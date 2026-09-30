@@ -18,18 +18,18 @@ Node.js/TypeScript and Pi AI 0.87.1 directly; no Agent Core loop. One active run
 
 ## Code map
 
-- [src/runtime.ts](../../../src/runtime.ts): shared loop, policy hooks, Pi provider adapter, cancellation, versioned notification, follow generator.
-- [src/http.ts](../../../src/http.ts): request validation, bounded body reads, JSON/SSE transport, heartbeat comments, socket backpressure, and connection abort handling.
-- [src/main.ts](../../../src/main.ts): environment configuration, provider catalog, initialization and graceful shutdown.
-- [src/types.ts](../../../src/types.ts): records, errors and versioned backend protocol.
-- [src/index.ts](../../../src/index.ts): in-process exports.
-- [README.md](../../../README.md): setup and caller examples.
-- [package.json](../../../package.json), [tsconfig.json](../../../tsconfig.json): pinned Pi version and build commands.
-- [scripts/verify.mjs](../../../scripts/verify.mjs), [scripts/mysql-test.mjs](../../../scripts/mysql-test.mjs): verification evidence and disposable database lifecycle.
+- [src/runtime.ts](../../../backend/src/runtime.ts): shared loop, policy hooks, Pi provider adapter, cancellation, versioned notification, follow generator.
+- [src/http.ts](../../../backend/src/http.ts): request validation, bounded body reads, JSON/SSE transport, heartbeat comments, socket backpressure, and connection abort handling.
+- [src/main.ts](../../../backend/src/main.ts): environment configuration, provider catalog, initialization and graceful shutdown.
+- [src/types.ts](../../../backend/src/types.ts): records, errors and versioned backend protocol.
+- [src/index.ts](../../../backend/src/index.ts): in-process exports.
+- [README.md](../../../backend/README.md): setup and caller examples.
+- [package.json](../../../backend/package.json), [tsconfig.json](../../../backend/tsconfig.json): pinned Pi version and build commands.
+- [scripts/verify.mjs](../../../backend/scripts/verify.mjs), [scripts/mysql-test.mjs](../../../backend/scripts/mysql-test.mjs): verification evidence and disposable database lifecycle.
 
 ## Verification
 
-Deterministic Pi event streams test request construction, tools, context changes, termination, failure, cancellation, reconnect, pruning, and handoff races against MySQL. HTTP integration checks whole-record synchronization, SSE termination, input validation, and connection independence. Live provider calls require caller credentials and are outside automated tests. [Integration tests](../../../test/integration/backend.test.ts) exercise the real Pi provider collection using its deterministic faux provider, alongside controlled Pi event sources for timing-sensitive cases. Run `node scripts/verify.mjs npm run check`, `node scripts/verify.mjs npm run test:mysql`, and `node scripts/verify.mjs npm run build`.
+Deterministic Pi event streams test request construction, tools, context changes, termination, failure, cancellation, reconnect, pruning, and handoff races against MySQL. HTTP integration checks whole-record synchronization, SSE termination, input validation, and connection independence. Live provider calls require caller credentials and are outside automated tests. [Integration tests](../../../backend/test/integration/backend.test.ts) exercise the real Pi provider collection using its deterministic faux provider, alongside controlled Pi event sources for timing-sensitive cases. From `backend/`, run `node scripts/verify.mjs npm run check`, `node scripts/verify.mjs npm run test:mysql`, and `node scripts/verify.mjs npm run build`.
 
 Submission registers background work after the input transaction commits. Shutdown first waits for in-flight submissions, then aborts jobs and releases ownership. Followers never drive the loop. Their generation check surrounds each database snapshot and prevents a completion notification being lost before waiting. A slow follower holds at most the current snapshot; there is no growing subscriber event queue. On a gap it suppresses that message's tail and still reads committed history. Pi terminal events and backend committed-message events remain distinct.
 

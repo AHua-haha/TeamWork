@@ -36,6 +36,8 @@ Review boundaries: [database](drafts/database/design.md), [agent runtime](drafts
 
 ## Checkpoints and remaining work
 
+- [delivered in this checkpoint] Moved MySQL setup, package, runtime source, tests, and backend scripts to `backend/`. Added `frontend/` with a link to its draft design. Shared system contracts remain under `docs/systems/`. Backend behavior is unchanged. Increment start commit: `5301eb6c075da653c5d7ddb6925324d4e993f40f`. Backend checks and 18 tests passed from the new directory; [verification evidence](tests.jsonl).
+
 - Backend checkpoint prepared on `codex/backend-runtime`. Existing untracked design documents were preserved in `/tmp/rsi-agent-designs.bgEaQM` before edits. No prior application code existed.
 - Backend implementation and tests are complete in this checkpoint; canonical database/runtime contracts have been promoted and verified. The frontend remains a proposal and has not been promoted or implemented.
 - Backend choices: Pi AI 0.87.1 provider collections; MySQL 8.4 via mysql2; Node.js HTTP/SSE; one database owner, no automatic resumption. Context compaction is supported by canonical replacement hooks; a compaction algorithm and application tools are not supplied.
