@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.playwright-cli/
+output/playwright/
 .env
 .env.*
 !.env.example

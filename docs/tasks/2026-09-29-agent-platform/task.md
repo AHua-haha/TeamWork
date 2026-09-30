@@ -1,6 +1,6 @@
 # 2026-09-29-agent-platform
 
-Status: active
+Status: complete
 Task start commit: 3e88309e0d8c33bfaa554775ddcf4bafb0229254
 Review boundaries: [database](drafts/database/design.md), [agent runtime](drafts/agent-runtime/design.md), and [frontend](drafts/frontend/design.md)
 
@@ -8,7 +8,7 @@ Review boundaries: [database](drafts/database/design.md), [agent runtime](drafts
 
 - [delivered] [Database system](drafts/database/design.md): MySQL persistence, independent context/display history, versioned serialization and bounded chunks; [canonical contract](../../systems/database/design.md).
 - [delivered] [Agent runtime](drafts/agent-runtime/design.md): TypeScript/Pi AI backend-owned loop, policy hooks, run-scoped SSE, cancellation and recovery; [canonical contract](../../systems/agent-runtime/design.md).
-- [planned] Implement the [frontend system](drafts/frontend/design.md) draft: Pi-format agent client and assistant-ui adapter, including synchronization and live updates.
+- [delivered] [Frontend system](drafts/frontend/design.md): Pi-format agent client, assistant-ui adapter, synchronization and live updates, and light theme; [canonical contract](../../systems/frontend/design.md).
 
 ## Decisions and open questions
 
@@ -19,6 +19,7 @@ Review boundaries: [database](drafts/database/design.md), [agent runtime](drafts
 - Frontends use a long-lived follow API on open, refresh, reconnect, and send. Each connection synchronizes completed messages first, then follows live chunks.
 - A follow stream ends with its associated run. With no active run, synchronization finishes and the connection ends. A subsequent run opens a new stream; the frontend does not periodically poll.
 - The frontend has two parts: an agent client that owns requests, synchronized backend data, Pi event processing, and recovery; and an adapter that converts client data and actions for assistant-ui.
+- The frontend presentation uses a light theme, as requested during implementation review. The user authorized the reviewed frontend commit.
 - The client preserves backend Pi messages, events, and metadata. It maintains partial Pi messages as events arrive; only the adapter converts them into assistant-ui presentation data.
 - The adapter supplies current accumulated message content with stable identities. Completed records replace partial messages under the same identity, and tool-result presentation is derived without mutating completed Pi records.
 - The frontend submits new user input; model-context history remains backend-owned. Reconnecting discards previous partial messages and synchronizes completed history before following available live output.
@@ -39,10 +40,10 @@ Review boundaries: [database](drafts/database/design.md), [agent runtime](drafts
 - [delivered in this checkpoint] Moved MySQL setup, package, runtime source, tests, and backend scripts to `backend/`. Added `frontend/` with a link to its draft design. Shared system contracts remain under `docs/systems/`. Backend behavior is unchanged. Increment start commit: `5301eb6c075da653c5d7ddb6925324d4e993f40f`. Backend checks and 18 tests passed from the new directory; [verification evidence](tests.jsonl).
 
 - Backend checkpoint prepared on `codex/backend-runtime`. Existing untracked design documents were preserved in `/tmp/rsi-agent-designs.bgEaQM` before edits. No prior application code existed.
-- Backend implementation and tests are complete in this checkpoint; canonical database/runtime contracts have been promoted and verified. The frontend remains a proposal and has not been promoted or implemented.
+- At the backend checkpoint, canonical database/runtime contracts were promoted and verified; the frontend was still a proposal.
 - Backend choices: Pi AI 0.87.1 provider collections; MySQL 8.4 via mysql2; Node.js HTTP/SSE; one database owner, no automatic resumption. Context compaction is supported by canonical replacement hooks; a compaction algorithm and application tools are not supplied.
 - Initial type checks caught MySQL parameter typing, ID default inference and a test narrowing issue; all were corrected. Integration testing found and corrected ownership-listener cleanup. Additional review corrected oversized-request handling so it returns HTTP 413 without destroying the response socket.
 - Backend verification passed: TypeScript check/build, 2 codec tests, 16 real-MySQL integration tests, disposable database test orchestration, and compiled entry-point startup/SIGTERM shutdown. Pi integration uses its deterministic provider; live paid-provider requests were not made.
 - Final review also ensured runtime reopening clears recovered failure state and shutdown cleans up connections if releasing ownership fails. The full affected suite was rerun.
-- Remaining platform work: frontend implementation. This task stays active for that planned outcome, while the requested database/runtime backend is delivered. No backend contract decision remains blocked.
+- The reviewed frontend implementation adds the agent client, assistant-ui adapter, app, tests, and light theme. This final checkpoint promotes its canonical frontend documents with those files. No backend contract decision remains blocked.
 - Initial frontend-only documentation review and all backend test runs (including earlier failures) are recorded in [verification evidence](tests.jsonl). The backend commit carries `Task-ID: 2026-09-29-agent-platform`; Git history identifies its resulting SHA.

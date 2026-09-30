@@ -75,7 +75,7 @@ Following uses a long-lived stream for one run. The connection ends when that ru
 
 ### Adapter output
 
-The adapter supplies assistant-ui's `ExternalStoreRuntime` with the current ordered display messages, relevant statuses, and action callbacks. This is a local frontend integration contract; backend messages remain in Pi format.
+The adapter supplies assistant-ui's `ExternalStoreRuntime` with the current ordered display messages, relevant statuses, and action callbacks. This is a local frontend integration contract; backend messages remain in Pi format. The frontend presents the conversation in a light theme at desktop and mobile widths.
 
 Completed and live messages use the same content-conversion rules:
 
