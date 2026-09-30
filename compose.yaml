@@ -1,0 +1,19 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: local-root
+      MYSQL_DATABASE: rsi_agent
+      MYSQL_USER: rsi
+      MYSQL_PASSWORD: rsi
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-plocal-root"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+volumes:
+  mysql-data:
