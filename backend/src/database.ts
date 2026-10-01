@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import mysql, { type Pool, type PoolConnection, type RowDataPacket } from 'mysql2/promise';
+import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode, validateEntries, validateEvent, validateRun } from './codec.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
 
 type Db = Pool | PoolConnection;
+export type ConfigScope = 'app' | 'catalog' | 'connection' | 'model_cache' | 'agent';
+export interface StoredConfig<T = unknown> { id: string; revision: number; value: T }
 async function rows(db: Db, sql: string, values: (string | number | null)[] = []): Promise<RowDataPacket[]> {
   return (await db.execute<RowDataPacket[]>(sql, values))[0];
 }
@@ -42,6 +44,13 @@ const schema = [
     sequence BIGINT UNSIGNED NOT NULL, event JSON NOT NULL, bytes INT UNSIGNED NOT NULL,
     PRIMARY KEY(message_id, sequence),
     FOREIGN KEY (message_id) REFERENCES live_messages(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS config_records (
+    scope VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    data JSON NOT NULL,
+    PRIMARY KEY(scope, id)
   ) ENGINE=InnoDB`,
 ];
 
@@ -150,8 +159,88 @@ export class MySqlStore {
     validateEntries(entries);
     await this.transaction(async db => {
       await db.execute('INSERT INTO agents (id, context) VALUES (?, ?)', [agentId, encode(entries)]);
+      await db.execute('INSERT INTO config_records (scope, id, data) VALUES (?, ?, ?)', ['agent', agentId, encode({})]);
     });
     return this.getState(agentId);
+  }
+
+  async listAgents(): Promise<string[]> {
+    const result = await rows(this.pool, 'SELECT id FROM agents ORDER BY id');
+    return result.map(row => row.id as string);
+  }
+
+  private configRow<T>(row: RowDataPacket): StoredConfig<T> {
+    return { id: row.id as string, revision: row.revision as number, value: decode<T>(row.data, () => undefined) };
+  }
+
+  async getConfig<T>(scope: ConfigScope, id: string): Promise<StoredConfig<T>> {
+    identity(id, 'config id');
+    const [row] = await rows(this.pool, 'SELECT id, revision, data FROM config_records WHERE scope = ? AND id = ?', [scope, id]);
+    if (!row) throw new AppError('not_found', 'Config record not found', 404);
+    return this.configRow<T>(row);
+  }
+
+  async listConfigs<T>(scope: ConfigScope): Promise<StoredConfig<T>[]> {
+    const result = await rows(this.pool, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', [scope]);
+    return result.map(row => this.configRow<T>(row));
+  }
+
+  async createConfig<T>(scope: ConfigScope, id: string, value: T): Promise<StoredConfig<T>> {
+    identity(id, 'config id');
+    const data = encode(value);
+    try {
+      await this.transaction(async db => {
+        if (scope === 'agent') await this.agent(db, id);
+        await db.execute('INSERT INTO config_records (scope, id, data) VALUES (?, ?, ?)', [scope, id, data]);
+      });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ER_DUP_ENTRY') throw new AppError('config_conflict', 'Config record already exists', 409);
+      throw error;
+    }
+    return { id, revision: 0, value: decode<T>(data, () => undefined) };
+  }
+
+  async updateConfig<T>(scope: ConfigScope, id: string, revision: number, value: T, clearModelCache = false): Promise<StoredConfig<T>> {
+    identity(id, 'config id');
+    position(revision);
+    const data = encode(value);
+    await this.transaction(async db => {
+      const [result] = await db.execute<ResultSetHeader>('UPDATE config_records SET data = ?, revision = revision + 1 WHERE scope = ? AND id = ? AND revision = ?', [data, scope, id, revision]);
+      if (result.affectedRows) {
+        if (clearModelCache) await db.execute('DELETE FROM config_records WHERE scope = ? AND id = ?', ['model_cache', id]);
+        return;
+      }
+      const [existing] = await rows(db, 'SELECT id FROM config_records WHERE scope = ? AND id = ?', [scope, id]);
+      throw new AppError(existing ? 'config_conflict' : 'not_found', existing ? 'Config revision changed' : 'Config record not found', existing ? 409 : 404);
+    });
+    return { id, revision: revision + 1, value: decode<T>(data, () => undefined) };
+  }
+
+  async deleteConfig(scope: ConfigScope, id: string, revision: number, clearModelCache = false): Promise<void> {
+    identity(id, 'config id');
+    position(revision);
+    await this.transaction(async db => {
+      const [result] = await db.execute<ResultSetHeader>('DELETE FROM config_records WHERE scope = ? AND id = ? AND revision = ?', [scope, id, revision]);
+      if (result.affectedRows) {
+        if (clearModelCache) await db.execute('DELETE FROM config_records WHERE scope = ? AND id = ?', ['model_cache', id]);
+        return;
+      }
+      const [existing] = await rows(db, 'SELECT id FROM config_records WHERE scope = ? AND id = ?', [scope, id]);
+      throw new AppError(existing ? 'config_conflict' : 'not_found', existing ? 'Config revision changed' : 'Config record not found', existing ? 409 : 404);
+    });
+  }
+
+  async configBundle(agentId: string): Promise<{ app: StoredConfig | null; agent: StoredConfig | null; catalog: StoredConfig[]; connections: StoredConfig[]; modelCaches: StoredConfig[] }> {
+    identity(agentId, 'agentId');
+    return this.transaction(async db => {
+      await this.agent(db, agentId);
+      const [app] = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? AND id = ?', ['app', 'settings']);
+      const [agent] = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? AND id = ?', ['agent', agentId]);
+      const catalog = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['catalog']);
+      const connections = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['connection']);
+      const modelCaches = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['model_cache']);
+      return { app: app ? this.configRow(app) : null, agent: agent ? this.configRow(agent) : null, catalog: catalog.map(row => this.configRow(row)), connections: connections.map(row => this.configRow(row)), modelCaches: modelCaches.map(row => this.configRow(row)) };
+    });
   }
 
   async getContext(agentId: string): Promise<ContextHistory> {

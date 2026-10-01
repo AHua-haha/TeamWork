@@ -1,17 +1,22 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
+import { createServer as createHttpServer } from 'node:http';
 import { after, before, test } from 'node:test';
 import { createModels, fauxAssistantMessage, fauxProvider, Type, type AssistantMessageEvent, type Message } from '@earendil-works/pi-ai';
+import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import { MySqlStore } from '../../src/database.js';
-import { AgentRuntime, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/runtime.js';
+import { ConfigService } from '../../src/config.js';
+import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/runtime.js';
 import { createAgentServer } from '../../src/http.js';
 import type { FollowEvent } from '../../src/types.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a disposable MySQL 8.4 database (see README)');
 const store = new MySqlStore(databaseUrl);
-before(async () => { await store.migrate(); });
+const config = new ConfigService(store, createModels());
+const testEncryptionKey = Buffer.alloc(32, 7).toString('base64');
+before(async () => { await store.migrate(); await config.initialize(); });
 after(async () => { await store.close(); });
 
 class Queue<T> implements AsyncIterable<T> {
@@ -28,13 +33,14 @@ class Queue<T> implements AsyncIterable<T> {
 }
 
 const model = fauxProvider().getModel();
+const staticConfig = { resolveForRun: async () => ({ model, tools: [], systemPrompt: '', options: {}, source: { appRevision: 0, agentRevision: 0, catalogRevisions: {} } }) };
 const message = (text = 'answer') => fauxAssistantMessage(text);
 const user = { role: 'user' as const, content: 'hello', timestamp: 1 };
 const limits = { maxChunks: 2, maxBytes: 100_000 };
 
 async function fixture(options: { policy?: RuntimePolicy; retention?: typeof limits; maxSteps?: number } = {}) {
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
-  const runtime = new AgentRuntime(store, options.policy ?? fixedPolicy(model), request => {
+  const runtime = new AgentRuntime(store, staticConfig, options.policy ?? fixedPolicy(model), request => {
     const events = new Queue<AssistantMessageEvent>();
     requests.push({ request, events });
     return events;
@@ -117,7 +123,7 @@ test('real Pi provider collection drives shared loop, validates and executes too
   let executed = 0;
   const echo: RuntimeTool = { definition: { name: 'echo', description: 'Echo input', parameters: Type.Object({ value: Type.String() }) }, execute: async args => { executed++; return { content: [{ type: 'text', text: String(args.value) }], isError: false }; } };
   const base = fixedPolicy(faux.getModel(), [echo]);
-  const runtime = new AgentRuntime(store, {
+  const runtime = new AgentRuntime(store, staticConfig, {
     ...base,
     beforeStep: async scope => {
       if (scope.step === 2) {
@@ -265,7 +271,7 @@ test('runtime owner lock excludes second owner and startup recovers abandoned ru
   } finally { await other.close(); await f.runtime.close(); }
   const abandoned = await store.startRun(f.agentId, user);
   await store.beginMessage(f.agentId, abandoned.runId, randomUUID(), 1);
-  const recovered = new AgentRuntime(store, fixedPolicy(model), () => new Queue());
+  const recovered = new AgentRuntime(store, staticConfig, fixedPolicy(model), () => new Queue());
   await recovered.open();
   try {
     const state = await recovered.getState(f.agentId);
@@ -276,7 +282,7 @@ test('runtime owner lock excludes second owner and startup recovers abandoned ru
 
 test('HTTP accepts input only, streams synchronization and run end, reports busy and bad cursors', { timeout: 15_000 }, async () => {
   const f = await fixture();
-  const server = createAgentServer(f.runtime);
+  const server = createAgentServer(f.runtime, config);
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -363,7 +369,7 @@ test('multiple followers see same identities; aborting one follow leaves others 
 });
 
 test('EOF without Pi done is a failed run, and cancel interrupts a running tool', { timeout: 15_000 }, async () => {
-  const runtime = new AgentRuntime(store, fixedPolicy(model), async function* () {
+  const runtime = new AgentRuntime(store, staticConfig, fixedPolicy(model), async function* () {
     yield { type: 'start', partial: message() };
   });
   await runtime.open();
@@ -408,6 +414,412 @@ test('failed terminal persistence surfaces as unavailable until restart recovery
   await next.open();
   try { assert.equal((await next.getState(f.agentId)).run?.status, 'interrupted'); }
   finally { await next.close(); }
+});
+
+test('provider and agent config snapshots survive edits while each next run resolves again', { timeout: 20_000 }, async () => {
+  const models = builtinModels();
+  const firstModel = models.getModels()[0]!;
+  const service = new ConfigService(store, models, [], testEncryptionKey);
+  const { agentId } = await store.createAgent();
+  const connectionId = `connection-${randomUUID()}`;
+  const connectionValue = { label: 'First connection', provider: firstModel.provider, baseUrl: firstModel.baseUrl, api: 'openai-completions', apiKey: 'first-key' };
+  const connection = await service.createConnection(connectionId, connectionValue);
+  assert.equal(connection.value.keyConfigured, true);
+  assert.equal(JSON.stringify(connection).includes('first-key'), false);
+  assert.ok((await service.modelChoices(connectionId)).some(item => item.modelId === firstModel.id));
+  await assert.rejects(service.updateConnection(connectionId, 10, connectionValue), /revision changed/);
+  const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
+  const runtime = new AgentRuntime(store, service, { ...configuredPolicy(), shouldContinue: scope => scope.step === 1 }, request => {
+    const events = new Queue<AssistantMessageEvent>(); requests.push({ request, events }); return events;
+  });
+  await runtime.open();
+  try {
+    await assert.rejects(runtime.start(agentId, 'invalid'), /Select a provider and model/);
+    assert.equal((await store.getState(agentId)).historyPosition, 0);
+    const empty = await service.getAgent(agentId);
+    assert.equal(empty.issues[0], 'Select a provider and model');
+    const settings = { name: 'Snapshot agent', connectionId, modelId: firstModel.id, toolOptionIds: [], prompt: 'Original instructions', promptOptionIds: [], callOptions: { temperature: 0.4, contextBudget: 1024 } };
+    const saved = await service.updateAgent(agentId, empty.revision, settings);
+    assert.deepEqual(saved.issues, []);
+    assert.equal((await service.resolveForRun(agentId)).contextBudget, 1024);
+    const first = await runtime.start(agentId, 'first');
+    const step1 = await requests.next();
+    assert.equal(step1.request.model.id, firstModel.id);
+    assert.equal(step1.request.options?.apiKey, 'first-key');
+    assert.equal(step1.request.context.systemPrompt, 'Original instructions');
+    assert.equal(step1.request.options?.temperature, 0.4);
+    const changedConnection = await service.updateConnection(connectionId, connection.revision, { ...connectionValue, baseUrl: 'https://example.com/v1', apiKey: 'second-key' });
+    await service.updateAgent(agentId, saved.revision, { ...settings, prompt: 'Changed instructions', callOptions: { temperature: 0.8 } });
+    answer(step1.events);
+    const step2 = await requests.next();
+    assert.equal(step2.request.options?.apiKey, 'first-key');
+    assert.equal(step2.request.model.baseUrl, firstModel.baseUrl);
+    assert.equal(step2.request.context.systemPrompt, 'Original instructions');
+    assert.equal(step2.request.options?.temperature, 0.4);
+    answer(step2.events);
+    await collect(runtime.follow(agentId, { runId: first.runId }));
+    const next = await runtime.start(agentId, 'second');
+    const nextStep = await requests.next();
+    assert.equal(nextStep.request.model.baseUrl, 'https://example.com/v1');
+    assert.equal(nextStep.request.options?.apiKey, 'second-key');
+    assert.equal(nextStep.request.context.systemPrompt, 'Changed instructions');
+    assert.equal(nextStep.request.options?.temperature, 0.8);
+    await service.deleteConnection(connectionId, changedConnection.revision);
+    answer(nextStep.events);
+    const lastStep = await requests.next();
+    assert.equal(lastStep.request.model.id, firstModel.id);
+    answer(lastStep.events);
+    await collect(runtime.follow(agentId, { runId: next.runId }));
+    await assert.rejects(runtime.start(agentId, 'third'), /Selected provider connection is unavailable/);
+  } finally { await runtime.close(); }
+});
+
+test('config initialization is repeatable and supplies incomplete records for existing agents', async () => {
+  const { agentId } = await store.createAgent();
+  const service = new ConfigService(store, builtinModels());
+  const original = await service.getAgent(agentId);
+  await service.deleteAgent(agentId, original.revision);
+  assert.equal((await service.listAgents()).find(item => item.agentId === agentId)?.ready, false);
+  await service.initialize();
+  await service.initialize();
+  const restored = await service.getAgent(agentId);
+  assert.equal(restored.revision, 0);
+  assert.deepEqual(restored.issues, ['Select a provider and model']);
+});
+
+test('initialization migrates an existing agent model selection to provider and model', async () => {
+  const models = builtinModels();
+  const model = models.getModel('openai', 'gpt-5');
+  assert.ok(model);
+  const id = `old-model-${randomUUID()}`;
+  const { agentId } = await store.createAgent();
+  await store.createConfig('catalog', id, { kind: 'model', label: 'Old model', provider: model.provider, modelId: model.id,
+    allowedReasoning: [], allowTemperature: true, allowMaxTokens: true });
+  const initial = await store.getConfig<Record<string, unknown>>('agent', agentId);
+  await store.updateConfig('agent', agentId, initial.revision, { name: 'Legacy', modelOptionId: id, toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: {} });
+  const service = new ConfigService(store, models);
+  await service.initialize();
+  await service.initialize();
+  const migrated = await service.getAgent(agentId);
+  assert.equal(migrated.value.modelId, model.id);
+  assert.ok(migrated.value.connectionId);
+  assert.equal((await service.getConnection(migrated.value.connectionId)).value.baseUrl, model.baseUrl);
+  assert.deepEqual(migrated.issues, []);
+  assert.equal((await service.listCatalog()).some(item => item.id === id), false);
+});
+
+test('initialization preserves a legacy discovered endpoint model as a selectable choice', async () => {
+  const models = builtinModels();
+  const service = new ConfigService(store, models);
+  const connectionId = `legacy-endpoint-${randomUUID()}`;
+  await service.createConnection(connectionId, { label: 'Legacy endpoint', provider: 'legacy-custom', baseUrl: 'http://127.0.0.1:9999/v1', api: 'openai-completions' });
+  const profileId = `legacy-profile-${randomUUID()}`;
+  await store.createConfig('catalog', profileId, { kind: 'model', label: 'Legacy discovered', connectionId, provider: 'legacy-custom',
+    modelId: 'endpoint-model', api: 'openai-completions', source: 'endpoint', maxTokens: 2048, reasoning: false,
+    allowedReasoning: [], allowTemperature: true, allowMaxTokens: true });
+  const { agentId } = await store.createAgent();
+  const initial = await store.getConfig<Record<string, unknown>>('agent', agentId);
+  await store.updateConfig('agent', agentId, initial.revision, { name: '', modelOptionId: profileId, toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: {} });
+  await service.initialize();
+  await service.initialize();
+  const migrated = await service.getAgent(agentId);
+  assert.equal(migrated.value.modelId, 'endpoint-model');
+  assert.deepEqual(migrated.issues, []);
+  assert.equal((await service.modelChoices(connectionId))[0]?.verified, false);
+});
+
+test('configured requests use selected prompt, registered tool and permitted reasoning', { timeout: 15_000 }, async () => {
+  const models = builtinModels();
+  const choice = models.getModel('openai', 'gpt-5');
+  assert.ok(choice?.reasoning);
+  const tool: RuntimeTool = {
+    definition: { name: 'echo', description: 'Echo text', parameters: Type.Object({ text: Type.String() }) },
+    execute: async args => ({ content: [{ type: 'text', text: String(args.text) }], isError: false }),
+  };
+  const service = new ConfigService(store, models, [tool]);
+  const { agentId } = await store.createAgent();
+  const suffix = randomUUID();
+  const connectionId = `connection-${suffix}`;
+  const toolId = `tool-${suffix}`;
+  const promptId = `prompt-${suffix}`;
+  await service.createConnection(connectionId, { label: 'OpenAI', provider: 'openai', baseUrl: choice.baseUrl, api: 'openai-responses' });
+  await service.createCatalog(toolId, { kind: 'tool', label: 'Echo', toolName: 'echo' });
+  await service.createCatalog(promptId, { kind: 'prompt', label: 'Shared instructions', text: 'Shared prompt' });
+  await assert.rejects(service.createCatalog(`missing-${suffix}`, { kind: 'tool', label: 'Unavailable', toolName: 'missing' }), /not registered/);
+  const empty = await service.getAgent(agentId);
+  await service.updateAgent(agentId, empty.revision, {
+    name: 'Configured', connectionId, modelId: 'gpt-5', toolOptionIds: [toolId], prompt: 'Agent prompt', promptOptionIds: [promptId], callOptions: { reasoning: 'high', maxTokens: 100 },
+  });
+  const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
+  const runtime = new AgentRuntime(store, service, configuredPolicy(), request => {
+    const events = new Queue<AssistantMessageEvent>();
+    requests.push({ request, events });
+    return events;
+  });
+  await runtime.open();
+  try {
+    const run = await runtime.start(agentId, 'hello');
+    const step = await requests.next();
+    assert.equal(step.request.model.id, 'gpt-5');
+    assert.equal(step.request.context.systemPrompt, 'Shared prompt\n\nAgent prompt');
+    assert.deepEqual(step.request.context.tools?.map(item => item.name), ['echo']);
+    assert.equal(step.request.tools[0], tool);
+    assert.equal(step.request.options?.reasoning, 'high');
+    assert.equal(step.request.options?.maxTokens, 100);
+    answer(step.events);
+    await collect(runtime.follow(agentId, { runId: run.runId }));
+  } finally { await runtime.close(); }
+});
+
+test('backend discovers a custom model ID and calls its endpoint through Pi with a stored key', { timeout: 20_000 }, async () => {
+  const seen: { authorization?: string; model?: string } = {};
+  let failDiscovery = false;
+  const endpoint = createHttpServer((request, response) => {
+    seen.authorization = request.headers.authorization;
+    if (request.url === '/v1/models' && request.method === 'GET') {
+      if (failDiscovery) { response.writeHead(503); response.end(); return; }
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ data: [{ id: 'server-owned-model', name: 'Discovered model' }] }));
+      return;
+    }
+    if (request.url === '/v1/chat/completions' && request.method === 'POST') {
+      void (async () => {
+        let body = '';
+        for await (const chunk of request) body += chunk;
+        seen.model = JSON.parse(body).model;
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        response.write('data: {"id":"reply","object":"chat.completion.chunk","created":1,"model":"server-owned-model","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"finish_reason":null}]}\n\n');
+        response.write('data: {"id":"reply","object":"chat.completion.chunk","created":1,"model":"server-owned-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
+        response.end('data: [DONE]\n\n');
+      })();
+      return;
+    }
+    response.writeHead(404); response.end();
+  });
+  endpoint.listen(0, '127.0.0.1');
+  await once(endpoint, 'listening');
+  const address = endpoint.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}/v1`;
+  const models = builtinModels();
+  const service = new ConfigService(store, models, [], testEncryptionKey);
+  const connectionId = `custom-${randomUUID()}`;
+  const connection = await service.createConnection(connectionId, { label: 'Local custom', provider: 'local-custom', baseUrl, api: 'openai-completions', apiKey: 'custom-secret' });
+  let runtime: AgentRuntime | undefined;
+  try {
+    const choices = await service.modelChoices(connectionId, true);
+    assert.deepEqual(choices.map(item => item.label), ['Discovered model']);
+    assert.equal(seen.authorization, 'Bearer custom-secret');
+    assert.equal(JSON.stringify(connection).includes('custom-secret'), false);
+    assert.equal(JSON.stringify(await store.getConfig('connection', connectionId)).includes('custom-secret'), false);
+    assert.equal(choices[0]?.verified, false);
+    assert.equal((await service.modelChoices(connectionId))[0]?.modelId, 'server-owned-model');
+    failDiscovery = true;
+    await assert.rejects(service.modelChoices(connectionId, true), /Could not discover/);
+    assert.equal((await service.modelChoices(connectionId))[0]?.modelId, 'server-owned-model');
+    failDiscovery = false;
+    const { agentId } = await store.createAgent();
+    const initial = await service.getAgent(agentId);
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: choices[0]!.modelId });
+    runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
+    await runtime.open();
+    const run = await runtime.start(agentId, 'Hello');
+    const events = await collect(runtime.follow(agentId, { runId: run.runId }));
+    const assistant = events.find(item => item.type === 'message' && item.record.message.role === 'assistant');
+    assert.ok(assistant && assistant.type === 'message');
+    assert.equal(seen.model, 'server-owned-model');
+    assert.equal(seen.authorization, 'Bearer custom-secret');
+    assert.equal(events.at(-1)?.type, 'end');
+    const changed = await service.updateConnection(connectionId, connection.revision, { label: 'Local custom', provider: 'local-custom', baseUrl: `${baseUrl}/new`, api: 'openai-completions' });
+    assert.deepEqual(await service.modelChoices(connectionId), []);
+    await service.updateConnection(connectionId, changed.revision, { label: 'Local custom', provider: 'local-custom', baseUrl, api: 'openai-completions' });
+    assert.deepEqual(await service.modelChoices(connectionId), []);
+  } finally {
+    await runtime?.close();
+    endpoint.closeAllConnections();
+    await new Promise<void>(resolve => endpoint.close(() => resolve()));
+  }
+});
+
+test('Anthropic Messages connection discovers paged models and streams through Pi', { timeout: 20_000 }, async () => {
+  const seen: { key?: string; version?: string; model?: string; requests: string[] } = { requests: [] };
+  const endpoint = createHttpServer((request, response) => {
+    seen.requests.push(request.url ?? '');
+    seen.key = request.headers['x-api-key'] as string | undefined;
+    seen.version = request.headers['anthropic-version'] as string | undefined;
+    if (request.url?.startsWith('/v1/models') && request.method === 'GET') {
+      const after = new URL(request.url, 'http://localhost').searchParams.get('after_id');
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify(after
+        ? { data: [{ id: 'custom-claude-b', display_name: 'Custom Claude B' }], has_more: false, last_id: 'custom-claude-b' }
+        : { data: [{ id: 'custom-claude-a', display_name: 'Custom Claude A' }], has_more: true, last_id: 'custom-claude-a' }));
+      return;
+    }
+    if (request.url?.startsWith('/v1/messages') && request.method === 'POST') {
+      void (async () => {
+        let body = '';
+        for await (const chunk of request) body += chunk;
+        seen.model = (JSON.parse(body) as { model: string }).model;
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const events = [
+          { type: 'message_start', message: { id: 'msg_test', type: 'message', role: 'assistant', content: [], model: 'custom-claude-b', stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } },
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Anthropic reply' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } },
+          { type: 'message_stop' },
+        ];
+        for (const event of events) response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        response.end();
+      })();
+      return;
+    }
+    response.writeHead(404); response.end();
+  });
+  endpoint.listen(0, '127.0.0.1');
+  await once(endpoint, 'listening');
+  const address = endpoint.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const models = builtinModels();
+  const service = new ConfigService(store, models, [], testEncryptionKey);
+  const connectionId = `anthropic-custom-${randomUUID()}`;
+  let runtime: AgentRuntime | undefined;
+  try {
+    await service.createConnection(connectionId, { label: 'Anthropic-compatible', provider: 'custom-anthropic', baseUrl, api: 'anthropic-messages', apiKey: 'anthropic-test-key' });
+    const choices = await service.modelChoices(connectionId, true);
+    assert.deepEqual(choices.map(item => item.label), ['Custom Claude A', 'Custom Claude B']);
+    assert.equal(choices[1]?.api, 'anthropic-messages');
+    assert.equal(seen.key, 'anthropic-test-key');
+    assert.equal(seen.version, '2023-06-01');
+    assert.ok(seen.requests.includes('/v1/models?after_id=custom-claude-a'));
+    assert.equal((await service.modelChoices(connectionId)).length, 2);
+    const { agentId } = await store.createAgent();
+    const initial = await service.getAgent(agentId);
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'custom-claude-b' });
+    runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
+    await runtime.open();
+    const run = await runtime.start(agentId, 'Hello');
+    const events = await collect(runtime.follow(agentId, { runId: run.runId }));
+    assert.equal(seen.model, 'custom-claude-b');
+    assert.ok(events.some(item => item.type === 'message' && item.record.message.role === 'assistant'));
+    assert.equal(events.at(-1)?.type, 'end');
+  } finally {
+    await runtime?.close();
+    endpoint.closeAllConnections();
+    await new Promise<void>(resolve => endpoint.close(() => resolve()));
+  }
+});
+
+test('known DeepSeek model follows the connection protocol instead of its Pi default', { timeout: 20_000 }, async () => {
+  const seen: { requests: string[]; model?: string; key?: string; thinking?: unknown } = { requests: [] };
+  const endpoint = createHttpServer((request, response) => {
+    seen.requests.push(request.url ?? '');
+    if (request.url?.startsWith('/anthropic/v1/messages') && request.method === 'POST') {
+      void (async () => {
+        let body = '';
+        for await (const chunk of request) body += chunk;
+        const input = JSON.parse(body) as { model: string; thinking?: unknown };
+        seen.model = input.model;
+        seen.thinking = input.thinking;
+        seen.key = request.headers['x-api-key'] as string | undefined;
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const events = [
+          { type: 'message_start', message: { id: 'msg_deepseek', type: 'message', role: 'assistant', content: [], model: 'deepseek-v4-pro', stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } },
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'DeepSeek reply' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } },
+          { type: 'message_stop' },
+        ];
+        for (const event of events) response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        response.end();
+      })();
+      return;
+    }
+    response.writeHead(404); response.end();
+  });
+  endpoint.listen(0, '127.0.0.1');
+  await once(endpoint, 'listening');
+  const address = endpoint.address();
+  assert.ok(address && typeof address === 'object');
+  const models = builtinModels();
+  const service = new ConfigService(store, models, [], testEncryptionKey);
+  const connectionId = `deepseek-anthropic-${randomUUID()}`;
+  let runtime: AgentRuntime | undefined;
+  try {
+    await service.createConnection(connectionId, { label: 'DeepSeek via Anthropic', provider: 'deepseek',
+      baseUrl: `http://127.0.0.1:${address.port}/anthropic`, api: 'anthropic-messages', apiKey: 'deepseek-test-key' });
+    const choice = (await service.modelChoices(connectionId)).find(item => item.modelId === 'deepseek-v4-pro');
+    assert.equal(choice?.api, 'anthropic-messages');
+    assert.equal(choice?.reasoning, true);
+    const { agentId } = await store.createAgent();
+    const initial = await service.getAgent(agentId);
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'deepseek-v4-pro', callOptions: { reasoning: 'high' } });
+    runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
+    await runtime.open();
+    const run = await runtime.start(agentId, 'Hello');
+    const events = await collect(runtime.follow(agentId, { runId: run.runId }));
+    assert.equal(seen.model, 'deepseek-v4-pro');
+    assert.equal(seen.key, 'deepseek-test-key');
+    assert.ok(seen.thinking);
+    assert.ok(events.some(item => item.type === 'message' && item.record.message.role === 'assistant'));
+    assert.equal(events.at(-1)?.type, 'end');
+    assert.ok(seen.requests.every(path => path.startsWith('/anthropic/v1/messages')));
+  } finally {
+    await runtime?.close();
+    endpoint.closeAllConnections();
+    await new Promise<void>(resolve => endpoint.close(() => resolve()));
+  }
+});
+
+test('config HTTP exposes app, catalog and agent edits without accepting invalid run input', { timeout: 20_000 }, async () => {
+  const models = builtinModels();
+  const service = new ConfigService(store, models, [], testEncryptionKey);
+  const runtime = new AgentRuntime(store, service, configuredPolicy(), async function* () { yield { type: 'done', reason: 'stop', message: message() }; });
+  await runtime.open();
+  const server = createAgentServer(runtime, service);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const base = `http://127.0.0.1:${address.port}`;
+  const request = (path: string, method = 'GET', data?: unknown) => fetch(base + path, data === undefined ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  try {
+    const app = await (await request('/config/app')).json() as { revision: number; value: { title: string; maxInputBytes: number; allowAgentCreation: boolean } };
+    assert.equal(app.value.title, 'RSI Agent');
+    assert.ok((await (await request('/config/capabilities')).json() as { models: unknown[] }).models.length > 0);
+    const agent = await (await request('/agents', 'POST', {})).json() as { agentId: string };
+    assert.equal((await request(`/agents/${agent.agentId}/runs`, 'POST', { input: 'no model' })).status, 409);
+    const configResponse = await (await request(`/agents/${agent.agentId}/config`)).json() as { revision: number; value: Record<string, unknown>; issues: string[] };
+    assert.equal(configResponse.issues[0], 'Select a provider and model');
+    const modelChoice = models.getModels()[0]!;
+    const connectionId = `http-connection-${randomUUID()}`;
+    const createdConnection = await request('/config/connections', 'POST', { id: connectionId, value: { label: 'HTTP connection', provider: modelChoice.provider, baseUrl: modelChoice.baseUrl, api: 'openai-completions', apiKey: 'http-private-key' } });
+    assert.equal(createdConnection.status, 201);
+    const connectionBody = await createdConnection.text();
+    assert.equal(connectionBody.includes('http-private-key'), false);
+    assert.equal((await request('/config/connections')).status, 200);
+    assert.equal((await request(`/config/connections/${connectionId}/models`)).status, 200);
+    assert.equal((await request(`/config/connections/${connectionId}/models/refresh`, 'POST')).status, 415);
+    const value = { ...configResponse.value, connectionId, modelId: modelChoice.id };
+    assert.equal((await request('/config/catalog', 'POST', { id: `invalid-${randomUUID()}`, value: { kind: 'model', label: 'Unsupported' } })).status, 400);
+    const updated = await request(`/agents/${agent.agentId}/config`, 'PUT', { revision: configResponse.revision, value });
+    assert.equal(updated.status, 200);
+    assert.deepEqual((await updated.json() as { issues: string[] }).issues, []);
+    assert.equal((await request(`/agents/${agent.agentId}/config`, 'PUT', { revision: configResponse.revision, value })).status, 409);
+    assert.ok((await (await request('/agents')).json() as { agentId: string }[]).some(item => item.agentId === agent.agentId));
+    assert.equal((await request(`/config/connections/${connectionId}`, 'DELETE', { revision: 0 })).status, 200);
+    assert.equal((await request(`/agents/${agent.agentId}/runs`, 'POST', { input: 'deleted provider' })).status, 409);
+    const changedApp = await request('/config/app', 'PUT', { revision: app.revision, value: { ...app.value, allowAgentCreation: false } });
+    assert.equal(changedApp.status, 200);
+    assert.equal((await request('/agents', 'POST', {})).status, 409);
+    await request('/config/app', 'PUT', { revision: app.revision + 1, value: app.value });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await runtime.close();
+  }
 });
 
 test('persisted context survives reopening the pool; corrupt stored schema fails explicitly', { timeout: 15_000 }, async () => {

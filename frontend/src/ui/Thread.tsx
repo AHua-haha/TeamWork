@@ -2,6 +2,8 @@ import { ComposerPrimitive, MessagePrimitive, ThreadPrimitive } from '@assistant
 import type { ImageMessagePartProps, ReasoningMessagePartProps, TextMessagePartProps, ToolCallMessagePartProps } from '@assistant-ui/react';
 import { useSyncExternalStore } from 'react';
 import { AgentClient } from '../client/agent-client.js';
+import { ConfigClient } from '../client/config-client.js';
+import { ComposerSettings, type AgentConfigControl } from './ConfigPages.js';
 
 function TextPart({ text }: TextMessagePartProps) { return <p className="message-text">{text}</p>; }
 function ImagePart({ image }: ImageMessagePartProps) { return <img className="message-image" src={image} alt="Message attachment" />; }
@@ -19,7 +21,7 @@ function ToolPart({ toolName, argsText, result, isError }: ToolCallMessagePartPr
 
 const parts = { Text: TextPart, Image: ImagePart, Reasoning: ReasoningPart, tools: { Fallback: ToolPart } };
 
-export function Conversation({ client }: { client: AgentClient }) {
+export function Conversation({ client, config, api, onConfigGate }: { client: AgentClient; config: AgentConfigControl; api: ConfigClient; onConfigGate: (ready: boolean) => void }) {
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
   const active = snapshot.run?.status === 'running';
   const status = snapshot.sending ? 'Submitting'
@@ -31,13 +33,14 @@ export function Conversation({ client }: { client: AgentClient }) {
 
   return <div className="conversation">
     <div className="conversation-head">
-      <div><div className="eyebrow">CONVERSATION</div><h2>Agent session</h2><span className="agent-id" title={client.agentId}>{client.agentId}</span></div>
+      <div><div className="eyebrow">CONVERSATION</div><h2>{config.record?.value.name || 'Agent session'}</h2><span className="agent-id" title={client.agentId}>{client.agentId}</span></div>
       <div className="conversation-actions">
         <span className={`status-pill ${active ? 'status-active' : ''} ${snapshot.connection === 'error' ? 'status-error' : ''}`}><span className="status-dot" />{status}</span>
         <button type="button" className="icon-button" onClick={() => client.refresh()} title="Synchronize conversation" aria-label="Refresh conversation">↻</button>
       </div>
     </div>
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={() => client.refresh()}>Retry</button></div>}
+    {config.record?.issues.length ? <div className="error-banner" role="alert">Configure this agent before sending: {config.record.issues.join(' · ')}</div> : null}
     {snapshot.run?.status === 'failed' && snapshot.run.error && <div className="error-banner" role="alert">Run failed: {snapshot.run.error.message}</div>}
     <ThreadPrimitive.Root className="thread">
       <ThreadPrimitive.Viewport className="thread-viewport">
@@ -51,7 +54,7 @@ export function Conversation({ client }: { client: AgentClient }) {
         <ThreadPrimitive.ViewportFooter className="composer-footer">
           <ComposerPrimitive.Root className="composer">
             <ComposerPrimitive.Input className="composer-input" placeholder="Send a message to the agent…" aria-label="Message the agent" />
-            <div className="composer-actions"><span>Enter to send · Shift+Enter for a new line</span>
+            <div className="composer-actions"><ComposerSettings control={config} api={api} active={active} onGateChange={onConfigGate} /><span>Enter to send · Shift+Enter for a new line</span>
               {active ? <button type="button" className="cancel-button" onClick={() => void client.cancel()}>Stop run</button> : <ComposerPrimitive.Send className="send-button">Send <span aria-hidden="true">↗</span></ComposerPrimitive.Send>}
             </div>
           </ComposerPrimitive.Root>

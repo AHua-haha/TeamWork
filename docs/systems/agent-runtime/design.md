@@ -13,6 +13,7 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 - A frontend may open a long-lived follow request when it opens or refreshes an agent view, reconnects, or sends input. It may provide its last completed-message position for incremental synchronization.
 - Input submission supplies the new user input and routing identifiers. The runtime obtains the model-context history from its own storage rather than requiring the frontend to submit that history.
 - Multiple frontends may follow an agent. Their connection state does not determine whether the agent run continues or when temporary chunks are removed.
+- Before accepting input, the runtime resolves that agent's editable config from the config system. The agent must explicitly select a resolvable provider connection and model; selected tools, prompt templates, instructions, and call options must be valid.
 
 ## Outputs and observable effects
 
@@ -22,6 +23,7 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 - The runtime handles model output, invokes chosen tools itself, records tool outcomes, updates the stored context history, and decides whether the shared loop continues or stops.
 - A context update, including compaction, changes later model requests. It does not change the completed message history presented to the frontend.
 - When a frontend-facing message completes, the runtime persists its whole stable record before announcing that completion to followers.
+- The runtime keeps one resolved copy of model, tools, instructions, and model-call options through the entire run, including later model calls. It resolves current config again for the next run. This does not freeze canonical message context, which the runtime may reread between calls.
 
 ### Frontend follow protocol
 
@@ -40,13 +42,16 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 
 | Operation | Request | Response |
 | --- | --- | --- |
-| Create an agent | `POST /agents`, JSON `{agentId?}` | 201, current state with an empty history/context |
+| List agents | `GET /agents` | 200, agent summaries with names and config readiness |
+| Create an agent | `POST /agents`, JSON `{agentId?}` | 201, current state with empty history/context and incomplete config |
 | Submit input | `POST /agents/:agentId/runs`, JSON `{input}` | 202, `{runId, run, followUrl}` after input is persisted |
 | Follow | `GET /agents/:agentId/follow?runId=...&after=...` | SSE stream of sync/history/live/run events |
 | Current state | `GET /agents/:agentId/state` | 200, `{agentId, contextRevision, historyPosition, run}` |
 | Cancel | `POST /agents/:agentId/runs/:runId/cancel` | 202, cancellation requested; final status arrives through follow/state |
 
-`input` is Pi user content: text or an array of text/image blocks. The server supplies the message role, timestamp, identity and metadata. Unknown submission fields, including context/history, are rejected. JSON requests have a 2 MiB limit. Agent/run/message IDs use 1–64 ASCII letters, digits, underscores or hyphens. The HTTP server binds to loopback by default and has no built-in user authentication or tenant authorization.
+`input` is Pi user content: text or an array of text/image blocks. The server supplies the message role, timestamp, identity and metadata. Unknown submission fields, including context/history, are rejected. The app config sets the request size limit up to 2 MiB and can disable agent creation. Agent/run/message IDs use 1–64 ASCII letters, digits, underscores or hyphens. The HTTP server binds to loopback by default and has no built-in user authentication or tenant authorization.
+
+The config API exposes `GET`/`PUT /config/app`, `GET /config/capabilities`, `GET`/`POST /config/connections`, `GET`/`PUT`/`DELETE /config/connections/:id`, `GET /config/connections/:id/models`, `POST /config/connections/:id/models/refresh`, `GET`/`POST /config/catalog`, `GET`/`PUT`/`DELETE /config/catalog/:id`, and `GET`/`POST`/`PUT`/`DELETE /agents/:agentId/config`. Writes return record revisions and reject stale revisions. The config system defines the meaning of these editable records; deployment system config is not exposed here.
 
 Follow omits `runId` to select the latest run when it starts. With no run, it synchronizes history and ends. The selected run never changes during a connection. `after` is the last completed-message position applied by the client; omitted or 0 starts from the beginning. It is not a live-chunk cursor. A cursor ahead of the selected run is rejected with 409. A client reconnects by discarding partials and using its completed-history cursor. SSE comment heartbeats keep idle connections open; they do not poll the database or extend a completed run.
 
@@ -82,6 +87,7 @@ The default buffer retains up to 256 events and 8 MiB of serialized event data f
 - Model errors, invalid tool calls, tool failures and step-limit exhaustion fail the run. A tool failure is persisted as an error tool-result message when storage is available. Completed records already committed are preserved. Uncommitted model partials are discarded on failure/cancellation; a committed tool-call record may remain without a result if execution was cancelled.
 - Cancellation aborts ongoing model/tool operations and eventually marks the run cancelled. Custom tools/hooks must honor the abort signal; external effects already performed cannot be rolled back. Losing a frontend connection never requests cancellation.
 - Submission is not idempotent: the caller must not blindly retry an input whose acceptance is uncertain. Concurrent input for an active agent returns 409. No automatic application retries or durable run resumption are provided.
+- If the agent's model or another selected catalog option cannot resolve, run submission returns 409 without accepting input. Editing or deleting a selected option never interrupts a run already using an earlier snapshot.
 - If terminal state cannot be persisted, state/follow operations report the run unavailable rather than claiming completion. After storage recovery, restart marks abandoned runs interrupted. Startup fails if another runtime owns the database; ownership loss stops accepting work and aborts local jobs.
 
 ## Guarantees and limits
@@ -101,3 +107,4 @@ The default buffer retains up to 256 events and 8 MiB of serialized event data f
 3. A follower falls behind and chunks for active message `m1` are pruned. It receives a gap signal, removes its partial `m1`, and waits until the complete `m1` is available.
 4. A message completes during initial synchronization. It is delivered through the sync or live phase and is displayed once by identity.
 5. The runtime compacts the agent's stored model context. Its next model request uses the changed context; completed frontend messages remain unchanged.
+6. An agent starts a run with model A. Its provider connection and instructions are edited while the run is active. Later steps in that run keep the original config; the next run resolves the new values.

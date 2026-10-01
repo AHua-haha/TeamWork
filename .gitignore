@@ -6,3 +6,4 @@ output/playwright/
 .env.*
 !.env.example
 .test-mysql.env
+.run/

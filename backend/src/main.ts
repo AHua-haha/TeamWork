@@ -1,22 +1,19 @@
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import { MySqlStore } from './database.js';
-import { AgentRuntime, fixedPolicy, piModelStream } from './runtime.js';
+import { ConfigService } from './config.js';
+import { AgentRuntime, configuredPolicy, piModelStream } from './runtime.js';
 import { createAgentServer } from './http.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
 const models = builtinModels();
-const provider = process.env.MODEL_PROVIDER ?? 'openai';
-const modelId = process.env.MODEL_ID ?? 'gpt-4.1-mini';
-const model = models.getModel(provider, modelId);
-if (!model) throw new Error(`Unknown Pi model: ${provider}/${modelId}`);
 const store = new MySqlStore(databaseUrl);
-const runtime = new AgentRuntime(store, fixedPolicy(model, [], process.env.SYSTEM_PROMPT, {
-  ...(process.env.MODEL_API_KEY ? { apiKey: process.env.MODEL_API_KEY } : {}),
-}), piModelStream(models));
-const server = createAgentServer(runtime);
+const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
+const runtime = new AgentRuntime(store, config, configuredPolicy(), piModelStream(models));
+const server = createAgentServer(runtime, config);
 try {
   await store.migrate();
+  await config.initialize();
   await runtime.open();
   const port = Number(process.env.PORT ?? 3000);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid PORT');

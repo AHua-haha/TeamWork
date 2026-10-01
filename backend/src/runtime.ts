@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type AssistantMessageEvent, type Context, type JsonObject, type Message, type Model, type Models, type SimpleStreamOptions, type Tool, type ToolCall, type ToolResultMessage, type UserMessage } from '@earendil-works/pi-ai';
 import { MySqlStore } from './database.js';
+import type { ResolvedRunConfig } from './config.js';
 import { encode, validateMessage } from './codec.js';
 import { AppError, type ContextEntry, type ContextHistory, type CurrentState, type FollowEvent, type Retention, type RunState } from './types.js';
 
@@ -9,6 +10,7 @@ export interface StepScope {
   runId: string;
   step: number;
   signal: AbortSignal;
+  config: ResolvedRunConfig;
   readContext(): Promise<ContextHistory>;
   replaceContext(revision: number, entries: ContextEntry[]): Promise<ContextHistory>;
 }
@@ -20,6 +22,7 @@ export interface RuntimeTool {
 
 export interface ModelRequest {
   model: Model<Api>;
+  models?: Models;
   context: Context;
   tools: RuntimeTool[];
   options?: SimpleStreamOptions;
@@ -35,15 +38,25 @@ export interface RuntimePolicy {
 }
 
 export type ModelStream = (request: ModelRequest, signal: AbortSignal) => AsyncIterable<AssistantMessageEvent>;
+export interface RunConfigSource { resolveForRun(agentId: string): Promise<ResolvedRunConfig> }
 
 export function piModelStream(models: Models): ModelStream {
-  return (request, signal) => models.streamSimple(request.model, request.context, { maxRetries: 0, ...request.options, deferred: false, signal });
+  return (request, signal) => (request.models ?? models).streamSimple(request.model, request.context, { maxRetries: 0, ...request.options, deferred: false, signal });
 }
 
 /** A simple starting policy. Every agent still uses AgentRuntime's single loop. */
 export function fixedPolicy(model: Model<Api>, tools: RuntimeTool[] = [], systemPrompt?: string, options?: SimpleStreamOptions): RuntimePolicy {
   return {
     buildRequest: (_scope, history) => ({ model, tools, options, context: { messages: history.entries.map(entry => entry.message), tools: tools.map(tool => tool.definition), ...(systemPrompt ? { systemPrompt } : {}) } }),
+  };
+}
+
+export function configuredPolicy(): RuntimePolicy {
+  return {
+    buildRequest: (scope, history) => ({
+      model: scope.config.model, models: scope.config.models, tools: scope.config.tools, options: scope.config.options,
+      context: { messages: history.entries.map(entry => entry.message), tools: scope.config.tools.map(tool => tool.definition), ...(scope.config.systemPrompt ? { systemPrompt: scope.config.systemPrompt } : {}) },
+    }),
   };
 }
 
@@ -88,7 +101,7 @@ export class AgentRuntime {
   private readonly maxSteps: number;
   private pendingStarts = new Set<Promise<RunState>>();
 
-  constructor(readonly store: MySqlStore, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, options: { retention?: Retention; maxSteps?: number } = {}) {
+  constructor(readonly store: MySqlStore, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, options: { retention?: Retention; maxSteps?: number } = {}) {
     this.retention = options.retention ?? { maxChunks: 256, maxBytes: 8 * 1024 * 1024 };
     this.maxSteps = options.maxSteps ?? 32;
     if (!Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1 || Object.values(this.retention).some(value => !Number.isSafeInteger(value) || value < 0)) throw new AppError('invalid_config', 'Invalid runtime limits');
@@ -129,14 +142,16 @@ export class AgentRuntime {
     const input: UserMessage = { role: 'user', content, timestamp: Date.now() };
     validateMessage(input);
     if ((typeof content === 'string' && !content.trim()) || (Array.isArray(content) && content.length === 0)) throw new AppError('invalid_input', 'User input cannot be empty');
-    const accepted = this.store.startRun(agentId, input).then(run => {
+    const accepted = (async () => {
+      const config = await this.config.resolveForRun(agentId);
+      const run = await this.store.startRun(agentId, input);
       const controller = new AbortController();
       // Schedule after the job is registered; frontend connection lifetime has no role here.
-      const done = Promise.resolve().then(() => this.runLoop(run, controller.signal)).finally(() => this.jobs.delete(run.runId));
+      const done = Promise.resolve().then(() => this.runLoop(run, config, controller.signal)).finally(() => this.jobs.delete(run.runId));
       this.jobs.set(run.runId, { agentId, controller, done });
       this.changes.publish();
       return run;
-    });
+    })();
     this.pendingStarts.add(accepted);
     void accepted.finally(() => this.pendingStarts.delete(accepted)).catch(() => undefined);
     return accepted;
@@ -169,7 +184,7 @@ export class AgentRuntime {
     if (runId && this.finalizationFailures.has(runId)) throw new AppError('persistence_failure', 'Run stopped but terminal state could not be persisted; restart runtime after database recovery', 503);
   }
 
-  private async runLoop(run: RunState, signal: AbortSignal): Promise<void> {
+  private async runLoop(run: RunState, config: ResolvedRunConfig, signal: AbortSignal): Promise<void> {
     let status: 'completed' | 'failed' | 'cancelled' = 'completed';
     let failure: RunState['error'] = null;
     try {
@@ -178,7 +193,7 @@ export class AgentRuntime {
         this.store.assertRuntime();
         if (step > this.maxSteps) throw new AppError('step_limit', 'Maximum model calls reached');
         const scope: StepScope = {
-          agentId: run.agentId, runId: run.runId, step, signal,
+          agentId: run.agentId, runId: run.runId, step, signal, config,
           readContext: () => this.store.getContext(run.agentId),
           replaceContext: (revision, entries) => {
             signal.throwIfAborted();

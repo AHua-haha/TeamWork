@@ -1,19 +1,20 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import type { AgentRuntime } from './runtime.js';
+import type { ConfigService } from './config.js';
 import { AppError, identity, position } from './types.js';
 
 const maxInputBytes = 2 * 1024 * 1024;
 
-async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function body(request: IncomingMessage, limit = maxInputBytes): Promise<Record<string, unknown>> {
   if (!request.headers['content-type']?.startsWith('application/json')) throw new AppError('invalid_input', 'Content-Type must be application/json', 415);
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > maxInputBytes) {
+    if (size > limit) {
       request.resume();
-      throw new AppError('input_too_large', 'Request exceeds 2 MiB', 413);
+      throw new AppError('input_too_large', `Request exceeds ${limit} bytes`, 413);
     }
     chunks.push(chunk);
   }
@@ -33,15 +34,103 @@ function json(response: ServerResponse, status: number, value: unknown): void {
   response.end(JSON.stringify(value));
 }
 
-export function createAgentServer(runtime: AgentRuntime) {
+export function createAgentServer(runtime: AgentRuntime, config: ConfigService) {
   return createServer((request, response) => {
     const controller = new AbortController();
     response.on('close', () => controller.abort());
     void (async () => {
       const url = new URL(request.url ?? '/', 'http://localhost');
       const path = url.pathname.split('/').filter(Boolean);
+      if (path[0] === 'config') {
+        if (path.length === 2 && path[1] === 'capabilities' && request.method === 'GET') { json(response, 200, config.capabilities()); return; }
+        if (path.length === 2 && path[1] === 'app') {
+          if (request.method === 'GET') { json(response, 200, await config.getApp()); return; }
+          if (request.method === 'PUT') {
+            const input = await body(request);
+            fields(input, ['revision', 'value']);
+            position(input.revision);
+            json(response, 200, await config.updateApp(input.revision, input.value));
+            return;
+          }
+        }
+        if (path[1] === 'connections') {
+          response.setHeader('Cache-Control', 'no-store');
+          if (path.length === 2 && request.method === 'GET') { json(response, 200, await config.listConnections()); return; }
+          if (path.length === 2 && request.method === 'POST') {
+            const input = await body(request);
+            fields(input, ['id', 'value']);
+            identity(input.id, 'connection id');
+            json(response, 201, await config.createConnection(input.id, input.value));
+            return;
+          }
+          if (path.length >= 3) {
+            const id = path[2]!;
+            identity(id, 'connection id');
+            if (path.length === 4 && path[3] === 'models' && request.method === 'GET') {
+              json(response, 200, await config.modelChoices(id));
+              return;
+            }
+            if (path.length === 5 && path[3] === 'models' && path[4] === 'refresh' && request.method === 'POST') {
+              fields(await body(request), []);
+              json(response, 200, await config.modelChoices(id, true));
+              return;
+            }
+            if (path.length === 3) {
+              if (request.method === 'GET') { json(response, 200, await config.getConnection(id)); return; }
+              if (request.method === 'PUT') {
+                const input = await body(request);
+                fields(input, ['revision', 'value']);
+                position(input.revision);
+                json(response, 200, await config.updateConnection(id, input.revision, input.value));
+                return;
+              }
+              if (request.method === 'DELETE') {
+                const input = await body(request);
+                fields(input, ['revision']);
+                position(input.revision);
+                await config.deleteConnection(id, input.revision);
+                json(response, 200, { deleted: id });
+                return;
+              }
+            }
+          }
+        }
+        if (path[1] === 'catalog') {
+          if (path.length === 2 && request.method === 'GET') { json(response, 200, await config.listCatalog()); return; }
+          if (path.length === 2 && request.method === 'POST') {
+            const input = await body(request);
+            fields(input, ['id', 'value']);
+            identity(input.id, 'catalog id');
+            json(response, 201, await config.createCatalog(input.id, input.value));
+            return;
+          }
+          if (path.length === 3) {
+            const id = path[2]!;
+            identity(id, 'catalog id');
+            if (request.method === 'GET') { json(response, 200, await config.getCatalog(id)); return; }
+            if (request.method === 'PUT') {
+              const input = await body(request);
+              fields(input, ['revision', 'value']);
+              position(input.revision);
+              json(response, 200, await config.updateCatalog(id, input.revision, input.value));
+              return;
+            }
+            if (request.method === 'DELETE') {
+              const input = await body(request);
+              fields(input, ['revision']);
+              position(input.revision);
+              await config.deleteCatalog(id, input.revision);
+              json(response, 200, { deleted: id });
+              return;
+            }
+          }
+        }
+        throw new AppError('not_found', 'Endpoint not found', 404);
+      }
       if (path[0] !== 'agents') throw new AppError('not_found', 'Endpoint not found', 404);
+      if (path.length === 1 && request.method === 'GET') { json(response, 200, await config.listAgents()); return; }
       if (path.length === 1 && request.method === 'POST') {
+        if (!(await config.getApp()).value.allowAgentCreation) throw new AppError('feature_disabled', 'Agent creation is disabled', 409);
         const input = await body(request);
         fields(input, ['agentId']);
         if (input.agentId !== undefined) identity(input.agentId, 'agentId');
@@ -50,10 +139,34 @@ export function createAgentServer(runtime: AgentRuntime) {
       }
       const agentId = path[1];
       identity(agentId, 'agentId');
+      if (path.length === 3 && path[2] === 'config') {
+        if (request.method === 'GET') { json(response, 200, await config.getAgent(agentId)); return; }
+        if (request.method === 'POST') {
+          const input = await body(request);
+          fields(input, ['value']);
+          json(response, 201, await config.createAgentConfig(agentId, input.value));
+          return;
+        }
+        if (request.method === 'PUT') {
+          const input = await body(request);
+          fields(input, ['revision', 'value']);
+          position(input.revision);
+          json(response, 200, await config.updateAgent(agentId, input.revision, input.value));
+          return;
+        }
+        if (request.method === 'DELETE') {
+          const input = await body(request);
+          fields(input, ['revision']);
+          position(input.revision);
+          await config.deleteAgent(agentId, input.revision);
+          json(response, 200, { deleted: agentId });
+          return;
+        }
+      }
       if (path.length === 3 && path[2] === 'state' && request.method === 'GET') {
         json(response, 200, await runtime.getState(agentId));
       } else if (path.length === 3 && path[2] === 'runs' && request.method === 'POST') {
-        const input = await body(request);
+        const input = await body(request, (await config.getApp()).value.maxInputBytes);
         fields(input, ['input']);
         // The runtime validates Pi's user-content shape and assigns role/time itself.
         const run = await runtime.start(agentId, input.input as Parameters<AgentRuntime['start']>[1]);

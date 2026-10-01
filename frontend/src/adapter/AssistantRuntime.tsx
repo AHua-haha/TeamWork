@@ -9,7 +9,7 @@ function inputText(message: AppendMessage): string {
   return message.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
 }
 
-export function AgentRuntimeProvider({ client, children }: { client: AgentClient; children: ReactNode }) {
+export function AgentRuntimeProvider({ client, sendAllowed, children }: { client: AgentClient; sendAllowed: boolean; children: ReactNode }) {
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
   const messages = useMemo(() => projectSnapshot(snapshot), [snapshot]);
   const runtime = useExternalStoreRuntime<ThreadMessageLike>({
@@ -17,7 +17,7 @@ export function AgentRuntimeProvider({ client, children }: { client: AgentClient
     convertMessage: message => message,
     isRunning: snapshot.run?.status === 'running' || snapshot.sending,
     isLoading: !snapshot.synchronized && snapshot.connection === 'syncing',
-    isSendDisabled: !snapshot.synchronized || snapshot.sending || snapshot.run?.status === 'running',
+    isSendDisabled: !sendAllowed || !snapshot.synchronized || snapshot.sending || snapshot.run?.status === 'running',
     onNew: async message => { await client.send(inputText(message)); },
     onCancel: async () => { await client.cancel(); },
   });
