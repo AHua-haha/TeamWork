@@ -31,8 +31,12 @@ export function useAgentConfig(agentId: string, api: ConfigClient) {
     return () => window.removeEventListener('focus', onFocus);
   }, [refresh]);
 
-  const save = useCallback(async (value: AgentSettings): Promise<AgentConfig | null> => {
+  const save = useCallback(async (value: AgentSettings, expectedRevision?: number): Promise<AgentConfig | null> => {
     if (!current.current || busy.current) return null;
+    if (expectedRevision !== undefined && current.current.revision !== expectedRevision) {
+      setError('These settings changed elsewhere. Review the latest values before saving again.');
+      return null;
+    }
     busy.current = true;
     setSaving(true);
     setError(null);
@@ -55,7 +59,7 @@ export function useAgentConfig(agentId: string, api: ConfigClient) {
     busy.current = true;
     setSaving(true);
     try {
-      const created = await api.createAgentConfig(agentId, { name: '', connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: {} });
+      const created = await api.createAgentConfig(agentId, { name: '', connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] });
       current.current = created;
       setRecord(created);
       setError(null);

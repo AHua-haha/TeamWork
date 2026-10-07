@@ -1,4 +1,4 @@
-import { createModels, createProvider, type Api, type Model, type Models, type SimpleStreamOptions, type ThinkingLevel } from '@earendil-works/pi-ai';
+import { clampThinkingLevel, createModels, createProvider, type Api, type Model, type ModelThinkingLevel, type Models, type SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
@@ -8,7 +8,10 @@ import type { RuntimeTool } from './runtime.js';
 import { ConfigSecrets } from './secrets.js';
 import { AppError, identity } from './types.js';
 
-const thinkingLevels = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+/** One reasoning scale for every reasoning model; each level is clamped to the model's supported Pi level when sent. */
+export const reasoningScale = ['off', 'low', 'medium', 'high', 'xhigh'] as const;
+export type ReasoningLevel = typeof reasoningScale[number];
+const isReasoningLevel = (value: unknown): value is ReasoningLevel => reasoningScale.includes(value as ReasoningLevel);
 const appId = 'settings';
 export const initialAppSettings: AppSettings = { title: 'RSI Agent', maxInputBytes: 2 * 1024 * 1024, allowAgentCreation: true };
 
@@ -19,20 +22,21 @@ export interface ProviderConnection {
 export interface ConnectionView { label: string; provider: string; baseUrl: string; api: ProviderConnection['api']; keyConfigured: boolean }
 export interface ModelChoice {
   source: 'pi' | 'endpoint'; modelId: string; label: string; api: Api; reasoning: boolean;
-  reasoningLevels: ThinkingLevel[]; contextWindow: number; maxTokens: number; verified: boolean;
+  reasoningLevels: ReasoningLevel[]; defaultReasoning: ReasoningLevel | null; reasoningSentAs: Partial<Record<ReasoningLevel, ModelThinkingLevel>>;
+  contextWindow: number; maxTokens: number; verified: boolean;
 }
 interface ModelCache { provider: string; baseUrl: string; api: ProviderConnection['api']; checkedAt: string; models: ModelChoice[] }
 export interface ToolOption { kind: 'tool'; label: string; toolName: string }
 export interface PromptOption { kind: 'prompt'; label: string; text: string }
 export type CatalogOption = ToolOption | PromptOption;
-export interface CallOptions { reasoning?: ThinkingLevel; temperature?: number; maxTokens?: number; contextBudget?: number }
+export interface ModelOptions { connectionId: string; modelId: string; reasoning?: ReasoningLevel; temperature?: number; maxTokens?: number; contextBudget?: number }
 export interface AgentSettings {
   name: string; connectionId: string | null; modelId: string | null; toolOptionIds: string[];
-  prompt: string; promptOptionIds: string[]; callOptions: CallOptions;
+  prompt: string; promptOptionIds: string[]; modelOptions: ModelOptions[];
 }
 export interface AgentConfigView extends StoredConfig<AgentSettings> { issues: string[] }
 export interface AgentSummary { agentId: string; name: string; ready: boolean; issues: string[] }
-export interface ModelCapability { provider: string; modelId: string; label: string; api: string; baseUrl: string; reasoning: boolean; maxTokens: number; reasoningLevels: ThinkingLevel[] }
+export interface ModelCapability { provider: string; modelId: string; label: string; api: string; baseUrl: string; reasoning: boolean; maxTokens: number; reasoningLevels: ReasoningLevel[]; defaultReasoning: ReasoningLevel | null; reasoningSentAs: Partial<Record<ReasoningLevel, ModelThinkingLevel>> }
 export interface ToolCapability { name: string; description: string }
 export interface ResolvedRunConfig {
   model: Model<Api>; models?: Models; tools: RuntimeTool[]; systemPrompt: string;
@@ -87,27 +91,56 @@ export function validateCatalogOption(value: unknown, tools: ReadonlyMap<string,
   }
   throw new AppError('invalid_config', 'Unknown catalog option kind');
 }
+function modelOptions(value: unknown): ModelOptions {
+  const data = obj(value, 'Model options');
+  keys(data, ['connectionId', 'modelId', 'reasoning', 'temperature', 'maxTokens', 'contextBudget']);
+  identity(data.connectionId, 'connectionId');
+  const entry: ModelOptions = { connectionId: data.connectionId, modelId: title(data.modelId, 'Model ID', 160) };
+  if (data.reasoning !== undefined) {
+    if (!isReasoningLevel(data.reasoning)) throw new AppError('invalid_config', 'Invalid reasoning level');
+    entry.reasoning = data.reasoning;
+  }
+  if (data.temperature !== undefined) {
+    if (typeof data.temperature !== 'number' || !Number.isFinite(data.temperature) || data.temperature < 0 || data.temperature > 2) throw new AppError('invalid_config', 'Temperature must be 0–2');
+    entry.temperature = data.temperature;
+  }
+  if (data.maxTokens !== undefined) {
+    if (!Number.isSafeInteger(data.maxTokens) || (data.maxTokens as number) < 1) throw new AppError('invalid_config', 'maxTokens must be a positive integer');
+    entry.maxTokens = data.maxTokens as number;
+  }
+  if (data.contextBudget !== undefined) {
+    if (!Number.isSafeInteger(data.contextBudget) || (data.contextBudget as number) < 1) throw new AppError('invalid_config', 'contextBudget must be a positive integer');
+    entry.contextBudget = data.contextBudget as number;
+  }
+  return entry;
+}
 export function validateAgentSettings(value: unknown): AgentSettings {
   const data = obj(value, 'Agent config');
-  keys(data, ['name', 'connectionId', 'modelId', 'toolOptionIds', 'prompt', 'promptOptionIds', 'callOptions']);
+  keys(data, ['name', 'connectionId', 'modelId', 'toolOptionIds', 'prompt', 'promptOptionIds', 'modelOptions']);
   if (data.connectionId !== null) identity(data.connectionId, 'connectionId');
   if (data.modelId !== null) title(data.modelId, 'Model ID', 160);
-  const options = obj(data.callOptions, 'callOptions');
-  keys(options, ['reasoning', 'temperature', 'maxTokens', 'contextBudget']);
-  if (options.reasoning !== undefined && !thinkingLevels.includes(options.reasoning as ThinkingLevel)) throw new AppError('invalid_config', 'Invalid reasoning level');
-  if (options.temperature !== undefined && (typeof options.temperature !== 'number' || !Number.isFinite(options.temperature) || options.temperature < 0 || options.temperature > 2)) throw new AppError('invalid_config', 'Temperature must be 0–2');
-  if (options.maxTokens !== undefined && (!Number.isSafeInteger(options.maxTokens) || (options.maxTokens as number) < 1)) throw new AppError('invalid_config', 'maxTokens must be a positive integer');
-  if (options.contextBudget !== undefined && (!Number.isSafeInteger(options.contextBudget) || (options.contextBudget as number) < 1)) throw new AppError('invalid_config', 'contextBudget must be a positive integer');
+  if (!Array.isArray(data.modelOptions)) throw new AppError('invalid_config', 'modelOptions must be a list');
+  const entries = data.modelOptions.map(modelOptions);
+  if (new Set(entries.map(entry => JSON.stringify([entry.connectionId, entry.modelId]))).size !== entries.length) throw new AppError('invalid_config', 'modelOptions contains duplicate models');
   return {
     name: data.name === '' ? '' : title(data.name, 'Agent name'), connectionId: data.connectionId as string | null,
     modelId: data.modelId as string | null, toolOptionIds: ids(data.toolOptionIds, 'toolOptionIds'),
     prompt: content(data.prompt, 'Agent prompt'), promptOptionIds: ids(data.promptOptionIds, 'promptOptionIds'),
-    callOptions: options as CallOptions,
+    modelOptions: entries,
   };
 }
 function normalizedAgent(value: unknown): AgentSettings {
-  const data = obj(value, 'Agent config');
-  return validateAgentSettings({ name: '', connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: {}, ...data });
+  const { callOptions: _dropped, ...data } = obj(value, 'Agent config');
+  // Levels outside the shared scale (stored before it existed) read as unset.
+  if (Array.isArray(data.modelOptions)) data.modelOptions = data.modelOptions.map(entry => {
+    if (!entry || typeof entry !== 'object' || !('reasoning' in entry) || isReasoningLevel(entry.reasoning)) return entry;
+    const { reasoning: _old, ...rest } = entry;
+    return rest;
+  });
+  return validateAgentSettings({ name: '', connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [], ...data });
+}
+function selectedOptions(settings: AgentSettings): ModelOptions | undefined {
+  return settings.modelOptions.find(entry => entry.connectionId === settings.connectionId && entry.modelId === settings.modelId);
 }
 function connectionInput(value: unknown, previous: ProviderConnection | null, secrets: ConfigSecrets): ProviderConnection {
   const data = obj(value, 'Provider connection');
@@ -130,13 +163,17 @@ function publicConnection(record: StoredConfig<ProviderConnection>): StoredConfi
   const { label, provider, baseUrl, api, encryptedKey } = record.value;
   return { id: record.id, revision: record.revision, value: { label, provider, baseUrl, api, keyConfigured: encryptedKey !== null } };
 }
+function reasoningChoices(model: Model<Api>): Pick<ModelChoice, 'reasoningLevels' | 'defaultReasoning' | 'reasoningSentAs'> {
+  if (!model.reasoning) return { reasoningLevels: [], defaultReasoning: null, reasoningSentAs: {} };
+  return { reasoningLevels: [...reasoningScale], defaultReasoning: 'off',
+    reasoningSentAs: Object.fromEntries(reasoningScale.map(level => [level, clampThinkingLevel(model, level)])) };
+}
 function choiceFromPi(model: Model<Api>, api: Api = model.api): ModelChoice {
   return { source: 'pi', modelId: model.id, label: model.name, api, reasoning: model.reasoning,
-    reasoningLevels: model.reasoning ? thinkingLevels.filter(level => model.thinkingLevelMap?.[level] !== null) : [],
-    contextWindow: model.contextWindow, maxTokens: model.maxTokens, verified: true };
+    ...reasoningChoices(model), contextWindow: model.contextWindow, maxTokens: model.maxTokens, verified: true };
 }
 function unknownChoice(modelId: string, label: string, api: ProviderConnection['api']): ModelChoice {
-  return { source: 'endpoint', modelId, label, api, reasoning: false, reasoningLevels: [], contextWindow: 8192, maxTokens: 2048, verified: false };
+  return { source: 'endpoint', modelId, label, api, reasoning: false, reasoningLevels: [], defaultReasoning: null, reasoningSentAs: {}, contextWindow: 8192, maxTokens: 2048, verified: false };
 }
 function cacheMatches(connection: ProviderConnection, cache?: ModelCache): cache is ModelCache {
   return !!cache && cache.provider === connection.provider && cache.baseUrl === connection.baseUrl && cache.api === connection.api;
@@ -285,7 +322,7 @@ export class ConfigService {
   capabilities(): { models: ModelCapability[]; tools: ToolCapability[] } {
     return { models: this.models.getModels().map(model => ({ provider: model.provider, modelId: model.id, label: model.name,
       api: model.api, baseUrl: model.baseUrl, reasoning: model.reasoning, maxTokens: model.maxTokens,
-      reasoningLevels: choiceFromPi(model).reasoningLevels })),
+      ...reasoningChoices(model) })),
       tools: [...this.tools.values()].map(tool => ({ name: tool.definition.name, description: tool.definition.description })) };
   }
   async listCatalog(): Promise<StoredConfig<CatalogOption>[]> {
@@ -351,7 +388,7 @@ export class ConfigService {
         const choice = this.selectedChoice(settings, connection, caches.get(settings.connectionId)?.value);
         if (!choice) issues.push('Selected model is unavailable');
         else {
-          const { reasoning, maxTokens, contextBudget } = settings.callOptions;
+          const { reasoning, maxTokens, contextBudget } = selectedOptions(settings) ?? {};
           if (reasoning && !choice.reasoningLevels.includes(reasoning)) issues.push('Reasoning level is unavailable for this model');
           if (maxTokens !== undefined && maxTokens > choice.maxTokens) issues.push('Maximum output tokens exceed this model limit');
           if (contextBudget !== undefined && contextBudget > choice.contextWindow) issues.push('Context budget exceeds this model context window');
@@ -403,8 +440,13 @@ export class ConfigService {
     const prompts = settings.promptOptionIds.map(id => (catalog.get(id)!.value as PromptOption).text);
     if (settings.prompt) prompts.push(settings.prompt);
     const catalogRevisions = Object.fromEntries([...settings.toolOptionIds, ...settings.promptOptionIds].map(id => [id, catalog.get(id)!.revision]));
-    const { contextBudget, ...callOptions } = settings.callOptions;
-    const options: SimpleStreamOptions = { ...callOptions, ...(connection.encryptedKey ? { apiKey: this.secrets.decrypt(connection.encryptedKey) } : {}) };
+    const { reasoning = choice.defaultReasoning, temperature, maxTokens, contextBudget } = selectedOptions(settings) ?? {};
+    const sent = reasoning ? choice.reasoningSentAs[reasoning] : undefined;
+    const options: SimpleStreamOptions = {
+      ...(sent && sent !== 'off' ? { reasoning: sent } : {}),
+      ...(temperature !== undefined ? { temperature } : {}), ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(connection.encryptedKey ? { apiKey: this.secrets.decrypt(connection.encryptedKey) } : {}),
+    };
     return { model, models: runModels, tools: [...tools], systemPrompt: prompts.join('\n\n'), options, contextBudget,
       source: { appRevision: bundle.app.revision, agentRevision: bundle.agent.revision, catalogRevisions,
         connectionRevision: connectionRecord.revision, modelCacheRevision: caches.get(settings.connectionId!)?.revision } };

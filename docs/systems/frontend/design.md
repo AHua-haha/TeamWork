@@ -2,176 +2,101 @@
 
 ## Purpose and boundary
 
-The frontend displays an agent's completed message history and updates messages while following a live run. Opening, refreshing, or reconnecting a conversation synchronizes it with the backend before following live output. Each follow stream ends with its associated run.
+The frontend lets a user open one agent's conversation, follow its run, choose that agent's model and reasoning, and manage the provider connections from which models are available. It uses a light, restrained layout with a compact navigation rail, a contextual secondary sidebar, and a large content area. The frontend does not own the agent's model-facing context or change the backend's one-history-per-agent identity.
 
-The frontend also lets users browse agents and edit the application config, global agent config catalog, and each agent's config through backend APIs. The Agents area contains the agent list, catalog, agent conversation, and agent configuration. App Settings is a separate destination. Backend system config has no frontend editor.
+One **conversation** in this UI is one backend **agent** and its single visible message history. Creating a conversation creates an agent. The UI does not promise multiple conversations under one agent, generated titles, or a separate conversation entity.
 
-The conversation flow has two parts with explicit integration boundaries:
+The conversation data flow retains two boundaries:
 
-1. **Agent client:** requests backend operations and receives, processes, and maintains backend message data in the backend's format.
-2. **assistant-ui adapter:** converts the client's data into assistant-ui presentation data and connects UI actions to client commands.
+1. The agent client requests backend operations and maintains completed Pi messages, live Pi message state, synchronization, run state, and connection state in the backend's format.
+2. The assistant-ui adapter converts client snapshots into display messages and routes UI actions to client commands.
 
-assistant-ui supplies the rendering components. The client is usable independently of assistant-ui; the adapter is specific to assistant-ui.
-
-A separate config client handles config reads and edits in the backend's format. Configuration pages and the chat-composer controls use that client. The assistant-ui adapter does not own config data or choose the model for a run.
-
-The backend owns agent execution, model requests, tool execution, persisted history, and model context management. The frontend sends new user input and observes backend output. Its visible conversation history is distinct from the backend's model-facing context history; context compaction does not rewrite the visible history.
-
-### Responsibility boundary
-
-| Concern | Owner |
-| --- | --- |
-| Backend requests and follow-stream lifecycle | Agent client |
-| Completed message records and live Pi message state | Agent client |
-| Pi event processing and construction of partial Pi messages | Agent client |
-| Synchronization, ordering, deduplication, and reconnect recovery | Agent client |
-| Run state and connection state | Agent client |
-| App, catalog, and agent-config reads and edits | Config client |
-| Editable form state, save status, and revision-conflict presentation | Config UI |
-| Agent navigation, catalog editor, app settings, and composer config controls | UI components |
-| Pi message conversion into assistant-ui messages | Adapter |
-| Display association between tool calls and tool results | Adapter |
-| Mapping message and run lifecycle into UI statuses | Adapter |
-| Mapping UI actions to client commands | Adapter |
-| Layout and custom message or tool rendering | assistant-ui components |
+A separate config client reads and edits backend config records. Navigation, provider forms, and composer config controls use it; the assistant-ui adapter does not own config or choose the model for a run. The backend owns agent execution, persisted history, and context management.
 
 ## Inputs and preconditions
 
-### Backend data and operations
-
-- A conversation is identified by the backend's agent or conversation identity and, when following a run, its run identity.
-- Sending a message supplies new user input and the identifiers needed to route the request. The backend constructs its model context from its own stored history.
-- Completed records contain Pi AI messages and backend-owned metadata. Live payloads use the backend's Pi event format. Transport envelopes supply message identity, run identity, ordering information, and synchronization signals as required by the backend protocol.
-- A live message and its completed record share a stable message identity. Completed history has a stable order. Missing chunk ranges are detectable from the backend protocol.
-- The backend synchronizes completed records before live following. A message completing during that handoff remains available through synchronization or subsequent stream delivery.
-- A backend completion notification identifies a persisted whole-message record. A Pi model-call completion event alone does not establish persistence or completion of the agent run.
-
-### Config data and operations
-
-- The backend supplies an agent-list operation, config read/edit operations, permitted catalog options, provider connections, backend-owned model choices, record revisions, and validation errors. The UI does not infer the available model or tool universe from provider names or hard-coded lists.
-- The global catalog is a set of permitted choices rather than agent defaults. Each agent selects a provider connection and a backend-listed model explicitly. A new agent may be created with incomplete config, but a run cannot start until the backend can resolve it.
-- Config writes may happen at any time. The backend resolves a copy of the run-affecting config at run start; later edits affect the next run, not the active one. The frontend never owns the runtime's model-facing context history.
-- System config, including the database connection and key used to encrypt provider secrets, is not editable from the frontend. App Settings exposes product-wide UI and API settings. The global Models tab edits provider connection details, including a write-only API key.
-
-### Client-to-adapter contract
-
-The client exposes a current snapshot and a way to subscribe to changes. Its snapshot provides:
-
-- Completed message records, preserving Pi payloads and backend metadata.
-- Current partial messages in Pi's message format, associated with their backend identities and order.
-- Message lifecycle information sufficient to distinguish active output from completed records.
-- Current run state and connection or synchronization state, separately from historical messages.
-
-Applying Pi events to maintain a partial Pi message is client protocol processing. It preserves Pi as the message format. Any event data exposed by the client also preserves the backend's event format.
-
-The adapter can obtain the current display from the latest client snapshot without replaying an independent event history. Client commands cover sending input, following a run, and other operations supported by the backend, such as cancellation when available. Exact method names and TypeScript signatures remain implementation decisions.
+- The backend supplies an agent list, one history per agent, a sync-then-follow operation for a run, agent config records with revisions and validation issues, provider connection records, and model choices for each connection.
+- A model selection is identified by both the provider connection ID and model ID. Names and model IDs alone need not be unique across connections.
+- A connection includes its display name, provider, request protocol, endpoint URL, and whether a key is configured. The API key is write-only to the backend; read responses do not contain it.
+- A model choice supplies its display label, its reasoning levels (the shared scale `off, low, medium, high, xhigh` for reasoning models, none otherwise), the level each scale step is actually sent as for that model, its effective default level, maximum output, context window, and whether its metadata is verified. A listed model is an available choice, not proof that a credential can invoke it.
+- An agent config holds the selected model and a separate settings entry per model for that conversation: reasoning, maximum output tokens, temperature, and context budget. Omitted values use the model's defaults. Existing agent configs may also contain prompts and tools; this UI revision does not expose editors for them and preserves their saved values.
+- Sending a message supplies user input only. The backend resolves a copy of the agent's saved config at run start and constructs the model request from its own context history. Edits made during a run take effect from the next run.
 
 ## Outputs and observable effects
 
-### Config navigation and editing
+### Navigation and page layout
 
-- The Agents destination provides an agent list and a global catalog editor with separate Models, Prompts, and Tools tabs. Each tab has a list and a form specific to its kind; there is no generic Kind selector. Runtime-policy tabs appear only when that kind is available. Editing a catalog entry changes data available to later resolutions; it does not create executable tool handlers.
-- The Models tab manages provider connections. Its editor sets a name, provider, endpoint URL, request protocol (OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages), and a write-only API key. The selected protocol applies to calls for all models on that connection, including Pi-known models. Selecting a known Pi provider initially fills its endpoint and default protocol; an Anthropic-compatible endpoint uses its provider root URL. Read views show only whether a key is configured. Selecting a connection displays a searchable, read-only model list supplied by the backend: Pi-known models plus models saved by endpoint discovery. The list shows context window, output limit, reasoning support, and whether metadata is verified, and clarifies that listing does not confirm credential access. There is no global model profile editor or model-ID text input.
-- Saving a known Pi provider shows its built-in models immediately. Saving an unknown provider attempts endpoint discovery and keeps the connection when discovery fails. The Models tab also offers an explicit refresh action. A discovery error leaves previously saved choices visible when the connection identity still matches. Changing provider, URL, or protocol invalidates old discovered choices.
-- An agent detail view provides Conversation and Configuration views. Configuration covers the agent's prompt, selected model, tools, model-call options, and future runtime settings. It shows missing or unavailable selections instead of silently replacing them.
-- A newly created agent opens with a clear setup state. The conversation composer offers an explicit model selection, and Send is unavailable until required agent config is saved and valid. Creating an agent does not automatically start a run.
-- App Settings provides one place to read and edit app-wide settings. There is no System Config page.
-- Leaving Conversation for a config view does not cancel an active backend run. Returning to Conversation uses the normal history synchronization and follow flow.
+- The fixed first-level rail has exactly two destinations: **Conversations** and **Config**. Each icon has a text tooltip and accessible name. The active destination remains visibly marked even when its secondary sidebar is collapsed.
+- Selecting a destination opens its secondary sidebar. Selecting the active icon again collapses that sidebar while leaving the current page visible. The rail remains available. The sidebar's open state is a view preference; the selected destination and conversation remain addressable through the URL and browser history.
+- Returning from Config to Conversations reopens the previously viewed conversation when one has been selected in this browser session.
+- On a narrow screen, the secondary sidebar appears over the content and can be dismissed without losing the current page. On wider screens it occupies space beside the rail. Opening or closing it does not cancel an agent run or reset a composer draft.
+- The conversation view gives message content the main area, keeps the composer at the bottom, and keeps navigation chrome subdued. Long messages and tool content remain readable without widening the navigation rail.
 
-### Chat-composer config controls
+### Conversations destination
 
-- A model selector beside the input offers configured provider connections and each connection's backend-listed models. The current reasoning selection is visible beside the model, with other supported model-call options available from a nearby control. The controls remain usable at desktop and mobile sizes.
-- These controls edit the same persisted agent-config record as the Configuration view. They are not per-run overrides and do not send a model-context history or a model request with the user's message. There is no implicit Default model choice.
-- The agent Configuration page selects a provider connection and then one of its models. It edits context budget, maximum output tokens, temperature, and reasoning for that agent. Context budget is marked as saved for future context management; automatic compaction is not yet provided. Unknown discovered models are labeled unverified and do not offer reasoning.
-- Opening the model selector refreshes the permitted choices. Only options supported by the selected model are offered. When a model change makes a selected option invalid, the UI shows what must be changed; it does not silently substitute a value.
-- Choosing a model or reasoning level saves immediately when the resulting config is valid. If a model change requires another option to change, the UI stages those choices and saves them together after the user resolves the incompatibility. The advanced model-call options panel stages multiple fields and applies them as one update. While a save is pending or has failed, Send cannot start a run using an unconfirmed choice. The UI distinguishes saved values from unsaved edits and reports failures without claiming success.
-- A config edit made during an active run is labeled for the next run. The active run continues with its earlier snapshot. The composer and full Configuration view display the same saved selections after synchronization with the backend.
-- Config forms submit the revision they last read. A stale-revision conflict asks the user to review the latest stored values; the UI does not overwrite another editor's change without review. Reopening or refocusing a config view refreshes its records; the feature does not require a continuous config stream or periodic polling.
+- The secondary sidebar has a **New conversation** action and an agent list. Each entry opens that agent's conversation. The list uses an agent's saved name, or a neutral short-ID fallback for an unnamed agent. It does not claim to be sorted by recent activity because the current agent-list API does not provide activity time.
+- A conversation may be renamed from its sidebar entry by editing the agent's saved name. The edit preserves every other agent-config field. The UI does not offer conversation deletion in this revision because the backend has no operation that deletes the full agent history.
+- **New conversation** creates a backend agent and initializes its agent config with empty optional fields if needed. The new conversation opens immediately, shows the model selection needed before sending, and starts no run on creation. If app config disallows agent creation, the action is disabled and explains why.
+- The main area shows the selected agent's visible message history and current run state. Opening, refreshing, or reconnecting synchronizes completed history before following available live output. Leaving and returning to the conversation does not cancel its run.
 
-### Synchronization and following
+### Config destination and Providers page
+
+- Config's secondary sidebar is headed **Providers** and lists configured connections as shortcuts into the overview. It creates no extra config page. The main page is a provider overview, not a generic catalog form. App Settings, prompt templates, tools, and advanced agent configuration have no visible editor in this navigation; their saved backend data remains intact.
+- The overview shows every configured connection as a spacious card in a single readable column. One card represents one backend connection, even when several connections use the same provider. Its header shows the display name and actions; its body shows provider, request protocol, endpoint URL, key-configured status, and model availability where the backend has returned a model list. Its read-only model choices and metadata expand beneath the summary. The page has clear empty, loading, and read-error states.
+- Each connection offers actions to edit, refresh its model choices, and delete. **Add provider** and **Edit** open a focused dialog rather than expanding an inline general form. The dialog edits display name, provider, request protocol, endpoint URL, and API key. For edits, the key field starts blank and means “keep existing”; replacing or explicitly clearing the key are distinct actions. The dialog explains protocol-specific URL expectations.
+- Provider presets may prefill provider, protocol, and endpoint, but all saved values remain reviewable before submission. Refresh attempts endpoint model discovery. The page distinguishes Pi-known models from endpoint-discovered models and indicates unverified metadata. A refresh failure leaves the connection and any previously saved choices visible when still applicable.
+- Delete asks for confirmation and explains that agents using the connection will need another model before their next run. The page never displays a raw API key. After a successful add, edit, refresh, or delete, the overview uses backend results rather than pretending a request succeeded before confirmation.
+
+### Composer model and reasoning controls
+
+- The composer contains one compact trigger showing the selected model and reasoning state. With a selected model, opening its popover shows a compact model button and reasoning control; the full model list starts collapsed. Clicking that model expands the list to switch models. With no selected model, the list opens directly. The list includes models from **all** configured connections, grouped or labeled by connection. It does not require a provider selection step. A selected row has a checkmark; duplicate model names remain distinguishable by connection label. An unavailable saved choice is shown as unavailable rather than silently replaced.
+- A search icon at the top of the popover reveals or hides the model search field; the field starts hidden. Revealing search also expands the model list. Selecting a model saves its connection ID and model ID, then folds the list back to the compact view.
+- Model-call settings are per conversation and per model. The popover always shows and edits the selected model's settings for this conversation. Switching models shows that model's own saved settings, or its defaults if this conversation has none; switching back restores the earlier model's settings. Another conversation's settings for the same model are unaffected. Because each model has its own settings, a model switch never asks to reconcile or clear values.
+- The reasoning control is a compact stepped slider with the same five stops for every reasoning model: Off, Low, Medium, High, XHigh. It has a slim pill-shaped track, a blue filled portion with subtle sparkle dots, a round white thumb, and small dots marking the unfilled stops. The current level's name appears prominently in the header button above the model name. With no saved level, the slider shows Off without writing it. Dragging or keyboard adjustment saves the named level when the interaction finishes. When the selected model does not support the chosen level, a small “Sent as …” note under the slider names the level actually sent. A model without reasoning support shows “No reasoning” instead of a slider. The slider never sends an arbitrary numeric value.
+- Below the slider, a **More settings** section edits maximum output tokens, temperature, and context budget for the selected model. These change rarely, so the section is folded each time the popover opens, and each field defaults to unset. When folded, it indicates how many of the selected model's values are customized. When expanded, each unset field reads Default with the model's limit (maximum output and context window, or 0–2 for temperature), and each customized field can be cleared back to Default. Its edits are staged and applied as one update for that model; invalid values are explained before saving. Context budget is labeled as saved for future context management.
+- Choosing a model, reasoning level, or More settings change persists it for this conversation's later runs once the save succeeds. During a run, a changed choice is labeled as applying to the next run. Send is unavailable while a model or settings change is unsaved, saving, failed, or invalid, or while the selected model's saved settings no longer fit it. The composer does not offer provider selection.
+- On opening the picker, the frontend refreshes the connection list and model choices. Config writes use the revision last read. A stale revision requires reviewing the latest stored value before saving; the UI does not overwrite another edit without review.
+
+### Conversation synchronization and display
 
 | Trigger or input | Client effect | Display effect |
 | --- | --- | --- |
-| Open or refresh a conversation | Open the follow operation and synchronize completed history; then follow available live output. | Show whole completed messages and subsequent live updates. |
-| Reconnect | Discard previous partial messages and synchronize completed history again, using a completed-history position when available. | Replace stale partial output with synchronized records and any reconstructible live output. |
-| Send new user input | Submit the input and follow the resulting run through the backend's sync-then-live operation. | Reflect the backend's accepted messages and subsequent output. |
-| Receive a live Pi event | Update the corresponding partial Pi message and notify subscribers. | Update the existing displayed message under its stable identity. |
-| Receive a completed record | Reconcile it with completed history and remove any partial message with the same identity. | Display the whole completed message once. |
-| Encounter a missing chunk range | Discard the affected partial message. Obtain its completed record through continued following or resynchronization. | Allow the partial message to disappear and the whole message to appear when available. |
-| Receive run completion | Apply the run's final delivered updates and finish following. | Preserve completed history and reflect the final run state. |
-| Synchronize with no active run | Complete history synchronization and finish the connection. | Show the synchronized completed history. |
+| Open or refresh a conversation | Synchronize completed records, then follow an active run if present. | Show whole completed messages before live updates. |
+| Reconnect | Discard previous partial messages and resynchronize completed history. | Replace stale partial output with current records and reconstructible live output. |
+| Send input | Submit user input, then follow that run through the backend operation. | Show backend-accepted messages and subsequent output. |
+| Receive a live Pi event | Update the corresponding partial Pi message by backend identity. | Update one displayed message in place. |
+| Receive a completed record | Reconcile it with history and remove a partial with the same identity. | Show the whole message once. |
+| Encounter a missing chunk range | Discard the affected partial. | Show the completed record when it becomes available. |
+| Receive run completion | Apply final updates and finish following. | Preserve history and final run state. |
 
-When an active message can be reconstructed from retained chunks, the client may rebuild it and continue live updates. When the required initial chunks are unavailable, it waits for the whole completed record. It does not treat an incomplete tail as a complete message.
-
-Following uses a long-lived stream for one run. The connection ends when that run finishes; a subsequent run opens a new connection. Periodic polling is outside this design. Whether input submission and following use one request or separate requests remains a backend API decision.
-
-### Adapter output
-
-The adapter supplies assistant-ui's `ExternalStoreRuntime` with the current ordered display messages, relevant statuses, and action callbacks. This is a local frontend integration contract; backend messages remain in Pi format. The frontend presents the conversation in a light theme at desktop and mobile widths.
-
-Completed and live messages use the same content-conversion rules:
-
-| Pi data | assistant-ui presentation |
-| --- | --- |
-| Text content | Text part |
-| Thinking content | Reasoning part when included in the presentation |
-| Tool call | Tool-call part with the same tool-call identity and current arguments |
-| Separate tool-result record | Result and error information associated with its displayed tool call |
-| Backend message identity | Stable display-message identity |
-| Message lifecycle and run state | Corresponding message statuses and overall running state |
-
-Conversion preserves content order. As the client publishes changes, the adapter supplies updated accumulated content for the same message identity. For example, `Hello`, `Hello world`, and the completed `Hello world!` are successive contents of one displayed message.
-
-A tool-result record can update the tool presentation associated with an earlier assistant message. That presentation update does not mutate the underlying completed Pi records. Producing tool-call arguments and completing tool execution are distinct events.
-
-The adapter maps composer input into the client's accepted user-input format and routes supported UI actions to client commands. Its presentation is derived from client data; synchronization and recovery remain client responsibilities. Message grouping and custom visual components are presentation choices that must preserve association with the underlying backend records.
-
-The composer config controls use the config client independently of the assistant-ui adapter. Sending input waits for any pending config save. The backend then resolves the latest committed config for the new run; the frontend does not construct or submit that resolved config itself.
+One follow stream ends with one run; another run opens a new stream. The UI does not periodically poll for live chunks. The assistant-ui adapter derives its messages from the client snapshot, preserves Pi content order and backend message identity, and associates tool results with their displayed tool calls. A completed record supersedes its partial presentation. The visible history does not change when the backend compacts model-facing context.
 
 ## Failure behavior
 
-- A connection failure is observable separately from agent-run failure. Losing the follow connection does not cancel the backend run.
-- An unexpected end of the connection does not establish run completion. Reconnection synchronizes with the backend before following again.
-- If synchronization fails, the client exposes that failure and does not claim that its retained completed history is current.
-- Missing chunks cause the affected partial message to be discarded. Continuous animation is not guaranteed; replacement by a completed message is an accepted recovery outcome.
-- Duplicate records or repeated chunks do not produce duplicate displayed messages or repeated content. The client uses backend identity and ordering information to reconcile them.
-- Command failures are surfaced to the caller. The client does not report input as accepted without backend confirmation; input retry and idempotency semantics remain to be specified with the send API.
-- Backend failures and cancellations are reflected as reported by the backend. Whether their partial output becomes a persisted record remains a backend contract decision; the frontend does not invent a completed historical record.
-- Config read, validation, and save errors remain visible in the relevant editor. An unsuccessful save does not appear as a saved selection or enable Send on an incomplete agent.
-- If a selected catalog option, provider connection, or model is deleted, an active run remains visible and continues according to the backend's run snapshot. The agent's next run is unavailable until its config is repaired; the UI shows the missing selection and a path to choose an available option.
-- A stale config revision produces a reviewable conflict. Unsaved user input and form edits are not silently discarded when the UI reloads the latest stored record.
+- A connection loss is shown separately from an agent-run failure. An unexpected stream end does not establish run completion; reconnect synchronizes first.
+- Missing live chunks may cause a partial message to disappear until its completed record arrives. Duplicate records or chunks do not create duplicate displayed messages.
+- A failed provider save, discovery, model save, or rename remains visible with the uncommitted draft so the user can retry or discard it. Successful saves use the backend's returned revision and value.
+- If a provider or model becomes unavailable, the selected choice remains visibly unavailable and Send remains disabled until the agent config is valid again. Existing completed history remains readable.
+- Backend-reported agent-config issues remain visible. If the selected model's saved maximum output or context budget no longer fits it, or a reasoning level is saved for a model without reasoning, the popover marks that field and lets the user choose a supported value or clear it to Default; it does not change the value automatically. This revision does not add controls for prompts or tools or erase their saved values.
 
 ## Guarantees and limits
 
-- The client preserves backend Pi payloads and runtime metadata. Conversion into assistant-ui types occurs at the adapter boundary.
-- One client-owned representation governs synchronization, live Pi messages, and recovery. Adapter data is a derived presentation that can be rebuilt from a snapshot.
-- Completed history and transient live output remain distinguishable. A completed record supersedes its partial message under the same identity.
-- The frontend does not own or submit the agent's model-context history. Backend context changes do not alter the completed display timeline.
-- Current run and connection state remain distinct from the timeline. Finishing one model call does not imply that the agent run has finished.
-- Live delivery is best effort within the backend's retained chunk range. There are no follower acknowledgements or guarantees of complete chunk replay after eviction.
-- Synchronization and following share one flow across open, refresh, reconnect, and send. Streams do not remain open across multiple runs.
-- Catalog and agent-config editing use one backend source of truth. The composer is a shortcut into the agent's persistent config, not a second config store. A UI config edit never changes the snapshot of an active run.
-- App Settings and catalog editing are separate from backend system config. The API key is sent only when entered or replaced; backend responses and retained frontend config data contain no raw provider credentials.
-- Exact endpoint paths, transport encoding, snapshot API signatures, retry timing, history pagination, local persistence, rendering cadence, and message grouping remain unspecified. This specification does not establish an implementation or supported package-version range.
+- The frontend keeps backend Pi payloads and runtime metadata in the agent client. Only the adapter converts them into assistant-ui data.
+- Completed history and transient live output remain distinct; current run and connection state are distinct from both.
+- The model picker uses backend-listed choices. It never infers models, protocols, or reasoning levels solely from a provider name.
+- Composer settings are edits to persistent agent config, not per-message overrides. An active run keeps its start-of-run config snapshot.
+- Provider credentials are write-only from the frontend's perspective. The read view shows only whether a key is configured.
+- The frontend adds no backend data entity or API requirement in this revision. Exact animations, widths, icon artwork, local sidebar preference persistence, search ranking, and model-list pagination are presentation details.
 
 ## Acceptance examples
 
-1. **Open an idle conversation:** the client synchronizes completed messages, the adapter converts them into whole displayed messages, and the connection ends when synchronization finishes because there is no active run.
-2. **Open during a run:** completed history arrives first. Available chunks reconstruct the active Pi message, and later chunks update the same displayed message.
-3. **Stream text:** events change Pi message `m1` from `Hello` to `Hello world`. The adapter publishes successive assistant-ui messages with identity `m1`, and the screen shows one growing message.
-4. **Complete a message:** the persisted whole record for `m1` replaces its partial data. It appears once, with its final content and appropriate status.
-5. **Reconnect after missed completion:** the client drops its partial `m1`. Synchronization returns the completed `m1`, which is shown without replaying its old chunks.
-6. **Lose retained chunks:** the backend reports a gap for active `m2`. The client removes its partial `m2`; the adapter reflects that removal. When the completed record arrives, the whole `m2` appears.
-7. **Receive a tool result:** the client retains the Pi assistant tool call and separate Pi tool-result record. The adapter associates the result with the same displayed tool call while preserving both client records.
-8. **Complete during handoff:** a message completes while the client is synchronizing. Delivery through either phase is reconciled by identity, so it appears once and is not lost between phases.
-9. **Continue after one model response:** a Pi response completes and the backend executes a tool or starts another model call. The frontend continues following until the backend reports the run's end.
-10. **Compact model context:** the backend changes its stored context for later requests. The frontend's completed message history remains unchanged.
-11. **Recover after an unexpected disconnect:** the connection closes without a run-end signal. The client exposes the disconnect and synchronizes on reconnect instead of treating the run as successfully completed.
-12. **Configure a new agent:** the user creates an agent, sees that a model is required, selects a permitted model in the composer, and can send input after the selection is saved and validated.
-13. **Change the model during a run:** the user selects another model in the composer. The saved agent config changes, the current run keeps its earlier model snapshot, and the next run uses the new selection.
-14. **Edit from two views:** the user changes reasoning in the composer, then opens Configuration. The Configuration view shows the same saved agent value, subject to a refresh if another editor changed it.
-15. **Handle a removed option:** a provider connection selected by an idle agent is deleted. The agent view shows the unavailable selection, does not choose another connection automatically, and requires a valid selection before Send.
-16. **Handle a conflicting edit:** two editors read the same agent config. One saves; the other's save reports a revision conflict and preserves its unsaved form for review.
-17. **Navigate during a run:** the user opens App Settings or the catalog while an agent is running. The backend run continues; returning to Conversation resynchronizes its completed messages and follows remaining live output.
-18. **Create a selectable model:** the user creates a provider connection and its backend-listed models appear in agent model selectors. No model ID or model profile is entered.
-19. **Replace a connection key:** the user sees that a key is configured but not its value, enters a replacement, and saves. A running agent keeps its earlier key snapshot; later runs use the new key.
+1. **Collapse navigation:** with a conversation open, the user collapses the Conversations sidebar. The icon rail and conversation remain; reopening the sidebar highlights the same conversation.
+2. **Start a conversation:** New conversation creates an agent, opens its empty history, and asks for a model. No run begins until the user sends input with a valid saved config.
+3. **Choose a duplicate model name:** two connections expose the same model label. The picker shows both with connection labels; selecting one saves the correct connection ID and model ID.
+4. **Choose reasoning:** every reasoning model shows five stops starting at Off, with Off as the default; selecting High saves `high`, never an intermediate number. On DeepSeek V4 Pro (Pi levels `off, high, max`), choosing Medium shows “Sent as High” and XHigh shows “Sent as Max”. A non-reasoning model shows “No reasoning”. Opening the picker writes nothing.
+5. **Switch and switch back:** in one conversation the user sets model A to High with a 64k output limit, switches to model B, and sets it to XHigh. B starts from its own defaults; returning to A shows High and 64k again. No conflict prompt appears.
+6. **Edit a provider:** the edit dialog shows that a key is configured but not its value. Saving with the key field blank retains it; replacing it sends the new key once and the resulting page still shows only configured status.
+7. **Reconnect mid-run:** the frontend removes stale partial chunks, synchronizes stable messages, and resumes available live output or waits for the completed record.
+8. **Open Config during a run:** provider edits do not alter the active run. Returning to Conversations synchronizes its history and follows the current run when possible.
+9. **Separate conversations:** two conversations use model A. Changing A's reasoning in one leaves the other's A settings unchanged.
+10. **Fold rarely changed settings:** opening the popover shows the model and reasoning slider with More settings folded. Expanding it shows Default for maximum output, temperature, and context budget; setting a temperature saves it for this conversation's model, and the folded row then indicates one customized value.

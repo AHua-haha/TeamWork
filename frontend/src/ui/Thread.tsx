@@ -3,7 +3,7 @@ import type { ImageMessagePartProps, ReasoningMessagePartProps, TextMessagePartP
 import { useSyncExternalStore } from 'react';
 import { AgentClient } from '../client/agent-client.js';
 import { ConfigClient } from '../client/config-client.js';
-import { ComposerSettings, type AgentConfigControl } from './ConfigPages.js';
+import { ComposerSettings, type AgentConfigControl } from './ComposerSettings.js';
 
 function TextPart({ text }: TextMessagePartProps) { return <p className="message-text">{text}</p>; }
 function ImagePart({ image }: ImageMessagePartProps) { return <img className="message-image" src={image} alt="Message attachment" />; }
@@ -33,7 +33,7 @@ export function Conversation({ client, config, api, onConfigGate }: { client: Ag
 
   return <div className="conversation">
     <div className="conversation-head">
-      <div><div className="eyebrow">CONVERSATION</div><h2>{config.record?.value.name || 'Agent session'}</h2><span className="agent-id" title={client.agentId}>{client.agentId}</span></div>
+      <div><div className="eyebrow">CONVERSATION</div><h2>{config.record?.value.name || `Conversation · ${client.agentId.slice(0, 8)}`}</h2></div>
       <div className="conversation-actions">
         <span className={`status-pill ${active ? 'status-active' : ''} ${snapshot.connection === 'error' ? 'status-error' : ''}`}><span className="status-dot" />{status}</span>
         <button type="button" className="icon-button" onClick={() => client.refresh()} title="Synchronize conversation" aria-label="Refresh conversation">↻</button>
@@ -41,6 +41,7 @@ export function Conversation({ client, config, api, onConfigGate }: { client: Ag
     </div>
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={() => client.refresh()}>Retry</button></div>}
     {config.record?.issues.length ? <div className="error-banner" role="alert">Configure this agent before sending: {config.record.issues.join(' · ')}</div> : null}
+    {config.error && <div className="error-banner" role="alert">{config.error}</div>}
     {snapshot.run?.status === 'failed' && snapshot.run.error && <div className="error-banner" role="alert">Run failed: {snapshot.run.error.message}</div>}
     <ThreadPrimitive.Root className="thread">
       <ThreadPrimitive.Viewport className="thread-viewport">

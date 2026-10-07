@@ -1,23 +1,26 @@
 import { BackendError } from './agent-client.js';
 
-export type ReasoningLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+/** The shared reasoning scale; the backend clamps each level to one the model supports (see `reasoningSentAs`). */
+export type ReasoningLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh';
+/** A level Pi actually sends to the provider. */
+export type SentReasoningLevel = ReasoningLevel | 'minimal' | 'max';
 export interface ConfigRecord<T> { id: string; revision: number; value: T }
 export interface AppSettings { title: string; maxInputBytes: number; allowAgentCreation: boolean }
 export interface ConnectionView { label: string; provider: string; baseUrl: string; api: 'openai-completions' | 'openai-responses' | 'anthropic-messages'; keyConfigured: boolean }
 export interface ConnectionInput { label: string; provider: string; baseUrl: string; api: ConnectionView['api']; apiKey?: string | null }
-export interface ModelChoice { source: 'pi' | 'endpoint'; modelId: string; label: string; api: string; reasoning: boolean; reasoningLevels: ReasoningLevel[]; contextWindow: number; maxTokens: number; verified: boolean }
+export interface ModelChoice { source: 'pi' | 'endpoint'; modelId: string; label: string; api: string; reasoning: boolean; reasoningLevels: ReasoningLevel[]; defaultReasoning: ReasoningLevel | null; reasoningSentAs: Partial<Record<ReasoningLevel, SentReasoningLevel>>; contextWindow: number; maxTokens: number; verified: boolean }
 export interface ToolOption { kind: 'tool'; label: string; toolName: string }
 export interface PromptOption { kind: 'prompt'; label: string; text: string }
 export type CatalogOption = ToolOption | PromptOption;
-export interface CallOptions { reasoning?: ReasoningLevel; temperature?: number; maxTokens?: number; contextBudget?: number }
+export interface ModelOptions { connectionId: string; modelId: string; reasoning?: ReasoningLevel; temperature?: number; maxTokens?: number; contextBudget?: number }
 export interface AgentSettings {
   name: string; connectionId: string | null; modelId: string | null; toolOptionIds: string[];
-  prompt: string; promptOptionIds: string[]; callOptions: CallOptions;
+  prompt: string; promptOptionIds: string[]; modelOptions: ModelOptions[];
 }
 export interface AgentConfig extends ConfigRecord<AgentSettings> { issues: string[] }
 export interface AgentSummary { agentId: string; name: string; ready: boolean; issues: string[] }
 export interface Capabilities {
-  models: { provider: string; modelId: string; label: string; api: string; baseUrl: string; reasoning: boolean; maxTokens: number; reasoningLevels: ReasoningLevel[] }[];
+  models: { provider: string; modelId: string; label: string; api: string; baseUrl: string; reasoning: boolean; maxTokens: number; reasoningLevels: ReasoningLevel[]; defaultReasoning: ReasoningLevel | null; reasoningSentAs: Partial<Record<ReasoningLevel, SentReasoningLevel>> }[];
   tools: { name: string; description: string }[];
 }
 

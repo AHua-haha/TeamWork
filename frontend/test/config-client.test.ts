@@ -5,7 +5,7 @@ import { BackendError } from '../src/client/agent-client.js';
 
 test('config client preserves backend records, revisions and complete agent values', async () => {
   const calls: { path: string; method: string; body?: unknown }[] = [];
-  const settings: AgentSettings = { name: 'Research', connectionId: 'main', modelId: 'backend-owned', toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: { reasoning: 'high', contextBudget: 4096 } };
+  const settings: AgentSettings = { name: 'Research', connectionId: 'main', modelId: 'backend-owned', toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'backend-owned', reasoning: 'high', contextBudget: 4096 }] };
   const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ path: String(input), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (String(input) === '/agents/a/config' && init?.method === 'PUT') return new Response(JSON.stringify({ id: 'a', revision: 4, value: settings, issues: [] }));
@@ -30,7 +30,7 @@ test('connection key is write-only in the client contract and model choices come
   const api = new ConfigClient((async (input, init) => {
     calls.push({ path: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (String(input) === '/config/connections') return new Response(JSON.stringify({ id: 'main', revision: 0, value: { label: 'Main', provider: 'openai', baseUrl: 'https://example.com/v1', api: 'openai-responses', keyConfigured: true } }), { status: 201 });
-    if (String(input) === '/config/connections/main/models/refresh' && init?.method === 'POST') return new Response(JSON.stringify([{ source: 'endpoint', modelId: 'backend-owned', label: 'Available model', api: 'openai-responses', reasoning: false, reasoningLevels: [], contextWindow: 8192, maxTokens: 2048, verified: false }]));
+    if (String(input) === '/config/connections/main/models/refresh' && init?.method === 'POST') return new Response(JSON.stringify([{ source: 'endpoint', modelId: 'backend-owned', label: 'Available model', api: 'openai-responses', reasoning: false, reasoningLevels: [], defaultReasoning: null, reasoningSentAs: {}, contextWindow: 8192, maxTokens: 2048, verified: false }]));
     throw new Error('Unexpected request');
   }) as typeof fetch);
   const connection = await api.createConnection('main', { label: 'Main', provider: 'openai', baseUrl: 'https://example.com/v1', api: 'openai-responses', apiKey: 'private-key' });

@@ -438,7 +438,7 @@ test('provider and agent config snapshots survive edits while each next run reso
     assert.equal((await store.getState(agentId)).historyPosition, 0);
     const empty = await service.getAgent(agentId);
     assert.equal(empty.issues[0], 'Select a provider and model');
-    const settings = { name: 'Snapshot agent', connectionId, modelId: firstModel.id, toolOptionIds: [], prompt: 'Original instructions', promptOptionIds: [], callOptions: { temperature: 0.4, contextBudget: 1024 } };
+    const settings = { name: 'Snapshot agent', connectionId, modelId: firstModel.id, toolOptionIds: [], prompt: 'Original instructions', promptOptionIds: [], modelOptions: [{ connectionId, modelId: firstModel.id, temperature: 0.4, contextBudget: 1024 }] };
     const saved = await service.updateAgent(agentId, empty.revision, settings);
     assert.deepEqual(saved.issues, []);
     assert.equal((await service.resolveForRun(agentId)).contextBudget, 1024);
@@ -449,7 +449,7 @@ test('provider and agent config snapshots survive edits while each next run reso
     assert.equal(step1.request.context.systemPrompt, 'Original instructions');
     assert.equal(step1.request.options?.temperature, 0.4);
     const changedConnection = await service.updateConnection(connectionId, connection.revision, { ...connectionValue, baseUrl: 'https://example.com/v1', apiKey: 'second-key' });
-    await service.updateAgent(agentId, saved.revision, { ...settings, prompt: 'Changed instructions', callOptions: { temperature: 0.8 } });
+    await service.updateAgent(agentId, saved.revision, { ...settings, prompt: 'Changed instructions', modelOptions: [{ connectionId, modelId: firstModel.id, temperature: 0.8 }] });
     answer(step1.events);
     const step2 = await requests.next();
     assert.equal(step2.request.options?.apiKey, 'first-key');
@@ -548,7 +548,7 @@ test('configured requests use selected prompt, registered tool and permitted rea
   await assert.rejects(service.createCatalog(`missing-${suffix}`, { kind: 'tool', label: 'Unavailable', toolName: 'missing' }), /not registered/);
   const empty = await service.getAgent(agentId);
   await service.updateAgent(agentId, empty.revision, {
-    name: 'Configured', connectionId, modelId: 'gpt-5', toolOptionIds: [toolId], prompt: 'Agent prompt', promptOptionIds: [promptId], callOptions: { reasoning: 'high', maxTokens: 100 },
+    name: 'Configured', connectionId, modelId: 'gpt-5', toolOptionIds: [toolId], prompt: 'Agent prompt', promptOptionIds: [promptId], modelOptions: [{ connectionId, modelId: 'gpt-5', reasoning: 'high', maxTokens: 100 }],
   });
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
   const runtime = new AgentRuntime(store, service, configuredPolicy(), request => {
@@ -569,6 +569,79 @@ test('configured requests use selected prompt, registered tool and permitted rea
     answer(step.events);
     await collect(runtime.follow(agentId, { runId: run.runId }));
   } finally { await runtime.close(); }
+});
+
+test('agent model-call settings are kept per model and only the selected entry is used', async () => {
+  const models = builtinModels();
+  const service = new ConfigService(store, models);
+  const suffix = randomUUID();
+  const openai = `openai-${suffix}`;
+  const deepseek = `deepseek-${suffix}`;
+  await service.createConnection(openai, { label: 'OpenAI', provider: 'openai', baseUrl: models.getModel('openai', 'gpt-5')!.baseUrl, api: 'openai-responses' });
+  await service.createConnection(deepseek, { label: 'DeepSeek', provider: 'deepseek', baseUrl: models.getModel('deepseek', 'deepseek-v4-pro')!.baseUrl, api: 'openai-completions' });
+  const gpt = (await service.modelChoices(openai)).find(item => item.modelId === 'gpt-5');
+  assert.deepEqual(gpt?.reasoningLevels, ['off', 'low', 'medium', 'high', 'xhigh']);
+  assert.equal(gpt?.defaultReasoning, 'off');
+  assert.deepEqual(gpt?.reasoningSentAs, { off: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'high' });
+  const plain = (await service.modelChoices(openai)).find(item => item.modelId === 'gpt-4o-mini');
+  assert.deepEqual(plain?.reasoningLevels, []);
+  assert.equal(plain?.defaultReasoning, null);
+  assert.deepEqual(plain?.reasoningSentAs, {});
+
+  const { agentId } = await store.createAgent();
+  const raw = await store.getConfig<Record<string, unknown>>('agent', agentId);
+  await store.updateConfig('agent', agentId, raw.revision, { name: '', connectionId: openai, modelId: 'gpt-5', toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: { reasoning: 'max' } });
+  const legacy = await service.getAgent(agentId);
+  assert.deepEqual(legacy.value.modelOptions, []);
+  assert.equal('callOptions' in legacy.value, false);
+  assert.deepEqual(legacy.issues, []);
+  assert.equal((await service.resolveForRun(agentId)).options.reasoning, 'minimal');
+  await assert.rejects(service.updateAgent(agentId, legacy.revision, { ...legacy.value, callOptions: {} }), /Unknown config field: callOptions/);
+  const twice = { connectionId: openai, modelId: 'gpt-5' };
+  await assert.rejects(service.updateAgent(agentId, legacy.revision, { ...legacy.value, modelOptions: [twice, twice] }), /duplicate/);
+  for (const level of ['minimal', 'max']) await assert.rejects(service.updateAgent(agentId, legacy.revision, { ...legacy.value, modelOptions: [{ ...twice, reasoning: level }] }), /Invalid reasoning level/);
+
+  const entryA = { connectionId: openai, modelId: 'gpt-5', reasoning: 'high', maxTokens: 64_000 };
+  const onA = await service.updateAgent(agentId, legacy.revision, { ...legacy.value, modelOptions: [entryA] });
+  const onB = await service.updateAgent(agentId, onA.revision, { ...onA.value, connectionId: deepseek, modelId: 'deepseek-v4-pro' });
+  assert.deepEqual(onB.issues, []);
+  let resolved = await service.resolveForRun(agentId);
+  assert.equal(resolved.options.reasoning, undefined);
+  assert.equal(resolved.options.maxTokens, undefined);
+  const withB = await service.updateAgent(agentId, onB.revision, { ...onB.value, modelOptions: [entryA, { connectionId: deepseek, modelId: 'deepseek-v4-pro', reasoning: 'xhigh' }] });
+  assert.equal((await service.resolveForRun(agentId)).options.reasoning, 'max');
+  const mediumB = await service.updateAgent(agentId, withB.revision, { ...withB.value, modelOptions: [entryA, { connectionId: deepseek, modelId: 'deepseek-v4-pro', reasoning: 'medium' }] });
+  assert.deepEqual(mediumB.issues, []);
+  assert.equal((await service.resolveForRun(agentId)).options.reasoning, 'high');
+  const backToA = await service.updateAgent(agentId, mediumB.revision, { ...mediumB.value, connectionId: openai, modelId: 'gpt-5' });
+  resolved = await service.resolveForRun(agentId);
+  assert.equal(resolved.options.reasoning, 'high');
+  assert.equal(resolved.options.maxTokens, 64_000);
+  assert.deepEqual(backToA.value.modelOptions.length, 2);
+
+  const other = await store.createAgent();
+  const otherInitial = await service.getAgent(other.agentId);
+  await service.updateAgent(other.agentId, otherInitial.revision, { ...otherInitial.value, connectionId: openai, modelId: 'gpt-5' });
+  assert.equal((await service.resolveForRun(other.agentId)).options.reasoning, 'minimal');
+
+  const offB = await service.updateAgent(agentId, backToA.revision, { ...backToA.value, connectionId: deepseek, modelId: 'deepseek-v4-pro',
+    modelOptions: [{ ...entryA, reasoning: 'xhigh', maxTokens: 999_999 }, { connectionId: deepseek, modelId: 'deepseek-v4-pro', reasoning: 'off' }] });
+  assert.deepEqual(offB.issues, []);
+  assert.equal((await service.resolveForRun(agentId)).options.reasoning, undefined);
+  const misfit = await service.updateAgent(agentId, offB.revision, { ...offB.value, connectionId: openai, modelId: 'gpt-5' });
+  assert.deepEqual(misfit.issues, ['Maximum output tokens exceed this model limit']);
+  await assert.rejects(service.resolveForRun(agentId), /Maximum output tokens exceed/);
+  const xhighOnGpt = await service.updateAgent(agentId, misfit.revision, { ...misfit.value, modelOptions: [{ connectionId: openai, modelId: 'gpt-5', reasoning: 'xhigh' }] });
+  assert.deepEqual(xhighOnGpt.issues, []);
+  assert.equal((await service.resolveForRun(agentId)).options.reasoning, 'high');
+  const onPlain = await service.updateAgent(agentId, xhighOnGpt.revision, { ...xhighOnGpt.value, modelId: 'gpt-4o-mini', modelOptions: [{ connectionId: openai, modelId: 'gpt-4o-mini', reasoning: 'low' }] });
+  assert.deepEqual(onPlain.issues, ['Reasoning level is unavailable for this model']);
+
+  // A level stored before the shared scale existed reads as unset; the entry's other values remain.
+  await store.updateConfig('agent', agentId, onPlain.revision, { ...onPlain.value, modelId: 'gpt-5', modelOptions: [{ ...twice, reasoning: 'max', temperature: 1 }] });
+  const dropped = await service.getAgent(agentId);
+  assert.deepEqual(dropped.value.modelOptions, [{ ...twice, temperature: 1 }]);
+  assert.deepEqual(dropped.issues, []);
 });
 
 test('backend discovers a custom model ID and calls its endpoint through Pi with a stored key', { timeout: 20_000 }, async () => {
@@ -753,9 +826,12 @@ test('known DeepSeek model follows the connection protocol instead of its Pi def
     const choice = (await service.modelChoices(connectionId)).find(item => item.modelId === 'deepseek-v4-pro');
     assert.equal(choice?.api, 'anthropic-messages');
     assert.equal(choice?.reasoning, true);
+    assert.deepEqual(choice?.reasoningLevels, ['off', 'low', 'medium', 'high', 'xhigh']);
+    assert.equal(choice?.defaultReasoning, 'off');
+    assert.deepEqual(choice?.reasoningSentAs, { off: 'off', low: 'high', medium: 'high', high: 'high', xhigh: 'max' });
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
-    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'deepseek-v4-pro', callOptions: { reasoning: 'high' } });
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'deepseek-v4-pro', modelOptions: [{ connectionId, modelId: 'deepseek-v4-pro', reasoning: 'high' }] });
     runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
