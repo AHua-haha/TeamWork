@@ -1,0 +1,161 @@
+import { BackendError, waitForRetry } from './agent-client.js';
+import { json } from './config-client.js';
+import { ProtocolError, readSse, type SseFrame } from './sse.js';
+
+export interface WorkspaceRecord { workspaceId: string; name: string; directory: string; createdAt: number }
+export interface WorkspaceInput { name: string; directory: string; adopt: boolean }
+export interface Problem { path: string; code: string; message: string }
+export interface ContextOverview { workspaceId: string; seq: number; user: { files: number; bytes: number }; agent: { files: number; bytes: number }; problems: Problem[] }
+export interface Workspace extends WorkspaceRecord { context: ContextOverview }
+export type Author = { type: 'user' } | { type: 'external' };
+export type FileAction = 'create' | 'update' | 'move' | 'delete';
+export interface FolderEntry { path: string; type: 'folder' }
+export interface FileEntry { path: string; type: 'file'; size: number; updatedAt: number; revision?: string; author?: Author }
+export type Entry = FileEntry | FolderEntry;
+export interface Listing { path: string; entries: Entry[]; truncated: boolean }
+export interface Found { paths: string[]; truncated: boolean }
+export interface ProjectFile { path: string; revision: string; content: string; size: number; updatedAt: number }
+export interface ContextFile extends ProjectFile { current: boolean; author: Author; reason: string | null }
+export interface ChangeFile { action: FileAction; path: string; fromPath: string | null; revision: string | null }
+export interface ChangeRecord { seq: number; time: number; author: Author; reason: string | null; files: ChangeFile[] }
+export interface ContextVersion { revision: string | null; seq: number; time: number; action: FileAction; path: string; fromPath: string | null; size: number | null; author: Author; reason: string | null }
+export interface History { versions: ContextVersion[]; next: number | null }
+export interface Match { path: string; line: number; text: string }
+
+const query = (path: string, values: Record<string, string | number | null | undefined>) => {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== null) params.set(key, String(value));
+  const search = params.toString();
+  return search ? `${path}?${search}` : path;
+};
+
+/** Workspace, project-file, and context-base requests in the backend's format. */
+export class WorkspaceClient {
+  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  private get<T>(path: string): Promise<T> { return this.fetcher(path).then(json<T>); }
+  private write<T>(path: string, method: 'POST' | 'PUT', data: object): Promise<T> {
+    return this.fetcher(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json<T>);
+  }
+  private base(workspaceId: string): string { return `/workspaces/${encodeURIComponent(workspaceId)}`; }
+
+  listWorkspaces(): Promise<WorkspaceRecord[]> { return this.get<{ workspaces: WorkspaceRecord[] }>('/workspaces').then(result => result.workspaces); }
+  createWorkspace(input: WorkspaceInput): Promise<Workspace> { return this.write('/workspaces', 'POST', input); }
+  getWorkspace(workspaceId: string): Promise<Workspace> { return this.get(this.base(workspaceId)); }
+
+  projectTree(workspaceId: string, path: string, depth = 1): Promise<Listing> { return this.get(query(`${this.base(workspaceId)}/files/tree`, { path, depth })); }
+  readProject(workspaceId: string, path: string): Promise<ProjectFile> { return this.get(query(`${this.base(workspaceId)}/files/file`, { path })); }
+  saveProject(workspaceId: string, path: string, content: string, baseRevision: string | null): Promise<{ path: string; revision: string }> {
+    return this.write(query(`${this.base(workspaceId)}/files/file`, { path }), 'PUT', { content, baseRevision });
+  }
+  findProject(workspaceId: string, q: string): Promise<Found> { return this.get(query(`${this.base(workspaceId)}/files/find`, { q })); }
+
+  overview(workspaceId: string): Promise<ContextOverview> { return this.get(`${this.base(workspaceId)}/context`); }
+  contextTree(workspaceId: string, path: string, depth = 1): Promise<Listing> { return this.get(query(`${this.base(workspaceId)}/context/tree`, { path, depth })); }
+  readContext(workspaceId: string, target: { path: string } | { revision: string }): Promise<ContextFile> {
+    return this.get(query(`${this.base(workspaceId)}/context/file`, target));
+  }
+  saveContext(workspaceId: string, path: string, content: string, baseRevision: string | null, reason?: string): Promise<{ path: string; revision: string; seq: number | null }> {
+    return this.write(query(`${this.base(workspaceId)}/context/file`, { path }), 'PUT', { content, baseRevision, reason });
+  }
+  moveContext(workspaceId: string, from: string, to: string, baseRevision?: string): Promise<{ seq: number; moved: { from: string; to: string; revision: string }[] }> {
+    return this.write(`${this.base(workspaceId)}/context/move`, 'POST', { from, to, baseRevision });
+  }
+  deleteContext(workspaceId: string, path: string, baseRevision?: string): Promise<{ seq: number; deleted: string[] }> {
+    return this.write(`${this.base(workspaceId)}/context/delete`, 'POST', { path, baseRevision });
+  }
+  contextHistory(workspaceId: string, path: string, before: number | null = null, limit?: number): Promise<History> {
+    return this.get(query(`${this.base(workspaceId)}/context/history`, { path, before, limit }));
+  }
+  findContext(workspaceId: string, q: string): Promise<Found> { return this.get(query(`${this.base(workspaceId)}/context/find`, { q })); }
+  searchContext(workspaceId: string, q: string, path = ''): Promise<{ matches: Match[]; truncated: boolean }> {
+    return this.get(query(`${this.base(workspaceId)}/context/search`, { q, path: path || undefined }));
+  }
+}
+
+export type FeedConnection = 'syncing' | 'following' | 'disconnected' | 'error';
+export interface FeedSnapshot { seq: number; connection: FeedConnection; error: string | null }
+interface FeedOptions { fetcher?: typeof fetch; retryDelayMs?: (attempt: number) => number }
+type FeedEvent = { type: 'record'; record: ChangeRecord } | { type: 'sync'; seq: number } | { type: 'stream_error'; message: string };
+
+function feedEvent(frame: SseFrame, workspaceId: string): FeedEvent {
+  let value: unknown;
+  try { value = JSON.parse(frame.data); }
+  catch { throw new ProtocolError('Invalid JSON in change stream'); }
+  const event = (value && typeof value === 'object' ? value : {}) as { version?: unknown; workspaceId?: unknown; type?: unknown };
+  if (event.version !== 1 || event.workspaceId !== workspaceId || event.type !== frame.name || !['record', 'sync', 'stream_error'].includes(String(event.type))) {
+    throw new ProtocolError('Unsupported change event');
+  }
+  return event as FeedEvent;
+}
+
+/** Follows a workspace's context change records in order, reconnecting from the last applied seq. */
+export class ContextFeed {
+  private readonly fetcher: typeof fetch;
+  private readonly retryDelayMs: (attempt: number) => number;
+  private readonly listeners = new Set<() => void>();
+  private readonly recordListeners = new Set<(record: ChangeRecord) => void>();
+  private readonly controller = new AbortController();
+  private snapshot: FeedSnapshot;
+
+  constructor(readonly workspaceId: string, after: number, options: FeedOptions = {}) {
+    this.fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
+    this.retryDelayMs = options.retryDelayMs ?? (attempt => Math.min(500 * 2 ** Math.min(attempt, 4), 8000));
+    this.snapshot = { seq: after, connection: 'syncing', error: null };
+  }
+
+  getSnapshot = (): FeedSnapshot => this.snapshot;
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  };
+  onRecord(listener: (record: ChangeRecord) => void): () => void {
+    this.recordListeners.add(listener);
+    return () => { this.recordListeners.delete(listener); };
+  }
+
+  start(): void { void this.run(this.controller.signal); }
+
+  dispose(): void {
+    this.controller.abort();
+    this.listeners.clear();
+    this.recordListeners.clear();
+  }
+
+  private publish(changes: Partial<FeedSnapshot>): void {
+    this.snapshot = { ...this.snapshot, ...changes };
+    for (const listener of this.listeners) listener();
+  }
+
+  private async run(signal: AbortSignal): Promise<void> {
+    let attempt = 0;
+    while (!signal.aborted) {
+      try {
+        const response = await this.fetcher(query(`/workspaces/${encodeURIComponent(this.workspaceId)}/context/follow`, { after: this.snapshot.seq }), { headers: { Accept: 'text/event-stream' }, signal });
+        if (!response.ok) await json(response);
+        if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw new ProtocolError('Backend did not return an SSE stream');
+        for await (const frame of readSse(response.body)) {
+          if (signal.aborted) return;
+          const event = feedEvent(frame, this.workspaceId);
+          if (event.type === 'stream_error') throw new Error(event.message);
+          if (event.type === 'sync') {
+            if (event.seq !== this.snapshot.seq) throw new ProtocolError('Change records did not reach the sync position');
+            attempt = 0;
+            this.publish({ connection: 'following', error: null });
+            continue;
+          }
+          if (event.record.seq !== this.snapshot.seq + 1) throw new ProtocolError('Change records have a gap');
+          this.publish({ seq: event.record.seq });
+          for (const listener of this.recordListeners) listener(event.record);
+        }
+        throw new Error('Change stream closed');
+      } catch (error) {
+        if (signal.aborted) return;
+        const fatal = error instanceof ProtocolError || (error instanceof BackendError && error.status >= 400 && error.status < 500);
+        this.publish({ connection: fatal ? 'error' : 'disconnected', error: error instanceof Error ? error.message : 'Change stream failed' });
+        if (fatal) return;
+        await waitForRetry(this.retryDelayMs(attempt++), signal);
+        if (!signal.aborted) this.publish({ connection: 'syncing', error: null });
+      }
+    }
+  }
+}

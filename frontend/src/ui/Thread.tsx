@@ -4,6 +4,7 @@ import { useSyncExternalStore } from 'react';
 import { AgentClient } from '../client/agent-client.js';
 import { ConfigClient } from '../client/config-client.js';
 import { ComposerSettings, type AgentConfigControl } from './ComposerSettings.js';
+import { Glyph } from './Glyph.js';
 
 function TextPart({ text }: TextMessagePartProps) { return <p className="message-text">{text}</p>; }
 function ImagePart({ image }: ImageMessagePartProps) { return <img className="message-image" src={image} alt="Message attachment" />; }
@@ -21,7 +22,9 @@ function ToolPart({ toolName, argsText, result, isError }: ToolCallMessagePartPr
 
 const parts = { Text: TextPart, Image: ImagePart, Reasoning: ReasoningPart, tools: { Fallback: ToolPart } };
 
-export function Conversation({ client, config, api, onConfigGate }: { client: AgentClient; config: AgentConfigControl; api: ConfigClient; onConfigGate: (ready: boolean) => void }) {
+export function Conversation({ client, config, api, onConfigGate, filesOpen, onFiles }: {
+  client: AgentClient; config: AgentConfigControl; api: ConfigClient; onConfigGate: (ready: boolean) => void; filesOpen: boolean; onFiles: (open: boolean) => void;
+}) {
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
   const active = snapshot.run?.status === 'running';
   const status = snapshot.sending ? 'Submitting'
@@ -37,10 +40,12 @@ export function Conversation({ client, config, api, onConfigGate }: { client: Ag
       <div className="conversation-actions">
         <span className={`status-pill ${active ? 'status-active' : ''} ${snapshot.connection === 'error' ? 'status-error' : ''}`}><span className="status-dot" />{status}</span>
         <button type="button" className="icon-button" onClick={() => client.refresh()} title="Synchronize conversation" aria-label="Refresh conversation">↻</button>
+        {!filesOpen && <button type="button" className="icon-button" onClick={() => onFiles(true)} title="Show workspace files" aria-label="Show workspace files"><Glyph name="panel" /></button>}
       </div>
     </div>
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={() => client.refresh()}>Retry</button></div>}
-    {config.record?.issues.length ? <div className="error-banner" role="alert">Configure this agent before sending: {config.record.issues.join(' · ')}</div> : null}
+    {config.record?.issues.length ? <div className="error-banner" role="alert">Configure this agent before sending: {config.record.issues.join(' · ')}
+      {!config.record.value.workspaceId && <button type="button" onClick={() => onFiles(true)}>Choose workspace</button>}</div> : null}
     {config.error && <div className="error-banner" role="alert">{config.error}</div>}
     {snapshot.run?.status === 'failed' && snapshot.run.error && <div className="error-banner" role="alert">Run failed: {snapshot.run.error.message}</div>}
     <ThreadPrimitive.Root className="thread">

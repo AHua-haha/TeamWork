@@ -1,4 +1,5 @@
 import type { AssistantMessageEvent, Message } from '@earendil-works/pi-ai';
+import type { Author, ChangeRecord } from './context-base.js';
 import { AppError, identity, type ContextEntry, type RunState } from './types.js';
 
 function invalid(message: string): never {
@@ -135,5 +136,22 @@ export function validateRun(value: unknown): asserts value is RunState {
   if (value.error !== null) {
     object(value.error);
     if (typeof value.error.code !== 'string' || typeof value.error.message !== 'string') invalid('Invalid run failure');
+  }
+}
+
+export function validateAuthor(value: unknown): asserts value is Author {
+  object(value);
+  if (value.type !== 'user' && value.type !== 'external') invalid('Unknown change author');
+}
+
+export function validateChangeRecord(value: unknown): asserts value is ChangeRecord {
+  object(value);
+  if (!Number.isSafeInteger(value.seq) || typeof value.time !== 'number' || !Array.isArray(value.files)) invalid('Invalid change record');
+  validateAuthor(value.author);
+  if (value.reason !== null && typeof value.reason !== 'string') invalid('Invalid change reason');
+  for (const file of value.files) {
+    object(file);
+    if (!['create', 'update', 'move', 'delete'].includes(String(file.action)) || typeof file.path !== 'string') invalid('Invalid changed file');
+    if ((file.fromPath !== null && typeof file.fromPath !== 'string') || (file.revision !== null && typeof file.revision !== 'string')) invalid('Invalid changed file');
   }
 }

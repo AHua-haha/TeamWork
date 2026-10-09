@@ -4,7 +4,7 @@ import type { AgentSettings, ConfigRecord, ConnectionView, ModelChoice } from '.
 import { clampedTo, customizedCount, effectiveReasoning, misfits, modelKey, modelSettings, selectModel, selectedModel, withModelSettings, type ModelEntry } from '../src/ui/model-selection.js';
 
 const settings: AgentSettings = {
-  name: 'Conversation', connectionId: 'first', modelId: 'shared', prompt: 'Keep this',
+  name: 'Conversation', workspaceId: 'workspace-1', connectionId: 'first', modelId: 'shared', prompt: 'Keep this',
   promptOptionIds: ['prompt-a'], toolOptionIds: ['tool-a'],
   modelOptions: [{ connectionId: 'first', modelId: 'shared', reasoning: 'high', temperature: 0.7, maxTokens: 10000 }],
 };

@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
-import { decode, encode, validateEntries, validateEvent, validateRun } from './codec.js';
+import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, validateEvent, validateRun } from './codec.js';
+import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from './context-base.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
 
 type Db = Pool | PoolConnection;
@@ -10,6 +11,25 @@ export interface StoredConfig<T = unknown> { id: string; revision: number; value
 async function rows(db: Db, sql: string, values: (string | number | null)[] = []): Promise<RowDataPacket[]> {
   return (await db.execute<RowDataPacket[]>(sql, values))[0];
 }
+
+/** Multi-row insert in batches, as `INSERT ... VALUES ?`. */
+async function insertRows(db: Db, sql: string, values: (string | number | null)[][]): Promise<void> {
+  for (let start = 0; start < values.length; start += 500) await db.query(sql, [values.slice(start, start + 500)]);
+}
+
+/** LIMIT takes a validated literal; prepared LIMIT placeholders are unreliable in mysql2. */
+function limitClause(limit: number): string {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new AppError('invalid_input', 'Invalid limit');
+  return ` LIMIT ${limit}`;
+}
+
+const duplicate = (error: unknown) => !!error && typeof error === 'object' && 'code' in error && error.code === 'ER_DUP_ENTRY';
+const workspaceRow = (row: RowDataPacket): WorkspaceRecord => ({ workspaceId: row.id as string, name: row.name as string, directory: row.directory as string, createdAt: Number(row.created_at) });
+const versionRow = (row: RowDataPacket): StoredVersion => ({
+  fileId: row.file_id as string, seq: Number(row.seq), revision: row.revision as string | null, action: row.action as FileAction,
+  path: row.path as string, fromPath: row.from_path as string | null, hash: row.hash as string | null, size: row.size === null ? null : Number(row.size),
+  time: Number(row.time), author: decode<Author>(row.author, validateAuthor), reason: row.reason as string | null,
+});
 
 const schema = [
   `CREATE TABLE IF NOT EXISTS agents (
@@ -52,10 +72,65 @@ const schema = [
     data JSON NOT NULL,
     PRIMARY KEY(scope, id)
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS workspaces (
+    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    directory VARCHAR(1024) NOT NULL,
+    directory_key CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+    seq BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    created_at BIGINT NOT NULL
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS context_blobs (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    content MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    size INT UNSIGNED NOT NULL,
+    PRIMARY KEY(workspace_id, hash),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS context_versions (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    file_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    seq BIGINT UNSIGNED NOT NULL,
+    revision CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    action VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    path VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    path_key VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    from_path VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    size INT UNSIGNED NULL,
+    time BIGINT NOT NULL,
+    author JSON NOT NULL,
+    reason TEXT NULL,
+    PRIMARY KEY(workspace_id, file_id, seq),
+    UNIQUE KEY(workspace_id, revision),
+    KEY(workspace_id, path_key, seq),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS context_files (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    path_key VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    path VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    file_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    revision CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    size INT UNSIGNED NOT NULL,
+    mtime_ms DOUBLE NOT NULL,
+    PRIMARY KEY(workspace_id, path_key),
+    UNIQUE KEY(workspace_id, file_id),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS context_records (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    seq BIGINT UNSIGNED NOT NULL,
+    data JSON NOT NULL,
+    PRIMARY KEY(workspace_id, seq),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
 ];
 
 /** All writers lock the agent row first. Follow reads use a repeatable-read snapshot. */
-export class MySqlStore {
+export class MySqlStore implements ContextStore {
   readonly pool: Pool;
   private lease?: PoolConnection;
   private leaseError?: Error;
@@ -385,5 +460,88 @@ export class MySqlStore {
       }
       return { state: { agentId, contextRevision: agent.context_revision, historyPosition: upper, run }, history, live };
     });
+  }
+
+  async listWorkspaces(): Promise<WorkspaceRecord[]> {
+    return (await rows(this.pool, 'SELECT id, name, directory, created_at FROM workspaces ORDER BY name, id')).map(workspaceRow);
+  }
+
+  async getWorkspace(workspaceId: string): Promise<WorkspaceRecord | null> {
+    const [row] = await rows(this.pool, 'SELECT id, name, directory, created_at FROM workspaces WHERE id = ?', [workspaceId]);
+    return row ? workspaceRow(row) : null;
+  }
+
+  async createWorkspace(workspace: WorkspaceRecord, directoryKey: string): Promise<void> {
+    try {
+      await this.pool.execute('INSERT INTO workspaces (id, name, directory, directory_key, created_at) VALUES (?, ?, ?, ?, ?)', [workspace.workspaceId, workspace.name, workspace.directory, directoryKey, workspace.createdAt]);
+    } catch (error) {
+      if (duplicate(error)) throw new AppError('workspace_exists', 'A workspace with this ID or folder already exists', 409);
+      throw error;
+    }
+  }
+
+  /** The sequence number and current files from one snapshot. */
+  loadContext(workspaceId: string): Promise<{ seq: number; files: IndexedFile[] }> {
+    return this.transaction(async db => {
+      const [workspace] = await rows(db, 'SELECT seq FROM workspaces WHERE id = ?', [workspaceId]);
+      if (!workspace) throw new AppError('not_found', `Workspace ${workspaceId} not found`, 404);
+      const files = await rows(db, `SELECT f.path, f.file_id, f.revision, f.hash, f.size, f.mtime_ms, v.time, v.author, v.reason
+        FROM context_files f JOIN context_versions v ON v.workspace_id = f.workspace_id AND v.revision = f.revision
+        WHERE f.workspace_id = ?`, [workspaceId]);
+      return {
+        seq: Number(workspace.seq),
+        files: files.map(row => ({
+          path: row.path as string, fileId: row.file_id as string, revision: row.revision as string, hash: row.hash as string, size: Number(row.size),
+          mtimeMs: Number(row.mtime_ms), updatedAt: Number(row.time), author: decode<Author>(row.author, validateAuthor), reason: row.reason as string | null,
+        })),
+      };
+    });
+  }
+
+  /** Stores one change. The sequence check refuses the commit if another writer advanced the workspace. */
+  async commitContext(workspaceId: string, expectedSeq: number, commit: ContextCommit): Promise<void> {
+    await this.transaction(async db => {
+      const [result] = await db.execute<ResultSetHeader>('UPDATE workspaces SET seq = ? WHERE id = ? AND seq = ?', [commit.seq, workspaceId, expectedSeq]);
+      if (result.affectedRows !== 1) throw new AppError('backend_error', 'The context base changed outside this process', 503);
+      for (const blob of commit.blobs) await db.execute('INSERT IGNORE INTO context_blobs (workspace_id, hash, content, size) VALUES (?, ?, ?, ?)', [workspaceId, blob.hash, blob.content, blob.size]);
+      await insertRows(db, 'INSERT INTO context_versions (workspace_id, file_id, seq, revision, action, path, path_key, from_path, hash, size, time, author, reason) VALUES ?', commit.versions.map(version => [
+        workspaceId, version.fileId, version.seq, version.revision, version.action, version.path, version.path.toLowerCase(), version.fromPath, version.hash, version.size, version.time, encode(version.author), version.reason,
+      ]));
+      for (let start = 0; start < commit.removeKeys.length; start += 500) {
+        await db.query('DELETE FROM context_files WHERE workspace_id = ? AND path_key IN (?)', [workspaceId, commit.removeKeys.slice(start, start + 500)]);
+      }
+      await insertRows(db, 'INSERT INTO context_files (workspace_id, path_key, path, file_id, revision, hash, size, mtime_ms) VALUES ?', commit.files.map(file => [
+        workspaceId, file.path.toLowerCase(), file.path, file.fileId, file.revision, file.hash, file.size, file.mtimeMs,
+      ]));
+      await db.execute('INSERT INTO context_records (workspace_id, seq, data) VALUES (?, ?, ?)', [workspaceId, commit.seq, encode(commit.record)]);
+    });
+  }
+
+  async blob(workspaceId: string, hash: string): Promise<string | null> {
+    const [row] = await rows(this.pool, 'SELECT content FROM context_blobs WHERE workspace_id = ? AND hash = ?', [workspaceId, hash]);
+    return row ? row.content as string : null;
+  }
+
+  async version(workspaceId: string, revision: string): Promise<StoredVersion | null> {
+    const [row] = await rows(this.pool, 'SELECT * FROM context_versions WHERE workspace_id = ? AND revision = ?', [workspaceId, revision]);
+    return row ? versionRow(row) : null;
+  }
+
+  async history(workspaceId: string, fileId: string, before: number | null, limit: number): Promise<StoredVersion[]> {
+    const result = before === null
+      ? await rows(this.pool, `SELECT * FROM context_versions WHERE workspace_id = ? AND file_id = ? ORDER BY seq DESC${limitClause(limit)}`, [workspaceId, fileId])
+      : await rows(this.pool, `SELECT * FROM context_versions WHERE workspace_id = ? AND file_id = ? AND seq < ? ORDER BY seq DESC${limitClause(limit)}`, [workspaceId, fileId, before]);
+    return result.map(versionRow);
+  }
+
+  /** At equal sequence numbers a file created at the path wins over one deleted from it. */
+  async lastFileId(workspaceId: string, pathKey: string): Promise<string | null> {
+    const [row] = await rows(this.pool, `SELECT file_id FROM context_versions WHERE workspace_id = ? AND path_key = ? ORDER BY seq DESC, (action = 'delete') ASC${limitClause(1)}`, [workspaceId, pathKey]);
+    return row ? row.file_id as string : null;
+  }
+
+  async records(workspaceId: string, after: number, limit: number): Promise<ChangeRecord[]> {
+    const result = await rows(this.pool, `SELECT data FROM context_records WHERE workspace_id = ? AND seq > ? ORDER BY seq${limitClause(limit)}`, [workspaceId, after]);
+    return result.map(row => decode<ChangeRecord>(row.data, validateChangeRecord));
   }
 }

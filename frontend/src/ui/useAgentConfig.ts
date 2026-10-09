@@ -54,12 +54,13 @@ export function useAgentConfig(agentId: string, api: ConfigClient) {
     } finally { busy.current = false; setSaving(false); }
   }, [api, refresh]);
 
-  const initialize = useCallback(async (): Promise<boolean> => {
+  /** Creates the conversation's settings when it has none yet; `settings` replaces some of the empty defaults. */
+  const initialize = useCallback(async (settings: Partial<AgentSettings> = {}): Promise<boolean> => {
     if (busy.current || current.current) return false;
     busy.current = true;
     setSaving(true);
     try {
-      const created = await api.createAgentConfig(agentId, { name: '', connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] });
+      const created = await api.createAgentConfig(agentId, { name: '', workspaceId: null, connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [], ...settings });
       current.current = created;
       setRecord(created);
       setError(null);

@@ -31,7 +31,7 @@ export interface PromptOption { kind: 'prompt'; label: string; text: string }
 export type CatalogOption = ToolOption | PromptOption;
 export interface ModelOptions { connectionId: string; modelId: string; reasoning?: ReasoningLevel; temperature?: number; maxTokens?: number; contextBudget?: number }
 export interface AgentSettings {
-  name: string; connectionId: string | null; modelId: string | null; toolOptionIds: string[];
+  name: string; workspaceId: string | null; connectionId: string | null; modelId: string | null; toolOptionIds: string[];
   prompt: string; promptOptionIds: string[]; modelOptions: ModelOptions[];
 }
 export interface AgentConfigView extends StoredConfig<AgentSettings> { issues: string[] }
@@ -116,14 +116,16 @@ function modelOptions(value: unknown): ModelOptions {
 }
 export function validateAgentSettings(value: unknown): AgentSettings {
   const data = obj(value, 'Agent config');
-  keys(data, ['name', 'connectionId', 'modelId', 'toolOptionIds', 'prompt', 'promptOptionIds', 'modelOptions']);
+  keys(data, ['name', 'workspaceId', 'connectionId', 'modelId', 'toolOptionIds', 'prompt', 'promptOptionIds', 'modelOptions']);
+  if (data.workspaceId !== null) identity(data.workspaceId, 'workspaceId');
   if (data.connectionId !== null) identity(data.connectionId, 'connectionId');
   if (data.modelId !== null) title(data.modelId, 'Model ID', 160);
   if (!Array.isArray(data.modelOptions)) throw new AppError('invalid_config', 'modelOptions must be a list');
   const entries = data.modelOptions.map(modelOptions);
   if (new Set(entries.map(entry => JSON.stringify([entry.connectionId, entry.modelId]))).size !== entries.length) throw new AppError('invalid_config', 'modelOptions contains duplicate models');
   return {
-    name: data.name === '' ? '' : title(data.name, 'Agent name'), connectionId: data.connectionId as string | null,
+    name: data.name === '' ? '' : title(data.name, 'Agent name'), workspaceId: data.workspaceId as string | null,
+    connectionId: data.connectionId as string | null,
     modelId: data.modelId as string | null, toolOptionIds: ids(data.toolOptionIds, 'toolOptionIds'),
     prompt: content(data.prompt, 'Agent prompt'), promptOptionIds: ids(data.promptOptionIds, 'promptOptionIds'),
     modelOptions: entries,
@@ -137,7 +139,7 @@ function normalizedAgent(value: unknown): AgentSettings {
     const { reasoning: _old, ...rest } = entry;
     return rest;
   });
-  return validateAgentSettings({ name: '', connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [], ...data });
+  return validateAgentSettings({ name: '', workspaceId: null, connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [], ...data });
 }
 function selectedOptions(settings: AgentSettings): ModelOptions | undefined {
   return settings.modelOptions.find(entry => entry.connectionId === settings.connectionId && entry.modelId === settings.modelId);
@@ -353,12 +355,24 @@ export class ConfigService {
     return { ...record, value, issues: this.issues(value, new Map(catalog.map(item => [item.id, item])), new Map(connections.map(item => [item.id, item])), new Map(caches.map(item => [item.id, item]))) };
   }
   async createAgentConfig(agentId: string, value: unknown): Promise<AgentConfigView> {
-    await this.store.createConfig('agent', agentId, validateAgentSettings(value));
+    const next = validateAgentSettings(value);
+    await this.checkWorkspace(next.workspaceId);
+    await this.store.createConfig('agent', agentId, next);
     return this.getAgent(agentId);
   }
+  /** A conversation's workspace is chosen once: it may go from none to a registered workspace, and never changes after that. */
   async updateAgent(agentId: string, revision: number, value: unknown): Promise<AgentConfigView> {
-    await this.store.updateConfig('agent', agentId, revision, validateAgentSettings(value));
+    const next = validateAgentSettings(value);
+    const previous = await this.store.getConfig('agent', agentId);
+    if (previous.revision !== revision) throw new AppError('config_conflict', 'Config revision changed', 409);
+    const bound = normalizedAgent(previous.value).workspaceId;
+    if (bound !== null && next.workspaceId !== bound) throw new AppError('invalid_config', "A conversation's workspace cannot change");
+    if (bound === null) await this.checkWorkspace(next.workspaceId);
+    await this.store.updateConfig('agent', agentId, revision, next);
     return this.getAgent(agentId);
+  }
+  private async checkWorkspace(workspaceId: string | null): Promise<void> {
+    if (workspaceId !== null && !await this.store.getWorkspace(workspaceId)) throw new AppError('invalid_config', 'Workspace not found');
   }
   async deleteAgent(agentId: string, revision: number): Promise<void> { await this.store.deleteConfig('agent', agentId, revision); }
   async listAgents(): Promise<AgentSummary[]> {
@@ -380,6 +394,7 @@ export class ConfigService {
   }
   private issues(settings: AgentSettings, catalog: ReadonlyMap<string, StoredConfig<CatalogOption>>, connections: ReadonlyMap<string, StoredConfig<ProviderConnection>>, caches: ReadonlyMap<string, StoredConfig<ModelCache>>): string[] {
     const issues: string[] = [];
+    if (!settings.workspaceId) issues.push('Choose a workspace for this conversation');
     if (!settings.connectionId || !settings.modelId) issues.push('Select a provider and model');
     else {
       const connection = connections.get(settings.connectionId)?.value;

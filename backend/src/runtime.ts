@@ -3,6 +3,7 @@ import { getCurrentTools, normalizeContext, validateToolArguments, type Api, typ
 import { MySqlStore } from './database.js';
 import type { ResolvedRunConfig } from './config.js';
 import { encode, validateMessage } from './codec.js';
+import { Changes } from './changes.js';
 import { AppError, type ContextEntry, type ContextHistory, type CurrentState, type FollowEvent, type Retention, type RunState } from './types.js';
 
 export interface StepScope {
@@ -58,27 +59,6 @@ export function configuredPolicy(): RuntimePolicy {
       context: { messages: history.entries.map(entry => entry.message), tools: scope.config.tools.map(tool => tool.definition), ...(scope.config.systemPrompt ? { systemPrompt: scope.config.systemPrompt } : {}) },
     }),
   };
-}
-
-class Changes {
-  version = 0;
-  private listeners = new Set<() => void>();
-  publish(): void {
-    this.version++;
-    for (const listener of this.listeners) listener();
-  }
-  wait(version: number, signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted || version !== this.version) return Promise.resolve();
-    return new Promise(resolve => {
-      const done = () => {
-        this.listeners.delete(done);
-        signal?.removeEventListener('abort', done);
-        resolve();
-      };
-      this.listeners.add(done);
-      signal?.addEventListener('abort', done, { once: true });
-    });
-  }
 }
 
 function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {

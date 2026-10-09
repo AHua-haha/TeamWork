@@ -8,6 +8,8 @@ The completed frontend message history and the model-facing context history are 
 
 The database also persists editable app, provider-connection, tool/prompt catalog, and per-agent config records, plus saved model-discovery results. It preserves their values and revisions; the config system interprets and validates them.
 
+It also persists the workspace registry and, for each workspace's context base, the index of current files, every file version, version content, and the ordered change records. The workspace module and the context base decide what to store; the files themselves stay on disk.
+
 ## Inputs and preconditions
 
 - Records are scoped by agent identity and, where applicable, run and message identity.
@@ -16,6 +18,7 @@ The database also persists editable app, provider-connection, tool/prompt catalo
 - Every live chunk names its message and has an ordered position within that message. The runtime supplies a completed message with the same identity when that message finishes.
 - The runtime supplies chunk retention decisions. A read may request chunks after a position, including positions that have already been pruned.
 - Config writes identify a record scope and stable ID. Updates and deletes supply the previously read revision. A config-bundle read identifies the agent whose run config is being resolved.
+- Workspace records and context-base changes are scoped by workspace identity. A context change names the sequence number it builds on and supplies its versions, content, index changes, and change record together.
 
 ## Outputs and observable effects
 
@@ -26,6 +29,7 @@ The database also persists editable app, provider-connection, tool/prompt catalo
 - Pruning removes only temporary chunks. It does not remove a completed message or silently make a truncated chunk range appear complete.
 - Serialization and deserialization preserve the supported Pi AI message payload and runtime metadata across a successful round trip.
 - Config reads return stored values with revisions. Creates, updates, and deletes commit atomically; a bundle read sees one consistent committed view of the app, agent, catalog, connection, and saved model-discovery records. Creating an agent also creates its initially incomplete config record.
+- A committed context change advances the workspace's sequence number by one and makes its versions, content, index, and change record visible together.
 
 ### Supported operations and records
 
@@ -41,6 +45,26 @@ The database also persists editable app, provider-connection, tool/prompt catalo
 - IDs contain 1–64 ASCII letters, digits, underscores or hyphens; cursors and revisions are nonnegative safe integers. Pi message and event payloads use the pinned Pi AI 0.87.1 format. JSON-compatible extension fields are preserved. Functions, cycles, nonfinite numbers, bigint, class instances and unknown content-block kinds fail. Optional undefined object properties are omitted according to JSON serialization. Stored envelopes have version 1; unknown versions fail explicitly.
 - `getConfig`, `listConfigs`, `createConfig`, `updateConfig`, and `deleteConfig` operate on app, connection, model-cache, catalog, and agent scopes. `configBundle(agentId)` returns the app record, that agent's record, and the catalog, connections, and model caches from one consistent read. `listAgents` returns existing agent IDs.
 
+**Workspaces and context bases.**
+- **Workspace registry:**
+  - `listWorkspaces` returns `{workspaceId, name, directory, createdAt}` records ordered by name.
+  - `getWorkspace` returns one record, or null.
+  - `createWorkspace(record, directoryKey)` stores a record. `directoryKey` identifies the directory, and no two workspaces share one.
+- **Loading.** `loadContext(workspaceId)` returns the workspace's sequence number and its current files from one consistent read. Each file has its path, file ID, revision, content hash, size, modification time, and its version's time, author, and reason.
+- **Committing.** `commitContext(workspaceId, expectedSeq, commit)` stores one change in one transaction:
+  - the new sequence number;
+  - content blobs, stored once per workspace and hash;
+  - new versions;
+  - the current-file rows removed and added;
+  - the change record.
+- **Reads:**
+  - `blob` returns content by hash;
+  - `version` returns a version by revision;
+  - `history(fileId, before, limit)` returns one file's versions, newest first, before a sequence number;
+  - `lastFileId(pathKey)` returns the most recent file that had a path;
+  - `records(after, limit)` returns change records in sequence order.
+- **Keys.** Paths are matched by a lower-cased key, so two paths that differ only in letter case name one current file. A revision is unique within a workspace.
+
 ## Failure behavior
 
 - Invalid identities, unsupported or corrupt serialized data, and conflicting writes fail explicitly. Deserialization does not silently discard unknown required message content or runtime metadata.
@@ -49,6 +73,9 @@ The database also persists editable app, provider-connection, tool/prompt catalo
 - Failure to prune chunks may retain extra temporary data but does not change completed history.
 - A context replacement requires the revision returned by its earlier read. A stale revision produces `context_conflict` and changes nothing. Duplicate agent/message identities or an attempt to start another active run fail with a conflict. A failed transaction leaves all its changes uncommitted.
 - A stale config revision produces `config_conflict` with no write. A duplicate config identity also conflicts. A missing config record fails a direct read explicitly; the bundle reports missing app/agent records for its caller to reject.
+- A duplicate workspace ID or directory key fails with 409 `workspace_exists`. Loading a missing workspace fails with 404 `not_found`.
+- A context commit whose expected sequence number is not the stored one fails with 503 `backend_error` and writes nothing. Any other failure in the commit also leaves nothing written.
+- A stored change record or author that cannot be read fails with 500 `corrupt_data`.
 
 ## Guarantees and limits
 
@@ -60,6 +87,7 @@ The database also persists editable app, provider-connection, tool/prompt catalo
 - One runtime process owns a database through an exclusive session lock. Another owner is rejected. On restart, abandoned active runs become `interrupted`; completed records and context survive, while transient partial output is cleared. Recovery does not rerun models or tools.
 - Durability is that of the configured MySQL/InnoDB deployment. Full-history reads are currently unpaginated; additional durable timeline event types and online schema upgrades are outside this version.
 - Config edits do not lock records for the lifetime of any consuming run. A run that already copied config may continue after its source records are changed or deleted.
+- Context-base change records are numbered from 1 without gaps. Versions, content, and records are never removed. Removing or renaming a workspace is not supported.
 
 ## Acceptance examples
 
@@ -69,3 +97,5 @@ The database also persists editable app, provider-connection, tool/prompt catalo
 4. The runtime stores completed message `m1`, then prunes all its chunks. A history read still returns the complete `m1`.
 5. Two editors read config revision 2. The first updates it to revision 3. The second update with revision 2 fails without changing the stored value.
 6. A config-bundle read concurrent with an edit returns either one complete prior state or one complete new state.
+7. A context base commits change 1, creating `user/a.md`, then change 2, moving it to `user/b.md`. Loading the workspace returns `seq` 2 and one current file at `user/b.md`, and the file's history returns both versions.
+8. Two commits both expect sequence number 2. The first stores change 3. The second fails, and the records still end at 3.

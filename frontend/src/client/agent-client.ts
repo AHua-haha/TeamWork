@@ -31,7 +31,7 @@ interface Options {
   retryDelayMs?: (attempt: number) => number;
 }
 
-function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
+export function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise(resolve => {
     if (signal.aborted) return resolve();
     const timer = setTimeout(done, ms);

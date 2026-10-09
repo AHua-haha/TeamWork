@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentRuntimeProvider } from '../adapter/AssistantRuntime.js';
 import { AgentClient, createAgent } from '../client/agent-client.js';
 import { ConfigClient, type AgentSummary, type ConfigRecord, type ConnectionView } from '../client/config-client.js';
 import { ProvidersPage } from './ProvidersPage.js';
 import { Conversation } from './Thread.js';
 import { useAgentConfig } from './useAgentConfig.js';
+import { ConfirmDialog } from './WorkspaceDialogs.js';
+import { WorkspacePanel } from './WorkspacePanel.js';
 
 type Route = { page: 'conversations' } | { page: 'conversation'; id: string } | { page: 'providers' };
 const validId = /^[A-Za-z0-9_-]{1,64}$/;
@@ -26,16 +28,28 @@ function ChatIcon() {
 function ConfigIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="9" cy="6" r="2" fill="white" /><circle cx="16" cy="12" r="2" fill="white" /><circle cx="11" cy="18" r="2" fill="white" /></svg>;
 }
-function AgentConversation({ agentId, api, configRefresh }: { agentId: string; api: ConfigClient; configRefresh: number }) {
+interface FilesControl { open: boolean; expanded: boolean; show(open: boolean): void; expand(expanded: boolean): void; onDirty(dirty: boolean): void }
+
+/** A conversation page: the chat, and the workspace panel for the conversation's own workspace on its right. */
+function AgentConversation({ agentId, api, configRefresh, files }: { agentId: string; api: ConfigClient; configRefresh: number; files: FilesControl }) {
   const client = useMemo(() => new AgentClient(agentId), [agentId]);
   const config = useAgentConfig(agentId, api);
   const [composerReady, setComposerReady] = useState(false);
   useEffect(() => { client.follow(); return () => client.dispose(); }, [client]);
   useEffect(() => { if (configRefresh) void config.refresh(); }, [configRefresh, config.refresh]);
   const sendAllowed = composerReady && !config.loading && !config.saving && !config.error && !!config.record && config.record.issues.length === 0;
-  return <AgentRuntimeProvider client={client} sendAllowed={sendAllowed}>
-    <Conversation client={client} config={config} api={api} onConfigGate={setComposerReady} />
-  </AgentRuntimeProvider>;
+  const bind = (workspaceId: string) => {
+    const record = config.record;
+    void (record ? config.save({ ...record.value, workspaceId }, record.revision) : config.initialize({ workspaceId }));
+  };
+  return <div className={`conversation-page ${files.open && files.expanded ? 'expanded' : ''}`}>
+    <AgentRuntimeProvider client={client} sendAllowed={sendAllowed}>
+      <Conversation client={client} config={config} api={api} onConfigGate={setComposerReady} filesOpen={files.open} onFiles={files.show} />
+    </AgentRuntimeProvider>
+    {files.open && <button type="button" className="workspace-scrim" aria-label="Hide workspace files" onClick={() => files.show(false)} />}
+    <WorkspacePanel open={files.open} expanded={files.expanded} workspaceId={config.record?.value.workspaceId ?? null} ready={!config.loading} saving={config.saving} error={config.error}
+      onBind={bind} onExpand={files.expand} onClose={() => files.show(false)} onDirty={files.onDirty} />
+  </div>;
 }
 
 export function App() {
@@ -50,6 +64,12 @@ export function App() {
     } catch { return null; }
   });
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth > 760);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [filesExpanded, setFilesExpanded] = useState(false);
+  const [leaving, setLeaving] = useState<Route | null>(null);
+  const filesDirty = useRef(false);
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const [title, setTitle] = useState('RSI Agent');
   const [allowCreation, setAllowCreation] = useState(true);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -101,18 +121,30 @@ export function App() {
   useEffect(() => {
     const onPop = () => {
       const next = readRoute();
+      // Leaving the conversation closes its open files, so unsaved edits are confirmed first.
+      if (filesDirty.current && routeUrl(next) !== routeUrl(routeRef.current)) {
+        window.history.pushState(null, '', routeUrl(routeRef.current));
+        setLeaving(next);
+        return;
+      }
       setRoute(next);
       if (next.page === 'conversation') setLastConversationId(next.id);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
+  const onFilesDirty = useCallback((dirty: boolean) => { filesDirty.current = dirty; }, []);
 
   function navigate(next: Route) {
+    if (filesDirty.current && routeUrl(next) !== routeUrl(route)) { setLeaving(next); return; }
     if (window.location.search !== routeUrl(next)) window.history.pushState(null, '', routeUrl(next));
     setRoute(next); setError(null);
     if (next.page === 'conversation') setLastConversationId(next.id);
     if (window.innerWidth <= 760) setPanelOpen(false);
+  }
+  function showFiles(open: boolean) {
+    if (open && window.innerWidth <= 760) setPanelOpen(false);
+    setFilesOpen(open);
   }
   function chooseSection(next: 'conversations' | 'config') {
     if (section === next) { setPanelOpen(!panelOpen); return; }
@@ -124,7 +156,7 @@ export function App() {
     try {
       const id = await createAgent();
       try {
-        await api.createAgentConfig(id, { name: '', connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] });
+        await api.createAgentConfig(id, { name: '', workspaceId: null, connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] });
       } catch (cause) { setError(`Conversation created, but setup needs attention: ${errorText(cause)}`); }
       await loadAgents();
       navigate({ page: 'conversation', id });
@@ -188,9 +220,13 @@ export function App() {
     </aside>
     <main className="main-area">
       {error && <div className="setup-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
-      {route.page === 'conversation' && <AgentConversation key={route.id} agentId={route.id} api={api} configRefresh={configRefresh} />}
+      {route.page === 'conversation' && <AgentConversation key={route.id} agentId={route.id} api={api} configRefresh={configRefresh}
+        files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded, onDirty: onFilesDirty }} />}
       {route.page === 'conversations' && <div className="welcome-page"><div className="welcome-mark">✳</div><div className="eyebrow">CONVERSATIONS</div><h1>What would you like to explore?</h1><p>Select a conversation from the sidebar or create a new one.</p><button type="button" className="primary-button" disabled={creating || !allowCreation} onClick={() => void newConversation()}>＋ New conversation</button></div>}
       {route.page === 'providers' && <ProvidersPage api={api} records={connections} loading={connectionsLoading} loadError={connectionsError} refresh={loadConnections} focusId={focusProviderId} clearFocus={() => setFocusProviderId(null)} />}
     </main>
+    {leaving && <ConfirmDialog eyebrow="UNSAVED CHANGES" title="Leave with unsaved changes?" action="Discard and leave"
+      message="Some open workspace files have changes that are not saved. Leaving this conversation closes them and discards the changes."
+      onClose={() => setLeaving(null)} onConfirm={() => { const next = leaving; setLeaving(null); filesDirty.current = false; navigate(next); }} />}
   </div>;
 }

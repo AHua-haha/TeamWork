@@ -13,6 +13,10 @@ export default defineConfig({
         target: process.env.AGENT_BACKEND_ORIGIN ?? 'http://127.0.0.1:3000',
         changeOrigin: true,
       },
+      '/workspaces': {
+        target: process.env.AGENT_BACKEND_ORIGIN ?? 'http://127.0.0.1:3000',
+        changeOrigin: true,
+      },
     },
   },
 });

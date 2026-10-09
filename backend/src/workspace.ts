@@ -1,0 +1,139 @@
+import { randomUUID } from 'node:crypto';
+import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, sep } from 'node:path';
+import { ContextBase, type ContextOverview, type ContextStore, type WorkspaceRecord } from './context-base.js';
+import { ProjectFiles } from './project-files.js';
+import { missing, sha256 } from './text.js';
+import { AppError, identity } from './types.js';
+
+export interface Workspace extends WorkspaceRecord { context: ContextOverview }
+export interface WorkspaceInput { workspaceId?: unknown; name: unknown; directory: unknown; adopt: unknown }
+
+const controlCharacter = /[\u0000-\u001f\u007f-\u009f]/;
+const folderKey = (directory: string) => directory.toLowerCase();
+const within = (folder: string, path: string) => path === folder || path.startsWith(folder.endsWith(sep) ? folder : folder + sep);
+
+/** Registers workspaces and opens each one's context base on first use. */
+export class WorkspaceService {
+  private readonly bases = new Map<string, Promise<ContextBase>>();
+  private readonly records = new Map<string, WorkspaceRecord>();
+  private creating: Promise<unknown> = Promise.resolve();
+  private closed = false;
+
+  constructor(private readonly store: ContextStore) {}
+
+  async list(): Promise<WorkspaceRecord[]> {
+    this.assertOpen();
+    return this.store.listWorkspaces();
+  }
+
+  async get(workspaceId: string): Promise<Workspace> {
+    const record = await this.record(workspaceId);
+    return { ...record, context: await (await this.context(workspaceId)).overview() };
+  }
+
+  async context(workspaceId: string): Promise<ContextBase> {
+    this.assertOpen();
+    let opening = this.bases.get(workspaceId);
+    if (!opening) {
+      const started = this.record(workspaceId).then(record => ContextBase.open(this.store, record));
+      // A failed open is retried by the next request, for example after the folder returns.
+      started.catch(() => { if (this.bases.get(workspaceId) === started) this.bases.delete(workspaceId); });
+      this.bases.set(workspaceId, started);
+      opening = started;
+    }
+    return opening;
+  }
+
+  async files(workspaceId: string): Promise<ProjectFiles> {
+    return new ProjectFiles((await this.record(workspaceId)).directory);
+  }
+
+  async create(input: WorkspaceInput): Promise<Workspace> {
+    const workspaceId = input.workspaceId === undefined ? randomUUID() : input.workspaceId;
+    identity(workspaceId, 'workspaceId');
+    if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 200 || controlCharacter.test(input.name)) throw new AppError('invalid_input', 'name has 1–200 characters without control characters');
+    if (typeof input.directory !== 'string' || !isAbsolute(input.directory) || input.directory.length > 1024) throw new AppError('invalid_input', 'directory is an absolute path of at most 1024 characters');
+    if (typeof input.adopt !== 'boolean') throw new AppError('invalid_input', 'adopt is true or false');
+    const { name, directory, adopt } = input;
+    // One create at a time, so the overlap check sees every earlier workspace.
+    const created = this.creating.then(async () => {
+      this.assertOpen();
+      if (await this.store.getWorkspace(workspaceId)) throw new AppError('workspace_exists', `Workspace ${workspaceId} already exists`, 409);
+      const planned = adopt ? await existingFolder(directory) : await newFolder(directory);
+      const key = folderKey(planned);
+      for (const other of await this.store.listWorkspaces()) {
+        const otherKey = folderKey(other.directory);
+        if (within(otherKey, key) || within(key, otherKey)) throw new AppError('workspace_exists', `${directory} overlaps workspace ${other.name}`, 409);
+      }
+      const made = adopt ? undefined : await mkdir(directory, { recursive: true });
+      try {
+        const record: WorkspaceRecord = { workspaceId, name, directory: await realpath(directory), createdAt: Date.now() };
+        await this.store.createWorkspace(record, sha256(folderKey(record.directory)));
+        this.records.set(workspaceId, record);
+      } catch (error) {
+        if (made) await rm(made, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
+      }
+    });
+    this.creating = created.catch(() => undefined);
+    return created.then(() => this.get(workspaceId));
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.creating;
+    await Promise.allSettled([...this.bases.values()].map(async opening => (await opening).close()));
+    this.bases.clear();
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new AppError('workspace_unavailable', 'Workspaces are closed', 503);
+  }
+
+  private async record(workspaceId: string): Promise<WorkspaceRecord> {
+    this.assertOpen();
+    identity(workspaceId, 'workspaceId');
+    const cached = this.records.get(workspaceId);
+    if (cached) return cached;
+    const record = await this.store.getWorkspace(workspaceId);
+    if (!record) throw new AppError('not_found', `Workspace ${workspaceId} not found`, 404);
+    this.records.set(workspaceId, record);
+    return record;
+  }
+}
+
+/** The real path of a folder to adopt. */
+async function existingFolder(directory: string): Promise<string> {
+  let real: string;
+  try { real = await realpath(directory); }
+  catch (error) {
+    if (missing(error)) throw new AppError('not_found', `${directory} does not exist`, 404);
+    throw error;
+  }
+  if (!(await stat(real)).isDirectory()) throw new AppError('invalid_input', `${directory} is not a folder`);
+  return real;
+}
+
+/** The real path a new project folder will have. An existing folder must be empty. */
+async function newFolder(directory: string): Promise<string> {
+  try {
+    const real = await realpath(directory);
+    if (!(await stat(real)).isDirectory() || (await readdir(real)).length) throw new AppError('file_exists', `${directory} already exists and is not an empty folder`, 409);
+    return real;
+  } catch (error) {
+    if (!missing(error)) throw error;
+  }
+  const names: string[] = [];
+  for (let current = directory; ; current = dirname(current)) {
+    if (dirname(current) === current) throw new AppError('invalid_input', `${directory} has no existing parent folder`);
+    names.unshift(basename(current));
+    try {
+      const real = await realpath(dirname(current));
+      if (!(await stat(real)).isDirectory()) throw new AppError('invalid_input', `${dirname(current)} is not a folder`);
+      return join(real, ...names);
+    } catch (error) {
+      if (!missing(error)) throw error;
+    }
+  }
+}

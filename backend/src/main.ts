@@ -3,6 +3,7 @@ import { MySqlStore } from './database.js';
 import { ConfigService } from './config.js';
 import { AgentRuntime, configuredPolicy, piModelStream } from './runtime.js';
 import { createAgentServer } from './http.js';
+import { WorkspaceService } from './workspace.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
@@ -10,7 +11,8 @@ const models = builtinModels();
 const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
 const runtime = new AgentRuntime(store, config, configuredPolicy(), piModelStream(models));
-const server = createAgentServer(runtime, config);
+const workspaces = new WorkspaceService(store);
+const server = createAgentServer(runtime, config, workspaces);
 try {
   await store.migrate();
   await config.initialize();
@@ -24,6 +26,7 @@ try {
   console.log(`Agent backend listening on ${process.env.HOST ?? '127.0.0.1'}:${port}`);
 } catch (error) {
   await runtime.close().catch(() => undefined);
+  await workspaces.close();
   await store.close();
   throw error;
 }
@@ -37,6 +40,7 @@ async function shutdown() {
   finally {
     server.closeAllConnections();
     await closed;
+    await workspaces.close();
     await store.close();
   }
 }

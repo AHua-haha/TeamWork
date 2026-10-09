@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
+import { mkdtemp, realpath, rm, stat } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createModels, fauxAssistantMessage, fauxProvider, Type, type AssistantMessageEvent, type Message } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
@@ -9,15 +12,27 @@ import { MySqlStore } from '../../src/database.js';
 import { ConfigService } from '../../src/config.js';
 import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/runtime.js';
 import { createAgentServer } from '../../src/http.js';
+import { WorkspaceService } from '../../src/workspace.js';
+import type { ContextCommit } from '../../src/context-base.js';
+import { sha256 } from '../../src/text.js';
 import type { FollowEvent } from '../../src/types.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a disposable MySQL 8.4 database (see README)');
 const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, createModels());
+const workspaces = new WorkspaceService(store);
 const testEncryptionKey = Buffer.alloc(32, 7).toString('base64');
-before(async () => { await store.migrate(); await config.initialize(); });
-after(async () => { await store.close(); });
+const conversationFolder = await realpath(await mkdtemp(join(tmpdir(), 'conversations-')));
+/** The workspace that configured conversations in these tests belong to. */
+let conversationWorkspace = '';
+before(async () => {
+  await store.migrate();
+  await config.initialize();
+  conversationWorkspace = (await workspaces.create({ name: 'Conversations', directory: join(conversationFolder, 'project'), adopt: false })).workspaceId;
+});
+after(async () => { await workspaces.close(); await store.close(); await rm(conversationFolder, { recursive: true, force: true }); });
+const unconfigured = ['Choose a workspace for this conversation', 'Select a provider and model'];
 
 class Queue<T> implements AsyncIterable<T> {
   private values: T[] = [];
@@ -282,7 +297,7 @@ test('runtime owner lock excludes second owner and startup recovers abandoned ru
 
 test('HTTP accepts input only, streams synchronization and run end, reports busy and bad cursors', { timeout: 15_000 }, async () => {
   const f = await fixture();
-  const server = createAgentServer(f.runtime, config);
+  const server = createAgentServer(f.runtime, config, workspaces);
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -437,8 +452,8 @@ test('provider and agent config snapshots survive edits while each next run reso
     await assert.rejects(runtime.start(agentId, 'invalid'), /Select a provider and model/);
     assert.equal((await store.getState(agentId)).historyPosition, 0);
     const empty = await service.getAgent(agentId);
-    assert.equal(empty.issues[0], 'Select a provider and model');
-    const settings = { name: 'Snapshot agent', connectionId, modelId: firstModel.id, toolOptionIds: [], prompt: 'Original instructions', promptOptionIds: [], modelOptions: [{ connectionId, modelId: firstModel.id, temperature: 0.4, contextBudget: 1024 }] };
+    assert.deepEqual(empty.issues, unconfigured);
+    const settings = { name: 'Snapshot agent', workspaceId: conversationWorkspace, connectionId, modelId: firstModel.id, toolOptionIds: [], prompt: 'Original instructions', promptOptionIds: [], modelOptions: [{ connectionId, modelId: firstModel.id, temperature: 0.4, contextBudget: 1024 }] };
     const saved = await service.updateAgent(agentId, empty.revision, settings);
     assert.deepEqual(saved.issues, []);
     assert.equal((await service.resolveForRun(agentId)).contextBudget, 1024);
@@ -484,7 +499,7 @@ test('config initialization is repeatable and supplies incomplete records for ex
   await service.initialize();
   const restored = await service.getAgent(agentId);
   assert.equal(restored.revision, 0);
-  assert.deepEqual(restored.issues, ['Select a provider and model']);
+  assert.deepEqual(restored.issues, unconfigured);
 });
 
 test('initialization migrates an existing agent model selection to provider and model', async () => {
@@ -504,7 +519,7 @@ test('initialization migrates an existing agent model selection to provider and 
   assert.equal(migrated.value.modelId, model.id);
   assert.ok(migrated.value.connectionId);
   assert.equal((await service.getConnection(migrated.value.connectionId)).value.baseUrl, model.baseUrl);
-  assert.deepEqual(migrated.issues, []);
+  assert.deepEqual(migrated.issues, ['Choose a workspace for this conversation']);
   assert.equal((await service.listCatalog()).some(item => item.id === id), false);
 });
 
@@ -524,7 +539,7 @@ test('initialization preserves a legacy discovered endpoint model as a selectabl
   await service.initialize();
   const migrated = await service.getAgent(agentId);
   assert.equal(migrated.value.modelId, 'endpoint-model');
-  assert.deepEqual(migrated.issues, []);
+  assert.deepEqual(migrated.issues, ['Choose a workspace for this conversation']);
   assert.equal((await service.modelChoices(connectionId))[0]?.verified, false);
 });
 
@@ -548,7 +563,7 @@ test('configured requests use selected prompt, registered tool and permitted rea
   await assert.rejects(service.createCatalog(`missing-${suffix}`, { kind: 'tool', label: 'Unavailable', toolName: 'missing' }), /not registered/);
   const empty = await service.getAgent(agentId);
   await service.updateAgent(agentId, empty.revision, {
-    name: 'Configured', connectionId, modelId: 'gpt-5', toolOptionIds: [toolId], prompt: 'Agent prompt', promptOptionIds: [promptId], modelOptions: [{ connectionId, modelId: 'gpt-5', reasoning: 'high', maxTokens: 100 }],
+    name: 'Configured', workspaceId: conversationWorkspace, connectionId, modelId: 'gpt-5', toolOptionIds: [toolId], prompt: 'Agent prompt', promptOptionIds: [promptId], modelOptions: [{ connectionId, modelId: 'gpt-5', reasoning: 'high', maxTokens: 100 }],
   });
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
   const runtime = new AgentRuntime(store, service, configuredPolicy(), request => {
@@ -590,7 +605,7 @@ test('agent model-call settings are kept per model and only the selected entry i
 
   const { agentId } = await store.createAgent();
   const raw = await store.getConfig<Record<string, unknown>>('agent', agentId);
-  await store.updateConfig('agent', agentId, raw.revision, { name: '', connectionId: openai, modelId: 'gpt-5', toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: { reasoning: 'max' } });
+  await store.updateConfig('agent', agentId, raw.revision, { name: '', workspaceId: conversationWorkspace, connectionId: openai, modelId: 'gpt-5', toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: { reasoning: 'max' } });
   const legacy = await service.getAgent(agentId);
   assert.deepEqual(legacy.value.modelOptions, []);
   assert.equal('callOptions' in legacy.value, false);
@@ -621,7 +636,7 @@ test('agent model-call settings are kept per model and only the selected entry i
 
   const other = await store.createAgent();
   const otherInitial = await service.getAgent(other.agentId);
-  await service.updateAgent(other.agentId, otherInitial.revision, { ...otherInitial.value, connectionId: openai, modelId: 'gpt-5' });
+  await service.updateAgent(other.agentId, otherInitial.revision, { ...otherInitial.value, workspaceId: conversationWorkspace, connectionId: openai, modelId: 'gpt-5' });
   assert.equal((await service.resolveForRun(other.agentId)).options.reasoning, 'minimal');
 
   const offB = await service.updateAgent(agentId, backToA.revision, { ...backToA.value, connectionId: deepseek, modelId: 'deepseek-v4-pro',
@@ -642,6 +657,27 @@ test('agent model-call settings are kept per model and only the selected entry i
   const dropped = await service.getAgent(agentId);
   assert.deepEqual(dropped.value.modelOptions, [{ ...twice, temperature: 1 }]);
   assert.deepEqual(dropped.issues, []);
+});
+
+test('a conversation chooses its workspace once', async () => {
+  const service = new ConfigService(store, builtinModels());
+  const { workspaceId: otherWorkspace } = await workspaces.create({ name: 'Other', directory: join(conversationFolder, 'other'), adopt: false });
+  const { agentId } = await store.createAgent();
+  const empty = await service.getAgent(agentId);
+  assert.equal(empty.value.workspaceId, null);
+  await assert.rejects(service.updateAgent(agentId, empty.revision, { ...empty.value, workspaceId: 'missing-workspace' }), /Workspace not found/);
+  const bound = await service.updateAgent(agentId, empty.revision, { ...empty.value, workspaceId: conversationWorkspace });
+  assert.deepEqual(bound.issues, ['Select a provider and model']);
+  await assert.rejects(service.updateAgent(agentId, empty.revision, { ...bound.value, name: 'Stale' }), /revision changed/);
+  const renamed = await service.updateAgent(agentId, bound.revision, { ...bound.value, name: 'Renamed' });
+  assert.equal(renamed.value.workspaceId, conversationWorkspace);
+  for (const workspaceId of [null, otherWorkspace]) await assert.rejects(service.updateAgent(agentId, renamed.revision, { ...renamed.value, workspaceId }), /workspace cannot change/);
+
+  const created = await store.createAgent();
+  const initial = await service.getAgent(created.agentId);
+  await service.deleteAgent(created.agentId, initial.revision);
+  await assert.rejects(service.createAgentConfig(created.agentId, { ...initial.value, workspaceId: 'missing-workspace' }), /Workspace not found/);
+  assert.equal((await service.createAgentConfig(created.agentId, { ...initial.value, workspaceId: otherWorkspace })).value.workspaceId, otherWorkspace);
 });
 
 test('backend discovers a custom model ID and calls its endpoint through Pi with a stored key', { timeout: 20_000 }, async () => {
@@ -693,7 +729,7 @@ test('backend discovers a custom model ID and calls its endpoint through Pi with
     failDiscovery = false;
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
-    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: choices[0]!.modelId });
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, workspaceId: conversationWorkspace, connectionId, modelId: choices[0]!.modelId });
     runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
@@ -769,7 +805,7 @@ test('Anthropic Messages connection discovers paged models and streams through P
     assert.equal((await service.modelChoices(connectionId)).length, 2);
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
-    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'custom-claude-b' });
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, workspaceId: conversationWorkspace, connectionId, modelId: 'custom-claude-b' });
     runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
@@ -831,7 +867,7 @@ test('known DeepSeek model follows the connection protocol instead of its Pi def
     assert.deepEqual(choice?.reasoningSentAs, { off: 'off', low: 'high', medium: 'high', high: 'high', xhigh: 'max' });
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
-    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'deepseek-v4-pro', modelOptions: [{ connectionId, modelId: 'deepseek-v4-pro', reasoning: 'high' }] });
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, workspaceId: conversationWorkspace, connectionId, modelId: 'deepseek-v4-pro', modelOptions: [{ connectionId, modelId: 'deepseek-v4-pro', reasoning: 'high' }] });
     runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
@@ -854,7 +890,7 @@ test('config HTTP exposes app, catalog and agent edits without accepting invalid
   const service = new ConfigService(store, models, [], testEncryptionKey);
   const runtime = new AgentRuntime(store, service, configuredPolicy(), async function* () { yield { type: 'done', reason: 'stop', message: message() }; });
   await runtime.open();
-  const server = createAgentServer(runtime, service);
+  const server = createAgentServer(runtime, service, workspaces);
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -868,7 +904,7 @@ test('config HTTP exposes app, catalog and agent edits without accepting invalid
     const agent = await (await request('/agents', 'POST', {})).json() as { agentId: string };
     assert.equal((await request(`/agents/${agent.agentId}/runs`, 'POST', { input: 'no model' })).status, 409);
     const configResponse = await (await request(`/agents/${agent.agentId}/config`)).json() as { revision: number; value: Record<string, unknown>; issues: string[] };
-    assert.equal(configResponse.issues[0], 'Select a provider and model');
+    assert.deepEqual(configResponse.issues, unconfigured);
     const modelChoice = models.getModels()[0]!;
     const connectionId = `http-connection-${randomUUID()}`;
     const createdConnection = await request('/config/connections', 'POST', { id: connectionId, value: { label: 'HTTP connection', provider: modelChoice.provider, baseUrl: modelChoice.baseUrl, api: 'openai-completions', apiKey: 'http-private-key' } });
@@ -878,7 +914,8 @@ test('config HTTP exposes app, catalog and agent edits without accepting invalid
     assert.equal((await request('/config/connections')).status, 200);
     assert.equal((await request(`/config/connections/${connectionId}/models`)).status, 200);
     assert.equal((await request(`/config/connections/${connectionId}/models/refresh`, 'POST')).status, 415);
-    const value = { ...configResponse.value, connectionId, modelId: modelChoice.id };
+    assert.equal((await request(`/agents/${agent.agentId}/config`, 'PUT', { revision: configResponse.revision, value: { ...configResponse.value, workspaceId: 'missing-workspace' } })).status, 400);
+    const value = { ...configResponse.value, workspaceId: conversationWorkspace, connectionId, modelId: modelChoice.id };
     assert.equal((await request('/config/catalog', 'POST', { id: `invalid-${randomUUID()}`, value: { kind: 'model', label: 'Unsupported' } })).status, 400);
     const updated = await request(`/agents/${agent.agentId}/config`, 'PUT', { revision: configResponse.revision, value });
     assert.equal(updated.status, 200);
@@ -907,4 +944,69 @@ test('persisted context survives reopening the pool; corrupt stored schema fails
     await reopened.pool.execute('UPDATE agents SET context = ? WHERE id = ?', ['{"version":999,"data":[]}', agentId]);
     await assert.rejects(reopened.getContext(agentId), /schema version/);
   } finally { await reopened.close(); }
+});
+
+const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
+
+test('workspace registry refuses duplicates; context commits reload with history and refuse a stale sequence', { timeout: 15_000 }, async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'workspace-')));
+  const reopened = new MySqlStore(databaseUrl!);
+  try {
+    const directory = join(folder, 'project');
+    const { workspaceId } = await workspaces.create({ name: 'Integration', directory, adopt: false });
+    const record = (await store.getWorkspace(workspaceId))!;
+    assert.equal(record.directory, directory);
+    assert.ok((await store.listWorkspaces()).some(item => item.workspaceId === workspaceId));
+    await assert.rejects(store.createWorkspace({ ...record, workspaceId: randomUUID() }, sha256(directory.toLowerCase())), code('workspace_exists'));
+    await assert.rejects(store.createWorkspace(record, sha256(randomUUID())), code('workspace_exists'));
+    await assert.rejects(workspaces.create({ name: 'Inner', directory: join(directory, 'inner'), adopt: false }), code('workspace_exists'));
+
+    const context = await workspaces.context(workspaceId);
+    const saved = await context.save('user/a.md', 'alpha', null, 'first');
+    await context.move('user/a.md', 'user/b.md', saved.revision, 'rename');
+    const loaded = await reopened.loadContext(workspaceId);
+    assert.equal(loaded.seq, 2);
+    assert.deepEqual(loaded.files.map(file => [file.path, file.size, file.author, file.reason]), [['user/b.md', 5, { type: 'user' }, 'rename']]);
+    const file = loaded.files[0]!;
+    assert.deepEqual((await reopened.history(workspaceId, file.fileId, null, 10)).map(version => [version.seq, version.action, version.path, version.fromPath]), [[2, 'move', 'user/b.md', 'user/a.md'], [1, 'create', 'user/a.md', null]]);
+    assert.deepEqual((await reopened.history(workspaceId, file.fileId, 2, 10)).map(version => version.revision), [saved.revision]);
+    assert.equal(await reopened.blob(workspaceId, file.hash), 'alpha');
+    assert.equal((await reopened.version(workspaceId, saved.revision))?.path, 'user/a.md');
+    assert.equal(await reopened.lastFileId(workspaceId, 'user/a.md'), file.fileId);
+    assert.deepEqual((await reopened.records(workspaceId, 0, 10)).map(item => [item.seq, item.author, item.reason, item.files]), [
+      [1, { type: 'user' }, 'first', [{ action: 'create', path: 'user/a.md', fromPath: null, revision: saved.revision }]],
+      [2, { type: 'user' }, 'rename', [{ action: 'move', path: 'user/b.md', fromPath: 'user/a.md', revision: file.revision }]],
+    ]);
+
+    // A second process reloads the index and finds nothing to record.
+    const service = new WorkspaceService(reopened);
+    try {
+      assert.equal((await service.get(workspaceId)).context.seq, 2);
+      assert.equal((await (await service.context(workspaceId)).read({ path: 'user/b.md' })).content, 'alpha');
+    } finally { await service.close(); }
+
+    // Another process stores change 3; this process's next change, also built on 2, is refused and undone on disk.
+    const time = Date.now();
+    const fileId = randomUUID();
+    const revision = randomUUID();
+    const hash = sha256('other');
+    const external = { type: 'external' } as const;
+    const other: ContextCommit = {
+      seq: 3,
+      blobs: [{ hash, content: 'other', size: 5 }],
+      versions: [{ fileId, seq: 3, revision, action: 'create', path: 'user/c.md', fromPath: null, hash, size: 5, time, author: external, reason: null }],
+      removeKeys: ['user/c.md'],
+      files: [{ path: 'user/c.md', fileId, revision, hash, size: 5, mtimeMs: time, updatedAt: time, author: external, reason: null }],
+      record: { seq: 3, time, author: external, reason: null, files: [{ action: 'create', path: 'user/c.md', fromPath: null, revision }] },
+    };
+    await reopened.commitContext(workspaceId, 2, other);
+    await assert.rejects(context.save('user/d.md', 'mine', null, null), code('backend_error'));
+    await assert.rejects(stat(join(directory, '.context', 'user', 'd.md')), code('ENOENT'));
+    await assert.rejects(reopened.commitContext(workspaceId, 2, { ...other, versions: [], files: [], removeKeys: [] }), code('backend_error'));
+    assert.deepEqual((await reopened.records(workspaceId, 0, 10)).map(item => item.seq), [1, 2, 3]);
+    assert.deepEqual((await reopened.loadContext(workspaceId)).files.map(item => item.path).sort(), ['user/b.md', 'user/c.md']);
+  } finally {
+    await reopened.close();
+    await rm(folder, { recursive: true, force: true });
+  }
 });

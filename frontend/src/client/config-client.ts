@@ -14,7 +14,7 @@ export interface PromptOption { kind: 'prompt'; label: string; text: string }
 export type CatalogOption = ToolOption | PromptOption;
 export interface ModelOptions { connectionId: string; modelId: string; reasoning?: ReasoningLevel; temperature?: number; maxTokens?: number; contextBudget?: number }
 export interface AgentSettings {
-  name: string; connectionId: string | null; modelId: string | null; toolOptionIds: string[];
+  name: string; workspaceId: string | null; connectionId: string | null; modelId: string | null; toolOptionIds: string[];
   prompt: string; promptOptionIds: string[]; modelOptions: ModelOptions[];
 }
 export interface AgentConfig extends ConfigRecord<AgentSettings> { issues: string[] }
@@ -24,7 +24,7 @@ export interface Capabilities {
   tools: { name: string; description: string }[];
 }
 
-async function json<T>(response: Response): Promise<T> {
+export async function json<T>(response: Response): Promise<T> {
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const error = (payload && typeof payload === 'object' && 'error' in payload) ? payload.error as { code?: string; message?: string } : null;
