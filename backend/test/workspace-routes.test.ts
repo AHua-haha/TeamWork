@@ -121,3 +121,24 @@ test('workspace endpoints edit the context base and stream its changes', () => w
   assert.equal(response.headers['content-type'], 'text/event-stream; charset=utf-8');
   assert.deepEqual((await events(response, 'sync')).map(event => [event.type, event.data.workspaceId, event.data.record?.seq ?? event.data.seq]), [['record', 'demo', 2], ['record', 'demo', 3], ['sync', 'demo', 3]]);
 }));
+
+test('read-only design endpoints discover current designs and explain invalid member references', () => withServer(async (call, _server, folder) => {
+  await call('/workspaces', { method: 'POST', data: { workspaceId: 'designs', name: 'Designs', directory: join(folder, 'designs'), adopt: false }, status: 201 });
+  const record = { content: '# Backend', implementation: ['backend/src'] };
+  await call('/workspaces/designs/context/file?path=user/design/backend.json', { method: 'PUT', status: 201, data: { content: JSON.stringify(record), baseRevision: null } });
+  await call('/workspaces/designs/context/file?path=user/notes.md', { method: 'PUT', status: 201, data: { content: '# Notes', baseRevision: null } });
+  await call('/workspaces/designs/context/file?path=user/bad.json', { method: 'PUT', status: 201, data: { content: '{"content":"Bad"}', baseRevision: null } });
+  const catalog = await call('/workspaces/designs/designs');
+  assert.equal(catalog.truncated, false);
+  assert.deepEqual(catalog.designs.map((item: Body) => [item.path, item.implementation]), [['user/design/backend.json', ['backend/src']]]);
+  const selected = await call('/workspaces/designs/designs/file?path=user/design/backend.json');
+  assert.deepEqual(selected.design, record);
+  assert.equal(selected.designIssue, null);
+  assert.equal((await call('/workspaces/designs/designs/file?path=user/bad.json')).design, null);
+  assert.ok((await call('/workspaces/designs/designs/file?path=user/bad.json')).designIssue);
+  await call('/workspaces/designs/designs/file?path=user/missing.json', { status: 404 });
+  await call('/workspaces/designs/designs/file?path=agent/design.json', { status: 403 });
+  await call('/workspaces/designs/designs/file?path=user/design/backend.json&revision=older', { status: 400 });
+  await call('/workspaces/designs/designs', { method: 'POST', data: record, status: 404 });
+  await call('/workspaces/missing/designs', { status: 404 });
+}));

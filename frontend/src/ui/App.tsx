@@ -128,6 +128,11 @@ export function App() {
     if (open && window.innerWidth <= 760) setPanelOpen(false);
     setFilesOpen(open);
   }
+  function showConversation() {
+    setFilesExpanded(false);
+    if (window.innerWidth <= 1100) setFilesOpen(false);
+    if (window.innerWidth <= 760) setPanelOpen(false);
+  }
   function chooseSection(next: 'conversations' | 'config') {
     if (section === next) { setPanelOpen(!panelOpen); return; }
     navigate(next === 'config' ? { page: 'providers' } : lastChat ?? { page: 'home' });
@@ -216,7 +221,7 @@ export function App() {
     <main className="main-area">
       {error && <div className="setup-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
       {route.page === 'workspace' && <WorkspacePage key={route.id} workspaceId={route.id} name={workspaces.find(item => item.workspaceId === route.id)?.name ?? null} api={api}
-        files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded, onDirty: onFilesDirty }} />}
+        files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded, onDirty: onFilesDirty, showConversation }} />}
       {route.page === 'conversation' && <SoloPage key={route.id} agentId={route.id} api={api} configRefresh={configRefresh} />}
       {route.page === 'home' && <div className="welcome-page"><div className="welcome-mark">✳</div><div className="eyebrow">PROJECTS</div><h1>What would you like to work on?</h1>
         <p>Add a workspace to work on a project with its team, or start a conversation with no workspace.</p>

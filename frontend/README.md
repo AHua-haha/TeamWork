@@ -26,3 +26,9 @@ npm run build
 ```
 
 The tests cover SSE parsing, completed/live reconciliation, gaps, reconnect, one-run termination, input submission, Pi-to-assistant-ui conversion, and cross-connection model selection. The development UI supports text input; Pi image content received from the backend is displayed. Authentication and history pagination are not implemented.
+
+## Current design and team views
+
+Open **Show design, team and files** on a workspace page. **Design** opens first and shows valid current design records, their rendered Markdown, implementation mappings and related members, including designs with no assigned member. **Team** shows member responsibilities, readiness, model and design references; **Inspect harness** reveals derived file-tool scopes and command allowances. Design and Team are read-only.
+
+Design/member links navigate between views. Implementation links open a file or reveal a directory in **Files**. **Discuss with lead** adds a removable reference to the composer and preserves existing typed text; the user submits explicitly. Current design content follows context updates. New design-version and diff interfaces are deferred; generic file editing/history stays available.

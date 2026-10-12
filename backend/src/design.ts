@@ -41,6 +41,24 @@ function parse(file: ContextFile): ResolvedDesign {
 export class DesignService {
   constructor(private readonly workspaces: WorkspaceService) {}
 
+  /** Discover designs by their valid record shape, independently of member references. */
+  async list(workspaceId: string): Promise<{ designs: Omit<ResolvedDesign, 'content'>[]; truncated: boolean }> {
+    const base = await this.workspaces.context(workspaceId);
+    const listing = await base.tree('user', 16);
+    const designs: Omit<ResolvedDesign, 'content'>[] = [];
+    for (const entry of listing.entries) {
+      if (entry.type !== 'file') continue;
+      try {
+        const file = await base.read({ path: entry.path });
+        const { content: _content, ...summary } = parse(file);
+        designs.push(summary);
+      } catch (error) {
+        if (!(error instanceof AppError) || error.status >= 500) throw error;
+      }
+    }
+    return { designs: designs.sort((a, b) => a.path.localeCompare(b.path)), truncated: listing.truncated };
+  }
+
   async read(workspaceId: string, path: unknown): Promise<ResolvedDesign> {
     return parse(await (await this.workspaces.context(workspaceId)).read({ path: designPath(path) }));
   }

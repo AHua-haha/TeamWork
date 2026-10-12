@@ -11,7 +11,7 @@
   - the workspace's latest `seq` and its problem list;
   - the operation queue, the file watcher, and the change notification;
   - the operations of the design: overview, list, read, save, attributed saveDesign, move, delete, history, find, search, changes, and follow.
-- The [design parts child](design-parts/design.md) interprets structured user-design records and implementation mappings; ordinary context remains free-form text.
+- The [design parts child](design-parts/design.md) interprets structured user-design records and implementation mappings; ordinary context remains free-form text. It also supplies current design discovery/inspection for the frontend, using the same design parser as lead and harness operations.
 - `Batch` builds one operation's stored change: new versions, content blobs, removed and added index rows, and the change record with its files ordered by path.
 - `DiskChange` performs one operation's disk steps and keeps the steps that undo them. After the change is stored, it deletes the replaced files and removes emptied folders.
 - `ContextStore` is the storage contract: the workspace registry, loading the index, committing a change, and reading blobs, versions, history, and records. The MySQL store implements it; tests use an in-memory store.

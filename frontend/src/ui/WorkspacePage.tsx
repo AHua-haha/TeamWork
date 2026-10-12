@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ConfigClient } from '../client/config-client.js';
 import { WorkspaceClient } from '../client/workspace-client.js';
+import type { DiscussionReference } from '../client/discussion-reference.js';
 import { ChatPage } from './ChatPage.js';
 import { useTeam } from './useTeam.js';
 import { WorkspacePanel } from './WorkspacePanel.js';
 
-export interface FilesControl { open: boolean; expanded: boolean; show(open: boolean): void; expand(expanded: boolean): void; onDirty(dirty: boolean): void }
+export interface FilesControl { open: boolean; expanded: boolean; show(open: boolean): void; expand(expanded: boolean): void; onDirty(dirty: boolean): void; showConversation(): void }
 
 /**
  * A workspace page: the lead's conversation, and the panel with the team and the files on its right. The workspace comes from
@@ -13,6 +14,12 @@ export interface FilesControl { open: boolean; expanded: boolean; show(open: boo
  */
 export function WorkspacePage({ workspaceId, name, api, files }: { workspaceId: string; name: string | null; api: ConfigClient; files: FilesControl }) {
   const client = useMemo(() => new WorkspaceClient(), []);
+  const [reference, setReference] = useState<DiscussionReference | null>(null);
+  useEffect(() => { setReference(null); }, [workspaceId]);
+  const discuss = (next: DiscussionReference) => {
+    setReference(next); files.showConversation();
+  };
+  const referenceSent = (sent: DiscussionReference) => setReference(current => current === sent ? null : current);
   const [leadRunning, setLeadRunning] = useState(false);
   const { state, lead, control } = useTeam(workspaceId, client, leadRunning);
   const title = name ?? 'Workspace';
@@ -27,9 +34,9 @@ export function WorkspacePage({ workspaceId, name, api, files }: { workspaceId: 
   }
   return <div className={`conversation-page ${files.open && files.expanded ? 'expanded' : ''}`}>
     <ChatPage key={lead.memberId} agentId={lead.memberId} control={control} api={api} eyebrow="WORKSPACE" title={title}
-      filesOpen={files.open} onFiles={files.show} onRunning={setLeadRunning} />
-    {files.open && <button type="button" className="workspace-scrim" aria-label="Hide team and files" onClick={() => files.show(false)} />}
+      filesOpen={files.open} onFiles={files.show} onRunning={setLeadRunning} discussion={{ reference, clear: () => setReference(null), sent: referenceSent }} />
+    {files.open && <button type="button" className="workspace-scrim" aria-label="Hide workspace panel" onClick={() => files.show(false)} />}
     <WorkspacePanel open={files.open} expanded={files.expanded} workspaceId={workspaceId} team={state}
-      onExpand={files.expand} onClose={() => files.show(false)} onDirty={files.onDirty} />
+      onExpand={files.expand} onClose={() => files.show(false)} onDirty={files.onDirty} onDiscuss={discuss} />
   </div>;
 }

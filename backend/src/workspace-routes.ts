@@ -1,3 +1,4 @@
+import { DesignService } from './design.js';
 import { body, count, fields, json, optionalString, query, sse, text, type Route } from './http-helpers.js';
 import { AppError, identity } from './types.js';
 import type { WorkspaceService } from './workspace.js';
@@ -33,6 +34,7 @@ function path(value: unknown, name: string): string {
 
 /** Handles `/workspaces` and everything under it. */
 export function workspaceRoutes(workspaces: WorkspaceService): (route: Route) => Promise<void> {
+  const designs = new DesignService(workspaces);
   return async ({ request, response, url, path: segments, signal }) => {
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
@@ -59,6 +61,17 @@ export function workspaceRoutes(workspaces: WorkspaceService): (route: Route) =>
       if (method !== 'GET') throw notFound();
       query(url, []);
       json(response, 200, await workspaces.get(workspaceId));
+      return;
+    }
+
+    if (area === 'designs') {
+      if (operation === undefined && method === 'GET') {
+        query(url, []);
+        json(response, 200, await designs.list(workspaceId));
+      } else if (operation === 'file' && method === 'GET') {
+        query(url, ['path']);
+        json(response, 200, await designs.inspect(workspaceId, text(url, 'path')));
+      } else throw notFound();
       return;
     }
 

@@ -8,6 +8,12 @@ A design part is the user's design for a project or one of its parts. It holds d
 
 A design part is a user-context text file whose JSON object is {content: "Markdown text", implementation: [project paths]}. Paths are workspace-relative files or folders; "." names the project root. .git and .context are excluded. At most 50 distinct implementation paths are allowed. Existing context path and size rules apply. Files can be arranged hierarchically and content can refer to other subdesigns.
 
+### Current discovery for frontend callers
+
+`GET /workspaces/:workspaceId/designs` returns `{designs, truncated}`. Each summary is `{path, revision, implementation}` for a valid current user-context design. Ordinary notes and invalid design records are omitted. Discovery is independent of current team membership, lists paths in order, and examines at most the context tree's 2,000 entries at depth 16; truncation is explicit.
+
+`GET /workspaces/:workspaceId/designs/file?path=...` returns the current raw context file plus `{design, designIssue}`. Valid records return their parsed content/mapping; invalid records return null design and a reason, allowing a referenced malformed design to be explained. Missing paths and unavailable storage/folders retain the existing context failure behavior. These operations are read-only, do not start agents, and do not return earlier versions. Discovery and individual reads are current observations rather than a transaction spanning concurrent edits.
+
 ## Outputs and observable effects
 
 Reads return the design part, its path, revision, and implementation mapping. A lead save replaces content and mapping as one versioned context save, with the reason and exact previous/resulting file content visible in its tool record. User edits through the context API retain their usual revision protection.

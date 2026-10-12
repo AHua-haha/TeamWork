@@ -19,6 +19,10 @@ export interface ContextFile extends ProjectFile { current: boolean; author: Aut
 export interface ChangeFile { action: FileAction; path: string; fromPath: string | null; revision: string | null }
 export interface ChangeRecord { seq: number; time: number; author: Author; reason: string | null; files: ChangeFile[] }
 export interface ContextVersion { revision: string | null; seq: number; time: number; action: FileAction; path: string; fromPath: string | null; size: number | null; author: Author; reason: string | null }
+export interface DesignPart { content: string; implementation: string[] }
+export interface DesignSummary { path: string; revision: string; implementation: string[] }
+export interface DesignCatalog { designs: DesignSummary[]; truncated: boolean }
+export interface CurrentDesign extends ContextFile { design: DesignPart | null; designIssue: string | null }
 export interface History { versions: ContextVersion[]; next: number | null }
 export interface Match { path: string; line: number; text: string }
 export type CommandRule = { kind: 'exact'; argv: string[] } | { kind: 'executable'; executable: string };
@@ -56,6 +60,9 @@ export class WorkspaceClient {
   updateMember(workspaceId: string, memberId: string, revision: number, value: MemberFields): Promise<Member> {
     return this.write(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}`, 'PUT', { revision, value });
   }
+
+  designs(workspaceId: string): Promise<DesignCatalog> { return this.get(`${this.base(workspaceId)}/designs`); }
+  readDesign(workspaceId: string, path: string): Promise<CurrentDesign> { return this.get(query(`${this.base(workspaceId)}/designs/file`, { path })); }
 
   projectTree(workspaceId: string, path: string, depth = 1): Promise<Listing> { return this.get(query(`${this.base(workspaceId)}/files/tree`, { path, depth })); }
   readProject(workspaceId: string, path: string): Promise<ProjectFile> { return this.get(query(`${this.base(workspaceId)}/files/file`, { path })); }
