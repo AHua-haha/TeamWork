@@ -10,7 +10,9 @@ mysql_owned="$run_dir/mysql.started"
 backend_entry="$root/backend/src/main.ts"
 frontend_entry="$root/frontend/node_modules/vite/bin/vite.js"
 backend_url='http://127.0.0.1:3000/agents'
-frontend_url='http://127.0.0.1:5173/'
+# Not Vite's default 5173, which other local Vite and VitePress servers commonly hold.
+frontend_port=5273
+frontend_url="http://127.0.0.1:$frontend_port/"
 started_mysql=0
 started_backend=0
 started_frontend=0
@@ -63,7 +65,8 @@ port_available() {
   node -e 'const net = require("node:net"); const server = net.createServer(); server.once("error", () => process.exit(1)); server.listen(Number(process.argv[1]), "127.0.0.1", () => server.close());' "$1"
 }
 
-ready() { curl --silent --show-error --fail --max-time 1 "$1" >/dev/null 2>&1; }
+# These checks talk to local servers only. --noproxy keeps a shell's http_proxy, which a proxy tool often sets without a no_proxy list, from sending them through the proxy.
+ready() { curl --noproxy '*' --silent --show-error --fail --max-time 1 "$1" >/dev/null 2>&1; }
 
 wait_ready() {
   local name="$1" url="$2" file="$3" marker="$4" log="$5" attempt
@@ -77,7 +80,10 @@ wait_ready() {
     if ready "$url"; then return 0; fi
     sleep 0.25
   done
-  echo "$name did not become ready at $url. Recent log output:" >&2
+  echo "$name did not become ready at $url. Its response:" >&2
+  curl --noproxy '*' --silent --show-error --include --max-time 5 "$url" 2>&1 | head -c 2000 >&2 || true
+  echo >&2
+  echo 'Recent log output:' >&2
   tail -n 30 "$log" >&2 || true
   return 1
 }
@@ -123,11 +129,11 @@ start_frontend() {
     return 1
   fi
   rm -f "$frontend_pid"
-  if ! port_available 5173; then echo 'Port 5173 is in use by another process.' >&2; return 1; fi
+  if ! port_available "$frontend_port"; then echo "Port $frontend_port is in use by another process." >&2; return 1; fi
   echo 'Starting frontend...'
   (
     cd "$root/frontend" || exit 1
-    nohup env AGENT_BACKEND_ORIGIN=http://127.0.0.1:3000 node "$frontend_entry" --host 127.0.0.1 --port 5173 --strictPort >>"$run_dir/frontend.log" 2>&1 </dev/null &
+    nohup env AGENT_BACKEND_ORIGIN=http://127.0.0.1:3000 node "$frontend_entry" --host 127.0.0.1 --port "$frontend_port" --strictPort >>"$run_dir/frontend.log" 2>&1 </dev/null &
     child_pid=$!
     if ! record_process "$child_pid" "$frontend_pid"; then
       kill -TERM "$child_pid" 2>/dev/null || true
@@ -199,7 +205,7 @@ start() {
     rollback
     return 1
   fi
-  echo "Frontend: http://127.0.0.1:5173/"
+  echo "Frontend: $frontend_url"
   echo "Backend:  http://127.0.0.1:3000/agents"
   echo "Logs:     $run_dir/backend.log and $run_dir/frontend.log"
 }

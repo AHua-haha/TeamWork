@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackendError } from '../client/agent-client.js';
-import { ConfigClient, type AgentConfig, type AgentSettings } from '../client/config-client.js';
+import { ConfigClient, emptySettings, type AgentConfig, type AgentSettings } from '../client/config-client.js';
 
-export function useAgentConfig(agentId: string, api: ConfigClient) {
+/**
+ * What the composer controls and the chat page need of the settings of the agent they talk to: a solo agent's config, or the
+ * lead's member record presented in the same shape.
+ */
+export interface SettingsControl {
+  record: AgentConfig | null;
+  loading: boolean;
+  saving: boolean;
+  error: string | null;
+  refresh(): Promise<void>;
+  save(value: AgentSettings, expectedRevision?: number): Promise<AgentConfig | null>;
+  initialize(settings?: Partial<AgentSettings>): Promise<boolean>;
+  clearError(): void;
+}
+
+export function useAgentConfig(agentId: string, api: ConfigClient): SettingsControl {
   const [record, setRecord] = useState<AgentConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -54,13 +69,13 @@ export function useAgentConfig(agentId: string, api: ConfigClient) {
     } finally { busy.current = false; setSaving(false); }
   }, [api, refresh]);
 
-  /** Creates the conversation's settings when it has none yet; `settings` replaces some of the empty defaults. */
+  /** Creates the agent's settings when it has none yet; `settings` replaces some of the empty defaults. */
   const initialize = useCallback(async (settings: Partial<AgentSettings> = {}): Promise<boolean> => {
     if (busy.current || current.current) return false;
     busy.current = true;
     setSaving(true);
     try {
-      const created = await api.createAgentConfig(agentId, { name: '', workspaceId: null, connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [], ...settings });
+      const created = await api.createAgentConfig(agentId, { ...emptySettings, ...settings });
       current.current = created;
       setRecord(created);
       setError(null);

@@ -3,6 +3,7 @@ import { watch, type Dirent, type FSWatcher } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { Changes } from './changes.js';
+import type { NewMember } from './team.js';
 import { decodeText, encodeText, maxFileBytes, missing, sha256 } from './text.js';
 import { AppError } from './types.js';
 
@@ -55,8 +56,8 @@ export interface ContextCommit {
 export interface ContextStore {
   listWorkspaces(): Promise<WorkspaceRecord[]>;
   getWorkspace(workspaceId: string): Promise<WorkspaceRecord | null>;
-  /** Fails with 409 `workspace_exists` for a duplicate ID or directory key. */
-  createWorkspace(workspace: WorkspaceRecord, directoryKey: string): Promise<void>;
+  /** Stores the workspace and its team's lead together, or neither. Fails with 409 `workspace_exists` for a duplicate ID or directory key. */
+  createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember): Promise<void>;
   loadContext(workspaceId: string): Promise<{ seq: number; files: IndexedFile[] }>;
   /** Applies the commit only while the stored sequence still equals `expectedSeq`. */
   commitContext(workspaceId: string, expectedSeq: number, commit: ContextCommit): Promise<void>;

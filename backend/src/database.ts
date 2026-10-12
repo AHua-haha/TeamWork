@@ -3,6 +3,7 @@ import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDa
 import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, validateEvent, validateRun } from './codec.js';
 import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from './context-base.js';
+import type { MemberRecord, NewMember, StoredMember, TeamStore } from './team.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
 
 type Db = Pool | PoolConnection;
@@ -25,6 +26,15 @@ function limitClause(limit: number): string {
 
 const duplicate = (error: unknown) => !!error && typeof error === 'object' && 'code' in error && error.code === 'ER_DUP_ENTRY';
 const workspaceRow = (row: RowDataPacket): WorkspaceRecord => ({ workspaceId: row.id as string, name: row.name as string, directory: row.directory as string, createdAt: Number(row.created_at) });
+const memberRow = (row: RowDataPacket): StoredMember => ({ id: row.id as string, workspaceId: row.workspace_id as string, revision: Number(row.revision), value: decode<MemberRecord>(row.data, () => undefined) });
+/** A duplicate key on a member row, named by the key that was violated. */
+function memberConflict(error: unknown): unknown {
+  if (!duplicate(error)) return error;
+  const message = String((error as { message?: unknown }).message);
+  if (message.includes('members_lead')) return new AppError('lead_exists', 'The workspace already has a lead', 409);
+  if (message.includes('members_name')) return new AppError('member_exists', 'Another member of this team has that name', 409);
+  return new AppError('conflict', 'Identity already exists', 409);
+}
 const versionRow = (row: RowDataPacket): StoredVersion => ({
   fileId: row.file_id as string, seq: Number(row.seq), revision: row.revision as string | null, action: row.action as FileAction,
   path: row.path as string, fromPath: row.from_path as string | null, hash: row.hash as string | null, size: row.size === null ? null : Number(row.size),
@@ -127,10 +137,24 @@ const schema = [
     PRIMARY KEY(workspace_id, seq),
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS members (
+    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    is_lead TINYINT NULL,
+    name_key VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ordinal BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    data JSON NOT NULL,
+    UNIQUE KEY members_order (ordinal),
+    UNIQUE KEY members_lead (workspace_id, is_lead),
+    UNIQUE KEY members_name (workspace_id, name_key),
+    FOREIGN KEY (id) REFERENCES agents(id),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
 ];
 
 /** All writers lock the agent row first. Follow reads use a repeatable-read snapshot. */
-export class MySqlStore implements ContextStore {
+export class MySqlStore implements ContextStore, TeamStore {
   readonly pool: Pool;
   private lease?: PoolConnection;
   private leaseError?: Error;
@@ -240,7 +264,7 @@ export class MySqlStore implements ContextStore {
   }
 
   async listAgents(): Promise<string[]> {
-    const result = await rows(this.pool, 'SELECT id FROM agents ORDER BY id');
+    const result = await rows(this.pool, 'SELECT id FROM agents WHERE id NOT IN (SELECT id FROM members) ORDER BY id');
     return result.map(row => row.id as string);
   }
 
@@ -265,7 +289,11 @@ export class MySqlStore implements ContextStore {
     const data = encode(value);
     try {
       await this.transaction(async db => {
-        if (scope === 'agent') await this.agent(db, id);
+        if (scope === 'agent') {
+          await this.agent(db, id);
+          // A team member's conversation is not an agent with a config.
+          if ((await rows(db, 'SELECT id FROM members WHERE id = ?', [id])).length) throw new AppError('not_found', 'Agent not found', 404);
+        }
         await db.execute('INSERT INTO config_records (scope, id, data) VALUES (?, ?, ?)', [scope, id, data]);
       });
     } catch (error) {
@@ -305,12 +333,12 @@ export class MySqlStore implements ContextStore {
     });
   }
 
-  async configBundle(agentId: string): Promise<{ app: StoredConfig | null; agent: StoredConfig | null; catalog: StoredConfig[]; connections: StoredConfig[]; modelCaches: StoredConfig[] }> {
-    identity(agentId, 'agentId');
+  async configBundle(agentId: string | null): Promise<{ app: StoredConfig | null; agent: StoredConfig | null; catalog: StoredConfig[]; connections: StoredConfig[]; modelCaches: StoredConfig[] }> {
+    if (agentId !== null) identity(agentId, 'agentId');
     return this.transaction(async db => {
-      await this.agent(db, agentId);
+      if (agentId !== null) await this.agent(db, agentId);
       const [app] = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? AND id = ?', ['app', 'settings']);
-      const [agent] = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? AND id = ?', ['agent', agentId]);
+      const [agent] = agentId === null ? [] : await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? AND id = ?', ['agent', agentId]);
       const catalog = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['catalog']);
       const connections = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['connection']);
       const modelCaches = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['model_cache']);
@@ -462,6 +490,58 @@ export class MySqlStore implements ContextStore {
     });
   }
 
+  /** The completed messages of one run, in order. A run is short, so this does not read the agent's whole history. */
+  async runMessages(agentId: string, runId: string): Promise<CompletedMessage[]> {
+    identity(agentId, 'agentId');
+    identity(runId, 'runId');
+    const records = await rows(this.pool, 'SELECT position, entry FROM messages WHERE agent_id = ? AND run_id = ? ORDER BY position', [agentId, runId]);
+    return records.map(row => ({ ...decode<ContextEntry>(row.entry, value => validateEntries([value])), agentId, runId, position: row.position as number }));
+  }
+
+  async listMembers(workspaceId: string): Promise<StoredMember[]> {
+    return (await rows(this.pool, 'SELECT id, workspace_id, revision, data FROM members WHERE workspace_id = ? ORDER BY ordinal', [workspaceId])).map(memberRow);
+  }
+
+  async getMember(memberId: string): Promise<StoredMember | null> {
+    const [row] = await rows(this.pool, 'SELECT id, workspace_id, revision, data FROM members WHERE id = ?', [memberId]);
+    return row ? memberRow(row) : null;
+  }
+
+  /** The member's conversation and the member, which the caller's transaction commits together. */
+  private async insertMember(db: Db, member: NewMember): Promise<StoredMember> {
+    identity(member.id, 'memberId');
+    const data = encode(member.value);
+    await db.execute('INSERT INTO agents (id, context) VALUES (?, ?)', [member.id, encode([])]);
+    try {
+      await db.execute('INSERT INTO members (id, workspace_id, is_lead, name_key, data) VALUES (?, ?, ?, ?, ?)', [member.id, member.workspaceId, member.lead ? 1 : null, member.nameKey, data]);
+    } catch (error) {
+      throw memberConflict(error);
+    }
+    return { id: member.id, workspaceId: member.workspaceId, revision: 0, value: decode<MemberRecord>(data, () => undefined) };
+  }
+
+  async createMember(member: NewMember): Promise<StoredMember> {
+    return this.transaction(db => this.insertMember(db, member));
+  }
+
+  async updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord): Promise<StoredMember> {
+    identity(memberId, 'memberId');
+    position(revision);
+    const data = encode(value);
+    await this.transaction(async db => {
+      let result: ResultSetHeader;
+      try {
+        [result] = await db.execute<ResultSetHeader>('UPDATE members SET data = ?, name_key = ?, revision = revision + 1 WHERE id = ? AND revision = ?', [data, nameKey, memberId, revision]);
+      } catch (error) {
+        throw memberConflict(error);
+      }
+      if (result.affectedRows) return;
+      const [existing] = await rows(db, 'SELECT id FROM members WHERE id = ?', [memberId]);
+      throw new AppError(existing ? 'config_conflict' : 'not_found', existing ? 'Member revision changed' : 'Member not found', existing ? 409 : 404);
+    });
+    return { id: memberId, workspaceId: value.workspaceId, revision: revision + 1, value: decode<MemberRecord>(data, () => undefined) };
+  }
+
   async listWorkspaces(): Promise<WorkspaceRecord[]> {
     return (await rows(this.pool, 'SELECT id, name, directory, created_at FROM workspaces ORDER BY name, id')).map(workspaceRow);
   }
@@ -471,13 +551,17 @@ export class MySqlStore implements ContextStore {
     return row ? workspaceRow(row) : null;
   }
 
-  async createWorkspace(workspace: WorkspaceRecord, directoryKey: string): Promise<void> {
-    try {
-      await this.pool.execute('INSERT INTO workspaces (id, name, directory, directory_key, created_at) VALUES (?, ?, ?, ?, ?)', [workspace.workspaceId, workspace.name, workspace.directory, directoryKey, workspace.createdAt]);
-    } catch (error) {
-      if (duplicate(error)) throw new AppError('workspace_exists', 'A workspace with this ID or folder already exists', 409);
-      throw error;
-    }
+  /** Registers the workspace and its team's lead together; if either fails, neither is stored. */
+  async createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember): Promise<void> {
+    await this.transaction(async db => {
+      try {
+        await db.execute('INSERT INTO workspaces (id, name, directory, directory_key, created_at) VALUES (?, ?, ?, ?, ?)', [workspace.workspaceId, workspace.name, workspace.directory, directoryKey, workspace.createdAt]);
+      } catch (error) {
+        if (duplicate(error)) throw new AppError('workspace_exists', 'A workspace with this ID or folder already exists', 409);
+        throw error;
+      }
+      await this.insertMember(db, lead);
+    });
   }
 
   /** The sequence number and current files from one snapshot. */

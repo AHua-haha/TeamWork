@@ -1,5 +1,5 @@
 import { BackendError, waitForRetry } from './agent-client.js';
-import { json } from './config-client.js';
+import { json, type RunSettings } from './config-client.js';
 import { ProtocolError, readSse, type SseFrame } from './sse.js';
 
 export interface WorkspaceRecord { workspaceId: string; name: string; directory: string; createdAt: number }
@@ -21,6 +21,13 @@ export interface ChangeRecord { seq: number; time: number; author: Author; reaso
 export interface ContextVersion { revision: string | null; seq: number; time: number; action: FileAction; path: string; fromPath: string | null; size: number | null; author: Author; reason: string | null }
 export interface History { versions: ContextVersion[]; next: number | null }
 export interface Match { path: string; line: number; text: string }
+/** A team member as the backend reports it. `memberId` is also the ID of the member's conversation. */
+export interface Member {
+  memberId: string; workspaceId: string; revision: number; name: string; role: string; responsibility: string; scope: string[];
+  lead: boolean; settings: RunSettings; issues: string[]; ready: boolean; running: boolean;
+}
+export interface Team { workspaceId: string; members: Member[] }
+export type MemberFields = Pick<Member, 'name' | 'role' | 'responsibility' | 'scope' | 'settings'>;
 
 const query = (path: string, values: Record<string, string | number | null | undefined>) => {
   const params = new URLSearchParams();
@@ -41,6 +48,12 @@ export class WorkspaceClient {
   listWorkspaces(): Promise<WorkspaceRecord[]> { return this.get<{ workspaces: WorkspaceRecord[] }>('/workspaces').then(result => result.workspaces); }
   createWorkspace(input: WorkspaceInput): Promise<Workspace> { return this.write('/workspaces', 'POST', input); }
   getWorkspace(workspaceId: string): Promise<Workspace> { return this.get(this.base(workspaceId)); }
+
+  team(workspaceId: string): Promise<Team> { return this.get(`${this.base(workspaceId)}/team`); }
+  /** Changes a member at the revision last read; the lead's run settings are changed this way. */
+  updateMember(workspaceId: string, memberId: string, revision: number, value: MemberFields): Promise<Member> {
+    return this.write(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}`, 'PUT', { revision, value });
+  }
 
   projectTree(workspaceId: string, path: string, depth = 1): Promise<Listing> { return this.get(query(`${this.base(workspaceId)}/files/tree`, { path, depth })); }
   readProject(workspaceId: string, path: string): Promise<ProjectFile> { return this.get(query(`${this.base(workspaceId)}/files/file`, { path })); }

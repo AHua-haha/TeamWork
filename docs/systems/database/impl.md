@@ -10,13 +10,15 @@ A MySQL repository owns schema setup, transactions, versioned JSON serialization
 
 The config service also calls it for scoped versioned config records. The database checks identities and revisions while leaving config field validation to that service.
 
-The workspace service and each context base call it through the `ContextStore` interface, which the repository implements. The [context base](../workspace-agent/context-base/impl.md) builds each change; the repository stores it and validates stored authors and change records when reading them.
+The team calls it through the `TeamStore` interface, which the repository also implements, to store team members. The workspace service and each context base call it through the `ContextStore` interface. The [context base](../workspace-agent/context-base/impl.md) builds each change; the repository stores it and validates stored authors and change records when reading them.
 
 ## Coordination and data flow
 
 Agent rows serialize writers with row locks. Starting a run atomically appends the accepted input to context and display history. Completing a message atomically appends both records and clears its temporary chunks. Context replacement uses a revision check. Runs record terminal history bounds so a follower cannot drift into a later run. Consistent transactional follow snapshots join durable history, run state, and the bounded active chunk range.
 
-`config_records` stores app, catalog, and agent values as versioned JSON envelopes. Creates, updates, and deletes are atomic, with updates/deletes checking the expected revision. `configBundle` reads app, agent, and catalog in one repeatable-read transaction. New agents receive a blank config record in their creation transaction. Config initialization can populate that record for preexisting agents.
+`config_records` stores app, catalog, connection, model-cache, and agent values as versioned JSON envelopes. Creates, updates, and deletes are atomic, with updates/deletes checking the expected revision. `configBundle` reads app, agent, and catalog in one repeatable-read transaction. New agents receive a blank config record in their creation transaction. Config initialization can populate that record for preexisting agents.
+
+Team members use one table, `members`: the member's ID, which is also its conversation's `agents` row, the workspace, a revision, the record as a JSON envelope, an `ordinal` that numbers members in creation order, and two nullable key columns. `is_lead` is 1 for the lead and null otherwise, and `name_key` is the lower-cased name for an active member and null once retired. Unique keys on `(workspace_id, is_lead)` and `(workspace_id, name_key)` make a second lead or a duplicate active name fail, because MySQL allows many nulls in a unique key. `createMember` inserts the `agents` row and the member row in one transaction, and `updateMember` checks the revision. `createWorkspace` inserts the workspace row and then the lead the same way, in one transaction, so a workspace is never stored without its lead; a duplicate directory or ID rolls back both and reports `workspace_exists`. `runMessages` reads the `messages` rows of one run, which a call between members uses to find the recipient's final assistant message. `listAgents` leaves out member IDs, `createConfig` for an agent refuses a member's ID, and `configBundle` takes no agent for members.
 
 Context bases use five tables:
 

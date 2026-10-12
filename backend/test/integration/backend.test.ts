@@ -12,6 +12,8 @@ import { MySqlStore } from '../../src/database.js';
 import { ConfigService } from '../../src/config.js';
 import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/runtime.js';
 import { createAgentServer } from '../../src/http.js';
+import { TeamSystem } from '../../src/team-system.js';
+import { newLead } from '../../src/team.js';
 import { WorkspaceService } from '../../src/workspace.js';
 import type { ContextCommit } from '../../src/context-base.js';
 import { sha256 } from '../../src/text.js';
@@ -23,16 +25,18 @@ const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, createModels());
 const workspaces = new WorkspaceService(store);
 const testEncryptionKey = Buffer.alloc(32, 7).toString('base64');
-const conversationFolder = await realpath(await mkdtemp(join(tmpdir(), 'conversations-')));
-/** The workspace that configured conversations in these tests belong to. */
-let conversationWorkspace = '';
 before(async () => {
   await store.migrate();
   await config.initialize();
-  conversationWorkspace = (await workspaces.create({ name: 'Conversations', directory: join(conversationFolder, 'project'), adopt: false })).workspaceId;
 });
-after(async () => { await workspaces.close(); await store.close(); await rm(conversationFolder, { recursive: true, force: true }); });
-const unconfigured = ['Choose a workspace for this conversation', 'Select a provider and model'];
+after(async () => { await workspaces.close(); await store.close(); });
+const unconfigured = ['Select a provider and model'];
+/** A team over the store for an HTTP server whose runtime is `runtime`. */
+function teamFor(runtime: AgentRuntime): TeamSystem {
+  const team = new TeamSystem(store, workspaces, config);
+  team.attach(runtime);
+  return team;
+}
 
 class Queue<T> implements AsyncIterable<T> {
   private values: T[] = [];
@@ -297,7 +301,7 @@ test('runtime owner lock excludes second owner and startup recovers abandoned ru
 
 test('HTTP accepts input only, streams synchronization and run end, reports busy and bad cursors', { timeout: 15_000 }, async () => {
   const f = await fixture();
-  const server = createAgentServer(f.runtime, config, workspaces);
+  const server = createAgentServer(f.runtime, config, workspaces, teamFor(f.runtime));
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -453,7 +457,7 @@ test('provider and agent config snapshots survive edits while each next run reso
     assert.equal((await store.getState(agentId)).historyPosition, 0);
     const empty = await service.getAgent(agentId);
     assert.deepEqual(empty.issues, unconfigured);
-    const settings = { name: 'Snapshot agent', workspaceId: conversationWorkspace, connectionId, modelId: firstModel.id, toolOptionIds: [], prompt: 'Original instructions', promptOptionIds: [], modelOptions: [{ connectionId, modelId: firstModel.id, temperature: 0.4, contextBudget: 1024 }] };
+    const settings = { name: 'Snapshot agent', connectionId, modelId: firstModel.id, toolOptionIds: [], prompt: 'Original instructions', promptOptionIds: [], modelOptions: [{ connectionId, modelId: firstModel.id, temperature: 0.4, contextBudget: 1024 }] };
     const saved = await service.updateAgent(agentId, empty.revision, settings);
     assert.deepEqual(saved.issues, []);
     assert.equal((await service.resolveForRun(agentId)).contextBudget, 1024);
@@ -519,7 +523,7 @@ test('initialization migrates an existing agent model selection to provider and 
   assert.equal(migrated.value.modelId, model.id);
   assert.ok(migrated.value.connectionId);
   assert.equal((await service.getConnection(migrated.value.connectionId)).value.baseUrl, model.baseUrl);
-  assert.deepEqual(migrated.issues, ['Choose a workspace for this conversation']);
+  assert.deepEqual(migrated.issues, []);
   assert.equal((await service.listCatalog()).some(item => item.id === id), false);
 });
 
@@ -539,7 +543,7 @@ test('initialization preserves a legacy discovered endpoint model as a selectabl
   await service.initialize();
   const migrated = await service.getAgent(agentId);
   assert.equal(migrated.value.modelId, 'endpoint-model');
-  assert.deepEqual(migrated.issues, ['Choose a workspace for this conversation']);
+  assert.deepEqual(migrated.issues, []);
   assert.equal((await service.modelChoices(connectionId))[0]?.verified, false);
 });
 
@@ -563,7 +567,7 @@ test('configured requests use selected prompt, registered tool and permitted rea
   await assert.rejects(service.createCatalog(`missing-${suffix}`, { kind: 'tool', label: 'Unavailable', toolName: 'missing' }), /not registered/);
   const empty = await service.getAgent(agentId);
   await service.updateAgent(agentId, empty.revision, {
-    name: 'Configured', workspaceId: conversationWorkspace, connectionId, modelId: 'gpt-5', toolOptionIds: [toolId], prompt: 'Agent prompt', promptOptionIds: [promptId], modelOptions: [{ connectionId, modelId: 'gpt-5', reasoning: 'high', maxTokens: 100 }],
+    name: 'Configured', connectionId, modelId: 'gpt-5', toolOptionIds: [toolId], prompt: 'Agent prompt', promptOptionIds: [promptId], modelOptions: [{ connectionId, modelId: 'gpt-5', reasoning: 'high', maxTokens: 100 }],
   });
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
   const runtime = new AgentRuntime(store, service, configuredPolicy(), request => {
@@ -605,7 +609,7 @@ test('agent model-call settings are kept per model and only the selected entry i
 
   const { agentId } = await store.createAgent();
   const raw = await store.getConfig<Record<string, unknown>>('agent', agentId);
-  await store.updateConfig('agent', agentId, raw.revision, { name: '', workspaceId: conversationWorkspace, connectionId: openai, modelId: 'gpt-5', toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: { reasoning: 'max' } });
+  await store.updateConfig('agent', agentId, raw.revision, { name: '', connectionId: openai, modelId: 'gpt-5', toolOptionIds: [], prompt: '', promptOptionIds: [], callOptions: { reasoning: 'max' } });
   const legacy = await service.getAgent(agentId);
   assert.deepEqual(legacy.value.modelOptions, []);
   assert.equal('callOptions' in legacy.value, false);
@@ -636,7 +640,7 @@ test('agent model-call settings are kept per model and only the selected entry i
 
   const other = await store.createAgent();
   const otherInitial = await service.getAgent(other.agentId);
-  await service.updateAgent(other.agentId, otherInitial.revision, { ...otherInitial.value, workspaceId: conversationWorkspace, connectionId: openai, modelId: 'gpt-5' });
+  await service.updateAgent(other.agentId, otherInitial.revision, { ...otherInitial.value, connectionId: openai, modelId: 'gpt-5' });
   assert.equal((await service.resolveForRun(other.agentId)).options.reasoning, 'minimal');
 
   const offB = await service.updateAgent(agentId, backToA.revision, { ...backToA.value, connectionId: deepseek, modelId: 'deepseek-v4-pro',
@@ -659,25 +663,58 @@ test('agent model-call settings are kept per model and only the selected entry i
   assert.deepEqual(dropped.issues, []);
 });
 
-test('a conversation chooses its workspace once', async () => {
+test('an agent config has no workspace, and one stored by the earlier binding is ignored', async () => {
   const service = new ConfigService(store, builtinModels());
-  const { workspaceId: otherWorkspace } = await workspaces.create({ name: 'Other', directory: join(conversationFolder, 'other'), adopt: false });
   const { agentId } = await store.createAgent();
   const empty = await service.getAgent(agentId);
-  assert.equal(empty.value.workspaceId, null);
-  await assert.rejects(service.updateAgent(agentId, empty.revision, { ...empty.value, workspaceId: 'missing-workspace' }), /Workspace not found/);
-  const bound = await service.updateAgent(agentId, empty.revision, { ...empty.value, workspaceId: conversationWorkspace });
-  assert.deepEqual(bound.issues, ['Select a provider and model']);
-  await assert.rejects(service.updateAgent(agentId, empty.revision, { ...bound.value, name: 'Stale' }), /revision changed/);
-  const renamed = await service.updateAgent(agentId, bound.revision, { ...bound.value, name: 'Renamed' });
-  assert.equal(renamed.value.workspaceId, conversationWorkspace);
-  for (const workspaceId of [null, otherWorkspace]) await assert.rejects(service.updateAgent(agentId, renamed.revision, { ...renamed.value, workspaceId }), /workspace cannot change/);
-
+  assert.equal('workspaceId' in empty.value, false);
+  assert.deepEqual(empty.issues, unconfigured);
+  await assert.rejects(service.updateAgent(agentId, empty.revision, { ...empty.value, workspaceId: 'w1' }), /Unknown config field: workspaceId/);
   const created = await store.createAgent();
-  const initial = await service.getAgent(created.agentId);
-  await service.deleteAgent(created.agentId, initial.revision);
-  await assert.rejects(service.createAgentConfig(created.agentId, { ...initial.value, workspaceId: 'missing-workspace' }), /Workspace not found/);
-  assert.equal((await service.createAgentConfig(created.agentId, { ...initial.value, workspaceId: otherWorkspace })).value.workspaceId, otherWorkspace);
+  await store.deleteConfig('agent', created.agentId, 0);
+  await assert.rejects(service.createAgentConfig(created.agentId, { ...empty.value, workspaceId: 'w1' }), /Unknown config field: workspaceId/);
+
+  const old = await store.createAgent();
+  const stored = await store.getConfig<Record<string, unknown>>('agent', old.agentId);
+  await store.updateConfig('agent', old.agentId, stored.revision, { ...empty.value, name: 'Earlier', workspaceId: 'gone' });
+  const read = await service.getAgent(old.agentId);
+  assert.equal(read.value.name, 'Earlier');
+  assert.equal('workspaceId' in read.value, false);
+  assert.equal((await service.updateAgent(old.agentId, read.revision, { ...read.value, name: 'Later' })).value.name, 'Later');
+});
+
+test('team members are stored with their conversation and kept out of the agent list', async () => {
+  const directory = join(await mkdtemp(join(tmpdir(), 'members-')), 'project');
+  const { workspaceId } = await workspaces.create({ name: 'Members', directory, adopt: false });
+  try {
+    const record = (name: string, lead = false) => ({ workspaceId, name, role: 'developer', responsibility: '', scope: [], lead, settings: { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, createdAt: 1, retiredAt: null });
+    const add = (name: string, lead = false) => store.createMember({ id: randomUUID(), workspaceId, lead, nameKey: name.toLowerCase(), value: record(name, lead) });
+    // Creating the workspace created its lead, in the same transaction.
+    const [lead] = await store.listMembers(workspaceId);
+    assert.deepEqual([lead?.value.name, lead?.value.lead], ['Lead', true]);
+    const backend = await add('Backend');
+    await assert.rejects(add('Second lead', true), code('lead_exists'));
+    await assert.rejects(add('backend'), code('member_exists'));
+    await assert.rejects(add('lead'), code('member_exists'));
+    assert.deepEqual((await store.listMembers(workspaceId)).map(member => member.value.name), ['Lead', 'Backend']);
+    assert.equal((await store.getMember(backend.id))?.revision, 0);
+    assert.equal(await store.getMember('missing'), null);
+
+    // A member's conversation is an agent for the runtime, but not an agent in the list and not one with a config.
+    assert.equal((await store.getState(backend.id)).historyPosition, 0);
+    assert.equal((await store.listAgents()).includes(backend.id), false);
+    await assert.rejects(store.createConfig('agent', backend.id, {}), code('not_found'));
+    await assert.rejects(new ConfigService(store, builtinModels()).getAgent(backend.id), code('not_found'));
+
+    await assert.rejects(store.updateMember(backend.id, 5, 'backend', backend.value), code('config_conflict'));
+    await assert.rejects(store.updateMember(backend.id, 0, 'lead', backend.value), code('member_exists'), 'a name an active member has is refused');
+    await assert.rejects(store.updateMember('missing', 0, 'x', backend.value), code('not_found'));
+    const retired = await store.updateMember(backend.id, 0, null, { ...backend.value, retiredAt: 2 });
+    assert.equal(retired.revision, 1);
+    assert.equal((await add('Backend')).revision, 0, 'a retired member frees its name');
+    assert.equal((await store.getMember(lead!.id))?.value.lead, true);
+    assert.equal((await store.configBundle(null)).agent, null);
+  } finally { await rm(join(directory, '..'), { recursive: true, force: true }); }
 });
 
 test('backend discovers a custom model ID and calls its endpoint through Pi with a stored key', { timeout: 20_000 }, async () => {
@@ -729,7 +766,7 @@ test('backend discovers a custom model ID and calls its endpoint through Pi with
     failDiscovery = false;
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
-    await service.updateAgent(agentId, initial.revision, { ...initial.value, workspaceId: conversationWorkspace, connectionId, modelId: choices[0]!.modelId });
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: choices[0]!.modelId });
     runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
@@ -805,7 +842,7 @@ test('Anthropic Messages connection discovers paged models and streams through P
     assert.equal((await service.modelChoices(connectionId)).length, 2);
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
-    await service.updateAgent(agentId, initial.revision, { ...initial.value, workspaceId: conversationWorkspace, connectionId, modelId: 'custom-claude-b' });
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'custom-claude-b' });
     runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
@@ -867,7 +904,7 @@ test('known DeepSeek model follows the connection protocol instead of its Pi def
     assert.deepEqual(choice?.reasoningSentAs, { off: 'off', low: 'high', medium: 'high', high: 'high', xhigh: 'max' });
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
-    await service.updateAgent(agentId, initial.revision, { ...initial.value, workspaceId: conversationWorkspace, connectionId, modelId: 'deepseek-v4-pro', modelOptions: [{ connectionId, modelId: 'deepseek-v4-pro', reasoning: 'high' }] });
+    await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'deepseek-v4-pro', modelOptions: [{ connectionId, modelId: 'deepseek-v4-pro', reasoning: 'high' }] });
     runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
@@ -890,7 +927,7 @@ test('config HTTP exposes app, catalog and agent edits without accepting invalid
   const service = new ConfigService(store, models, [], testEncryptionKey);
   const runtime = new AgentRuntime(store, service, configuredPolicy(), async function* () { yield { type: 'done', reason: 'stop', message: message() }; });
   await runtime.open();
-  const server = createAgentServer(runtime, service, workspaces);
+  const server = createAgentServer(runtime, service, workspaces, teamFor(runtime));
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -914,8 +951,8 @@ test('config HTTP exposes app, catalog and agent edits without accepting invalid
     assert.equal((await request('/config/connections')).status, 200);
     assert.equal((await request(`/config/connections/${connectionId}/models`)).status, 200);
     assert.equal((await request(`/config/connections/${connectionId}/models/refresh`, 'POST')).status, 415);
-    assert.equal((await request(`/agents/${agent.agentId}/config`, 'PUT', { revision: configResponse.revision, value: { ...configResponse.value, workspaceId: 'missing-workspace' } })).status, 400);
-    const value = { ...configResponse.value, workspaceId: conversationWorkspace, connectionId, modelId: modelChoice.id };
+    assert.equal((await request(`/agents/${agent.agentId}/config`, 'PUT', { revision: configResponse.revision, value: { ...configResponse.value, workspaceId: 'w1' } })).status, 400);
+    const value = { ...configResponse.value, connectionId, modelId: modelChoice.id };
     assert.equal((await request('/config/catalog', 'POST', { id: `invalid-${randomUUID()}`, value: { kind: 'model', label: 'Unsupported' } })).status, 400);
     const updated = await request(`/agents/${agent.agentId}/config`, 'PUT', { revision: configResponse.revision, value });
     assert.equal(updated.status, 200);
@@ -957,8 +994,15 @@ test('workspace registry refuses duplicates; context commits reload with history
     const record = (await store.getWorkspace(workspaceId))!;
     assert.equal(record.directory, directory);
     assert.ok((await store.listWorkspaces()).some(item => item.workspaceId === workspaceId));
-    await assert.rejects(store.createWorkspace({ ...record, workspaceId: randomUUID() }, sha256(directory.toLowerCase())), code('workspace_exists'));
-    await assert.rejects(store.createWorkspace(record, sha256(randomUUID())), code('workspace_exists'));
+    const created = (await store.listMembers(workspaceId)).filter(member => member.value.lead);
+    assert.equal(created.length, 1, 'a workspace is created with its lead');
+    const duplicateId = randomUUID();
+    const rival = newLead(duplicateId);
+    await assert.rejects(store.createWorkspace({ ...record, workspaceId: duplicateId }, sha256(directory.toLowerCase()), rival), code('workspace_exists'));
+    assert.equal(await store.getMember(rival.id), null, 'a refused workspace leaves no lead');
+    await assert.rejects(store.getState(rival.id), code('not_found'));
+    await assert.rejects(store.createWorkspace(record, sha256(randomUUID()), newLead(workspaceId)), code('workspace_exists'));
+    assert.equal((await store.listMembers(workspaceId)).length, 1, 'a refused workspace adds no second lead');
     await assert.rejects(workspaces.create({ name: 'Inner', directory: join(directory, 'inner'), adopt: false }), code('workspace_exists'));
 
     const context = await workspaces.context(workspaceId);

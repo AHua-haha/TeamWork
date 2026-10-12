@@ -13,7 +13,8 @@
   - a cache of workspace records;
   - a project-file view for each request.
 - `ProjectFiles` serves one workspace folder: path rules, list, read, save, and find. It holds no state between requests.
-- The workspace routes map `/workspaces` requests to the service, the project files, and the context base. The agent server sends every `/workspaces` request to them.
+- The workspace routes map `/workspaces` requests to the service, the project files, and the context base. The agent server sends every `/workspaces` request to them, except team requests.
+- `MemberFiles` gives an agent the workspace folder in the form Pi's file tools take: operations that apply the caller's access rule. It holds no state besides the folder and the rule, and the team supplies the rule for each member.
 - The shared HTTP helpers are used by every route: agent, config, and workspace. They read bounded JSON bodies, reject unknown fields and query parameters, parse counts, write JSON, map errors to responses, abort work when the client disconnects, and send SSE streams.
 - The text helpers apply the same text rules and hashing to project files and context files.
 - The backend entry point creates the workspace service with the MySQL store, passes it to the agent server, and closes it on shutdown or a failed start.
@@ -27,9 +28,9 @@
    - a new project requires a missing path or an empty folder, and resolves the real path of its nearest existing parent;
 3. compares the planned path, without letter case, with every registered directory, in both directions;
 4. creates the folder for a new project;
-5. stores the record with the SHA-256 of the lower-cased real path. The database's unique key on that hash also stops another process from registering the same directory at the same time.
+5. stores the record, together with the workspace's lead from `newLead`, in one store call: the SHA-256 of the lower-cased real path is its directory key, whose unique key also stops another process from registering the same directory at the same time, and the lead's record is the team's initial one. The store registers both in one transaction.
 
-If storing fails, the folder the service created is removed. The response is `get`, which opens the context base and returns its overview.
+If storing fails, the folder the service created is removed, and no workspace or lead is left. The response is `get`, which opens the context base and returns its overview.
 
 **Opening context bases.** The first request for a workspace starts `ContextBase.open` and caches the pending result, so concurrent requests share one open. A failed open is removed from the cache, so the next request tries again, for example after a missing folder returns.
 
@@ -54,6 +55,7 @@ If storing fails, the folder the service created is removed. The response is `ge
 
 - [Workspace service](../../../../../../backend/src/workspace.ts): registry, create and adopt, and context bases.
 - [Project files](../../../../../../backend/src/project-files.ts): project path rules, list, read, save, and find.
+- [Member files](../../../../../../backend/src/member-files.ts): the operations behind the agents' file tools, with the access rule.
 - [Workspace routes](../../../../../../backend/src/workspace-routes.ts): `/workspaces` endpoints.
 - [HTTP helpers](../../../../../../backend/src/http-helpers.ts) and [agent server](../../../../../../backend/src/http.ts): shared transport, and routing to agents, config, and workspaces.
 - [Text rules](../../../../../../backend/src/text.ts): shared text decoding, encoding, and hashing.

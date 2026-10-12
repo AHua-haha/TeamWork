@@ -30,10 +30,12 @@ export interface ToolOption { kind: 'tool'; label: string; toolName: string }
 export interface PromptOption { kind: 'prompt'; label: string; text: string }
 export type CatalogOption = ToolOption | PromptOption;
 export interface ModelOptions { connectionId: string; modelId: string; reasoning?: ReasoningLevel; temperature?: number; maxTokens?: number; contextBudget?: number }
-export interface AgentSettings {
-  name: string; workspaceId: string | null; connectionId: string | null; modelId: string | null; toolOptionIds: string[];
+/** What a run needs from its agent: the model, tools, prompts, instructions, and per-model options. Agents and team members share it. */
+export interface RunSettings {
+  connectionId: string | null; modelId: string | null; toolOptionIds: string[];
   prompt: string; promptOptionIds: string[]; modelOptions: ModelOptions[];
 }
+export interface AgentSettings extends RunSettings { name: string }
 export interface AgentConfigView extends StoredConfig<AgentSettings> { issues: string[] }
 export interface AgentSummary { agentId: string; name: string; ready: boolean; issues: string[] }
 export interface ModelCapability { provider: string; modelId: string; label: string; api: string; baseUrl: string; reasoning: boolean; maxTokens: number; reasoningLevels: ReasoningLevel[]; defaultReasoning: ReasoningLevel | null; reasoningSentAs: Partial<Record<ReasoningLevel, ModelThinkingLevel>> }
@@ -48,11 +50,11 @@ type LegacyModelOption = {
   kind: 'model'; label: string; connectionId?: string; provider: string; modelId: string;
   api: Api; source: 'pi' | 'endpoint'; maxTokens: number; reasoning: boolean;
 };
-function obj(value: unknown, label: string): Record<string, unknown> {
+export function obj(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AppError('invalid_config', `${label} must be an object`);
   return value as Record<string, unknown>;
 }
-function keys(value: Record<string, unknown>, allowed: readonly string[]): void {
+export function keys(value: Record<string, unknown>, allowed: readonly string[]): void {
   for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new AppError('invalid_config', `Unknown config field: ${key}`);
 }
 function title(value: unknown, label: string, max = 80): string {
@@ -114,34 +116,37 @@ function modelOptions(value: unknown): ModelOptions {
   }
   return entry;
 }
-export function validateAgentSettings(value: unknown): AgentSettings {
-  const data = obj(value, 'Agent config');
-  keys(data, ['name', 'workspaceId', 'connectionId', 'modelId', 'toolOptionIds', 'prompt', 'promptOptionIds', 'modelOptions']);
-  if (data.workspaceId !== null) identity(data.workspaceId, 'workspaceId');
+export const emptyRunSettings: RunSettings = { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] };
+export function validateRunSettings(value: unknown, label = 'Run settings', allowed: readonly string[] = []): RunSettings {
+  const data = obj(value, label);
+  keys(data, [...allowed, 'connectionId', 'modelId', 'toolOptionIds', 'prompt', 'promptOptionIds', 'modelOptions']);
   if (data.connectionId !== null) identity(data.connectionId, 'connectionId');
   if (data.modelId !== null) title(data.modelId, 'Model ID', 160);
   if (!Array.isArray(data.modelOptions)) throw new AppError('invalid_config', 'modelOptions must be a list');
   const entries = data.modelOptions.map(modelOptions);
   if (new Set(entries.map(entry => JSON.stringify([entry.connectionId, entry.modelId]))).size !== entries.length) throw new AppError('invalid_config', 'modelOptions contains duplicate models');
   return {
-    name: data.name === '' ? '' : title(data.name, 'Agent name'), workspaceId: data.workspaceId as string | null,
     connectionId: data.connectionId as string | null,
     modelId: data.modelId as string | null, toolOptionIds: ids(data.toolOptionIds, 'toolOptionIds'),
-    prompt: content(data.prompt, 'Agent prompt'), promptOptionIds: ids(data.promptOptionIds, 'promptOptionIds'),
+    prompt: content(data.prompt, 'Instructions'), promptOptionIds: ids(data.promptOptionIds, 'promptOptionIds'),
     modelOptions: entries,
   };
 }
+export function validateAgentSettings(value: unknown): AgentSettings {
+  const data = obj(value, 'Agent config');
+  return { name: data.name === '' ? '' : title(data.name, 'Agent name'), ...validateRunSettings(data, 'Agent config', ['name']) };
+}
 function normalizedAgent(value: unknown): AgentSettings {
-  const { callOptions: _dropped, ...data } = obj(value, 'Agent config');
+  const { callOptions: _dropped, workspaceId: _bound, ...data } = obj(value, 'Agent config');
   // Levels outside the shared scale (stored before it existed) read as unset.
   if (Array.isArray(data.modelOptions)) data.modelOptions = data.modelOptions.map(entry => {
     if (!entry || typeof entry !== 'object' || !('reasoning' in entry) || isReasoningLevel(entry.reasoning)) return entry;
     const { reasoning: _old, ...rest } = entry;
     return rest;
   });
-  return validateAgentSettings({ name: '', workspaceId: null, connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [], ...data });
+  return validateAgentSettings({ name: '', ...emptyRunSettings, ...data });
 }
-function selectedOptions(settings: AgentSettings): ModelOptions | undefined {
+function selectedOptions(settings: RunSettings): ModelOptions | undefined {
   return settings.modelOptions.find(entry => entry.connectionId === settings.connectionId && entry.modelId === settings.modelId);
 }
 function connectionInput(value: unknown, previous: ProviderConnection | null, secrets: ConfigSecrets): ProviderConnection {
@@ -355,24 +360,20 @@ export class ConfigService {
     return { ...record, value, issues: this.issues(value, new Map(catalog.map(item => [item.id, item])), new Map(connections.map(item => [item.id, item])), new Map(caches.map(item => [item.id, item]))) };
   }
   async createAgentConfig(agentId: string, value: unknown): Promise<AgentConfigView> {
-    const next = validateAgentSettings(value);
-    await this.checkWorkspace(next.workspaceId);
-    await this.store.createConfig('agent', agentId, next);
+    await this.store.createConfig('agent', agentId, validateAgentSettings(value));
     return this.getAgent(agentId);
   }
-  /** A conversation's workspace is chosen once: it may go from none to a registered workspace, and never changes after that. */
   async updateAgent(agentId: string, revision: number, value: unknown): Promise<AgentConfigView> {
-    const next = validateAgentSettings(value);
-    const previous = await this.store.getConfig('agent', agentId);
-    if (previous.revision !== revision) throw new AppError('config_conflict', 'Config revision changed', 409);
-    const bound = normalizedAgent(previous.value).workspaceId;
-    if (bound !== null && next.workspaceId !== bound) throw new AppError('invalid_config', "A conversation's workspace cannot change");
-    if (bound === null) await this.checkWorkspace(next.workspaceId);
-    await this.store.updateConfig('agent', agentId, revision, next);
+    await this.store.updateConfig('agent', agentId, revision, validateAgentSettings(value));
     return this.getAgent(agentId);
   }
-  private async checkWorkspace(workspaceId: string | null): Promise<void> {
-    if (workspaceId !== null && !await this.store.getWorkspace(workspaceId)) throw new AppError('invalid_config', 'Workspace not found');
+  /** What stops each of these run settings from running, checked against the current catalog and connections. */
+  async issuesFor(settings: readonly RunSettings[]): Promise<string[][]> {
+    const [catalog, connections, caches] = await Promise.all([this.listCatalog(), this.store.listConfigs<ProviderConnection>('connection'), this.store.listConfigs<ModelCache>('model_cache')]);
+    const options = new Map(catalog.map(item => [item.id, item]));
+    const connectionMap = new Map(connections.map(item => [item.id, item]));
+    const cacheMap = new Map(caches.map(item => [item.id, item]));
+    return settings.map(item => this.issues(item, options, connectionMap, cacheMap));
   }
   async deleteAgent(agentId: string, revision: number): Promise<void> { await this.store.deleteConfig('agent', agentId, revision); }
   async listAgents(): Promise<AgentSummary[]> {
@@ -389,12 +390,11 @@ export class ConfigService {
       return { agentId, name: value.name, ready: issues.length === 0, issues };
     });
   }
-  private selectedChoice(settings: AgentSettings, connection?: ProviderConnection, cache?: ModelCache): ModelChoice | undefined {
+  private selectedChoice(settings: RunSettings, connection?: ProviderConnection, cache?: ModelCache): ModelChoice | undefined {
     return connection && settings.modelId ? this.choices(connection, cache).find(item => item.modelId === settings.modelId) : undefined;
   }
-  private issues(settings: AgentSettings, catalog: ReadonlyMap<string, StoredConfig<CatalogOption>>, connections: ReadonlyMap<string, StoredConfig<ProviderConnection>>, caches: ReadonlyMap<string, StoredConfig<ModelCache>>): string[] {
+  private issues(settings: RunSettings, catalog: ReadonlyMap<string, StoredConfig<CatalogOption>>, connections: ReadonlyMap<string, StoredConfig<ProviderConnection>>, caches: ReadonlyMap<string, StoredConfig<ModelCache>>): string[] {
     const issues: string[] = [];
-    if (!settings.workspaceId) issues.push('Choose a workspace for this conversation');
     if (!settings.connectionId || !settings.modelId) issues.push('Select a provider and model');
     else {
       const connection = connections.get(settings.connectionId)?.value;
@@ -422,9 +422,16 @@ export class ConfigService {
   }
   async resolveForRun(agentId: string): Promise<ResolvedRunConfig> {
     const bundle = await this.store.configBundle(agentId);
-    if (!bundle.app || !bundle.agent) throw new AppError('invalid_agent_config', 'App or agent config is missing', 409);
+    if (!bundle.agent) throw new AppError('invalid_agent_config', 'App or agent config is missing', 409);
+    return this.resolve(bundle, normalizedAgent(bundle.agent.value), bundle.agent.revision);
+  }
+  /** Resolves run settings that belong to something other than an agent config, such as a team member, by the same rules. */
+  async resolveSettings(settings: unknown, revision: number): Promise<ResolvedRunConfig> {
+    return this.resolve(await this.store.configBundle(null), validateRunSettings(settings), revision);
+  }
+  private resolve(bundle: Awaited<ReturnType<MySqlStore['configBundle']>>, settings: RunSettings, revision: number): ResolvedRunConfig {
+    if (!bundle.app) throw new AppError('invalid_agent_config', 'App or agent config is missing', 409);
     validateAppSettings(bundle.app.value);
-    const settings = normalizedAgent(bundle.agent.value);
     const catalog = new Map(bundle.catalog.filter(item => (item.value as {kind?:string}).kind !== 'model').map(item => [item.id, item as StoredConfig<CatalogOption>]));
     const connections = new Map(bundle.connections.map(item => [item.id, item as StoredConfig<ProviderConnection>]));
     const caches = new Map(bundle.modelCaches.map(item => [item.id, item as StoredConfig<ModelCache>]));
@@ -463,7 +470,7 @@ export class ConfigService {
       ...(connection.encryptedKey ? { apiKey: this.secrets.decrypt(connection.encryptedKey) } : {}),
     };
     return { model, models: runModels, tools: [...tools], systemPrompt: prompts.join('\n\n'), options, contextBudget,
-      source: { appRevision: bundle.app.revision, agentRevision: bundle.agent.revision, catalogRevisions,
+      source: { appRevision: bundle.app.revision, agentRevision: revision, catalogRevisions,
         connectionRevision: connectionRecord.revision, modelCacheRevision: caches.get(settings.connectionId!)?.revision } };
   }
 }

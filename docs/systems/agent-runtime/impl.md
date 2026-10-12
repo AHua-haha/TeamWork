@@ -10,7 +10,9 @@ The runtime composes the [database system](../database/design.md) with Pi AI mod
 
 The [config system](../config/design.md) supplies one run snapshot of editable selections. The runtime chooses the resolution point before accepting input and applies that copy through all loop steps. Policy hooks remain the extension point for request construction and context changes.
 
-The agent server also carries the [workspace](../workspace-agent/workspace/design.md) endpoints. It sends every `/workspaces` request to the workspace routes; agent, config, and workspace routes share one set of HTTP helpers.
+The agent server also carries the [workspace](../workspace-agent/workspace/design.md) endpoints. It sends every `/workspaces` request to the workspace routes, except those under a workspace's `team`, which go to the [team](../workspace-agent/team/design.md) routes; agent, config, workspace, and team routes share one set of HTTP helpers.
+
+The team supplies the runtime's config source, which resolves a team member's snapshot from its own settings, and wraps the runtime policy to give members their tools and instructions. The server hands user input to the team's runner, which refuses it for members that are not leads and otherwise starts the run in the runtime. The runtime does not know about teams. It adds two reads for a caller that starts a run itself: `finished`, which resolves with the run's final state when its work ends in this process, and `finalText`, which returns the text of the run's last assistant message from storage. A team member's call to another member is such a tool: it starts the recipient's run, waits with `finished`, and reads `finalText`.
 
 ## Coordination and data flow
 
@@ -29,7 +31,7 @@ Node.js/TypeScript and Pi AI 0.87.1 directly; no Agent Core loop. One active run
 - [Config service](../config/impl.md): editable choices, validation, and consistent run resolution.
 - [src/http.ts](../../../backend/src/http.ts): agent and config endpoints, and routing of `/workspaces` to the [workspace routes](../workspace-agent/workspace/impl.md).
 - [src/http-helpers.ts](../../../backend/src/http-helpers.ts): request validation, bounded body reads, JSON/SSE transport, heartbeat comments, socket backpressure, and connection abort handling.
-- [src/main.ts](../../../backend/src/main.ts): environment configuration, provider catalog, workspace service, initialization and graceful shutdown.
+- [src/main.ts](../../../backend/src/main.ts): environment configuration, provider catalog, workspace service, team system, initialization and graceful shutdown.
 - [src/types.ts](../../../backend/src/types.ts): records, errors and versioned backend protocol.
 - [src/index.ts](../../../backend/src/index.ts): in-process exports.
 - [README.md](../../../backend/README.md): setup and caller examples.

@@ -73,6 +73,8 @@ export function respond(handle: (route: Route) => Promise<void>): (request: Inco
     const path = url.pathname.split('/').filter(Boolean);
     handle({ request, response, url, path, signal: controller.signal }).catch(error => {
       if (controller.signal.aborted) return;
+      // The client gets only a short message for these, so the log is where their cause can be found.
+      if (!(error instanceof AppError) || error.status >= 500) console.error(`${request.method} ${url.pathname} failed:`, error);
       if (response.headersSent) {
         response.end();
         return;

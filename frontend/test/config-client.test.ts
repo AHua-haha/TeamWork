@@ -5,7 +5,7 @@ import { BackendError } from '../src/client/agent-client.js';
 
 test('config client preserves backend records, revisions and complete agent values', async () => {
   const calls: { path: string; method: string; body?: unknown }[] = [];
-  const settings: AgentSettings = { name: 'Research', workspaceId: 'workspace-1', connectionId: 'main', modelId: 'backend-owned', toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'backend-owned', reasoning: 'high', contextBudget: 4096 }] };
+  const settings: AgentSettings = { name: 'Research', connectionId: 'main', modelId: 'backend-owned', toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'backend-owned', reasoning: 'high', contextBudget: 4096 }] };
   const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ path: String(input), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (String(input) === '/agents/a/config' && init?.method === 'PUT') return new Response(JSON.stringify({ id: 'a', revision: 4, value: settings, issues: [] }));

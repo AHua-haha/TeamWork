@@ -2,13 +2,16 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/context-base.js';
+import type { MemberRecord, NewMember, StoredMember, TeamStore } from '../src/team.js';
 import { AppError } from '../src/types.js';
 
 interface Stored { record: WorkspaceRecord; key: string; seq: number; blobs: Map<string, string>; versions: StoredVersion[]; files: Map<string, IndexedFile>; records: ChangeRecord[] }
 
 /** The MySQL store's context semantics in memory. `failNextCommit` makes the next commit fail before it applies. */
-export class MemoryStore implements ContextStore {
+export class MemoryStore implements ContextStore, TeamStore {
   readonly workspaces = new Map<string, Stored>();
+  readonly members = new Map<string, { member: StoredMember; lead: boolean; nameKey: string | null; ordinal: number }>();
+  private ordinal = 0;
   failNextCommit = false;
 
   async listWorkspaces(): Promise<WorkspaceRecord[]> {
@@ -19,9 +22,15 @@ export class MemoryStore implements ContextStore {
     return this.workspaces.get(workspaceId)?.record ?? null;
   }
 
-  async createWorkspace(record: WorkspaceRecord, key: string): Promise<void> {
+  async createWorkspace(record: WorkspaceRecord, key: string, lead: NewMember): Promise<void> {
     if (this.workspaces.has(record.workspaceId) || [...this.workspaces.values()].some(stored => stored.key === key)) throw new AppError('workspace_exists', 'A workspace with this ID or folder already exists', 409);
     this.workspaces.set(record.workspaceId, { record, key, seq: 0, blobs: new Map(), versions: [], files: new Map(), records: [] });
+    try { await this.createMember(lead); }
+    catch (error) {
+      // Like the real store's transaction: a workspace is never stored without its lead.
+      this.workspaces.delete(record.workspaceId);
+      throw error;
+    }
   }
 
   async loadContext(workspaceId: string): Promise<{ seq: number; files: IndexedFile[] }> {
@@ -42,6 +51,35 @@ export class MemoryStore implements ContextStore {
     for (const file of commit.files) stored.files.set(file.path.toLowerCase(), { ...file });
     stored.records.push(structuredClone(commit.record));
     stored.seq = commit.seq;
+  }
+
+  async listMembers(workspaceId: string): Promise<StoredMember[]> {
+    return [...this.members.values()].filter(item => item.member.workspaceId === workspaceId).sort((a, b) => a.ordinal - b.ordinal).map(item => structuredClone(item.member));
+  }
+
+  async getMember(memberId: string): Promise<StoredMember | null> {
+    const item = this.members.get(memberId);
+    return item ? structuredClone(item.member) : null;
+  }
+
+  async createMember(input: NewMember): Promise<StoredMember> {
+    this.stored(input.workspaceId);
+    const others = [...this.members.values()].filter(item => item.member.workspaceId === input.workspaceId);
+    if (input.lead && others.some(item => item.lead)) throw new AppError('lead_exists', 'The workspace already has a lead', 409);
+    if (others.some(item => item.nameKey === input.nameKey)) throw new AppError('member_exists', 'Another member of this team has that name', 409);
+    const member = { id: input.id, workspaceId: input.workspaceId, revision: 0, value: structuredClone(input.value) };
+    this.members.set(input.id, { member, lead: input.lead, nameKey: input.nameKey, ordinal: ++this.ordinal });
+    return structuredClone(member);
+  }
+
+  async updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord): Promise<StoredMember> {
+    const item = this.members.get(memberId);
+    if (!item) throw new AppError('not_found', 'Member not found', 404);
+    if (item.member.revision !== revision) throw new AppError('config_conflict', 'Member revision changed', 409);
+    if (nameKey !== null && [...this.members.values()].some(other => other !== item && other.member.workspaceId === item.member.workspaceId && other.nameKey === nameKey)) throw new AppError('member_exists', 'Another member of this team has that name', 409);
+    item.nameKey = nameKey;
+    item.member = { ...item.member, revision: revision + 1, value: structuredClone(value) };
+    return structuredClone(item.member);
   }
 
   async blob(workspaceId: string, hash: string): Promise<string | null> {

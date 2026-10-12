@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { AgentSettings, ConfigClient, ConfigRecord, ConnectionView, ModelChoice, ReasoningLevel, SentReasoningLevel } from '../client/config-client.js';
 import { clampedTo, customizedCount, effectiveReasoning, misfits, modelKey, modelSettings, selectModel, selectedModel, withModelSettings, type ModelEntry, type ModelSettings } from './model-selection.js';
-import type { useAgentConfig } from './useAgentConfig.js';
+import type { SettingsControl } from './useAgentConfig.js';
 
-export type AgentConfigControl = ReturnType<typeof useAgentConfig>;
+export type AgentConfigControl = SettingsControl;
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed';
 const levelLabel = (level: SentReasoningLevel) => level === 'xhigh' ? 'XHigh' : level[0]!.toUpperCase() + level.slice(1);
 

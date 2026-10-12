@@ -3,6 +3,7 @@ import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { ContextBase, type ContextOverview, type ContextStore, type WorkspaceRecord } from './context-base.js';
 import { ProjectFiles } from './project-files.js';
+import { newLead } from './team.js';
 import { missing, sha256 } from './text.js';
 import { AppError, identity } from './types.js';
 
@@ -69,7 +70,7 @@ export class WorkspaceService {
       const made = adopt ? undefined : await mkdir(directory, { recursive: true });
       try {
         const record: WorkspaceRecord = { workspaceId, name, directory: await realpath(directory), createdAt: Date.now() };
-        await this.store.createWorkspace(record, sha256(folderKey(record.directory)));
+        await this.store.createWorkspace(record, sha256(folderKey(record.directory)), newLead(workspaceId));
         this.records.set(workspaceId, record);
       } catch (error) {
         if (made) await rm(made, { recursive: true, force: true }).catch(() => undefined);
@@ -91,7 +92,8 @@ export class WorkspaceService {
     if (this.closed) throw new AppError('workspace_unavailable', 'Workspaces are closed', 503);
   }
 
-  private async record(workspaceId: string): Promise<WorkspaceRecord> {
+  /** The registered workspace, or 404 `not_found`. */
+  async record(workspaceId: string): Promise<WorkspaceRecord> {
     this.assertOpen();
     identity(workspaceId, 'workspaceId');
     const cached = this.records.get(workspaceId);

@@ -3,6 +3,7 @@ import { MySqlStore } from './database.js';
 import { ConfigService } from './config.js';
 import { AgentRuntime, configuredPolicy, piModelStream } from './runtime.js';
 import { createAgentServer } from './http.js';
+import { TeamSystem } from './team-system.js';
 import { WorkspaceService } from './workspace.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -10,12 +11,16 @@ if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
 const models = builtinModels();
 const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
-const runtime = new AgentRuntime(store, config, configuredPolicy(), piModelStream(models));
 const workspaces = new WorkspaceService(store);
-const server = createAgentServer(runtime, config, workspaces);
+const team = new TeamSystem(store, workspaces, config);
+const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models));
+team.attach(runtime);
+const server = createAgentServer(runtime, config, workspaces, team);
 try {
   await store.migrate();
   await config.initialize();
+  // Workspaces registered before teams existed get their lead.
+  await team.initialize();
   await runtime.open();
   const port = Number(process.env.PORT ?? 3000);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid PORT');
@@ -25,6 +30,7 @@ try {
   });
   console.log(`Agent backend listening on ${process.env.HOST ?? '127.0.0.1'}:${port}`);
 } catch (error) {
+  team.runner.close();
   await runtime.close().catch(() => undefined);
   await workspaces.close();
   await store.close();
@@ -36,7 +42,7 @@ async function shutdown() {
   if (closing) return;
   closing = true;
   const closed = new Promise<void>(resolve => server.close(() => resolve()));
-  try { await runtime.close(); }
+  try { team.runner.close(); await runtime.close(); }
   finally {
     server.closeAllConnections();
     await closed;

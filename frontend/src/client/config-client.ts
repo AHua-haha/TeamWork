@@ -13,10 +13,13 @@ export interface ToolOption { kind: 'tool'; label: string; toolName: string }
 export interface PromptOption { kind: 'prompt'; label: string; text: string }
 export type CatalogOption = ToolOption | PromptOption;
 export interface ModelOptions { connectionId: string; modelId: string; reasoning?: ReasoningLevel; temperature?: number; maxTokens?: number; contextBudget?: number }
-export interface AgentSettings {
-  name: string; workspaceId: string | null; connectionId: string | null; modelId: string | null; toolOptionIds: string[];
+/** What a run needs from its agent. A solo agent's config and a team member's record both hold it. */
+export interface RunSettings {
+  connectionId: string | null; modelId: string | null; toolOptionIds: string[];
   prompt: string; promptOptionIds: string[]; modelOptions: ModelOptions[];
 }
+export interface AgentSettings extends RunSettings { name: string }
+export const emptySettings: AgentSettings = { name: '', connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] };
 export interface AgentConfig extends ConfigRecord<AgentSettings> { issues: string[] }
 export interface AgentSummary { agentId: string; name: string; ready: boolean; issues: string[] }
 export interface Capabilities {

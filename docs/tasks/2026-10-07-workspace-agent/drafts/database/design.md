@@ -11,6 +11,8 @@ The database also persists editable app, provider-connection, tool/prompt catalo
 
 It also persists the workspace registry and, for each workspace's context base, the index of current files, every file version, version content, and the ordered change records. The workspace module and the context base decide what to store; the files themselves stay on disk.
 
+It persists each workspace's team members: a member record with its revision, and the member's conversation, which is an agent in the runtime's sense. The team decides what a member record holds; the database keeps the lead unique and the names of active members unique.
+
 ## Inputs and preconditions
 
 - Records are scoped by agent identity and, where applicable, run and message identity.
@@ -31,6 +33,7 @@ It also persists the workspace registry and, for each workspace's context base, 
 - Serialization and deserialization preserve the supported Pi AI message payload and runtime metadata across a successful round trip.
 - Config reads return stored values with revisions. Creates, updates, and deletes commit atomically; a bundle read sees one consistent committed view of the app, agent, catalog, connection, and saved model-discovery records. Creating an agent also creates its initially incomplete config record.
 - A committed context change advances the workspace's sequence number by one and makes its versions, content, index, and change record visible together.
+- Creating a member also creates its conversation, in one transaction. Member records are read by workspace or by ID, and are updated or retired with the previously read revision. A member's conversation is an agent for every runtime operation but is not returned by `listAgents`, has no agent config record, and cannot be given one. Retiring a member keeps its record and conversation.
 
 ### Supported operations and records
 
@@ -44,13 +47,15 @@ It also persists the workspace registry and, for each workspace's context base, 
 - A completed record is `{agentId, runId, messageId, position, message, metadata}`. Positions start at 1 and are ordered within an agent. Position 0 means no completed records have been seen. Chunk sequences start at 0 per message. The range reports `firstAvailable`, `nextSequence` and retained chunks; a requested sequence below `firstAvailable` is a gap, including when every chunk has been removed.
 - Current state is `{agentId, contextRevision, historyPosition, run}`. A run contains `agentId`, `runId`, `status`, `phase`, `step`, `startedAt`, `endedAt`, `endPosition`, `activeMessageId`, and `error`. Status is `running`, `completed`, `failed`, `cancelled`, or `interrupted`; phase is `model`, `tools`, or `finished`. Absent values are null. Timestamps are epoch milliseconds.
 - IDs contain 1–64 ASCII letters, digits, underscores or hyphens; cursors and revisions are nonnegative safe integers. Pi message and event payloads use the pinned Pi AI 0.87.1 format. JSON-compatible extension fields are preserved. Functions, cycles, nonfinite numbers, bigint, class instances and unknown content-block kinds fail. Optional undefined object properties are omitted according to JSON serialization. Stored envelopes have version 1; unknown versions fail explicitly.
-- `getConfig`, `listConfigs`, `createConfig`, `updateConfig`, and `deleteConfig` operate on app, connection, model-cache, catalog, and agent scopes. `configBundle(agentId)` returns the app record, that agent's record, and the catalog, connections, and model caches from one consistent read. `listAgents` returns existing agent IDs.
+- `getConfig`, `listConfigs`, `createConfig`, `updateConfig`, and `deleteConfig` operate on app, connection, model-cache, catalog, and agent scopes. `configBundle(agentId)` returns the app record, that agent's record when an agent is named, and the catalog, connections, and model caches from one consistent read. `listAgents` returns the IDs of existing agents that are not team members.
+- `createMember`, `getMember`, `listMembers(workspaceId)`, `updateMember`, and `retireMember` serve the team. A member record is `{id, workspaceId, revision, value}`, where `id` is also the conversation's agent ID and `value` is opaque JSON supplied by the team. The store also keeps whether the member is the lead and its active name, as the team supplies them, to enforce uniqueness.
 
 **Workspaces and context bases.**
 - **Workspace registry:**
   - `listWorkspaces` returns `{workspaceId, name, directory, createdAt}` records ordered by name.
   - `getWorkspace` returns one record, or null.
-  - `createWorkspace(record, directoryKey)` stores a record. `directoryKey` identifies the directory, and no two workspaces share one.
+  - `createWorkspace(record, directoryKey, lead)` stores a record and its team's lead, with the lead's conversation, in one transaction. `directoryKey` identifies the directory, and no two workspaces share one. If any part fails, nothing is stored.
+- **Run results.** `runMessages(agentId, runId)` returns the completed messages of one run in order, so a caller can read a run's last assistant message without reading the agent's whole history.
 - **Loading.** `loadContext(workspaceId)` returns the workspace's sequence number and its current files from one consistent read. Each file has its path, file ID, revision, content hash, size, modification time, and its version's time, author, and reason.
 - **Committing.** `commitContext(workspaceId, expectedSeq, commit)` stores one change in one transaction:
   - the new sequence number;
@@ -73,6 +78,7 @@ It also persists the workspace registry and, for each workspace's context base, 
 - A request for pruned chunks reports their unavailability; the caller may use completed history or wait for the message to complete.
 - Failure to prune chunks may retain extra temporary data but does not change completed history.
 - A context replacement requires the revision returned by its earlier read. A stale revision produces `context_conflict` and changes nothing. Duplicate agent/message identities or an attempt to start another active run fail with a conflict. A failed transaction leaves all its changes uncommitted.
+- A second lead for a workspace fails with 409 `lead_exists`. A name used by another active member of the workspace fails with 409 `member_exists`. A stale member revision fails with 409 `config_conflict`. A member ID that is not found fails with 404 `not_found`.
 - A stale config revision produces `config_conflict` with no write. A duplicate config identity also conflicts. A missing config record fails a direct read explicitly; the bundle reports missing app/agent records for its caller to reject.
 - A duplicate workspace ID or directory key fails with 409 `workspace_exists`. Loading a missing workspace fails with 404 `not_found`.
 - A context commit whose expected sequence number is not the stored one fails with 503 `backend_error` and writes nothing. Any other failure in the commit also leaves nothing written.
@@ -99,4 +105,5 @@ It also persists the workspace registry and, for each workspace's context base, 
 5. Two editors read config revision 2. The first updates it to revision 3. The second update with revision 2 fails without changing the stored value.
 6. A config-bundle read concurrent with an edit returns either one complete prior state or one complete new state.
 7. A context base commits change 1, creating `user/a.md`, then change 2, moving it to `user/b.md`. Loading the workspace returns `seq` 2 and one current file at `user/b.md`, and the file's history returns both versions.
-8. Two commits both expect sequence number 2. The first stores change 3. The second fails, and the records still end at 3.
+8. A workspace gets a lead and then a second member `Backend`. A second lead, or a second `backend`, is refused. `listAgents` returns neither member, and creating an agent config for the lead's ID is refused. Retiring Backend frees the name `Backend` and keeps its conversation readable.
+9. Two commits both expect sequence number 2. The first stores change 3. The second fails, and the records still end at 3.

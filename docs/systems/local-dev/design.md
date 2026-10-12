@@ -8,7 +8,7 @@ A developer can start, inspect, and stop the local MySQL, backend, and frontend 
 
 - The command accepts `start`, `stop`, or `status` from any working directory.
 - Docker with Compose, Node.js, curl, and installed backend/frontend dependencies are available. The project provides a local database example and a backend environment example.
-- The backend and frontend use local loopback ports 3000 and 5173. A conflicting process on either port prevents startup; the command does not take ownership of that process.
+- The backend and frontend use local loopback ports 3000 and 5273. The frontend does not use Vite's default 5173, which other local Vite and VitePress servers commonly hold. A conflicting process on either port prevents startup; the command does not take ownership of that process.
 
 ## Outputs and observable effects
 
@@ -20,7 +20,7 @@ A developer can start, inspect, and stop the local MySQL, backend, and frontend 
 
 ## Failure behavior
 
-- Missing dependencies, occupied ports, database startup failure, or an application that does not become ready produce a nonzero exit and a useful diagnostic. An application newly started by the failed invocation is stopped. A database newly started by that invocation is stopped. Previously running services are left as they were.
+- Missing dependencies, occupied ports, database startup failure, or an application that does not become ready produce a nonzero exit and a useful diagnostic; for an application that does not become ready, the diagnostic includes the response its URL gave. An application newly started by the failed invocation is stopped. A database newly started by that invocation is stopped. Previously running services are left as they were.
 - A stale process ID does not cause an unrelated process to be signaled. `stop` removes stale ownership records without killing another process.
 - `stop` reports a failed shutdown instead of claiming success if a managed service cannot be stopped.
 
@@ -28,11 +28,12 @@ A developer can start, inspect, and stop the local MySQL, backend, and frontend 
 
 - The script manages one local backend and frontend pair on the documented ports. It does not install packages or manage production processes.
 - Stopping MySQL preserves its Docker volume. The developer may remove it separately if desired.
-- Readiness checks confirm that the documented local API and frontend URL respond; they do not confirm provider credentials or a successful live model call.
+- Readiness checks confirm that the documented local API and frontend URL respond; they do not confirm provider credentials or a successful live model call. They contact those loopback addresses directly, so proxy settings in the developer's shell do not affect them.
 
 ## Acceptance examples
 
 1. With dependencies installed and Docker available, `start` returns after both URLs respond; `status` reports all three services running.
 2. A second `start` leaves the same managed process IDs in place.
 3. `stop` ends the managed application processes and the MySQL container it started, without deleting the database volume. A second `stop` succeeds.
-4. Port 5173 is used by an unrelated server. `start` reports the conflict, stops the backend and MySQL it just started, and leaves that server running.
+4. Port 5273 is used by an unrelated server. `start` reports the conflict, stops the backend and MySQL it just started, and leaves that server running.
+5. The developer's shell sets `http_proxy` and `https_proxy` to a local proxy with no exceptions. `start` still reaches the backend and frontend directly and returns once both respond.

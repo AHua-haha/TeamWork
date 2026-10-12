@@ -47,9 +47,10 @@ The context base is the only memory. Every activation of the lead or a worker st
 
 ## Code map
 
-Built so far: the workspace registry with its project-file view, and the context base's frontend API without proposals. The frontend shows both in a workspace panel. The harness, team, library, agent API, and proposals are designed but not built.
+Built so far: the workspace registry with its project-file view, the context base's frontend API without proposals, and the team: members stored per workspace, the lead, the run part, and the lead's management tools. Members work in the workspace through Pi's file tools, with their scope enforced in the file operations, so the context base has no agent API yet. The frontend adds workspaces, opens each workspace's lead conversation, and shows the team and the files in a panel. The harness, library, agent API for the context base, proposals, search for agents, and commands are designed but not built.
 
-- [Workspace implementation](workspace/impl.md): registry, project files, and the `/workspaces` routes.
+- [Workspace implementation](workspace/impl.md): registry, project files, the files an agent works on, and the `/workspaces` routes.
+- [Team implementation](team/impl.md): members, the lead created with its workspace, calls between members, the member tools, and the instructions each model call starts with.
 - [Context base implementation](context-base/impl.md): current files on disk, versions, change records, outside changes, and follow.
 - [Database implementation](../database/impl.md): the workspace and context-base tables.
 - [Agent runtime implementation](../agent-runtime/impl.md): the server that carries the workspace routes, and the shared change notification.

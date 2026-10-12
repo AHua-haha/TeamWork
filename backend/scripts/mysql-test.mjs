@@ -17,8 +17,10 @@ try {
   }
   if (!ready) throw new Error('Disposable MySQL did not become ready');
   const port = execFileSync('docker', ['port', container, '3306/tcp'], { encoding: 'utf8' }).trim().split(':').at(-1);
+  // The tests call mock servers on loopback. A shell that sets http_proxy and NODE_OPTIONS=--use-env-proxy would send those requests to the proxy.
+  const noProxy = ['127.0.0.1', 'localhost', '::1', process.env.NO_PROXY ?? process.env.no_proxy].filter(Boolean).join(',');
   const result = spawnSync('npm', ['run', 'test:integration'], {
-    stdio: 'inherit', env: { ...process.env, TEST_DATABASE_URL: `mysql://root:rsi-test-root@127.0.0.1:${port}/rsi_agent_test` },
+    stdio: 'inherit', env: { ...process.env, NO_PROXY: noProxy, no_proxy: noProxy, TEST_DATABASE_URL: `mysql://root:rsi-test-root@127.0.0.1:${port}/rsi_agent_test` },
   });
   process.exitCode = result.status ?? 1;
 } finally {

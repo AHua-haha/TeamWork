@@ -3,14 +3,17 @@ import type { AgentRuntime } from './runtime.js';
 import type { ConfigService } from './config.js';
 import { body, fields, json, respond, sse } from './http-helpers.js';
 import { AppError, identity, position } from './types.js';
+import { teamRoutes } from './team-routes.js';
+import type { TeamSystem } from './team-system.js';
 import { workspaceRoutes } from './workspace-routes.js';
 import type { WorkspaceService } from './workspace.js';
 
-export function createAgentServer(runtime: AgentRuntime, config: ConfigService, workspaces: WorkspaceService) {
+export function createAgentServer(runtime: AgentRuntime, config: ConfigService, workspaces: WorkspaceService, team: TeamSystem) {
   const workspaceRoute = workspaceRoutes(workspaces);
+  const teamRoute = teamRoutes(team);
   return createServer(respond(async route => {
     const { request, response, url, path, signal } = route;
-    if (path[0] === 'workspaces') return workspaceRoute(route);
+    if (path[0] === 'workspaces') return path[2] === 'team' ? teamRoute(route) : workspaceRoute(route);
     if (path[0] === 'config') {
       if (path.length === 2 && path[1] === 'capabilities' && request.method === 'GET') { json(response, 200, config.capabilities()); return; }
       if (path.length === 2 && path[1] === 'app') {
@@ -139,7 +142,7 @@ export function createAgentServer(runtime: AgentRuntime, config: ConfigService, 
       const input = await body(request, (await config.getApp()).value.maxInputBytes);
       fields(input, ['input']);
       // The runtime validates Pi's user-content shape and assigns role/time itself.
-      const run = await runtime.start(agentId, input.input as Parameters<AgentRuntime['start']>[1]);
+      const run = await team.runner.startUser(agentId, input.input as Parameters<AgentRuntime['start']>[1]);
       json(response, 202, { runId: run.runId, run, followUrl: `/agents/${agentId}/follow?runId=${run.runId}` });
     } else if (path.length === 5 && path[2] === 'runs' && path[4] === 'cancel' && request.method === 'POST') {
       const runId = path[3];

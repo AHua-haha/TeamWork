@@ -4,13 +4,14 @@ import { mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { ContextBase, contextPath, validSegment, type ContextEvent, type WorkspaceRecord } from '../src/context-base.js';
+import { newLead } from '../src/team.js';
 import { MemoryStore, withFolder } from './memory-store.js';
 
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 
 async function workspace(store: MemoryStore, folder: string): Promise<WorkspaceRecord> {
   const record = { workspaceId: 'w1', name: 'Test', directory: await realpath(folder), createdAt: 1 };
-  await store.createWorkspace(record, 'key');
+  await store.createWorkspace(record, 'key', newLead(record.workspaceId));
   return record;
 }
 

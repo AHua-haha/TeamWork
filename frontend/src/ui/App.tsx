@@ -1,26 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AgentRuntimeProvider } from '../adapter/AssistantRuntime.js';
-import { AgentClient, createAgent } from '../client/agent-client.js';
-import { ConfigClient, type AgentSummary, type ConfigRecord, type ConnectionView } from '../client/config-client.js';
+import { createAgent } from '../client/agent-client.js';
+import { ConfigClient, emptySettings, type AgentSummary, type ConfigRecord, type ConnectionView } from '../client/config-client.js';
+import { WorkspaceClient, type WorkspaceRecord } from '../client/workspace-client.js';
 import { ProvidersPage } from './ProvidersPage.js';
-import { Conversation } from './Thread.js';
-import { useAgentConfig } from './useAgentConfig.js';
-import { ConfirmDialog } from './WorkspaceDialogs.js';
-import { WorkspacePanel } from './WorkspacePanel.js';
+import { readRoute as parseRoute, routeUrl, sameRoute, validId, type Route } from './routes.js';
+import { SoloPage } from './SoloPage.js';
+import { ConfirmDialog, CreateWorkspaceDialog } from './WorkspaceDialogs.js';
+import { WorkspacePage } from './WorkspacePage.js';
 
-type Route = { page: 'conversations' } | { page: 'conversation'; id: string } | { page: 'providers' };
-const validId = /^[A-Za-z0-9_-]{1,64}$/;
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed';
-
-function readRoute(): Route {
-  const query = new URLSearchParams(window.location.search);
-  const id = query.get('agent');
-  if (id && validId.test(id)) return { page: 'conversation', id };
-  if (query.get('page') === 'providers') return { page: 'providers' };
-  return { page: 'conversations' };
-}
-function routeUrl(route: Route): string {
-  return route.page === 'conversation' ? `?agent=${encodeURIComponent(route.id)}` : `?page=${route.page}`;
+const readRoute = () => parseRoute(window.location.search);
+/** The page the user last had open in this browser session, so leaving Config returns to it. */
+type ChatRoute = Extract<Route, { page: 'workspace' | 'conversation' }>;
+const chatRoute = (route: Route): ChatRoute | null => route.page === 'workspace' || route.page === 'conversation' ? route : null;
+const saveChat = (route: ChatRoute) => `${route.page}:${route.id}`;
+function loadChat(value: string | null): ChatRoute | null {
+  const [page, id] = (value ?? '').split(':');
+  return (page === 'workspace' || page === 'conversation') && id && validId.test(id) ? { page, id } : null;
 }
 function ChatIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5.5h16v11H9l-5 3v-14Z" /><path d="M8 9h8M8 13h5" /></svg>;
@@ -28,40 +24,15 @@ function ChatIcon() {
 function ConfigIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="9" cy="6" r="2" fill="white" /><circle cx="16" cy="12" r="2" fill="white" /><circle cx="11" cy="18" r="2" fill="white" /></svg>;
 }
-interface FilesControl { open: boolean; expanded: boolean; show(open: boolean): void; expand(expanded: boolean): void; onDirty(dirty: boolean): void }
-
-/** A conversation page: the chat, and the workspace panel for the conversation's own workspace on its right. */
-function AgentConversation({ agentId, api, configRefresh, files }: { agentId: string; api: ConfigClient; configRefresh: number; files: FilesControl }) {
-  const client = useMemo(() => new AgentClient(agentId), [agentId]);
-  const config = useAgentConfig(agentId, api);
-  const [composerReady, setComposerReady] = useState(false);
-  useEffect(() => { client.follow(); return () => client.dispose(); }, [client]);
-  useEffect(() => { if (configRefresh) void config.refresh(); }, [configRefresh, config.refresh]);
-  const sendAllowed = composerReady && !config.loading && !config.saving && !config.error && !!config.record && config.record.issues.length === 0;
-  const bind = (workspaceId: string) => {
-    const record = config.record;
-    void (record ? config.save({ ...record.value, workspaceId }, record.revision) : config.initialize({ workspaceId }));
-  };
-  return <div className={`conversation-page ${files.open && files.expanded ? 'expanded' : ''}`}>
-    <AgentRuntimeProvider client={client} sendAllowed={sendAllowed}>
-      <Conversation client={client} config={config} api={api} onConfigGate={setComposerReady} filesOpen={files.open} onFiles={files.show} />
-    </AgentRuntimeProvider>
-    {files.open && <button type="button" className="workspace-scrim" aria-label="Hide workspace files" onClick={() => files.show(false)} />}
-    <WorkspacePanel open={files.open} expanded={files.expanded} workspaceId={config.record?.value.workspaceId ?? null} ready={!config.loading} saving={config.saving} error={config.error}
-      onBind={bind} onExpand={files.expand} onClose={() => files.show(false)} onDirty={files.onDirty} />
-  </div>;
-}
-
 export function App() {
   const api = useMemo(() => new ConfigClient(), []);
+  const workspaceClient = useMemo(() => new WorkspaceClient(), []);
   const [route, setRoute] = useState<Route>(readRoute);
-  const [lastConversationId, setLastConversationId] = useState<string | null>(() => {
-    const initial = readRoute();
-    if (initial.page === 'conversation') return initial.id;
-    try {
-      const saved = window.sessionStorage.getItem('lastConversationId');
-      return saved && validId.test(saved) ? saved : null;
-    } catch { return null; }
+  const [lastChat, setLastChat] = useState<ChatRoute | null>(() => {
+    const initial = chatRoute(readRoute());
+    if (initial) return initial;
+    try { return loadChat(window.sessionStorage.getItem('lastChat')); }
+    catch { return null; }
   });
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth > 760);
   const [filesOpen, setFilesOpen] = useState(false);
@@ -75,6 +46,10 @@ export function App() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [agentsError, setAgentsError] = useState<string | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
+  const [workspacesLoading, setWorkspacesLoading] = useState(true);
+  const [workspacesError, setWorkspacesError] = useState<string | null>(null);
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
   const [connections, setConnections] = useState<ConfigRecord<ConnectionView>[]>([]);
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
@@ -94,6 +69,11 @@ export function App() {
     catch (cause) { setAgentsError(errorText(cause)); }
     finally { setAgentsLoading(false); }
   }, [api]);
+  const loadWorkspaces = useCallback(async () => {
+    try { setWorkspaces(await workspaceClient.listWorkspaces()); setWorkspacesError(null); }
+    catch (cause) { setWorkspacesError(errorText(cause)); }
+    finally { setWorkspacesLoading(false); }
+  }, [workspaceClient]);
   const loadConnections = useCallback(async () => {
     try { setConnections(await api.listConnections()); setConnectionsError(null); }
     catch (cause) { setConnectionsError(errorText(cause)); }
@@ -108,27 +88,28 @@ export function App() {
   }, [api]);
 
   useEffect(() => {
-    void loadAgents(); void loadConnections(); void loadApp();
-    const onFocus = () => { void loadAgents(); void loadConnections(); void loadApp(); };
+    void loadAgents(); void loadWorkspaces(); void loadConnections(); void loadApp();
+    const onFocus = () => { void loadAgents(); void loadWorkspaces(); void loadConnections(); void loadApp(); };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [loadAgents, loadConnections, loadApp]);
+  }, [loadAgents, loadWorkspaces, loadConnections, loadApp]);
   useEffect(() => { document.title = title; }, [title]);
   useEffect(() => {
-    if (!lastConversationId) return;
-    try { window.sessionStorage.setItem('lastConversationId', lastConversationId); } catch { /* Keep navigation usable without session storage. */ }
-  }, [lastConversationId]);
+    if (!lastChat) return;
+    try { window.sessionStorage.setItem('lastChat', saveChat(lastChat)); } catch { /* Keep navigation usable without session storage. */ }
+  }, [lastChat]);
   useEffect(() => {
     const onPop = () => {
       const next = readRoute();
-      // Leaving the conversation closes its open files, so unsaved edits are confirmed first.
-      if (filesDirty.current && routeUrl(next) !== routeUrl(routeRef.current)) {
+      // Leaving a workspace page closes its open files, so unsaved edits are confirmed first.
+      if (filesDirty.current && !sameRoute(next, routeRef.current)) {
         window.history.pushState(null, '', routeUrl(routeRef.current));
         setLeaving(next);
         return;
       }
       setRoute(next);
-      if (next.page === 'conversation') setLastConversationId(next.id);
+      const chat = chatRoute(next);
+      if (chat) setLastChat(chat);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -136,10 +117,11 @@ export function App() {
   const onFilesDirty = useCallback((dirty: boolean) => { filesDirty.current = dirty; }, []);
 
   function navigate(next: Route) {
-    if (filesDirty.current && routeUrl(next) !== routeUrl(route)) { setLeaving(next); return; }
+    if (filesDirty.current && !sameRoute(next, route)) { setLeaving(next); return; }
     if (window.location.search !== routeUrl(next)) window.history.pushState(null, '', routeUrl(next));
     setRoute(next); setError(null);
-    if (next.page === 'conversation') setLastConversationId(next.id);
+    const chat = chatRoute(next);
+    if (chat) setLastChat(chat);
     if (window.innerWidth <= 760) setPanelOpen(false);
   }
   function showFiles(open: boolean) {
@@ -148,7 +130,7 @@ export function App() {
   }
   function chooseSection(next: 'conversations' | 'config') {
     if (section === next) { setPanelOpen(!panelOpen); return; }
-    navigate(next === 'config' ? { page: 'providers' } : lastConversationId ? { page: 'conversation', id: lastConversationId } : { page: 'conversations' });
+    navigate(next === 'config' ? { page: 'providers' } : lastChat ?? { page: 'home' });
     setPanelOpen(true);
   }
   async function newConversation() {
@@ -156,7 +138,7 @@ export function App() {
     try {
       const id = await createAgent();
       try {
-        await api.createAgentConfig(id, { name: '', workspaceId: null, connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] });
+        await api.createAgentConfig(id, emptySettings);
       } catch (cause) { setError(`Conversation created, but setup needs attention: ${errorText(cause)}`); }
       await loadAgents();
       navigate({ page: 'conversation', id });
@@ -176,7 +158,9 @@ export function App() {
     finally { setRenameBusy(false); }
   }
 
-  const filteredAgents = agents.filter(agent => `${agent.name} ${agent.agentId}`.toLowerCase().includes(search.toLowerCase().trim()));
+  const needle = search.toLowerCase().trim();
+  const filteredAgents = agents.filter(agent => `${agent.name} ${agent.agentId}`.toLowerCase().includes(needle));
+  const filteredWorkspaces = workspaces.filter(workspace => `${workspace.name} ${workspace.directory}`.toLowerCase().includes(needle));
 
   return <div className={`app-shell ${panelOpen ? 'panel-open' : 'panel-closed'}`}>
     <nav className="icon-rail" aria-label="Primary navigation">
@@ -189,9 +173,20 @@ export function App() {
     {panelOpen && <button type="button" className="mobile-scrim" aria-label="Close sidebar" onClick={() => setPanelOpen(false)} />}
     <aside className="context-panel" aria-label={section === 'conversations' ? 'Conversations sidebar' : 'Config sidebar'} aria-hidden={!panelOpen} inert={!panelOpen}>
       {section === 'conversations' ? <>
-        <div className="context-head"><span className="eyebrow">WORKSPACE</span><h2>Conversations</h2></div>
-        <button type="button" className="new-conversation" disabled={creating || !allowCreation} title={allowCreation ? undefined : 'Conversation creation is disabled by app settings'} onClick={() => void newConversation()}><span>＋</span>{creating ? 'Creating…' : 'New conversation'}</button>
-        <label className="sidebar-search"><span className="sr-only">Search conversations</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search conversations" /></label>
+        <div className="context-head"><span className="eyebrow">PROJECTS</span><h2>Conversations</h2></div>
+        <label className="sidebar-search"><span className="sr-only">Search workspaces and conversations</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search" /></label>
+        <div className="context-section-label with-action"><span>WORKSPACES</span>
+          <button type="button" className="section-add" title="Add workspace" aria-label="Add workspace" onClick={() => setAddingWorkspace(true)}>＋</button></div>
+        {workspacesError && <div className="sidebar-error" role="alert">{workspacesError}<button type="button" onClick={() => void loadWorkspaces()}>Retry</button></div>}
+        <div className="context-list" aria-label="Workspace list">
+          {workspacesLoading && !workspaces.length && <p className="sidebar-muted">Loading workspaces…</p>}
+          {!workspacesLoading && !workspaces.length && !workspacesError && <p className="sidebar-muted">No workspaces yet. A workspace is a project folder with its own team.</p>}
+          {filteredWorkspaces.map(workspace => <div className={`conversation-nav-row ${route.page === 'workspace' && route.id === workspace.workspaceId ? 'selected' : ''}`} key={workspace.workspaceId}>
+            <button type="button" className="conversation-nav-link" title={workspace.directory} onClick={() => navigate({ page: 'workspace', id: workspace.workspaceId })}><span className="conversation-nav-mark">▣</span><span>{workspace.name}</span></button>
+          </div>)}
+        </div>
+        <div className="context-section-label with-action"><span>CONVERSATIONS</span>
+          <button type="button" className="section-add" disabled={creating || !allowCreation} title={allowCreation ? 'New conversation' : 'Conversation creation is disabled by app settings'} aria-label="New conversation" onClick={() => void newConversation()}>{creating ? '…' : '＋'}</button></div>
         {agentsError && <div className="sidebar-error" role="alert">{agentsError}<button type="button" onClick={() => void loadAgents()}>Retry</button></div>}
         <div className="context-list" aria-label="Conversation list">
           {agentsLoading && !agents.length && <p className="sidebar-muted">Loading conversations…</p>}
@@ -220,13 +215,22 @@ export function App() {
     </aside>
     <main className="main-area">
       {error && <div className="setup-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
-      {route.page === 'conversation' && <AgentConversation key={route.id} agentId={route.id} api={api} configRefresh={configRefresh}
+      {route.page === 'workspace' && <WorkspacePage key={route.id} workspaceId={route.id} name={workspaces.find(item => item.workspaceId === route.id)?.name ?? null} api={api}
         files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded, onDirty: onFilesDirty }} />}
-      {route.page === 'conversations' && <div className="welcome-page"><div className="welcome-mark">✳</div><div className="eyebrow">CONVERSATIONS</div><h1>What would you like to explore?</h1><p>Select a conversation from the sidebar or create a new one.</p><button type="button" className="primary-button" disabled={creating || !allowCreation} onClick={() => void newConversation()}>＋ New conversation</button></div>}
+      {route.page === 'conversation' && <SoloPage key={route.id} agentId={route.id} api={api} configRefresh={configRefresh} />}
+      {route.page === 'home' && <div className="welcome-page"><div className="welcome-mark">✳</div><div className="eyebrow">PROJECTS</div><h1>What would you like to work on?</h1>
+        <p>Add a workspace to work on a project with its team, or start a conversation with no workspace.</p>
+        <div className="welcome-actions"><button type="button" className="primary-button" onClick={() => setAddingWorkspace(true)}>＋ Add workspace</button>
+          <button type="button" className="secondary-button" disabled={creating || !allowCreation} onClick={() => void newConversation()}>＋ New conversation</button></div></div>}
       {route.page === 'providers' && <ProvidersPage api={api} records={connections} loading={connectionsLoading} loadError={connectionsError} refresh={loadConnections} focusId={focusProviderId} clearFocus={() => setFocusProviderId(null)} />}
     </main>
     {leaving && <ConfirmDialog eyebrow="UNSAVED CHANGES" title="Leave with unsaved changes?" action="Discard and leave"
-      message="Some open workspace files have changes that are not saved. Leaving this conversation closes them and discards the changes."
+      message="Some open workspace files have changes that are not saved. Leaving this workspace closes them and discards the changes."
       onClose={() => setLeaving(null)} onConfirm={() => { const next = leaving; setLeaving(null); filesDirty.current = false; navigate(next); }} />}
+    {addingWorkspace && <CreateWorkspaceDialog client={workspaceClient} onClose={() => setAddingWorkspace(false)} onCreated={created => {
+      setAddingWorkspace(false);
+      setWorkspaces(list => [...list.filter(item => item.workspaceId !== created.workspaceId), created].sort((a, b) => a.name.localeCompare(b.name)));
+      navigate({ page: 'workspace', id: created.workspaceId });
+    }} />}
   </div>;
 }

@@ -146,6 +146,26 @@ export class AgentRuntime {
     job.controller.abort();
   }
 
+  /** Resolves with the run's final state once its work has ended here. A run this runtime does not run reports its stored state at once. */
+  async finished(agentId: string, runId: string): Promise<RunState> {
+    await this.jobs.get(runId)?.done;
+    const { state } = await this.store.followSnapshot(agentId, runId, 0, false);
+    this.checkFinalization(runId);
+    return state.run!;
+  }
+
+  /** The text of the last assistant message of a run that has any, or an empty string. */
+  async finalText(agentId: string, runId: string): Promise<string> {
+    const messages = await this.store.runMessages(agentId, runId);
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index]!.message;
+      if (message.role !== 'assistant') continue;
+      const text = message.content.flatMap(part => (part.type === 'text' ? [part.text] : [])).join('\n').trim();
+      if (text) return text;
+    }
+    return '';
+  }
+
   async getState(agentId: string): Promise<CurrentState> {
     this.available();
     const state = await this.store.getState(agentId);

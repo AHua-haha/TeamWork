@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ContextFeed, WorkspaceClient, type ContextOverview, type Entry, type FeedSnapshot, type Found, type Workspace, type WorkspaceRecord } from '../client/workspace-client.js';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { ContextFeed, WorkspaceClient, type ContextOverview, type Entry, type FeedSnapshot, type Found, type Workspace } from '../client/workspace-client.js';
 import { ancestorsOf, errorText, FolderTree, nameOf, useFolders } from './FileTree.js';
 import { FileView, type FileSource, type FileTarget } from './FileView.js';
 import { Glyph } from './Glyph.js';
-import { ConfirmDialog, CreateWorkspaceDialog, PathDialog } from './WorkspaceDialogs.js';
+import { TeamTab } from './TeamTab.js';
+import type { TeamState } from './useTeam.js';
+import { ConfirmDialog, PathDialog } from './WorkspaceDialogs.js';
 
 /** Context paths compare without case, like the backend; project paths compare exactly. */
 const sameTarget = (a: FileTarget, b: FileTarget) => a.source === b.source && (a.source === 'context' ? a.path.toLowerCase() === b.path.toLowerCase() : a.path === b.path);
@@ -16,20 +18,17 @@ const narrow = () => window.matchMedia('(max-width: 760px)').matches;
 interface PanelProps {
   open: boolean;
   expanded: boolean;
-  /** The conversation's workspace; null until the user chooses one. */
-  workspaceId: string | null;
-  /** Whether the conversation's settings are loaded, so its workspace is known. */
-  ready: boolean;
-  saving: boolean;
-  error: string | null;
-  onBind(workspaceId: string): void;
+  /** The workspace of the page, from its address. */
+  workspaceId: string;
+  /** The workspace's team, read by the page. */
+  team: TeamState;
   onExpand(expanded: boolean): void;
   onClose(): void;
   onDirty(dirty: boolean): void;
 }
 
-/** The conversation's workspace sidebar: it asks once for the workspace, then shows open files in tabs with the workspace tree on the right. */
-export function WorkspacePanel({ open, expanded, workspaceId, ready, saving, error, onBind, onExpand, onClose, onDirty }: PanelProps) {
+/** The workspace page's sidebar: the pinned Team tab and the open files in tabs, with the workspace tree on the right. */
+export function WorkspacePanel({ open, expanded, workspaceId, team, onExpand, onClose, onDirty }: PanelProps) {
   const client = useMemo(() => new WorkspaceClient(), []);
   const [visited, setVisited] = useState(open);
   if (open && !visited) setVisited(true);
@@ -39,7 +38,7 @@ export function WorkspacePanel({ open, expanded, workspaceId, ready, saving, err
 
   useEffect(() => {
     setWorkspace(null); setLoadError(null);
-    if (!visited || !workspaceId) return;
+    if (!visited) return;
     let current = true;
     client.getWorkspace(workspaceId).then(value => { if (current) setWorkspace(value); }, (cause: unknown) => { if (current) setLoadError(errorText(cause)); });
     return () => { current = false; };
@@ -54,13 +53,11 @@ export function WorkspacePanel({ open, expanded, workspaceId, ready, saving, err
 
   let body: ReactNode = null;
   if (!visited) body = null;
-  else if (!ready) body = notice(error ? <div className="sidebar-error" role="alert">{error}</div> : <p className="sidebar-muted">Loading the conversation…</p>);
-  else if (!workspaceId) body = <WorkspaceChooser client={client} bar={titleBar} saving={saving} error={error} onBind={onBind} />;
   else if (loadError) body = notice(<div className="sidebar-error" role="alert">{loadError}<button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></div>);
   else if (!workspace) body = notice(<p className="sidebar-muted">Opening workspace…</p>);
-  else body = <WorkspaceView key={workspace.workspaceId} client={client} workspace={workspace} actions={actions} onDirty={onDirty} />;
+  else body = <WorkspaceView key={workspace.workspaceId} client={client} workspace={workspace} team={team} actions={actions} onDirty={onDirty} />;
 
-  return <aside className={`workspace-panel ${open ? 'open' : ''} ${expanded ? 'expanded' : ''}`} aria-label="Workspace files" aria-hidden={!open} inert={!open}>{body}</aside>;
+  return <aside className={`workspace-panel ${open ? 'open' : ''} ${expanded ? 'expanded' : ''}`} aria-label="Team and files" aria-hidden={!open} inert={!open}>{body}</aside>;
 }
 
 /** The panel's top bar: tabs or a title on the left, panel actions on the right. */
@@ -68,53 +65,11 @@ function PanelBar({ actions, children }: { actions: ReactNode; children: ReactNo
   return <div className="workspace-bar"><div className="workspace-tabs">{children}</div><div className="workspace-bar-actions">{actions}</div></div>;
 }
 
-/** Lists the registered workspaces so the user can choose the conversation's workspace, once. */
-function WorkspaceChooser({ client, bar, saving, error, onBind }: { client: WorkspaceClient; bar: ReactNode; saving: boolean; error: string | null; onBind(workspaceId: string): void }) {
-  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[] | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const group = useId();
-  const load = useCallback(async () => {
-    try { setWorkspaces(await client.listWorkspaces()); setListError(null); }
-    catch (cause) { setListError(errorText(cause)); }
-  }, [client]);
-  useEffect(() => { void load(); }, [load]);
-
-  return <>
-    {bar}
-    <div className="workspace-chooser">
-      <span className="eyebrow">WORKSPACE</span>
-      <h2>Choose a workspace for this conversation</h2>
-      <p>The agent works in the workspace's project folder and its context base. The conversation keeps this workspace; start a new conversation to work in another one.</p>
-      {error && <div className="form-error" role="alert">{error}</div>}
-      {listError ? <div className="sidebar-error" role="alert">{listError}<button type="button" onClick={() => void load()}>Retry</button></div>
-        : !workspaces ? <p className="sidebar-muted">Loading workspaces…</p>
-        : !workspaces.length ? <p className="sidebar-muted">No workspaces yet. A workspace is a project folder with its own context base.</p>
-        : <fieldset className="workspace-options"><legend className="sr-only">Workspaces</legend>
-          {workspaces.map(item => <label key={item.workspaceId} className="workspace-option">
-            <input type="radio" name={group} checked={selected === item.workspaceId} disabled={saving} onChange={() => setSelected(item.workspaceId)} />
-            <span><strong>{item.name}</strong><small>{item.directory}</small></span>
-          </label>)}
-        </fieldset>}
-      <div className="workspace-chooser-actions">
-        <button type="button" className="primary-button" disabled={!selected || saving} onClick={() => { if (selected) onBind(selected); }}>{saving ? 'Saving…' : 'Use this workspace'}</button>
-        <button type="button" className="secondary-button" disabled={saving} onClick={() => setCreating(true)}><Glyph name="plus" />New workspace</button>
-      </div>
-    </div>
-    {creating && <CreateWorkspaceDialog client={client} onClose={() => setCreating(false)} onCreated={created => {
-      setCreating(false);
-      setWorkspaces(list => [...(list ?? []), created]);
-      setSelected(created.workspaceId);
-    }} />}
-  </>;
-}
-
 type DialogState = { type: 'new'; source: FileSource; folder: string } | { type: 'move' | 'delete'; path: string; folder: boolean };
 /** An open file. Its handlers are made once, so the file view's effects keep their subscriptions. */
 interface Tab extends FileTarget { key: number; startEditing: boolean; onDirty(dirty: boolean): void; onMoved(path: string): void }
 
-function WorkspaceView({ client, workspace, actions, onDirty }: { client: WorkspaceClient; workspace: Workspace; actions: ReactNode; onDirty(dirty: boolean): void }) {
+function WorkspaceView({ client, workspace, team, actions, onDirty }: { client: WorkspaceClient; workspace: Workspace; team: TeamState; actions: ReactNode; onDirty(dirty: boolean): void }) {
   const id = workspace.workspaceId;
   const [feed, setFeed] = useState<ContextFeed | null>(null);
   const [feedFrom, setFeedFrom] = useState({ seq: workspace.context.seq });
@@ -127,7 +82,9 @@ function WorkspaceView({ client, workspace, actions, onDirty }: { client: Worksp
   const [found, setFound] = useState<{ context: Found; project: Found } | null>(null);
   const [findError, setFindError] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
+  /** The active file tab; null is the pinned Team tab. */
   const [activeKey, setActiveKey] = useState<number | null>(null);
+  const [scopeNote, setScopeNote] = useState<string | null>(null);
   const [dirtyKeys, setDirtyKeys] = useState<ReadonlySet<number>>(() => new Set());
   const [treeOpen, setTreeOpen] = useState(true);
   const [filterFocus, setFilterFocus] = useState(0);
@@ -136,7 +93,8 @@ function WorkspaceView({ client, workspace, actions, onDirty }: { client: Worksp
   const keys = useRef(0);
   const filterInput = useRef<HTMLInputElement>(null);
   const reloadContext = context.reload;
-  const active = tabs.find(tab => tab.key === activeKey) ?? tabs.at(-1) ?? null;
+  const active = tabs.find(tab => tab.key === activeKey) ?? null;
+  const showTeam = active === null;
   const closingTab = tabs.find(tab => tab.key === closing);
 
   useEffect(() => {
@@ -199,6 +157,18 @@ function WorkspaceView({ client, workspace, actions, onDirty }: { client: Worksp
   };
   const requestClose = (key: number) => { if (dirtyKeys.has(key)) setClosing(key); else closeTab(key); };
   const browse = () => { setTreeOpen(true); setFilterFocus(value => value + 1); };
+  /** A scope path from a member card: a folder is revealed in the tree, a file opens in a tab. */
+  const openScope = (path: string) => {
+    setScopeNote(null);
+    client.contextTree(id, path).then(() => {
+      context.expand([...ancestorsOf(path), path]);
+      setTreeOpen(true);
+    }, (cause: unknown) => {
+      const code = (cause as { code?: string }).code;
+      if (code === 'invalid_path') show({ source: 'context', path });
+      else setScopeNote(code === 'not_found' ? `${path} does not exist yet.` : errorText(cause));
+    });
+  };
 
   const contextActions = (entry: Entry) => entry.path.startsWith('user/') && <>
     {entry.type === 'folder' && <button type="button" className="tree-action" title="New file here" aria-label={`New file in ${entry.path}`} onClick={() => setDialog({ type: 'new', source: 'context', folder: entry.path })}><Glyph name="plus" /></button>}
@@ -214,6 +184,12 @@ function WorkspaceView({ client, workspace, actions, onDirty }: { client: Worksp
       <button type="button" className="tree-action" aria-pressed={treeOpen} aria-label="File tree" title={treeOpen ? 'Hide file tree' : 'Show file tree'} onClick={() => setTreeOpen(!treeOpen)}><Glyph name="tree" /></button>
       {actions}
     </>}>
+      <div className={`workspace-tab pinned ${showTeam ? 'active' : ''}`}>
+        <button type="button" aria-current={showTeam ? 'true' : undefined} title="The workspace's team" onClick={() => setActiveKey(null)}>
+          <span className="workspace-tab-name">Team</span>
+          {team.team?.members.some(member => member.running) && <span className="team-working" aria-label="A member is working" title="A member is working" />}
+        </button>
+      </div>
       {tabs.map(tab => {
         const name = nameOf(tab.path);
         const current = tab.key === active?.key;
@@ -235,12 +211,9 @@ function WorkspaceView({ client, workspace, actions, onDirty }: { client: Worksp
             onMoved={tab.onMoved} onDirty={tab.onDirty} onOpenLink={target => show(target)}
             onRename={() => setDialog({ type: 'move', path: tab.path, folder: false })} onDelete={() => setDialog({ type: 'delete', path: tab.path, folder: false })} />
         </div>)}
-        {!tabs.length && <div className="workspace-empty">
-          <strong>{workspace.name}</strong>
-          <span className="workspace-directory">{workspace.directory}</span>
-          <p>Open a file from the tree to preview or edit it.</p>
-          {!treeOpen && <button type="button" className="secondary-button" onClick={browse}>Show files</button>}
-        </div>}
+        <div className="file-tab-panel" hidden={!showTeam}>
+          <TeamTab team={team} workspace={workspace} note={scopeNote} onOpenScope={openScope} onBrowse={browse} />
+        </div>
       </div>
       {treeOpen && <div className="workspace-tree-column">
         <div className="workspace-tree-head"><strong>{workspace.name}</strong><span className="workspace-directory" title={workspace.directory}>{workspace.directory}</span></div>
