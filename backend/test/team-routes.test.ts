@@ -5,6 +5,7 @@ import { text } from 'node:stream/consumers';
 import { test } from 'node:test';
 import { createAgentServer } from '../src/http.js';
 import type { AgentRuntime } from '../src/runtime.js';
+import { emptyHarness } from '../src/harness-config.js';
 import { stubConfig, withTeam, type Fixture } from './team-fixture.js';
 
 type Body = Record<string, any>;
@@ -41,16 +42,16 @@ test('the team is viewed, formed, changed, and retired over HTTP', () => withSer
   const team = await call(base);
   assert.deepEqual(team.members.map((member: Body) => [member.name, member.lead, member.ready, member.running]), [['Lead', true, true, false]]);
 
-  const created = await call(`${base}/members`, { method: 'POST', status: 201, data: { name: 'Backend', role: 'backend developer', scope: ['agent/systems/backend'] } });
-  assert.deepEqual([created.name, created.scope, created.ready, created.running, created.revision], ['Backend', ['agent/systems/backend'], true, false, 0]);
+  const created = await call(`${base}/members`, { method: 'POST', status: 201, data: { name: 'Backend', role: 'backend developer', harness: emptyHarness() } });
+  assert.deepEqual([created.name, created.harness, created.ready, created.running, created.revision], ['Backend', emptyHarness(), false, false, 0]);
   assert.equal((await call(`${base}/members/${created.memberId}`)).name, 'Backend');
   await fixture.team.runner.startUser(fixture.lead.memberId, 'go');
   assert.deepEqual((await call(base)).members.map((member: Body) => member.running), [true, false]);
   fixture.runtime.end(fixture.lead.memberId);
 
-  const changed = await call(`${base}/members/${created.memberId}`, { method: 'PUT', data: { revision: 0, value: { name: 'Backend', role: 'api developer', responsibility: 'The API', scope: [], settings: created.settings } } });
+  const changed = await call(`${base}/members/${created.memberId}`, { method: 'PUT', data: { revision: 0, value: { name: 'Backend', role: 'api developer', responsibility: 'The API', harness: emptyHarness(), settings: created.settings } } });
   assert.deepEqual([changed.role, changed.revision, changed.running], ['api developer', 1, false]);
-  assert.equal((await call(`${base}/members/${created.memberId}`, { method: 'PUT', status: 409, data: { revision: 0, value: { name: 'Backend', role: 'x', responsibility: '', scope: [], settings: created.settings } } })).error.code, 'config_conflict');
+  assert.equal((await call(`${base}/members/${created.memberId}`, { method: 'PUT', status: 409, data: { revision: 0, value: { name: 'Backend', role: 'x', responsibility: '', harness: emptyHarness(), settings: created.settings } } })).error.code, 'config_conflict');
   assert.equal((await call(`${base}/members`, { method: 'POST', status: 409, data: { name: 'backend', role: 'x' } })).error.code, 'member_exists');
   assert.equal((await call(`${base}/members`, { method: 'POST', status: 400, data: { name: 'X', role: 'x', surprise: 1 } })).error.code, 'invalid_input');
 

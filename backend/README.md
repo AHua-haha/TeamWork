@@ -65,6 +65,42 @@ On open/refresh, omit `runId` to sync and follow the latest run. On reconnect, d
 
 SSE types: `message`, `sync`, `chunk`, `gap`, `state`, `end`; transport errors use `stream_error`. Pi payloads are preserved inside versioned JSON envelopes. `partial` in a Pi event is cumulative; a client using it should replace the current partial rather than appending the same delta again. There is no periodic frontend polling or connection spanning runs.
 
+## Workspace lead and harness prototype
+
+Create or adopt a workspace in the frontend, select its lead's model, and talk to the lead. It can offer choices to settle the design, save discussed changes, form the team, configure harnesses and assign work. Design changes appear in tool results with exact before/after content and reason, and in context history attributed to the lead.
+
+A design part is an ordinary user-context JSON file:
+
+```json
+{
+  "content": "# Backend design\nImplement the agreed backend behavior.",
+  "implementation": ["backend/src", "backend/test"]
+}
+```
+
+A member harness has two configuration parts:
+
+```json
+{
+  "designScope": {
+    "working": ["user/design/backend.json"],
+    "dependencies": ["user/design/api.json"]
+  },
+  "allowedCommands": [
+    {"kind": "exact", "argv": ["npm", "test"]},
+    {"kind": "executable", "executable": "node"}
+  ]
+}
+```
+
+The lead uses `save_design`, `create_member`, `configure_harness` and `assign_member`. Workers read and follow working designs, edit their mapped implementation through file tools, and only read dependency design/implementation. Dependency read-only access takes precedence on overlap. Generic file tools cannot edit context. Design records survive member retirement and replacement.
+
+New or migrated workers need a configured design scope before running. The old agent-context `scope` field is replaced once at startup with an empty harness; identity, conversations and settings are preserved. Members use harness tools and require empty catalog tool selections. Existing text design notes can be read and converted by the lead after discussion.
+
+`run_command` accepts an executable/argument vector and checks exact whole commands or exact executable names/paths. It runs in the workspace directory without implicit shell parsing, retains up to 64 KiB of output, and times out after 60 seconds. Filesystem confinement of allowed command effects and automated harness-context maintenance remain deferred.
+
+Contracts: [lead](../docs/systems/workspace-agent/team/lead/design.md), [harness](../docs/systems/workspace-agent/harness/design.md), [design parts](../docs/systems/workspace-agent/context-base/design-parts/design.md), and [team](../docs/systems/workspace-agent/team/design.md).
+
 ## Customize the runtime
 
 The exported `AgentRuntime` always owns the loop. `RuntimePolicy` supplies:
@@ -77,7 +113,7 @@ The exported `AgentRuntime` always owns the loop. `RuntimePolicy` supplies:
 | `shouldContinue(scope, response, results)` | Decide whether the loop makes another call |
 | `messageMetadata(scope, message)` | Attach JSON metadata to completed model/tool records |
 
-`configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the canonical context history for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. The executable ships with no tools; register the tools your application needs and expose them through catalog entries.
+`configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the canonical context history for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. Solo agents have no built-in catalog tools; register them in a custom entry point. Workspace members receive their tools from the harness, including lead design and team operations.
 
 Example policy customization:
 

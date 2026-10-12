@@ -13,10 +13,10 @@ export function leadConfig(member: Member): AgentConfig {
   return { id: member.memberId, revision: member.revision, value: { name: member.name, ...member.settings }, issues: member.issues };
 }
 
-/** The member fields to save when the composer changes the lead's settings. The lead keeps its name, role, responsibility, and scope. */
+/** Composer edits preserve the lead's team identity and harness. */
 export function leadFields(member: Member, value: AgentSettings): MemberFields {
   const { name: _name, ...settings } = value;
-  return { name: member.name, role: member.role, responsibility: member.responsibility, scope: member.scope, settings };
+  return { name: member.name, role: member.role, responsibility: member.responsibility, harness: member.harness, settings };
 }
 
 /** Whether the team is read on a timer: only while the lead's run is active. */

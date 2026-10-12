@@ -23,7 +23,7 @@ A separate config client reads and edits backend config records. Navigation, pro
 ## Inputs and preconditions
 
 - The backend supplies the registered workspaces; for each, a team of members, with the lead first; a list of agents that belong to no workspace; one history per agent, including each lead; a sync-then-follow operation for a run; agent config records for solo agents with revisions and validation issues; provider connection records; and model choices for each connection.
-- A team member has a name, role, responsibility, scope paths, run settings, a revision, issues that stop it from running, and whether it is running now, as the [Team design](../workspace-agent/team/design.md) defines. The lead's conversation is the agent whose ID is the lead's member ID.
+- A team member has a name, role, responsibility, working/dependency design references and command allowances, run settings, a revision, issues that stop it from running, and whether it is running now, as the [Team design](../workspace-agent/team/design.md) defines. The lead's conversation is the agent whose ID is the lead's member ID.
 - A model selection is identified by both the provider connection ID and model ID. Names and model IDs alone need not be unique across connections.
 - A connection includes its display name, provider, request protocol, endpoint URL, and whether a key is configured. The API key is write-only to the backend; read responses do not contain it.
 - A model choice supplies its display label, its reasoning levels (the shared scale `off, low, medium, high, xhigh` for reasoning models, none otherwise), the level each scale step is actually sent as for that model, its effective default level, maximum output, context window, and whether its metadata is verified. A listed model is an available choice, not proof that a credential can invoke it.
@@ -86,6 +86,8 @@ A separate config client reads and edits backend config records. Navigation, pro
 | Encounter a missing chunk range | Discard the affected partial. | Show the completed record when it becomes available. |
 | Receive run completion | Apply final updates and finish following. | Preserve history and final run state. |
 
+A design-based assignment is headed **Assign → Backend** with Assignment and Report sections. Design reads and updates, harness configuration and command execution have named tool cards. An applied design change includes exact before/after file content and reason from the backend; no additional approval screen is added. Context versions authored by the lead are labeled **edited by lead**. Structured design records are editable as ordinary JSON text files.
+
 A call from the lead to another member appears like any tool call, with a header that names the recipient, such as **→ Backend**. Its input is the text sent, and its result is the recipient's final response, shown when the call returns; while it waits the card says Running. The recipient's own reasoning, tool calls, and files are not shown in the conversation, and the application offers no way to open another member's conversation.
 
 One follow stream ends with one run; another run opens a new stream. The UI does not periodically poll for live chunks. The assistant-ui adapter derives its messages from the client snapshot, preserves Pi content order and backend message identity, and associates tool results with their displayed tool calls. A completed record supersedes its partial presentation. The visible history does not change when the backend compacts model-facing context.
@@ -100,8 +102,8 @@ One follow stream ends with one run; another run opens a new stream. The UI does
 - **Team tab.** It lists the workspace's members, the lead first, each as a card:
   - the name, with the lead marked, and the role;
   - a status: **Working** while the member is running, **Idle** when it can run, or **Cannot run** with the reasons when it has issues; the lead without a model says to select one in the composer;
-  - the responsibility, the selected model, and the scope as paths;
-  - a scope path that exists opens in a file tab, a folder by revealing it in the tree.
+  - the responsibility, selected model, working design paths, read-only dependency paths, and allowed exact commands or executables;
+  - a design path opens its user-context file in a tab; the design record carries its implementation mapping.
 
   A note says that the lead manages the team and the user asks the lead for changes. The tab offers no way to create, change, or retire a member. It reads the team when the panel opens and when the tab is shown. While the lead's run is active it reads again every few seconds, and when the run ends, so **Working** follows who is being called. A failed read shows the backend's message with Retry, keeping the last team shown.
 - **Trees.** The tree shows two sections:

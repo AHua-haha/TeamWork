@@ -1,6 +1,10 @@
 import type { ConfigService } from './config.js';
+import { LeadService } from './lead.js';
+import { leadTools } from './lead-tools.js';
+import { DesignService } from './design.js';
+import { HarnessService } from './harness.js';
 import { MemberContext } from './member-context.js';
-import { fileTools, teamTools } from './member-tools.js';
+import { teamTools } from './member-tools.js';
 import type { RunConfigSource, RuntimePolicy } from './runtime.js';
 import { TeamRunner, type RunHost } from './team-runner.js';
 import { TeamService, teamRunConfig, type MemberView, type TeamStore, type TeamView } from './team.js';
@@ -15,16 +19,22 @@ export class TeamSystem {
   readonly service: TeamService;
   readonly runner: TeamRunner;
   readonly context: MemberContext;
+  readonly lead: LeadService;
+  readonly designs: DesignService;
+  readonly harness: HarnessService;
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
 
   constructor(store: TeamStore, workspaces: WorkspaceService, private readonly config: ConfigService) {
-    this.service = new TeamService(store, workspaces, config);
+    this.designs = new DesignService(workspaces);
+    this.service = new TeamService(store, workspaces, config, this.designs);
+    this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id));
     this.context = new MemberContext(this.service, workspaces);
     this.runner = new TeamRunner(this.service, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
     });
+    this.lead = new LeadService(this.service, this.runner, this.designs);
     this.runConfig = teamRunConfig(this.service, config);
   }
 
@@ -65,16 +75,16 @@ export class TeamSystem {
    */
   policy(base: RuntimePolicy): RuntimePolicy {
     const { messaging, management } = teamTools(this.service, this.runner, this.config);
-    const files = fileTools(this.context);
+    const lead = leadTools(this.lead);
     return {
       ...base,
       buildRequest: async (scope, history) => {
         const request = await base.buildRequest(scope, history);
         const member = await this.service.find(scope.agentId);
         if (!member) return request;
-        const tools = [...files, ...messaging, ...(member.value.lead ? management : []), ...request.tools];
-        const systemPrompt = await this.context.instructions(scope.agentId, scope.config.systemPrompt);
-        return { ...request, tools, context: { ...request.context, tools: tools.map(tool => tool.definition), ...(systemPrompt ? { systemPrompt } : {}) } };
+        const prepared = await this.harness.prepare(scope.agentId, [...messaging, ...(member.value.lead ? [...management, ...lead] : [])]);
+        const systemPrompt = [await this.context.instructions(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
+        return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };
       },
     };
   }

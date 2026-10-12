@@ -36,6 +36,12 @@ const updatedAt = (info: Stats) => Math.floor(info.mtimeMs);
 export class ProjectFiles {
   constructor(private readonly root: string) {}
 
+  /** Classifies a mapped implementation entry without interpreting content. */
+  async kind(path: string): Promise<'file' | 'folder' | null> {
+    const info = await this.locate(projectPath(path, true));
+    return info === null ? null : info.isDirectory() ? 'folder' : info.isFile() ? 'file' : null;
+  }
+
   async tree(path: string, depth: number): Promise<{ path: string; entries: ProjectEntry[]; truncated: boolean }> {
     if (!Number.isSafeInteger(depth) || depth < 1 || depth > maxDepth) throw new AppError('invalid_input', `depth is 1–${maxDepth}`);
     const segments = projectPath(path, true);

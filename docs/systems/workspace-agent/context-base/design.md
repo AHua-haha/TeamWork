@@ -15,7 +15,7 @@ Each category is a tree of text files. The context base does not prescribe folde
 
 It does not interpret file contents or decide what work to do. It does not hold the project's own files, credentials, or conversation transcripts.
 
-This document defines the HTTP API that the frontend uses to view and edit the context base for the user. Agents write agent context through an agent API designed later; this API shows the results as files, versions, and change records. Proposals, through which agents will suggest changes to user context, are deferred to that API.
+This document defines the HTTP API that the frontend uses to view and edit context and the attributed design-save capability used by the lead. User design files carry content and corresponding implementation mappings. Agent harness-context maintenance and proposals remain deferred.
 
 ## Inputs and preconditions
 
@@ -29,6 +29,12 @@ This document defines the HTTP API that the frontend uses to view and edit the c
 - **Caller.** The frontend acts for the user. Like the rest of the backend, the server binds to loopback and has no authentication.
 - **Revisions.** Every file version has a revision, an opaque string. A change to an existing file may name the revision it is based on.
 
+### User design parts and attributed saves
+
+A design part is a file in user context containing JSON `{content: "Markdown text", implementation: [project paths]}`. The mapping lists at most 50 distinct files/directories, workspace-relative, allowing `.` for the project root and excluding `.git` and `.context`. Paths may name future implementation. Designs can be arranged as subdesign files independent of team membership. Malformed design metadata prevents using that record as a harness reference but remains readable as ordinary raw context for repair.
+
+The lead's in-process design save supplies the complete record, prior revision (null only to create), nonempty reason up to 1,000 characters, and lead/run author. It uses the same queue, revision protection, durability and sequence rules as user saves. It returns `{path, revision, seq, created, before, after, reason}` plus parsed design at the semantic boundary. A byte-identical save has null sequence and no new version. There is no HTTP operation that lets the user forge a lead author; existing user save/move/delete remain user-authored. Workers read designs through their scoped tools and do not edit them.
+
 ## Outputs and observable effects
 
 ### What the user may do
@@ -40,7 +46,7 @@ This document defines the HTTP API that the frontend uses to view and edit the c
 
 - Every operation that changes files receives the workspace's next **sequence number** (`seq`) and one **change record**. An operation such as moving a folder applies whole or not at all, so it has one record listing all its files.
 - **Change record:** `{seq, time, author, reason, files}`. Each entry in `files` is `{action, path, fromPath, revision}`. The action is `create`, `update`, `move`, or `delete`. `fromPath` is set for a move. `revision` is the new version, or null for a delete.
-- **Author:** `{type: "user"}` for a change through this API, or `{type: "external"}` for a change made outside the application. Agent authors arrive with the agent API.
+- **Author:** `{type: "user"}` for user API changes, `{type: "external"}` for outside changes, or `{type: "lead", memberId, runId}` for a design save by the workspace lead. Lead identifiers follow runtime identity rules.
 - Every version of every file is kept. A move creates a version with the same content at the new path. Earlier versions, including versions of deleted files, can be read by revision. A file's history follows it across moves made through this API.
 
 ### Workspace-scoped operations
@@ -131,16 +137,16 @@ All paths below are under `/workspaces/:workspaceId/context`, written `…`:
 ## Guarantees and limits
 
 - **Durable.** Recorded versions and records survive the end of conversations and restarts of the application. Current files are the files on disk.
-- **User-governed.** Through the application, user context changes only through the user's saves, moves, and deletes. The frontend never changes agent context.
+- **User-governed.** Through the application, user context changes through the user's saves, moves and deletes or the lead's dedicated discussed design saves. Lead changes carry exact before/after content and a reason in the conversation tool result, and are attributed in history and the change feed. The frontend never changes agent context.
 - **Complete history.** Every recorded version is kept, with its author, time, and reason. A deleted file's versions remain readable. Outside changes are kept as the application observes them, so several outside edits between two observations become one version.
 - **Ordered.** Operations on one workspace apply one at a time in the order of their sequence numbers. The change records have no gaps, so a follower after any `seq` receives every later change.
 - **Visible.** The user can read everything in both categories.
 - Fixed limits: 1 MiB per file, 2,000 entries per listing, 200 find results, 100 search matches.
 - Text files only. One backend process serves a database, so a workspace is never open in two processes.
 - Deferred:
-  - the agent API: how agents read context, write agent context, and create and withdraw proposals, and how workers' scopes limit them;
+  - automated agent harness-context maintenance and proposal operations;
   - proposals and their review in the frontend;
-  - folder layout and file formats;
+  - fixed folder layout and additional semantic context formats;
   - links between user and agent context, marking agent context affected by a change in user context, consolidation, and health checks;
   - version retention.
 
@@ -156,3 +162,5 @@ All paths below are under `/workspaces/:workspaceId/context`, written `…`:
 8. **Reconnect.** After a restart, the frontend follows with its last applied `seq` and receives every record it missed before `sync`.
 9. **Changes while closed.** With the backend stopped, the user runs `git checkout`, which changes two user-context files and removes one. After the next start, the first request to the workspace waits for the scan, which records all three changes in one record authored by `external`.
 10. **Problem file.** The user copies `photo.png` into `.context/user/`. It is not listed, and the overview's `problems` names it with `not_text`.
+
+11. **Lead design change.** A discussed design save records one lead-authored version and change. The user sees its exact previous/resulting content in the conversation and the version in history. A stale revision leaves the file unchanged.

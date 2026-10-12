@@ -10,7 +10,8 @@
   - the index of current files, keyed by the lower-cased path;
   - the workspace's latest `seq` and its problem list;
   - the operation queue, the file watcher, and the change notification;
-  - the operations of the design: overview, list, read, save, move, delete, history, find, search, changes, and follow.
+  - the operations of the design: overview, list, read, save, attributed saveDesign, move, delete, history, find, search, changes, and follow.
+- The [design parts child](design-parts/design.md) interprets structured user-design records and implementation mappings; ordinary context remains free-form text.
 - `Batch` builds one operation's stored change: new versions, content blobs, removed and added index rows, and the change record with its files ordered by path.
 - `DiskChange` performs one operation's disk steps and keeps the steps that undo them. After the change is stored, it deletes the replaced files and removes emptied folders.
 - `ContextStore` is the storage contract: the workspace registry, loading the index, committing a change, and reading blobs, versions, history, and records. The MySQL store implements it; tests use an in-memory store.
@@ -23,7 +24,7 @@
 **Opening.** `ContextBase.open` loads the index and `seq` from the store, then reconciles the files on disk with the index. If opening fails, the context base closes and the workspace service forgets it, so the next request opens it again.
 
 **Operations.** Each operation:
-1. checks its input before it is queued: path rules, the `user/` category for changes, the reason length, and the content encoding and size;
+1. checks its input before it is queued: path rules, the `user/` category for user and lead changes, the reason length, and the content encoding and size;
 2. runs in the queue, one at a time per workspace;
 3. reconciles before it reads the index, so it sees every outside change.
 
@@ -34,9 +35,11 @@ Reading a version by revision, `changes`, and `follow` read the store only and d
    - a save writes a temporary file and renames it over the target; the replaced file is first renamed to a trash name;
    - a move renames the file or folder, creating the destination folder;
    - a delete renames each file to a trash name.
-2. It then stats the result and builds one `Batch`, authored by the user.
+2. It then stats the result and builds one `Batch`, authored by the supplied user or lead actor for saves, and by the user for moves/deletes.
 3. `commit` calls `commitContext` with the `seq` the index was loaded at. Only after the store accepts it does the index change, `seq` advance, and the notification publish.
 4. `finish` deletes the trash and prunes folders emptied up to the category roots. If any step before it fails, `undo` reverses the disk steps in the opposite order and prunes the folders it created.
+
+**Attributed design saves.** `save` and `saveDesign` share private `saveFile`: revision validation, reconcile, unchanged detection, disk replacement, batch commit and rollback. The lead variant validates member/run IDs and returns exact before/after content and reason. The user wrapper keeps its existing API shape. DesignService owns JSON interpretation; ContextBase remains format-independent.
 
 **New paths.** A new path keeps the spelling of folders that already exist on disk. It fails with `file_exists` when the target exists, or when an existing ancestor is not a folder, has an invalid name, or has a duplicate that differs only in case. A move whose source and target differ only in case renames the last segment in place.
 
@@ -99,4 +102,4 @@ Context base tests run each operation against a temporary folder and the in-memo
 - follow replay, `sync`, and live records;
 - the watcher recording an outside change without a request. This test is skipped where the platform delivers no file events, as in some sandboxes.
 
-The MySQL integration tests check the store against a real database: a save and a move reload with their history, and a change from this process is refused and undone on disk after another process stored a change. The [route tests](../../../../backend/test/workspace-routes.test.ts) cover the context endpoints over HTTP.
+Lead tests additionally check attributed exact changes and unchanged/stale saves. The MySQL integration tests check the store against a real database: a save and a move reload with their history, and a change from this process is refused and undone on disk after another process stored a change. The [route tests](../../../../backend/test/workspace-routes.test.ts) cover the context endpoints over HTTP.

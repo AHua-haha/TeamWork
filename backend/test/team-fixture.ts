@@ -36,6 +36,11 @@ const stateOf = (run: FakeRun): RunState => ({
 /** A runtime whose runs end when the test says so. One run per agent at a time, as in the real one. */
 export class FakeRuntime implements RunHost {
   readonly runs: FakeRun[] = [];
+  private readonly startWaiters = new Map<string, (() => void)[]>();
+  started(agentId: string): Promise<void> {
+    if (this.active(agentId)) return Promise.resolve();
+    return new Promise(resolve => { const waiters = this.startWaiters.get(agentId) ?? []; waiters.push(resolve); this.startWaiters.set(agentId, waiters); });
+  }
 
   async start(agentId: string, input: unknown): Promise<RunState> {
     if (this.active(agentId)) throw new AppError('agent_busy', 'Agent already has an active run', 409);
@@ -52,6 +57,8 @@ export class FakeRuntime implements RunHost {
       },
     };
     this.runs.push(run);
+    for (const resolve of this.startWaiters.get(agentId) ?? []) resolve();
+    this.startWaiters.delete(agentId);
     return stateOf(run);
   }
 
@@ -123,7 +130,7 @@ export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void
       const directory = join(root, 'project');
       const { workspaceId } = await workspaces.create({ workspaceId: 'w1', name: 'Project', directory, adopt: false });
       const first = (await team.service.team(workspaceId)).members[0]!;
-      const lead = await team.service.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, scope: first.scope, settings: { ...first.settings, ...ready } });
+      const lead = await team.service.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: first.harness, settings: { ...first.settings, ...ready } });
       await run({ folder: root, store, workspaces, team, runtime, workspaceId, directory, lead });
     } finally {
       team.runner.close();
@@ -133,6 +140,11 @@ export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void
 }
 
 /** Creates a worker that can run. */
-export function worker(fixture: Fixture, name: string, scope: string[] = [], role = 'developer'): Promise<MemberView> {
-  return fixture.team.service.create(fixture.workspaceId, { name, role, responsibility: `Owns ${name}`, scope });
+export async function worker(fixture: Fixture, name: string, implementation: string[] = ['.'], role = 'developer'): Promise<MemberView> {
+  const path = `user/design/${name.toLowerCase()}.json`;
+  const base = await fixture.workspaces.context(fixture.workspaceId);
+  const existing = (await base.tree('user', 16)).entries.find(entry => entry.path === path && entry.type === 'file');
+  const revision = existing ? (await base.read({ path })).revision : null;
+  await fixture.team.designs.save(fixture.workspaceId, path, { content: `Design for ${name}`, implementation }, revision, 'Test design', { type: 'lead', memberId: fixture.lead.memberId, runId: 'fixture' });
+  return fixture.team.service.create(fixture.workspaceId, { name, role, responsibility: `Owns ${name}`, harness: { designScope: { working: [path], dependencies: [] }, allowedCommands: [] } });
 }

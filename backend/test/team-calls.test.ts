@@ -14,6 +14,7 @@ test('a call runs the recipient and returns only its final response', () => with
   assert.deepEqual(await running(fixture), { Lead: true, Backend: false });
 
   const call = team.runner.call(lead.memberId, run.runId, never, 'backend', 'Do the API');
+  await runtime.started(backend.memberId);
   await settle();
   assert.equal(inputOf(fixture, backend.memberId), 'Message from Lead:\n\nDo the API');
   assert.deepEqual(await running(fixture), { Lead: true, Backend: true });
@@ -36,7 +37,7 @@ test('a long response is cut, and an empty one is said to be empty', () => withT
     ['', 'Backend finished without a response.'],
   ] as const) {
     const call = team.runner.call(lead.memberId, run.runId, never, 'Backend', 'again');
-    await settle();
+    await runtime.started(backend.memberId);
     runtime.end(backend.memberId, text);
     assert.equal(await call, expected);
   }
@@ -48,17 +49,17 @@ test('a recipient that fails, is cancelled, or is retired still ends the call', 
   const run = await team.runner.startUser(lead.memberId, 'go');
 
   let call = team.runner.call(lead.memberId, run.runId, never, 'Backend', 'one');
-  await settle();
+  await runtime.started(backend.memberId);
   runtime.fail(backend.memberId, 'Model request failed');
   assert.equal(await call, 'Backend failed: Model request failed');
 
   call = team.runner.call(lead.memberId, run.runId, never, 'Backend', 'two');
-  await settle();
+  await runtime.started(backend.memberId);
   await runtime.cancel(backend.memberId, runtime.active(backend.memberId)!.runId);
   assert.equal(await call, 'Backend was cancelled.');
 
   call = team.runner.call(lead.memberId, run.runId, never, 'Backend', 'three');
-  await settle();
+  await runtime.started(backend.memberId);
   const current = await team.service.get(fixture.workspaceId, backend.memberId);
   await team.runner.retire(fixture.workspaceId, backend.memberId, current.revision);
   assert.equal(await call, 'Backend was cancelled.');
@@ -71,10 +72,10 @@ test('stopping the caller stops the recipient, down the chain', () => withTeam(a
   const run = await team.runner.startUser(lead.memberId, 'go');
   const stopLead = new AbortController();
   const callA = team.runner.call(lead.memberId, run.runId, stopLead.signal, 'Alpha', 'start');
-  await settle();
+  await runtime.started(a.memberId);
   const stopAlpha = new AbortController();
   const callB = team.runner.call(a.memberId, runtime.active(a.memberId)!.runId, stopAlpha.signal, 'Beta', 'continue');
-  await settle();
+  await runtime.started(b.memberId);
   assert.equal(runtime.active(b.memberId) !== undefined, true);
 
   stopLead.abort();
@@ -100,12 +101,12 @@ test('a call that cannot happen is refused with a reason', () => withTeam(async 
   assert.equal(runtime.runs.length, 1, 'no refused call started a run');
 
   const toAlpha = call(lead.memberId, run.runId, 'Alpha');
-  await settle();
+  await runtime.started(a.memberId);
   const alphaRun = runtime.active(a.memberId)!.runId;
   await assert.rejects(call(a.memberId, alphaRun, 'Lead'), /already part of this chain of calls \(Lead → Alpha\)/);
   await assert.rejects(call(a.memberId, alphaRun, 'alpha'), code('member_in_chain'));
   const toBeta = call(a.memberId, alphaRun, 'Beta');
-  await settle();
+  await runtime.started(b.memberId);
   await assert.rejects(call(b.memberId, runtime.active(b.memberId)!.runId, 'Alpha'), code('member_in_chain'));
   runtime.end(b.memberId, 'beta result');
   assert.equal(await toBeta, 'beta result');
@@ -122,7 +123,7 @@ test('a chain has at most five members, and a member that is already working is 
   const pending: Promise<string>[] = [];
   for (let index = 0; index < maxChainMembers - 1; index++) {
     pending.push(team.runner.call(from, runId, never, members[index]!.name, 'next'));
-    await settle();
+    await runtime.started(members[index]!.memberId);
     from = members[index]!.memberId;
     runId = runtime.active(from)!.runId;
   }

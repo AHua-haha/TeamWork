@@ -1,23 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { emptyRunSettings, keys, obj, validateRunSettings, type ConfigService, type ResolvedRunConfig, type RunSettings } from './config.js';
-import { validSegment } from './context-base.js';
+import type { DesignService } from './design.js';
+import { emptyHarness, harnessConfig, type HarnessConfig } from './harness-config.js';
+import { resolveHarness } from './harness.js';
 import { AppError } from './types.js';
 import type { WorkspaceRecord } from './context-base.js';
 import type { RunConfigSource } from './runtime.js';
 
 export const maxMembers = 20;
-export const maxScopePaths = 50;
-const maxScopeSegments = 16;
 const namePattern = /^[A-Za-z0-9](?:[A-Za-z0-9 _.-]{0,38}[A-Za-z0-9])?$/;
 const controlCharacter = /[\u0000-\u001f\u007f-\u009f]/;
 
 /** The team's record of one member. Its conversation has the member's ID. */
 export interface MemberRecord {
-  workspaceId: string; name: string; role: string; responsibility: string; scope: string[];
+  workspaceId: string; name: string; role: string; responsibility: string; harness: HarnessConfig;
   lead: boolean; settings: RunSettings; createdAt: number; retiredAt: number | null;
 }
 /** The fields a caller may set. */
-export interface MemberFields { name: string; role: string; responsibility: string; scope: string[]; settings: RunSettings }
+export interface MemberFields { name: string; role: string; responsibility: string; harness: HarnessConfig; settings: RunSettings }
 export interface StoredMember { id: string; workspaceId: string; revision: number; value: MemberRecord }
 export interface MemberView extends MemberFields { memberId: string; workspaceId: string; revision: number; lead: boolean; issues: string[]; ready: boolean }
 export interface TeamView { workspaceId: string; members: MemberView[] }
@@ -36,13 +36,13 @@ export interface TeamStore {
   updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord): Promise<StoredMember>;
 }
 
-export const leadResponsibility = 'Works with the user on this project: understands what the user wants, forms the team the project needs, gives work to the members, and reports results.';
+export const leadResponsibility = 'Works with the user on this project: helps maintain the user design, forms the team the project needs, gives work to the members, and reports results.';
 
 /** The lead every workspace is created with: no model, so the user chooses one before it can run. */
 export function newLead(workspaceId: string): NewMember {
   return {
     id: randomUUID(), workspaceId, lead: true, nameKey: 'lead',
-    value: { workspaceId, name: 'Lead', role: 'Lead', responsibility: leadResponsibility, scope: [], lead: true, settings: emptyRunSettings, createdAt: Date.now(), retiredAt: null },
+    value: { workspaceId, name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: emptyHarness(), lead: true, settings: emptyRunSettings, createdAt: Date.now(), retiredAt: null },
   };
 }
 
@@ -58,36 +58,18 @@ export function memberName(value: unknown): string {
   return value;
 }
 
-/** One scope path in the context base's form: `agent` or `agent/...`, without a trailing slash. */
-export function scopePath(value: unknown): string {
-  if (typeof value !== 'string') throw new AppError('invalid_path', 'A scope path is a string');
-  const path = value.replace(/\/+$/, '');
-  const segments = path.split('/');
-  if (segments[0] !== 'agent' || segments.length > maxScopeSegments || !segments.slice(1).every(validSegment)) {
-    throw new AppError('invalid_path', `"${value}" is not an agent-context path: it starts with agent/ and its names use letters, digits, spaces, "-", "_", or "."`);
-  }
-  return path;
-}
-
-function scope(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length > maxScopePaths) throw new AppError('invalid_input', `scope is a list of at most ${maxScopePaths} paths`);
-  const paths = value.map(scopePath);
-  if (new Set(paths.map(path => path.toLowerCase())).size !== paths.length) throw new AppError('invalid_input', 'scope contains duplicate paths');
-  return paths;
-}
-
 /** The editable fields from a full value. */
 export function memberFields(value: unknown): MemberFields {
   const data = obj(value, 'Member');
-  keys(data, ['name', 'role', 'responsibility', 'scope', 'settings']);
-  return { name: memberName(data.name), role: text(data.role, 'role', 80, true), responsibility: text(data.responsibility, 'responsibility', 4000, false, true), scope: scope(data.scope), settings: validateRunSettings(data.settings, 'Settings') };
+  keys(data, ['name', 'role', 'responsibility', 'harness', 'settings']);
+  return { name: memberName(data.name), role: text(data.role, 'role', 80, true), responsibility: text(data.responsibility, 'responsibility', 4000, false, true), harness: harnessConfig(data.harness), settings: validateRunSettings(data.settings, 'Settings') };
 }
 
 function stored(member: StoredMember): StoredMember {
   const value = member.value as unknown;
   try {
     const data = obj(value, 'Member record');
-    const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, scope: data.scope, settings: data.settings });
+    const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, harness: data.harness, settings: data.settings });
     if (typeof data.workspaceId !== 'string' || typeof data.lead !== 'boolean' || !Number.isSafeInteger(data.createdAt) || !(data.retiredAt === null || Number.isSafeInteger(data.retiredAt))) throw new Error('shape');
     return { ...member, value: { ...fields, workspaceId: data.workspaceId, lead: data.lead, createdAt: data.createdAt as number, retiredAt: data.retiredAt as number | null } };
   } catch { throw new AppError('corrupt_data', `Stored member ${member.id} cannot be read`, 500); }
@@ -102,11 +84,19 @@ export class TeamService {
     private readonly store: TeamStore,
     private readonly workspaces: { record(workspaceId: string): Promise<WorkspaceRecord>; list(): Promise<WorkspaceRecord[]> },
     private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> },
+    private readonly designs: DesignService,
   ) {}
 
   /** Gives each workspace that has no lead one, so workspaces registered before teams existed get theirs. Safe to repeat. */
   async initialize(): Promise<void> {
     for (const workspace of await this.workspaces.list()) {
+      for (const member of await this.store.listMembers(workspace.workspaceId)) {
+        const data = member.value as unknown as Record<string, unknown>;
+        if ('harness' in data) continue;
+        const { scope: _oldScope, ...rest } = data;
+        const value = { ...rest, harness: emptyHarness() } as unknown as MemberRecord;
+        await this.store.updateMember(member.id, member.revision, value.retiredAt === null ? value.name.toLowerCase() : null, value);
+      }
       if ((await this.store.listMembers(workspace.workspaceId)).some(member => member.value.lead)) continue;
       try { await this.store.createMember(newLead(workspace.workspaceId)); }
       catch (error) {
@@ -148,9 +138,9 @@ export class TeamService {
   async create(workspaceId: string, input: unknown): Promise<MemberView> {
     const lead = await this.lead(workspaceId);
     const data = obj(input, 'Member');
-    keys(data, ['name', 'role', 'responsibility', 'scope', 'settings']);
+    keys(data, ['name', 'role', 'responsibility', 'harness', 'settings']);
     if (data.settings !== undefined && (typeof data.settings !== 'object' || data.settings === null || Array.isArray(data.settings))) throw new AppError('invalid_input', 'settings is an object');
-    const fields = memberFields({ responsibility: '', scope: [], ...data, settings: { ...lead.value.settings, prompt: '', ...(data.settings as object | undefined) } });
+    const fields = memberFields({ responsibility: '', harness: emptyHarness(), ...data, settings: { ...lead.value.settings, prompt: '', ...(data.settings as object | undefined) } });
     if ((await this.active(workspaceId)).length >= maxMembers) throw new AppError('team_full', `A team has at most ${maxMembers} members`, 409);
     return this.view(await this.insert(workspaceId, fields));
   }
@@ -171,7 +161,18 @@ export class TeamService {
 
   /** What stops each of these members from running. */
   async issues(members: readonly StoredMember[]): Promise<string[][]> {
-    return this.config.issuesFor(members.map(member => member.value.settings));
+    const issues = await this.config.issuesFor(members.map(member => member.value.settings));
+    for (const [index, member] of members.entries()) {
+      if (member.value.settings.toolOptionIds.length) issues[index]!.push('Workspace member tools are supplied by the harness; clear catalog tool selections');
+      const scope = member.value.harness.designScope;
+      if (!member.value.lead && !scope.working.length && !scope.dependencies.length) issues[index]!.push('Configure a design scope for this member');
+      try { await resolveHarness(this.designs, member.workspaceId, member.value.harness); }
+      catch (error) {
+        if (!(error instanceof AppError) || error.status >= 500) throw error;
+        issues[index]!.push(`Harness design is unavailable: ${error.message}`);
+      }
+    }
+    return issues;
   }
 
   private async member(workspaceId: string, memberId: string): Promise<StoredMember> {
@@ -196,10 +197,10 @@ export class TeamService {
   }
 
   private async views(members: StoredMember[]): Promise<MemberView[]> {
-    const issues = await this.config.issuesFor(members.map(member => member.value.settings));
+    const issues = await this.issues(members);
     return members.map((member, index) => {
-      const { name, role, responsibility, scope: paths, settings, lead } = member.value;
-      return { memberId: member.id, workspaceId: member.workspaceId, revision: member.revision, name, role, responsibility, scope: paths, lead, settings, issues: issues[index]!, ready: issues[index]!.length === 0 };
+      const { name, role, responsibility, harness, settings, lead } = member.value;
+      return { memberId: member.id, workspaceId: member.workspaceId, revision: member.revision, name, role, responsibility, harness, lead, settings, issues: issues[index]!, ready: issues[index]!.length === 0 };
     });
   }
 }
@@ -211,6 +212,8 @@ export function teamRunConfig(team: TeamService, config: ConfigService): RunConf
       const member = await team.find(agentId);
       if (!member) return config.resolveForRun(agentId);
       if (member.value.retiredAt !== null) throw new AppError('invalid_agent_config', 'This member has been retired', 409);
+      const [issues] = await team.issues([member]);
+      if (issues!.length) throw new AppError('invalid_agent_config', issues!.join('; '), 409);
       return config.resolveSettings(member.value.settings, member.revision);
     },
   };

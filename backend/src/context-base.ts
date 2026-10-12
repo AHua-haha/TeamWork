@@ -5,10 +5,11 @@ import { dirname, join, sep } from 'node:path';
 import { Changes } from './changes.js';
 import type { NewMember } from './team.js';
 import { decodeText, encodeText, maxFileBytes, missing, sha256 } from './text.js';
-import { AppError } from './types.js';
+import { AppError, identity } from './types.js';
 
 export type Category = 'user' | 'agent';
-export type Author = { type: 'user' } | { type: 'external' };
+export interface LeadAuthor { type: 'lead'; memberId: string; runId: string }
+export type Author = { type: 'user' } | { type: 'external' } | LeadAuthor;
 export type FileAction = 'create' | 'update' | 'move' | 'delete';
 export interface ChangeFile { action: FileAction; path: string; fromPath: string | null; revision: string | null }
 export interface ChangeRecord { seq: number; time: number; author: Author; reason: string | null; files: ChangeFile[] }
@@ -75,6 +76,8 @@ export interface Problem { path: string; code: ProblemCode; message: string }
 export interface ContextOverview { workspaceId: string; seq: number; user: { files: number; bytes: number }; agent: { files: number; bytes: number }; problems: Problem[] }
 export type ContextTreeEntry = { path: string; type: 'file'; size: number; revision: string; updatedAt: number; author: Author } | { path: string; type: 'folder' };
 export interface ContextFile { path: string; revision: string; current: boolean; content: string; size: number; updatedAt: number; author: Author; reason: string | null }
+export interface ContextSave { path: string; revision: string; seq: number | null; created: boolean }
+export interface DesignSave extends ContextSave { before: string | null; after: string; reason: string | null }
 export interface ContextVersion { revision: string | null; seq: number; time: number; action: FileAction; path: string; fromPath: string | null; size: number | null; author: Author; reason: string | null }
 export type ContextEvent = { version: 1; workspaceId: string } & ({ type: 'record'; record: ChangeRecord } | { type: 'sync'; seq: number });
 
@@ -327,7 +330,20 @@ export class ContextBase {
     });
   }
 
-  async save(path: string, content: string, baseRevision: string | null, reason: string | null): Promise<{ path: string; revision: string; seq: number | null; created: boolean }> {
+  async save(path: string, content: string, baseRevision: string | null, reason: string | null): Promise<ContextSave> {
+    const { path: savedPath, revision, seq, created } = await this.saveFile(path, content, baseRevision, reason, userAuthor);
+    return { path: savedPath, revision, seq, created };
+  }
+
+  /** The trusted lead service saves discussed design changes and receives the exact before/after result. */
+  async saveDesign(path: string, content: string, baseRevision: string | null, reason: string, author: LeadAuthor): Promise<DesignSave> {
+    identity(author.memberId, 'memberId');
+    identity(author.runId, 'runId');
+    if (author.type !== 'lead' || !reason.trim()) throw new AppError('invalid_input', 'A lead design change requires its author and a reason');
+    return this.saveFile(path, content, baseRevision, reason, author);
+  }
+
+  private async saveFile(path: string, content: string, baseRevision: string | null, reason: string | null, author: Author): Promise<DesignSave> {
     contextPath(path);
     writable(path);
     checkReason(reason);
@@ -338,18 +354,19 @@ export class ContextBase {
       if (existing) {
         if (baseRevision === null) throw new AppError('file_exists', `${existing.path} already exists`, 409);
         if (baseRevision !== existing.revision) throw stale(existing.path);
-        if (existing.hash === hash) return { path: existing.path, revision: existing.revision, seq: null, created: false };
       } else if (baseRevision !== null) throw new AppError('stale_revision', `${path} no longer exists`, 409);
+      const before = existing ? await this.blob(existing.hash) : null;
+      if (existing?.hash === hash) return { path: existing.path, revision: existing.revision, seq: null, created: false, before, after: content, reason };
       const target = existing ? existing.path : await this.resolveNew(path);
       const disk = new DiskChange(this.roots);
       try {
         await disk.write(this.disk(target), bytes, !!existing);
         const { mtimeMs } = await stat(this.disk(target));
-        const batch = new Batch(this.seq + 1, userAuthor, reason);
+        const batch = new Batch(this.seq + 1, author, reason);
         const file = batch.write(existing?.fileId ?? randomUUID(), existing ? 'update' : 'create', target, null, hash, bytes.length, mtimeMs, content);
         await this.commit(batch);
         await disk.finish();
-        return { path: target, revision: file.revision, seq: batch.seq, created: !existing };
+        return { path: target, revision: file.revision, seq: batch.seq, created: !existing, before, after: content, reason };
       } catch (error) {
         await disk.undo();
         throw error;

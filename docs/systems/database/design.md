@@ -68,6 +68,7 @@ It persists each workspace's team members: a member record with its revision, an
   - `history(fileId, before, limit)` returns one file's versions, newest first, before a sequence number;
   - `lastFileId(pathKey)` returns the most recent file that had a path;
   - `records(after, limit)` returns change records in sequence order.
+- **Authors.** Stored context authors accept user, external, or lead with memberId/runId. They are preserved across file, history, record and reload reads; malformed authors fail explicitly. Design content and implementation mappings remain opaque text to storage.
 - **Keys.** Paths are matched by a lower-cased key, so two paths that differ only in letter case name one current file. A revision is unique within a workspace.
 
 ## Failure behavior

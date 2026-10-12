@@ -4,7 +4,7 @@
 
 A workspace is one project: a directory on the backend's machine, its [context base](../context-base/design.md), and its [team](../team/design.md). The Workspace module registers workspaces and serves the frontend's HTTP API for listing them and for browsing and editing the project's own files. It also gives the workspace's agents file actions inside the directory. It opens each workspace's context base on first use and closes them when the backend stops.
 
-The project-file API lists, reads, saves, and finds files. It does not move or delete project files, keep their history, or deliver live updates; the project's own version control does that. The agent file actions read and write the same folder, with an access rule that the caller supplies; the [team](../team/design.md) supplies a rule for each member. Commands and version control for agents are designed later.
+The project-file API lists, reads, saves, and finds files. It does not move or delete project files, keep their history, or deliver live updates; the project's own version control does that. The agent file actions read and write the same folder, with an access rule that the caller supplies; the [harness](../harness/design.md) supplies the rule for each member. Command execution belongs to the harness; version-control-specific operations are deferred.
 
 ## Inputs and preconditions
 
@@ -44,7 +44,7 @@ Four actions work on the workspace folder for an agent: list, read, write, and e
 
 Requests follow the context base's rules for fields, bodies, and errors.
 
-Agent file actions have no HTTP form; the team's tools call them inside the backend. A file an action changes under `.context/` is an outside change for the context base, recorded as an `external` version the next time the context base looks, and a file it changes elsewhere is like any other change made outside the application.
+Agent file actions have no HTTP form; the harness's tools call them inside the backend. Workspace members cannot write context through these generic actions; discussed design saves use a dedicated context-base operation. A file an action changes under `.context/` is an outside change for the context base, recorded as an `external` version the next time the context base looks, and a file it changes elsewhere is like any other change made outside the application.
 
 ## Failure behavior
 
@@ -76,6 +76,6 @@ Agent file actions have no HTTP form; the team's tools call them inside the back
 4. **Edit a project file.** The user reads `README.md`, edits it, and saves with its revision. The response has a new revision. Saving again with the old revision returns 409 `stale_revision`.
 5. **Binary file.** Reading `frontend/public/icon.png` returns 415 `unsupported_file`.
 6. **Find.** Finding `app.tsx` returns `frontend/src/ui/App.tsx`.
-7. **Agent writes.** A member whose rule allows `.context/agent/notes/` writes `.context/agent/notes/plan.md`. The context base lists `agent/notes/plan.md` with an `external` version. The same member writing `.context/user/spec.md` gets `access_denied`.
-8. **Hidden from an agent.** A rule that hides `.context/agent/secret/` makes list omit it and read report `not_found`.
+7. **Agent writes.** A member assigned a working design mapped to `src/backend` writes `src/backend/api.ts`. A generic write to its user design or agent context is refused; discussed design changes use the lead design tool.
+8. **Hidden from an agent.** A worker whose design scope does not include `frontend` cannot list or read its implementation; a dependency file can be read but not edited.
 9. **Edit.** Editing `src/a.ts` with text that is not in the file is reported to the agent and leaves the file unchanged. A path like `../outside/secret.txt`, or one through a link, is refused.

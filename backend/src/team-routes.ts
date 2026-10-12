@@ -21,7 +21,7 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     if (memberId === undefined) {
       if (method !== 'POST') throw notFound();
       const input = await body(request, maxBodyBytes);
-      fields(input, ['name', 'role', 'responsibility', 'scope', 'settings']);
+      fields(input, ['name', 'role', 'responsibility', 'harness', 'settings']);
       json(response, 201, await team.create(workspaceId, input));
       return;
     }

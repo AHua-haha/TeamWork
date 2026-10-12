@@ -31,10 +31,16 @@ export function TeamTab({ team, workspace, note, onOpenScope, onBrowse }: {
           <p className="member-responsibility">{member.responsibility || 'No responsibility given yet.'}</p>
           <dl className="member-facts">
             <dt>Model</dt><dd>{model ?? 'None selected'}</dd>
-            <dt>Scope</dt>
-            <dd>{member.scope.length ? <ul className="member-scope">{member.scope.map(path => <li key={path}>
+            <dt>Working designs</dt>
+            <dd>{member.harness.designScope.working.length ? <ul className="member-scope">{member.harness.designScope.working.map(path => <li key={path}>
               <button type="button" className="text-button" title={`Show .context/${path}`} onClick={() => onOpenScope(path)}>{path}</button>
-            </li>)}</ul> : member.lead ? 'All agent context' : 'None'}</dd>
+            </li>)}</ul> : 'None'}</dd>
+            <dt>Dependencies</dt>
+            <dd>{member.harness.designScope.dependencies.length ? <ul className="member-scope">{member.harness.designScope.dependencies.map(path => <li key={path}>
+              <button type="button" className="text-button" title={`Show .context/${path}`} onClick={() => onOpenScope(path)}>{path}</button> · Read only
+            </li>)}</ul> : 'None'}</dd>
+            <dt>Commands</dt>
+            <dd>{member.harness.allowedCommands.length ? member.harness.allowedCommands.map(rule => rule.kind === 'exact' ? rule.argv.join(' ') : `${rule.executable} …`).join('; ') : 'None allowed'}</dd>
           </dl>
         </li>;
       })}

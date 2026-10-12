@@ -3,77 +3,52 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { ModelRequest, RuntimePolicy, StepScope } from '../src/runtime.js';
-import { viewBudget } from '../src/member-context.js';
-import { withTeam, worker, type Fixture } from './team-fixture.js';
+import { viewBudget } from '../src/harness.js';
+import { withTeam, worker } from './team-fixture.js';
 
-async function put(fixture: Fixture, path: string, content: string) {
-  const target = join(fixture.directory, '.context', path);
-  await mkdir(join(target, '..'), { recursive: true });
-  await writeFile(target, content);
-}
 const names = (request: ModelRequest) => request.tools.map(tool => tool.definition.name);
-const scope = (agentId: string): StepScope => ({ agentId, runId: 'r', step: 1, signal: new AbortController().signal, config: { systemPrompt: 'standing words' } } as unknown as StepScope);
+const scope = (agentId: string) => ({ agentId, runId: 'r', step: 1, signal: new AbortController().signal, config: { systemPrompt: 'standing words' } } as StepScope);
+const base: RuntimePolicy = { buildRequest: () => ({ model: {} as never, tools: [], context: { messages: [], tools: [], systemPrompt: 'base' } }) };
 
-test('a worker is told its role, the team, the user context, and only its own scope', () => withTeam(async fixture => {
-  await put(fixture, 'user/spec.md', 'THE GOAL: a reading list');
-  await put(fixture, 'agent/systems/backend/plan.md', 'BACKEND PLAN');
-  await put(fixture, 'agent/systems/frontend/plan.md', 'FRONTEND PLAN');
-  const backend = await worker(fixture, 'Backend', ['agent/systems/backend'], 'backend developer');
-  await fixture.team.service.create(fixture.workspaceId, { name: 'Idle', role: 'reviewer', settings: { connectionId: null, modelId: null } });
-
-  const text = (await fixture.team.context.instructions(backend.memberId, 'standing words'))!;
-  assert.match(text, /You are Backend, backend developer on the team of the workspace "Project"/);
-  assert.match(text, /Your responsibility: Owns Backend/);
-  assert.match(text, /- Lead \(Lead\): Works with the user/);
-  assert.match(text, /- Backend \(backend developer\), you: Owns Backend/);
-  assert.match(text, /- Idle \(reviewer\): no responsibility given \[cannot run yet: Select a provider and model\]/);
-  assert.match(text, /### \.context\/user\/spec\.md\nTHE GOAL: a reading list/);
-  assert.match(text, /### \.context\/agent\/systems\/backend\/plan\.md\nBACKEND PLAN/);
-  assert.match(text, /## Your instructions\nstanding words/);
-  assert.doesNotMatch(text, /FRONTEND PLAN/);
-  assert.doesNotMatch(text, /Agent context files/);
-  assert.match(text, /The lead talks to the user and changes the team/);
-  assert.equal(await fixture.team.context.instructions('not-a-member', 'x'), null);
+test('member requests get team rules and only their harness design and implementation context', () => withTeam(async fixture => {
+  const backend = await worker(fixture, 'Backend', ['backend'], 'backend developer');
+  await worker(fixture, 'Frontend', ['frontend']);
+  await mkdir(join(fixture.directory, 'backend'));
+  await mkdir(join(fixture.directory, 'frontend'));
+  await writeFile(join(fixture.directory, 'backend', 'main.ts'), 'BACKEND SOURCE');
+  await writeFile(join(fixture.directory, 'frontend', 'main.ts'), 'FRONTEND SOURCE');
+  const request = await fixture.team.policy(base).buildRequest(scope(backend.memberId), { revision: 0, entries: [] });
+  assert.match(request.context.systemPrompt!, /You are Backend, backend developer/);
+  assert.match(request.context.systemPrompt!, /Design for Backend/);
+  assert.match(request.context.systemPrompt!, /BACKEND SOURCE/);
+  assert.doesNotMatch(request.context.systemPrompt!, /FRONTEND SOURCE|Design for Frontend/);
+  assert.match(request.context.systemPrompt!, /never edit a working or dependency design/);
+  assert.match(request.context.systemPrompt!, /standing words/);
+  assert.deepEqual(names(request).sort(), ['edit', 'ls', 'read', 'send_message', 'write']);
+  assert.deepEqual(request.context.tools!.map(tool => tool.name), names(request));
 }));
-
-test('the lead gets a list of all agent context and the team rules for leads', () => withTeam(async fixture => {
-  await put(fixture, 'agent/systems/backend/plan.md', 'BACKEND PLAN');
-  await put(fixture, 'agent/systems/frontend/plan.md', 'FRONTEND PLAN');
-  const text = (await fixture.team.context.instructions(fixture.lead.memberId, undefined))!;
-  assert.match(text, /## Agent context files\n\.context\/agent\/systems\/backend\/plan\.md \(12 bytes\)\n\.context\/agent\/systems\/frontend\/plan\.md \(13 bytes\)/);
-  assert.match(text, /create_member, update_member, and retire_member/);
-  assert.match(text, /There are no user context files yet\./);
-  assert.doesNotMatch(text, /BACKEND PLAN/, 'the lead scope is empty, so no agent file content is loaded');
-  assert.doesNotMatch(text, /## Your instructions/);
+test('the lead receives design maintenance, choices, configuration and assignment tools through the harness', () => withTeam(async fixture => {
+  const request = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
+  assert.deepEqual(names(request).sort(), ['assign_member', 'configure_harness', 'create_member', 'list_models', 'ls', 'read', 'read_design', 'retire_member', 'save_design', 'send_message', 'update_member']);
+  assert.match(request.context.systemPrompt!, /offer concrete choices with their tradeoffs and your recommendation/);
+  assert.match(request.context.systemPrompt!, /wait for the user's answer/);
+  assert.match(request.context.systemPrompt!, /There are no context files yet/);
+  await fixture.team.designs.save(fixture.workspaceId, 'user/design.json', { content: 'Project', implementation: ['.'] }, null, 'Test', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
+  await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'executable', executable: 'node' }] });
+  const configured = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
+  for (const name of ['write', 'edit', 'run_command']) assert.ok(names(configured).includes(name));
 }));
-
-test('a section is cut at the budget and the rest is listed by path', () => withTeam(async fixture => {
-  await put(fixture, 'user/a.md', 'a'.repeat(viewBudget - 10));
-  await put(fixture, 'user/b.md', 'b'.repeat(100));
-  const text = (await fixture.team.context.instructions(fixture.lead.memberId, undefined))!;
-  assert.match(text, /### \.context\/user\/a\.md/);
-  assert.doesNotMatch(text, /### \.context\/user\/b\.md/);
-  assert.match(text, /Not shown \(too large for this view; read them with your tools\): \.context\/user\/b\.md/);
-}));
-
-test('the policy gives members their tools and instructions and leaves other agents alone', () => withTeam(async fixture => {
-  const base: RuntimePolicy = { buildRequest: () => ({ model: {} as never, tools: [], context: { messages: [], tools: [], systemPrompt: 'base' } }) };
-  const policy = fixture.team.policy(base);
-  const backend = await worker(fixture, 'Backend');
-
-  const leadRequest = await policy.buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
-  assert.deepEqual(names(leadRequest).sort(), ['create_member', 'edit', 'list_models', 'ls', 'read', 'retire_member', 'send_message', 'update_member', 'write']);
-  assert.deepEqual(leadRequest.context.tools!.map(tool => tool.name), names(leadRequest));
-  assert.match(leadRequest.context.systemPrompt!, /You are Lead, Lead on the team/);
-  assert.match(leadRequest.context.systemPrompt!, /## Your instructions\nstanding words/);
-
-  const workerRequest = await policy.buildRequest(scope(backend.memberId), { revision: 0, entries: [] });
-  assert.deepEqual(names(workerRequest).sort(), ['edit', 'ls', 'read', 'send_message', 'write']);
-
-  // The instructions may only name tools the member really has.
-  const named = (prompt: string) => ['ls', 'read', 'edit', 'write', 'send_message', 'create_member', 'update_member', 'retire_member', 'list_files', 'read_file', 'search_files', 'edit_file', 'write_file'].filter(tool => new RegExp(`\\b${tool}\\b`).test(prompt));
-  for (const request of [leadRequest, workerRequest]) for (const tool of named(request.context.systemPrompt!)) assert.ok(names(request).includes(tool), `${tool} is named in the instructions but is not a tool of this member`);
-
+test('bounded file context names omitted files and unrelated catalog tools are not injected', () => withTeam(async fixture => {
+  const member = await worker(fixture, 'Backend', ['backend']);
+  await mkdir(join(fixture.directory, 'backend'));
+  await writeFile(join(fixture.directory, 'backend', 'a.txt'), 'a'.repeat(viewBudget - 10));
+  await writeFile(join(fixture.directory, 'backend', 'b.txt'), 'b'.repeat(100));
+  const unscoped = { definition: { name: 'unscoped', description: '', parameters: {} as never }, execute: async () => ({ content: [], isError: false }) };
+  const policy = fixture.team.policy({ buildRequest: () => ({ model: {} as never, tools: [unscoped], context: { messages: [] } }) });
+  const request = await policy.buildRequest(scope(member.memberId), { revision: 0, entries: [] });
+  assert.match(request.context.systemPrompt!, /Not loaded: backend\/b.txt/);
+  assert.doesNotMatch(request.context.systemPrompt!, /### backend\/b.txt/);
+  assert.ok(!names(request).includes('unscoped'));
   const plain = await policy.buildRequest(scope('plain-agent'), { revision: 0, entries: [] });
-  assert.deepEqual([names(plain), plain.context.systemPrompt], [[], 'base']);
+  assert.deepEqual(names(plain), ['unscoped']);
 }));

@@ -141,6 +141,11 @@ export function validateRun(value: unknown): asserts value is RunState {
 
 export function validateAuthor(value: unknown): asserts value is Author {
   object(value);
+  if (value.type === 'lead') {
+    identity(value.memberId, 'memberId');
+    identity(value.runId, 'runId');
+    return;
+  }
   if (value.type !== 'user' && value.type !== 'external') invalid('Unknown change author');
 }
 

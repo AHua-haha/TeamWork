@@ -14,7 +14,7 @@ function ReasoningPart({ text }: ReasoningMessagePartProps) {
 }
 function ToolPart({ toolName, argsText, result, isError }: ToolCallMessagePartProps) {
   const labels = toolLabels(toolName);
-  return <details className={`tool-card ${toolName === 'send_message' ? 'tool-call' : ''} ${isError ? 'tool-error' : ''}`}>
+  return <details className={`tool-card ${toolName === 'send_message' || toolName === 'assign_member' ? 'tool-call' : ''} ${isError ? 'tool-error' : ''}`}>
     <summary><span className="tool-dot" /> <strong>{toolHeading(toolName, argsText)}</strong><span className="tool-state">{result === undefined ? 'Running' : isError ? 'Failed' : 'Complete'}</span></summary>
     <div className="tool-body"><span>{labels.input}</span><pre>{argsText || '{}'}</pre>
       {result !== undefined && <><span>{labels.output}</span><pre>{typeof result === 'string' ? result : JSON.stringify(result, null, 2)}</pre></>}

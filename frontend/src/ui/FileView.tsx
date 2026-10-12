@@ -14,7 +14,7 @@ export const isWritable = (target: FileTarget) => target.source === 'project' ||
 const isContextFile = (file: Loaded): file is ContextFile => 'author' in file;
 const formatTime = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const formatSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-const authorLabel = (author: Author) => author.type === 'user' ? 'edited in app' : 'changed on disk';
+const authorLabel = (author: Author) => author.type === 'user' ? 'edited in app' : author.type === 'lead' ? 'edited by lead' : 'changed on disk';
 const actionLabel = (version: ContextVersion) => ({ create: 'Created', update: 'Edited', move: `Moved from ${version.fromPath}`, delete: 'Deleted' })[version.action];
 
 /**

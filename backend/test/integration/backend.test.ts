@@ -1,7 +1,9 @@
+import { emptyHarness } from '../../src/harness-config.js';
+import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, realpath, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -687,7 +689,7 @@ test('team members are stored with their conversation and kept out of the agent 
   const directory = join(await mkdtemp(join(tmpdir(), 'members-')), 'project');
   const { workspaceId } = await workspaces.create({ name: 'Members', directory, adopt: false });
   try {
-    const record = (name: string, lead = false) => ({ workspaceId, name, role: 'developer', responsibility: '', scope: [], lead, settings: { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, createdAt: 1, retiredAt: null });
+    const record = (name: string, lead = false) => ({ workspaceId, name, role: 'developer', responsibility: '', harness: emptyHarness(), lead, settings: { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, createdAt: 1, retiredAt: null });
     const add = (name: string, lead = false) => store.createMember({ id: randomUUID(), workspaceId, lead, nameKey: name.toLowerCase(), value: record(name, lead) });
     // Creating the workspace created its lead, in the same transaction.
     const [lead] = await store.listMembers(workspaceId);
@@ -984,6 +986,92 @@ test('persisted context survives reopening the pool; corrupt stored schema fails
 });
 
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
+
+test('the lead saves a visible design, creates a worker, and assigns it through the real runtime and MySQL', { timeout: 15_000 }, async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'lead-prototype-')));
+  const workspaceService = new WorkspaceService(store);
+  const models = builtinModels();
+  const service = new ConfigService(store, models);
+  const team = new TeamSystem(store, workspaceService, service);
+  const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
+  const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), request => {
+    const events = new Queue<AssistantMessageEvent>();
+    requests.push({ request, events });
+    return events;
+  });
+  team.attach(runtime);
+  const call = (name: string, args: JsonObject) => fauxAssistantMessage([
+    { type: 'toolCall', id: randomUUID(), name, arguments: args },
+  ], { stopReason: 'toolUse' });
+  try {
+    const connectionId = `lead-test-${randomUUID()}`;
+    await service.createConnection(connectionId, { label: 'Test model', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
+    const { workspaceId } = await workspaceService.create({ name: 'Lead prototype', directory: join(folder, 'project'), adopt: false });
+    const first = (await team.team(workspaceId)).members[0]!;
+    const lead = await team.update(workspaceId, first.memberId, first.revision, {
+      name: first.name, role: first.role, responsibility: first.responsibility, harness: first.harness,
+      settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' },
+    });
+    await runtime.open();
+    const run = await team.runner.startUser(lead.memberId, 'Save the agreed design and ask Backend to implement it.');
+    const firstStep = await requests.next();
+    assert.ok(firstStep.request.tools.some(tool => tool.definition.name === 'save_design'));
+    assert.match(firstStep.request.context.systemPrompt!, /wait for the user's answer/);
+    answer(firstStep.events, call('save_design', { path: 'user/design.json', content: '# Design\nCreate src/result.txt with Done.', implementation: ['src/result.txt'], baseRevision: null, reason: 'The user requested this prototype result.' }));
+    const secondStep = await requests.next();
+    assert.match(secondStep.request.context.systemPrompt!, /Create src\/result.txt with Done/);
+    answer(secondStep.events, call('create_member', { name: 'Backend', role: 'developer', responsibility: 'Realize the backend subdesign' }));
+    const thirdStep = await requests.next();
+    assert.match(thirdStep.request.context.systemPrompt!, /Backend \(developer\)/);
+    const command = [process.execPath, '-e', 'process.stdout.write(require("node:fs").readFileSync("src/result.txt","utf8"))'];
+    answer(thirdStep.events, call('configure_harness', { to: 'Backend', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'exact', argv: command }] } }));
+    const fourthStep = await requests.next();
+    answer(fourthStep.events, call('assign_member', { to: 'Backend', text: 'Implement the design and report the changed file.' }));
+    const workerStep = await requests.next();
+    assert.match(workerStep.request.context.systemPrompt!, /You are Backend/);
+    assert.ok(!workerStep.request.tools.some(tool => ['read_design', 'save_design', 'assign_member', 'create_member'].includes(tool.definition.name)));
+    const workerInput = workerStep.request.context.messages.at(-1)!;
+    assert.ok(workerInput.role === 'user' && typeof workerInput.content === 'string' && workerInput.content.includes('.context/user/design.json (revision '));
+    answer(workerStep.events, call('write', { path: 'src/result.txt', content: 'Done' }));
+    const workerCommand = await requests.next();
+    assert.ok(workerCommand.request.tools.some(tool => tool.definition.name === 'run_command'));
+    answer(workerCommand.events, call('run_command', { argv: command }));
+    const workerFinish = await requests.next();
+    const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'run_command');
+    assert.ok(commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text');
+    if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.deepEqual([JSON.parse(commandResult.content[0].text).exitCode, JSON.parse(commandResult.content[0].text).stdout], [0, 'Done']);
+    answer(workerFinish.events, message('Implemented the design; src/result.txt contains Done.'));
+    const leadFinish = await requests.next();
+    const report = leadFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'assign_member');
+    assert.ok(report?.role === 'toolResult' && report.content.some(part => part.type === 'text' && part.text.includes('src/result.txt contains Done')));
+    answer(leadFinish.events, message('Design created and explained; Backend delivered src/result.txt.'));
+    assert.equal((await runtime.finished(lead.memberId, run.runId)).status, 'completed');
+    assert.equal(await readFile(join(folder, 'project', 'src', 'result.txt'), 'utf8'), 'Done');
+    const history = await store.runMessages(lead.memberId, run.runId);
+    const save = history.find(record => record.message.role === 'toolResult' && record.message.toolName === 'save_design')!.message;
+    assert.ok(save.role === 'toolResult' && save.content[0]?.type === 'text');
+    if (save.role === 'toolResult' && save.content[0]?.type === 'text') {
+      const change = JSON.parse(save.content[0].text);
+      assert.deepEqual([change.before, change.after, change.seq], [null, JSON.stringify({ content: '# Design\nCreate src/result.txt with Done.', implementation: ['src/result.txt'] }, null, 2) + '\n', 1]);
+    }
+    const expectedAuthor = { type: 'lead', memberId: lead.memberId, runId: run.runId };
+    const base = await workspaceService.context(workspaceId);
+    assert.deepEqual((await base.history('user/design.json', null, 50)).versions[0]!.author, expectedAuthor);
+    const reopened = new MySqlStore(databaseUrl!);
+    try {
+      assert.deepEqual((await reopened.loadContext(workspaceId)).files[0]!.author, expectedAuthor);
+      assert.deepEqual((await reopened.records(workspaceId, 0, 10))[0]!.author, expectedAuthor);
+    } finally { await reopened.close(); }
+    const followed = await collect(runtime.follow(lead.memberId, { runId: run.runId }));
+    assert.equal(followed.at(-1)?.type, 'end');
+    assert.ok(followed.some(event => event.type === 'message' && event.record.message.role === 'toolResult' && event.record.message.toolName === 'save_design'));
+  } finally {
+    await runtime.close();
+    team.runner.close();
+    await workspaceService.close();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 
 test('workspace registry refuses duplicates; context commits reload with history and refuse a stale sequence', { timeout: 15_000 }, async () => {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'workspace-')));

@@ -7,7 +7,7 @@ export interface WorkspaceInput { name: string; directory: string; adopt: boolea
 export interface Problem { path: string; code: string; message: string }
 export interface ContextOverview { workspaceId: string; seq: number; user: { files: number; bytes: number }; agent: { files: number; bytes: number }; problems: Problem[] }
 export interface Workspace extends WorkspaceRecord { context: ContextOverview }
-export type Author = { type: 'user' } | { type: 'external' };
+export type Author = { type: 'user' } | { type: 'external' } | { type: 'lead'; memberId: string; runId: string };
 export type FileAction = 'create' | 'update' | 'move' | 'delete';
 export interface FolderEntry { path: string; type: 'folder' }
 export interface FileEntry { path: string; type: 'file'; size: number; updatedAt: number; revision?: string; author?: Author }
@@ -21,13 +21,15 @@ export interface ChangeRecord { seq: number; time: number; author: Author; reaso
 export interface ContextVersion { revision: string | null; seq: number; time: number; action: FileAction; path: string; fromPath: string | null; size: number | null; author: Author; reason: string | null }
 export interface History { versions: ContextVersion[]; next: number | null }
 export interface Match { path: string; line: number; text: string }
+export type CommandRule = { kind: 'exact'; argv: string[] } | { kind: 'executable'; executable: string };
+export interface HarnessConfig { designScope: { working: string[]; dependencies: string[] }; allowedCommands: CommandRule[] }
 /** A team member as the backend reports it. `memberId` is also the ID of the member's conversation. */
 export interface Member {
-  memberId: string; workspaceId: string; revision: number; name: string; role: string; responsibility: string; scope: string[];
+  memberId: string; workspaceId: string; revision: number; name: string; role: string; responsibility: string; harness: HarnessConfig;
   lead: boolean; settings: RunSettings; issues: string[]; ready: boolean; running: boolean;
 }
 export interface Team { workspaceId: string; members: Member[] }
-export type MemberFields = Pick<Member, 'name' | 'role' | 'responsibility' | 'scope' | 'settings'>;
+export type MemberFields = Pick<Member, 'name' | 'role' | 'responsibility' | 'harness' | 'settings'>;
 
 const query = (path: string, values: Record<string, string | number | null | undefined>) => {
   const params = new URLSearchParams();

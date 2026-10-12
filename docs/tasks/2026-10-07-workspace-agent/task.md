@@ -16,6 +16,15 @@ Review boundaries: [Workspace agent](drafts/workspace-agent/design.md), [workspa
 
 ## Decisions and open questions
 
+- 2026-10-12: the lead/design-scope harness prototype is tracked in [2026-10-12-lead-harness](../2026-10-12-lead-harness/task.md). It supersedes the delivered agent-context scope field. Automated harness-context maintenance and the broader parent vision remain planned.
+- 2026-10-12, further backend design discussion:
+  - The three core backend responsibilities remain context base, team, and agent runtime. The team has member management and cooperation; the runtime applies team and context-base rules during one agent's execution.
+  - The harness now means two things together: an agent's work scope and authority, within which it operates freely; and the rules and mechanisms for maintaining context and knowledge for that scope. This supersedes the earlier Harness module centered on converting conversation to spec.
+  - Context is organized around the user's system design and work, independently of member identity. Members may be temporary or reused, and the team may revise its division of work, responsibilities, and scopes while preserving the shared user contract. This supersedes the earlier assumption that workers must persist across assignments.
+  - Agents maintain agent-owned context without requiring the user to follow or approve each update. The user's accepted specification and design form the shared contract; internal knowledge remains available to the user and persists when members change.
+  - The user chose **design** as the term for their whole project design and its shared contract with agents. It may contain **subdesigns**. The lead helps the user develop and refine it, and every design change must be made known to the user. This supersedes the suggested project/system/work-contract terminology. Awareness is required; the exact acceptance workflow remains open.
+  - Harness context is agent-owned and organized around the design and subdesigns. It preserves the whole project's knowledge across team changes and follows changes to the design structure without losing relevant accumulated knowledge.
+  - Updated the parent design and responsibility draft. Detailed child APIs, assignment lifecycle, context maintenance rules, and the design change workflow remain for discussion; this refinement is not implemented.
 - The user's three principles: harness (the user works only with spec and design; agents have scoped freedom below them), decompose (split a big project into systems handled by agents with scoped context), and knowledge consolidation and reuse.
 - Each workspace has its own context base, persisted in the file system rather than in agent context.
 - Decomposition is a team mechanism rather than a one-shot delegate tool. During the conversation the lead creates workers, sets each worker's role and responsibility, and splits the context among them.
@@ -56,7 +65,7 @@ Review boundaries: [Workspace agent](drafts/workspace-agent/design.md), [workspa
   - Tabs: each file opens once in its own tab, all tabs stay loaded so background drafts survive, and tabs are not remembered or reorderable. Closing a tab with unsaved changes asks first, and so does leaving a conversation with unsaved changes. Deleting a file closes its clean tabs; a tab with unsaved changes stays and can save the file again. The tree can be hidden and shown; "+" in the tab bar shows the tree and focuses its filter.
   - Files: a new file starts empty and opens in the editor; a move never replaces an existing path; a stale save shows a conflict banner that keeps the draft; restoring a version saves its content as a new version; limits of 2,000 tree entries, 200 find results, and 100 search matches; no drag-resize and no content-search UI in this revision.
 - Open, with the recommendation written into the drafts:
-  1. Spec approval (revised for the API): agents never write user context. Every agent change to it is a proposal that the user accepts, possibly with edits, or rejects. This includes recording what the user said directly. A proposal is accepted or rejected whole; related changes go in one proposal. This replaces the earlier recommendation that the lead records the user's direct statements once restated.
+  1. Earlier spec-approval recommendation, superseded by the further design discussion above: every agent change to user context was proposed for acceptance, including recording the user's direct statements. The current requirement is that the user is aware of every design change; the exact acceptance workflow remains open.
   2. Team control: team changes need no user approval; the team is visible and the user can ask for changes.
   3. Worker creation: only the lead creates and changes workers in the prototype; coordinators assign work within their part.
   4. Context base location: inside the project directory and versioned with it.

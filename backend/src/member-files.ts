@@ -4,34 +4,14 @@ import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'n
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { EditOperations, LsOperations, ReadOperations, WriteOperations } from '@earendil-works/pi-coding-agent';
 import { validSegment } from './context-base.js';
-import type { StoredMember } from './team.js';
 import { decodeText, encodeText, maxFileBytes, missing } from './text.js';
 import { AppError } from './types.js';
 
-export type FileMode = 'see' | 'read' | 'write';
+export type FileMode = 'see' | 'read' | 'write' | 'mkdir';
 /** The rule for one agent: why it may not do `mode` on a workspace-relative path, or null when it may. */
 export interface FileAccess { deny(path: string, mode: FileMode): string | null }
 
 const badCharacter = /[\\:\u0000-\u001f\u007f]/;
-
-/** What a team member may see, read, and write in the workspace folder. */
-export function memberAccess(member: StoredMember): FileAccess {
-  const { lead, scope } = member.value;
-  const entries = scope.map(path => path.toLowerCase());
-  return {
-    deny(path, mode) {
-      const segments = path.split('/');
-      if (segments[0] !== '.context' || segments.length === 1) return null;
-      if (segments[1] === 'user') return mode === 'write' ? 'User context changes only through the user' : null;
-      if (segments.length === 2) return mode === 'write' ? '.context/agent is a folder' : null;
-      if (lead) return null;
-      const key = ['agent', ...segments.slice(2)].join('/').toLowerCase();
-      if (entries.some(entry => entry === 'agent' || key === entry || key.startsWith(`${entry}/`))) return null;
-      if (mode === 'see' && entries.some(entry => entry.startsWith(`${key}/`))) return null;
-      return `${path} is outside your scope (${scope.length ? scope.map(entry => `.context/${entry}`).join(', ') : 'empty'})`;
-    },
-  };
-}
 
 /**
  * The workspace folder as one agent may use it, in the form Pi's file tools take: operations that
@@ -113,8 +93,7 @@ export class MemberFiles {
     const label = segments.join('/');
     if (segments.length && this.access.deny(label, 'see') !== null) throw new AppError('not_found', `${label} not found`, 404);
     if (mode !== 'see') {
-      // A folder is writable when a file inside it would be.
-      const reason = this.access.deny(folder ? [...segments, '_'].join('/') : label, mode);
+      const reason = this.access.deny(label, folder ? 'mkdir' : mode);
       if (reason !== null) throw new AppError('access_denied', reason, 403);
     }
     return segments;
@@ -138,6 +117,7 @@ export class MemberFiles {
       if (missing(error)) throw new AppError('workspace_unavailable', `Workspace folder ${this.root} is missing or unreadable`, 503);
       throw error;
     });
+    if (!info.isDirectory()) throw new AppError('workspace_unavailable', `Workspace folder ${this.root} is not a real directory`, 503);
     for (const [index, segment] of segments.entries()) {
       try { info = await lstat(join(this.root, ...segments.slice(0, index + 1))); }
       catch (error) {

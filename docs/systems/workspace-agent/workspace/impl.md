@@ -11,9 +11,9 @@
   - one open context base per workspace, kept until shutdown;
   - a cache of workspace records;
   - a project-file view for each request.
-- `ProjectFiles` serves one workspace folder: path rules, list, read, save, and find. It holds no state between requests.
+- `ProjectFiles` serves one workspace folder: path rules, list, read, save, find, and internal kind inspection for mapped implementation paths. It holds no state between requests.
 - The workspace routes map `/workspaces` requests to the service, the project files, and the context base. The agent server sends every `/workspaces` request to them, except team requests.
-- `MemberFiles` gives an agent the workspace folder in the form Pi's file tools take: operations that apply the caller's access rule. It holds no state besides the folder and the rule, and the team supplies the rule for each member.
+- The neighboring [harness](../harness/design.md) owns MemberFiles and agent file tools; it supplies the access rule from design mappings. Workspace supplies project-file reads/listings for context delivery.
 - The shared HTTP helpers are used by every route: agent, config, and workspace. They read bounded JSON bodies, reject unknown fields and query parameters, parse counts, write JSON, map errors to responses, abort work when the client disconnects, and send SSE streams.
 - The text helpers apply the same text rules and hashing to project files and context files.
 - The backend entry point creates the workspace service with the MySQL store, passes it to the agent server, and closes it on shutdown or a failed start.
@@ -53,8 +53,8 @@ If storing fails, the folder the service created is removed, and no workspace or
 ## Code map
 
 - [Workspace service](../../../../backend/src/workspace.ts): registry, create and adopt, and context bases.
-- [Project files](../../../../backend/src/project-files.ts): project path rules, list, read, save, and find.
-- [Member files](../../../../backend/src/member-files.ts): the operations behind the agents' file tools, with the access rule.
+- [Project files](../../../../backend/src/project-files.ts): project path rules, list, read, save, find, and internal kind inspection for mapped implementation paths.
+- [Harness implementation](../harness/impl.md): scoped agent file operations and their access rules.
 - [Workspace routes](../../../../backend/src/workspace-routes.ts): `/workspaces` endpoints.
 - [HTTP helpers](../../../../backend/src/http-helpers.ts) and [agent server](../../../../backend/src/http.ts): shared transport, and routing to agents, config, and workspaces.
 - [Text rules](../../../../backend/src/text.ts): shared text decoding, encoding, and hashing.

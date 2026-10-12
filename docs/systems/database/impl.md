@@ -38,6 +38,8 @@ Context bases use five tables:
 5. Insert the new current-file rows.
 6. Insert the record.
 
+The codec accepts context authors of user, external, and lead with validated member/run identities. Existing JSON author columns store the lead variant without schema changes. The team owns one-time migration of member scope to harness; the database treats member values as opaque.
+
 `loadContext` reads the sequence number and the current files joined with their versions in one transaction. `lastFileId` orders by `seq` and, at the same `seq`, prefers a file created at the path over one deleted from it, which matters after an outside move that changes only letter case.
 
 ## Decisions and constraints
@@ -62,3 +64,5 @@ Context paths are ASCII by the path rules and are stored with a binary collation
 The repository locks an agent row before every mutation; snapshot reads use one repeatable-read transaction. The advisory ownership lock is held on a dedicated pooled connection, its error listener is removed on release, and ownership loss is reported to the runtime. Schema initialization is idempotent for the initial schema, not a migration engine for future versions. JSON envelopes are versioned independently of the schema. Raw Pi event partials are serialized before awaiting database operations so later in-process mutations cannot rewrite retained events.
 
 The config integration tests in [backend.test.ts](../../../backend/test/integration/backend.test.ts) cover revision conflicts, repeatable initialization, and a running agent's independence from later catalog edits/deletions.
+
+The complete lead/harness integration verifies persisted lead author and version content after reopening the pool; codec checks reject invalid author IDs.
