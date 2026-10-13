@@ -181,6 +181,12 @@ Check the commit criteria in section 9 and run the required tests against the ex
 
 After a partial commit, continue the task from that new commit. If the next proposed increment fails or is blocked, keep that increment uncommitted and report its status; earlier consistent commits remain valid.
 
+### G. Review on the feature branch, then merge
+
+Implement and commit work on a feature branch. The user reviews the committed diff and runs the application on that branch. Apply review fixes and verify them on the same branch. Merge into `main` after the user accepts the work and authorizes the merge; `main` holds accepted work. Push when the user requests it.
+
+For this project, the default is to share the feature branch in the existing project base folder, so the user can review and run it from VS Code or a shell there. Use the `codex/` prefix for new feature branches. Coordinate edits when the user and agent work concurrently, and preserve existing local changes before switching branches. Separate worktrees are optional when isolation is useful or requested; arrange review in the project base folder according to the user's preference.
+
 ## 7. Task documents and test evidence
 
 Keep `task.md`, `tests.jsonl`, and the proposed system documents under `docs/tasks/<task-id>/`. They record the task's target and history; they do not replace the canonical documents under `docs/systems/`.

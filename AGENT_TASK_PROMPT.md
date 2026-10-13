@@ -37,6 +37,7 @@ Implement the new design expressed by the task drafts. Discuss material ambiguit
 3. Implement the increment and its meaningful tests. Keep the task draft `impl.md` aligned with the implementation. At commit preparation, promote only delivered design and implementation content from the task drafts into canonical documents. Leave future proposals in the task directory.
 4. Test the exact candidate code and canonical documents for that commit. Record every test run, including failures, in `docs/tasks/<task-id>/tests.jsonl` with the full starting commit SHA for that increment. Rerun affected checks after any behavior-affecting edit.
 5. Commit only when canonical `design.md`, canonical `impl.md`, code, and tests agree. Include the task files and a `Task-ID: <task-id>` commit trailer. Continue the remaining task from that commit.
+6. Follow the protocol's branch review workflow: by default, work and review on a feature branch in the existing project base folder. Keep review fixes on that branch, and merge into `main` after the user accepts the work and authorizes the merge. Push when requested.
 
 Before each commit, check for obsolete branches, duplicated behavior, unnecessary fallbacks, and any mismatch between the new design and the code.
 
