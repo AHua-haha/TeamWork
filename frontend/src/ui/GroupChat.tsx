@@ -50,7 +50,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
     <div className="group-viewport" ref={viewport} onScroll={() => { const view = viewport.current!; pinned.current = view.scrollHeight - view.scrollTop - view.clientHeight < 80; }}>
       {!snapshot.entries.length && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open design and team</button></div>}
       <div className="group-timeline">{snapshot.entries.map(entry => entry.kind === 'user'
-        ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body"><div className="group-user-label">You</div><p>{entry.text}</p></div><span className="group-avatar group-user-avatar" aria-hidden="true">Y</span></article>
+        ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body"><p>{entry.text}</p></div><div className="group-identity group-user-identity"><span className="group-avatar" aria-hidden="true">Y</span><strong className="group-identity-name">You</strong></div></article>
         : <MemberResponse key={entry.entryId} entry={entry} />)}</div>
     </div>
     <div className="group-composer-footer"><form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
@@ -97,7 +97,7 @@ function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
     return { iso: date.toISOString(), time: date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), full: date.toLocaleString() };
   }, [entry.run.startedAt]);
   return <article className="group-member" data-entry-id={entry.entryId} style={{ '--member-color': memberColor(entry.memberId) } as CSSProperties}>
-    <div className="group-member-identity"><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong className="group-member-name">{entry.name}</strong></div>
+    <div className="group-identity group-member-identity"><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong className="group-identity-name">{entry.name}</strong></div>
     <div className="group-run-area">
       <button type="button" className="group-run-header" aria-expanded={expanded} aria-controls={`group-work-${entry.entryId}`}
         aria-label={`${entry.name}: ${status}, ${duration}. ${expanded ? 'Hide' : 'Show'} working history`} onClick={() => setExpanded(value => !value)}>
@@ -120,7 +120,6 @@ function WorkingHistory({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
   useEffect(() => { client.follow(entry.run.runId); return () => client.dispose(); }, [client, entry.run.runId]);
   const items = workingItems(snapshot, entry);
   return <div className="group-work" id={`group-work-${entry.entryId}`} aria-label={`${entry.name} working history`}>
-    <div className="group-work-label">Working history</div>
     {snapshot.error && <div className="group-work-error" role="alert">{snapshot.error}<button type="button" onClick={() => client.follow(entry.run.runId)}>Retry work history</button></div>}
     {!items.length && <p>{snapshot.synchronized ? 'No intermediate work recorded.' : 'Loading work…'}</p>}
     {items.map(item => item.kind === 'tool'

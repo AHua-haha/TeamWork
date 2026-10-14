@@ -21,7 +21,7 @@ This contract includes the approved UI defaults.
 
 - Position user messages on the right-hand side of the chat.
 - Preserve their backend-assigned timeline positions relative to reserved member response sections.
-- Use a subtle bubble background with left-aligned multiline text. A user avatar sits outside the bubble on its right, aligned with its top.
+- Use a subtle bubble background with left-aligned multiline text. A user avatar sits outside the bubble on its right, aligned with its top, with the user identity name beneath it like member names. In this prototype the user identity is You. The bubble contains only the submitted message text.
 
 ### Member response sections
 
@@ -41,7 +41,7 @@ This contract includes the approved UI defaults.
 ### Folded working history
 
 - Above each response, show textual run status, elapsed duration, start time and a disclosure arrow. The header has no background fill, surrounding box or top/side borders; its only separator is a thicker colored bottom line. Clicking anywhere on the header, or activating it by keyboard, expands/collapses private work. Work is collapsed by default.
-- Expanding it reveals only that member activation's stored working messages and tool activity in a separate area below the fixed header line and above the final report. A Working history label, subtle background and inset content distinguish private inspection from the unboxed final response. The header line stays directly beneath metadata in both states and does not cross the avatar gutter. Pending/running activity uses this same layout. It can be collapsed again; expansion does not start or cancel a member run.
+- Expanding it reveals only that member activation's stored working messages and tool activity in a separate area below the fixed header line and above the final report. Subtle background and inset content distinguish private inspection from the unboxed final response; no visible Working history title is added. The header line stays directly beneath metadata in both states and does not cross the avatar gutter. Pending/running activity uses this same layout. It can be collapsed again; expansion does not start or cancel a member run.
 - Accepted final-response text is displayed once in the main response body. Its private-history copy is not repeated as a second final answer inside the fold. Relevant working content associated with that response may remain inspectable.
 - Working messages retain their private inspection identity. They are not appended to the shared transcript, converted into new shared messages, or included in another member's model context.
 - The same member's earlier or later activations are not mixed into this fold.
