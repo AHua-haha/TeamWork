@@ -45,7 +45,7 @@ test('the team is viewed, formed, changed, and retired over HTTP', () => withSer
   const created = await call(`${base}/members`, { method: 'POST', status: 201, data: { name: 'Backend', role: 'backend developer', harness: emptyHarness() } });
   assert.deepEqual([created.name, created.harness, created.ready, created.running, created.revision], ['Backend', emptyHarness(), false, false, 0]);
   assert.equal((await call(`${base}/members/${created.memberId}`)).name, 'Backend');
-  await fixture.team.runner.startUser(fixture.lead.memberId, 'go');
+  await fixture.team.runner.postUser(fixture.workspaceId, 'go');
   assert.deepEqual((await call(base)).members.map((member: Body) => member.running), [true, false]);
   fixture.runtime.end(fixture.lead.memberId);
 
@@ -62,12 +62,19 @@ test('the team is viewed, formed, changed, and retired over HTTP', () => withSer
   await call(`${base}/other`, { status: 404 });
 }));
 
-test('only the lead takes the user\'s input, and members are not in the agent list', () => withServer(async (call, fixture) => {
+test('workspace input goes to group chat; direct member input is refused', () => withServer(async (call, fixture) => {
   const worker = await call(`/workspaces/${fixture.workspaceId}/team/members`, { method: 'POST', status: 201, data: { name: 'Backend', role: 'developer' } });
-  const accepted = await call(`/agents/${fixture.lead.memberId}/runs`, { method: 'POST', status: 202, data: { input: 'Build a reading list' } });
-  assert.equal(accepted.runId, 'run1');
-  assert.equal(fixture.runtime.last(fixture.lead.memberId)?.input, 'Build a reading list');
-  assert.equal((await call(`/agents/${fixture.lead.memberId}/runs`, { method: 'POST', status: 409, data: { input: 'again' } })).error.code, 'agent_busy');
-  assert.equal((await call(`/agents/${worker.memberId}/runs`, { method: 'POST', status: 409, data: { input: 'hello' } })).error.code, 'member_conversation');
-  assert.equal(fixture.runtime.last(worker.memberId), undefined);
+  for (const id of [fixture.lead.memberId, worker.memberId]) assert.equal((await call(`/agents/${id}/runs`, { method: 'POST', status: 409, data: { input: 'hello' } })).error.code, 'member_conversation');
+  const base = `/workspaces/${fixture.workspaceId}/team/chat`;
+  const accepted = await call(`${base}/messages`, { method: 'POST', status: 202, data: { text: 'Build a reading list' } });
+  assert.deepEqual(accepted.message.author, { type: 'user' });
+  assert.equal(accepted.runs[0].agentId, fixture.lead.memberId);
+  assert.equal((await call(`${base}/messages`, { method: 'POST', status: 409, data: { text: 'again' } })).error.code, 'member_busy');
+  assert.equal((await call(base)).messages.length, 1);
+  assert.equal((await call(`${base}?after=2`, { status: 409 })).error.code, 'invalid_cursor');
+  assert.equal((await call(`${base}?after=0&after=0`, { status: 400 })).error.code, 'invalid_input');
+  assert.equal((await call(base, { method: 'PUT', data: { mentionLimit: 7 } })).mentionLimit, 7);
+  await call(base, { method: 'PUT', status: 400, data: { mentionLimit: 0 } });
+  await call(`${base}/stop`, { method: 'POST', status: 202 });
+  assert.equal(fixture.runtime.last(fixture.lead.memberId)?.status, 'cancelled');
 }));

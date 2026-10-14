@@ -82,9 +82,9 @@ test('retiring frees the name, keeps the lead, and a team has a size limit', () 
 
 test('the lead forms the team with tools; other members cannot', () => withTeam(async fixture => {
   const { team, lead } = fixture;
-  const { management, messaging } = teamTools(team.service, team.runner, stubConfig as never);
+  const { management } = teamTools(team.service, team.runner, stubConfig as never);
   const run = async (name: string, agentId: string, args: Record<string, unknown>) => {
-    const tool = [...management, ...messaging].find(item => item.definition.name === name)!;
+    const tool = management.find(item => item.definition.name === name)!;
     return (await tool.execute(args as never, scope(agentId), {} as never)).content.map(part => ('text' in part ? part.text : '')).join('');
   };
 
@@ -105,7 +105,6 @@ test('the lead forms the team with tools; other members cannot', () => withTeam(
   assert.match(await run('retire_member', lead.memberId, { name: 'Server' }), /^Retired Server/);
   assert.equal(await team.service.byName(fixture.workspaceId, 'Server'), undefined);
   assert.match(await run('list_models', lead.memberId, {}), /conn \(Test\):\n {2}model/);
-  assert.match(await run('send_message', lead.memberId, { to: 'Nobody', text: 'hi' }), /^Refused \(not_found\)/);
 }));
 
 test('startup replaces legacy scopes with empty harnesses once and preserves the member identity and settings', () => withTeam(async fixture => {

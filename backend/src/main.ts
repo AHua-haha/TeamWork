@@ -30,7 +30,7 @@ try {
   });
   console.log(`Agent backend listening on ${process.env.HOST ?? '127.0.0.1'}:${port}`);
 } catch (error) {
-  team.runner.close();
+  await team.runner.close();
   await runtime.close().catch(() => undefined);
   await workspaces.close();
   await store.close();
@@ -42,7 +42,7 @@ async function shutdown() {
   if (closing) return;
   closing = true;
   const closed = new Promise<void>(resolve => server.close(() => resolve()));
-  try { team.runner.close(); await runtime.close(); }
+  try { await team.runner.close(); await runtime.close(); }
   finally {
     server.closeAllConnections();
     await closed;

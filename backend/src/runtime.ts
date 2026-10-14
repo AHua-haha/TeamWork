@@ -125,16 +125,35 @@ export class AgentRuntime {
     const accepted = (async () => {
       const config = await this.config.resolveForRun(agentId);
       const run = await this.store.startRun(agentId, input);
-      const controller = new AbortController();
-      // Schedule after the job is registered; frontend connection lifetime has no role here.
-      const done = Promise.resolve().then(() => this.runLoop(run, config, controller.signal)).finally(() => this.jobs.delete(run.runId));
-      this.jobs.set(run.runId, { agentId, controller, done });
-      this.changes.publish();
+      this.launch(run, config);
       return run;
     })();
     this.pendingStarts.add(accepted);
     void accepted.finally(() => this.pendingStarts.delete(accepted)).catch(() => undefined);
     return accepted;
+  }
+
+  /** Resolve a member configuration before the team atomically accepts a publication. */
+  async prepareRun(agentId: string): Promise<ResolvedRunConfig> {
+    this.available();
+    return this.config.resolveForRun(agentId);
+  }
+
+  /** Execute an already-persisted run. Group publication owns creation and input delivery. */
+  launch(run: RunState, config: ResolvedRunConfig): void {
+    // Shutdown waits for accepted starts to register, then aborts their jobs before releasing the lease.
+    this.store.assertRuntime();
+    if (this.jobs.has(run.runId)) throw new AppError('agent_busy', 'Run already launched', 409);
+    const controller = new AbortController();
+    const done = Promise.resolve().then(() => this.runLoop(run, config, controller.signal)).finally(() => this.jobs.delete(run.runId));
+    this.jobs.set(run.runId, { agentId: run.agentId, controller, done });
+    this.changes.publish();
+  }
+
+  /** Refused final publications are private input to the same model/tool loop. */
+  async feedback(agentId: string, runId: string, text: string): Promise<void> {
+    await this.store.commitMessage(agentId, runId, { messageId: randomUUID(), message: { role: 'user', content: text, timestamp: Date.now() }, metadata: { source: 'publication-feedback' } });
+    this.changes.publish();
   }
 
   async cancel(agentId: string, runId: string): Promise<void> {

@@ -20,8 +20,8 @@ function describe(member: MemberView): string {
 
 const optionalString = (value: unknown) => (value === undefined ? undefined : String(value));
 
-/** The tools that belong to the team: calling a teammate for every member, and team management for the lead. */
-export function teamTools(team: TeamService, runner: TeamRunner, models: ModelDirectory): { messaging: RuntimeTool[]; management: RuntimeTool[] } {
+/** The tools that belong to the team: team management for the lead. */
+export function teamTools(team: TeamService, runner: TeamRunner, models: ModelDirectory): { management: RuntimeTool[] } {
   const lead = async (agentId: string): Promise<StoredMember> => {
     const member = await team.find(agentId);
     if (!member?.value.lead || member.value.retiredAt !== null) throw new AppError('access_denied', 'Only the lead changes the team', 403);
@@ -38,14 +38,6 @@ export function teamTools(team: TeamService, runner: TeamRunner, models: ModelDi
     return args.connectionId === undefined ? {} : { connectionId: String(args.connectionId), modelId: String(args.modelId) };
   };
   return {
-    messaging: [{
-      definition: {
-        name: 'send_message',
-        description: 'Ask a teammate by name to do something. The teammate works in its own conversation while you wait, and its final response comes back as the result; nothing else of its work is shown to you. A teammate already in this chain of calls cannot be called.',
-        parameters: Type.Object({ to: Type.String({ description: 'Name of the teammate' }), text: Type.String({ description: 'What you need: the goal, where to find context, and what to answer with' }) }),
-      },
-      execute: (args, scope) => refusing(() => runner.call(scope.agentId, scope.runId, scope.signal, String(args.to), String(args.text))),
-    }],
     management: [
       {
         definition: {
@@ -92,7 +84,7 @@ export function teamTools(team: TeamService, runner: TeamRunner, models: ModelDi
       {
         definition: {
           name: 'retire_member',
-          description: 'Remove a member other than yourself from the team. Its run is cancelled and a caller waiting for it receives a cancelled result. What it wrote stays.',
+          description: 'Remove a member other than yourself from the team. Its run is cancelled and its status is visible in the group chat. What it wrote stays.',
           parameters: Type.Object({ name: Type.String({ description: 'Name of the member' }) }),
         },
         execute: (args, scope) => refusing(async () => {

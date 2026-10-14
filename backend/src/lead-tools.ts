@@ -4,7 +4,7 @@ import { refusing } from './tool-result.js';
 import { harnessSchema } from './harness-tools.js';
 import type { RuntimeTool } from './runtime.js';
 
-/** User-visible design changes and assignments, available only to the lead. */
+/** User-visible design changes and harness configuration, available only to the lead. */
 export function leadTools(lead: LeadService): RuntimeTool[] {
   return [
     {
@@ -45,19 +45,6 @@ export function leadTools(lead: LeadService): RuntimeTool[] {
         parameters: Type.Object({ to: Type.String(), harness: harnessSchema }),
       },
       execute: (args, scope) => refusing(async () => JSON.stringify(await lead.configureHarness(scope.agentId, args.to, args.harness), null, 2)),
-    },
-    {
-      definition: {
-        name: 'assign_member',
-        description: 'Assign work under the worker\'s configured working and dependency designs. Configure the member and its harness first. The worker runs while you wait and returns its final report.',
-        parameters: Type.Object({
-          to: Type.String({ description: 'Name of the worker' }),
-          text: Type.String({ minLength: 1, description: 'Objective, expected result, and work to do under the design' }),
-        }),
-      },
-      execute: (args, scope) => refusing(() => lead.assign(scope.agentId, scope.runId, scope.signal, {
-        to: args.to, text: args.text,
-      })),
     },
   ];
 }

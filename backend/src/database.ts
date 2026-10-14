@@ -6,6 +6,8 @@ import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, Ind
 import type { MemberRecord, NewMember, StoredMember, TeamStore } from './team.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
 
+import { defaultMentionLimit, groupEntry, mentionLimit, validateChatMessage, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore } from './group-chat.js';
+
 type Db = Pool | PoolConnection;
 export type ConfigScope = 'app' | 'catalog' | 'connection' | 'model_cache' | 'agent';
 export interface StoredConfig<T = unknown> { id: string; revision: number; value: T }
@@ -151,10 +153,38 @@ const schema = [
     FOREIGN KEY (id) REFERENCES agents(id),
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS chat_settings (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    position BIGINT UNSIGNED NOT NULL DEFAULT 0, mention_limit INT UNSIGNED NOT NULL DEFAULT 32,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS chat_exchanges (
+    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    mention_limit INT UNSIGNED NOT NULL, used INT UNSIGNED NOT NULL DEFAULT 0,
+    stopped TINYINT NOT NULL DEFAULT 0,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS chat_messages (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    position BIGINT UNSIGNED NOT NULL, entry JSON NOT NULL,
+    PRIMARY KEY (workspace_id, position),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS chat_runs (
+    run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    exchange_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES runs(id), FOREIGN KEY (exchange_id) REFERENCES chat_exchanges(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS chat_delivery (
+    member_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    position BIGINT UNSIGNED NOT NULL DEFAULT 0, end_position BIGINT UNSIGNED NULL,
+    FOREIGN KEY (member_id) REFERENCES members(id)
+  ) ENGINE=InnoDB`,
 ];
 
 /** All writers lock the agent row first. Follow reads use a repeatable-read snapshot. */
-export class MySqlStore implements ContextStore, TeamStore {
+export class MySqlStore implements ContextStore, TeamStore, ChatStore {
   readonly pool: Pool;
   private lease?: PoolConnection;
   private leaseError?: Error;
@@ -447,11 +477,14 @@ export class MySqlStore implements ContextStore, TeamStore {
   async finishRun(agentId: string, runId: string, status: Exclude<RunStatus, 'running'>, error: RunState['error'] = null): Promise<RunState> {
     return this.transaction(async db => {
       const agent = await this.agent(db, agentId, true);
+      const existing = await this.run(db, agentId, runId);
+      if (existing.status !== 'running') return existing;
       const run = await this.active(db, agent, runId);
       const finished: RunState = { ...run, status, phase: 'finished', activeMessageId: null, endedAt: Date.now(), endPosition: agent.history_position, error };
       await db.execute('DELETE FROM live_messages WHERE run_id = ?', [runId]);
       await this.saveRun(db, finished);
       await db.execute('UPDATE agents SET active_run_id = NULL WHERE id = ?', [agentId]);
+      await this.drainChat(db, agent, true);
       return finished;
     });
   }
@@ -498,6 +531,112 @@ export class MySqlStore implements ContextStore, TeamStore {
     return records.map(row => ({ ...decode<ContextEntry>(row.entry, value => validateEntries([value])), agentId, runId, position: row.position as number }));
   }
 
+  /** Delivery changes model context only. Display history remains an independent record. */
+  private async drainChat(db: Db, agent: RowDataPacket, finished = false): Promise<void> {
+    if (agent.active_run_id && !finished) return;
+    const [member] = await rows(db, 'SELECT workspace_id FROM members WHERE id = ?', [agent.id]);
+    if (!member) return;
+    const [cursor] = await rows(db, 'SELECT position, end_position FROM chat_delivery WHERE member_id = ?', [agent.id]);
+    const pending = await rows(db, 'SELECT position, entry FROM chat_messages WHERE workspace_id = ? AND position > ? AND (? IS NULL OR position <= ?) ORDER BY position', [member.workspace_id, cursor?.position ?? 0, cursor?.end_position ?? null, cursor?.end_position ?? null]);
+    if (!pending.length) return;
+    const context = decode<ContextEntry[]>(agent.context, validateEntries);
+    for (const row of pending) {
+      const message = decode<ChatMessage>(row.entry, validateChatMessage);
+      context.push(groupEntry(message));
+    }
+    validateEntries(context);
+    await db.execute('UPDATE agents SET context = ?, context_revision = context_revision + 1 WHERE id = ?', [encode(context), agent.id]);
+    await db.execute('INSERT INTO chat_delivery (member_id, position) VALUES (?, ?) ON DUPLICATE KEY UPDATE position = VALUES(position)', [agent.id, pending.at(-1)!.position]);
+  }
+
+  async syncChatMember(memberId: string): Promise<void> {
+    await this.transaction(async db => this.drainChat(db, await this.agent(db, memberId, true)));
+  }
+
+  async configureChat(workspaceId: string, value: number): Promise<void> {
+    mentionLimit(value);
+    await this.transaction(async db => {
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      await db.execute('INSERT INTO chat_settings (workspace_id, mention_limit) VALUES (?, ?) ON DUPLICATE KEY UPDATE mention_limit = VALUES(mention_limit)', [workspaceId, value]);
+    });
+  }
+
+  async publishChat(input: ChatPublication): Promise<{ message: ChatMessage; runs: RunState[] }> {
+    return this.transaction(async db => {
+      // Workspace lock serializes publication, budget allocation and stop. Runtime writes lock agents.
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [input.workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      await db.execute('INSERT IGNORE INTO chat_settings (workspace_id) VALUES (?)', [input.workspaceId]);
+      const [settings] = await rows(db, 'SELECT * FROM chat_settings WHERE workspace_id = ?', [input.workspaceId]);
+      const memberRows = await rows(db, 'SELECT id, data FROM members WHERE workspace_id = ? ORDER BY id', [input.workspaceId]);
+      const active = memberRows.filter(row => decode<MemberRecord>(row.data, () => undefined).retiredAt === null);
+      const agents = new Map<string, RowDataPacket>();
+      for (const member of active) agents.set(member.id, await this.agent(db, member.id, true));
+      const sender = input.author.type === 'member' ? agents.get(input.author.memberId) : undefined;
+      if (input.author.type === 'member') {
+        if (!sender || sender.active_run_id !== input.author.runId) throw new AppError('member_unavailable', 'The sending member is no longer working', 409);
+        const [origin] = await rows(db, 'SELECT exchange_id FROM chat_runs WHERE run_id = ?', [input.author.runId]);
+        if (!origin || origin.exchange_id !== input.exchangeId) throw new AppError('invalid_input', 'Response does not belong to this exchange');
+      }
+      for (const recipient of input.recipients) {
+        const agent = agents.get(recipient);
+        if (!agent) throw new AppError('member_unavailable', 'A mentioned member has retired', 409);
+        if (agent.active_run_id) throw new AppError('member_busy', 'A mentioned member is already working; revise or try again when it is free', 409);
+      }
+      const exchangeId = input.exchangeId ?? randomUUID();
+      if (!input.exchangeId) await db.execute('INSERT INTO chat_exchanges (id, workspace_id, mention_limit) VALUES (?, ?, ?)', [exchangeId, input.workspaceId, settings!.mention_limit]);
+      const [exchange] = await rows(db, 'SELECT * FROM chat_exchanges WHERE id = ? AND workspace_id = ?', [exchangeId, input.workspaceId]);
+      if (!exchange || exchange.stopped) throw new AppError('exchange_stopped', 'This exchange has stopped', 409);
+      if (exchange.used + input.recipients.length > exchange.mention_limit) throw new AppError('mention_limit', 'The exchange mention limit is reached; finish with a response without mentions', 409);
+      const message: ChatMessage = { workspaceId: input.workspaceId, messageId: randomUUID(), position: settings!.position + 1, exchangeId, author: input.author, text: input.text, recipients: input.recipients, time: Date.now() };
+      validateChatMessage(message);
+      await db.execute('INSERT INTO chat_messages (workspace_id, position, entry) VALUES (?, ?, ?)', [input.workspaceId, message.position, encode(message)]);
+      await db.execute('UPDATE chat_settings SET position = ? WHERE workspace_id = ?', [message.position, input.workspaceId]);
+      await db.execute('UPDATE chat_exchanges SET used = used + ? WHERE id = ?', [input.recipients.length, exchangeId]);
+      if (sender && input.author.type === 'member') {
+        const run = await this.active(db, sender, input.author.runId);
+        if (run.activeMessageId) throw new AppError('conflict', 'Finish the private response before publication', 409);
+        await this.saveRun(db, { ...run, status: 'completed', phase: 'finished', endedAt: Date.now(), endPosition: sender.history_position });
+        await db.execute('UPDATE agents SET active_run_id = NULL WHERE id = ?', [sender.id]);
+        sender.active_run_id = null;
+      }
+      // Active workers keep their cursor unchanged until finishRun; idle members receive now.
+      for (const agent of agents.values()) await this.drainChat(db, agent);
+      const runs: RunState[] = [];
+      for (const agentId of input.recipients) {
+        const run: RunState = { agentId, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
+        await db.execute('INSERT INTO runs (id, agent_id, state) VALUES (?, ?, ?)', [run.runId, agentId, encode(run)]);
+        await db.execute('INSERT INTO chat_runs (run_id, exchange_id) VALUES (?, ?)', [run.runId, exchangeId]);
+        await db.execute('UPDATE agents SET active_run_id = ?, latest_run_id = ? WHERE id = ?', [run.runId, run.runId, agentId]);
+        runs.push(run);
+      }
+      return { message, runs };
+    });
+  }
+
+  async chatSnapshot(workspaceId: string, after = 0, limit = 100): Promise<ChatSnapshot> {
+    identity(workspaceId, 'workspaceId'); position(after);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new AppError('invalid_input', 'limit is 1–500');
+    return this.transaction(async db => {
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ?', [workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      const [settings] = await rows(db, 'SELECT * FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+      const upper = settings?.position ?? 0;
+      if (after > upper) throw new AppError('invalid_cursor', 'Chat cursor is ahead of history', 409);
+      const records = await rows(db, 'SELECT entry FROM chat_messages WHERE workspace_id = ? AND position > ? ORDER BY position' + limitClause(limit), [workspaceId, after]);
+      const messages = records.map(row => decode<ChatMessage>(row.entry, validateChatMessage));
+      const activity = await rows(db, `SELECT r.state, cr.exchange_id FROM chat_runs cr JOIN runs r ON r.id = cr.run_id JOIN chat_exchanges e ON e.id = cr.exchange_id WHERE e.workspace_id = ? ORDER BY r.id`, [workspaceId]);
+      return { workspaceId, position: upper, mentionLimit: settings?.mention_limit ?? defaultMentionLimit, messages, more: (messages.at(-1)?.position ?? after) < upper, runs: activity.map(row => ({ exchangeId: row.exchange_id, run: decode<RunState>(row.state, validateRun) })) };
+    });
+  }
+
+  async stopChat(workspaceId: string): Promise<RunState[]> {
+    return this.transaction(async db => {
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      await db.execute('UPDATE chat_exchanges SET stopped = 1 WHERE workspace_id = ?', [workspaceId]);
+      const active = await rows(db, 'SELECT r.state FROM chat_runs cr JOIN runs r ON r.id = cr.run_id JOIN agents a ON a.active_run_id = r.id JOIN chat_exchanges e ON e.id = cr.exchange_id WHERE e.workspace_id = ?', [workspaceId]);
+      return active.map(row => decode<RunState>(row.state, validateRun));
+    });
+  }
+
   async listMembers(workspaceId: string): Promise<StoredMember[]> {
     return (await rows(this.pool, 'SELECT id, workspace_id, revision, data FROM members WHERE workspace_id = ? ORDER BY ordinal', [workspaceId])).map(memberRow);
   }
@@ -517,11 +656,15 @@ export class MySqlStore implements ContextStore, TeamStore {
     } catch (error) {
       throw memberConflict(error);
     }
+    await this.drainChat(db, await this.agent(db, member.id, true));
     return { id: member.id, workspaceId: member.workspaceId, revision: 0, value: decode<MemberRecord>(data, () => undefined) };
   }
 
   async createMember(member: NewMember): Promise<StoredMember> {
-    return this.transaction(db => this.insertMember(db, member));
+    return this.transaction(async db => {
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [member.workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      return this.insertMember(db, member);
+    });
   }
 
   async updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord): Promise<StoredMember> {
@@ -529,13 +672,20 @@ export class MySqlStore implements ContextStore, TeamStore {
     position(revision);
     const data = encode(value);
     await this.transaction(async db => {
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [value.workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
       let result: ResultSetHeader;
       try {
         [result] = await db.execute<ResultSetHeader>('UPDATE members SET data = ?, name_key = ?, revision = revision + 1 WHERE id = ? AND revision = ?', [data, nameKey, memberId, revision]);
       } catch (error) {
         throw memberConflict(error);
       }
-      if (result.affectedRows) return;
+      if (result.affectedRows) {
+        if (value.retiredAt !== null) {
+          const [chat] = await rows(db, 'SELECT position FROM chat_settings WHERE workspace_id = ?', [value.workspaceId]);
+          await db.execute('INSERT INTO chat_delivery (member_id, position, end_position) VALUES (?, 0, ?) ON DUPLICATE KEY UPDATE end_position = VALUES(end_position)', [memberId, chat?.position ?? 0]);
+        }
+        return;
+      }
       const [existing] = await rows(db, 'SELECT id FROM members WHERE id = ?', [memberId]);
       throw new AppError(existing ? 'config_conflict' : 'not_found', existing ? 'Member revision changed' : 'Member not found', existing ? 409 : 404);
     });

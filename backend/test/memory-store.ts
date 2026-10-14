@@ -3,16 +3,77 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/context-base.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore } from '../src/team.js';
+import { randomUUID } from 'node:crypto';
+import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot } from '../src/group-chat.js';
+import type { ContextEntry, RunState } from '../src/types.js';
 import { AppError } from '../src/types.js';
 
 interface Stored { record: WorkspaceRecord; key: string; seq: number; blobs: Map<string, string>; versions: StoredVersion[]; files: Map<string, IndexedFile>; records: ChangeRecord[] }
 
 /** The MySQL store's context semantics in memory. `failNextCommit` makes the next commit fail before it applies. */
-export class MemoryStore implements ContextStore, TeamStore {
+export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   readonly workspaces = new Map<string, Stored>();
   readonly members = new Map<string, { member: StoredMember; lead: boolean; nameKey: string | null; ordinal: number }>();
   private ordinal = 0;
   failNextCommit = false;
+
+  readonly chatMessages = new Map<string, ChatMessage[]>();
+  readonly chatRuns = new Map<string, { exchangeId: string; run: RunState }>();
+  readonly agentContexts = new Map<string, ContextEntry[]>();
+  readonly delivery = new Map<string, number>();
+  private readonly limits = new Map<string, number>();
+  private readonly exchanges = new Map<string, { used: number; limit: number; stopped: boolean }>();
+  onPublicationComplete?: (runId: string) => void;
+  failNextPublication = false;
+
+  async publishChat(input: ChatPublication) {
+    this.stored(input.workspaceId);
+    const active = [...this.chatRuns.values()].filter(item => item.run.status === 'running');
+    for (const id of input.recipients) if (active.some(item => item.run.agentId === id)) throw new AppError('member_busy', 'Member is working', 409);
+    const exchangeId = input.exchangeId ?? randomUUID();
+    const exchange = this.exchanges.get(exchangeId) ?? { used: 0, limit: this.limits.get(input.workspaceId) ?? 32, stopped: false };
+    if (exchange.stopped) throw new AppError('exchange_stopped', 'Exchange stopped', 409);
+    if (exchange.used + input.recipients.length > exchange.limit) throw new AppError('mention_limit', 'Mention limit reached', 409);
+    if (this.failNextPublication) { this.failNextPublication = false; throw new Error('injected publication failure'); }
+    const messages = this.chatMessages.get(input.workspaceId) ?? [];
+    const message: ChatMessage = { ...input, exchangeId, messageId: randomUUID(), position: messages.length + 1, time: Date.now() };
+    messages.push(structuredClone(message)); this.chatMessages.set(input.workspaceId, messages);
+    exchange.used += input.recipients.length; this.exchanges.set(exchangeId, exchange);
+    if (input.author.type === 'member') this.onPublicationComplete?.(input.author.runId);
+    for (const member of await this.listMembers(input.workspaceId)) if (member.value.retiredAt === null) await this.syncChatMember(member.id);
+    const runs = input.recipients.map(agentId => {
+      const run: RunState = { agentId, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
+      this.chatRuns.set(run.runId, { exchangeId, run }); return run;
+    });
+    return { message, runs };
+  }
+
+  async syncChatMember(memberId: string) {
+    if ([...this.chatRuns.values()].some(item => item.run.agentId === memberId && item.run.status === 'running')) return;
+    const member = this.members.get(memberId)?.member;
+    if (!member) return;
+    const pending = (this.chatMessages.get(member.workspaceId) ?? []).filter(item => item.position > (this.delivery.get(memberId) ?? 0));
+    const entries = this.agentContexts.get(memberId) ?? [];
+    entries.push(...pending.map(groupEntry)); this.agentContexts.set(memberId, entries);
+    if (pending.length) this.delivery.set(memberId, pending.at(-1)!.position);
+  }
+
+  async chatSnapshot(workspaceId: string, after = 0, limit = 100): Promise<ChatSnapshot> {
+    this.stored(workspaceId);
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new AppError('invalid_input', 'Invalid cursor or limit');
+    const all = this.chatMessages.get(workspaceId) ?? [];
+    if (after > all.length) throw new AppError('invalid_cursor', 'Cursor ahead', 409);
+    const messages = all.slice(after, after + limit);
+    return { workspaceId, position: all.length, mentionLimit: this.limits.get(workspaceId) ?? 32, messages: structuredClone(messages), more: after + messages.length < all.length, runs: [...this.chatRuns.values()].filter(item => this.members.get(item.run.agentId)?.member.workspaceId === workspaceId).map(item => structuredClone(item)) };
+  }
+
+  async configureChat(workspaceId: string, value: number) { this.stored(workspaceId); this.limits.set(workspaceId, value); }
+  async stopChat(workspaceId: string) {
+    this.stored(workspaceId);
+    const runs = [...this.chatRuns.values()].filter(item => item.run.status === 'running' && this.members.get(item.run.agentId)?.member.workspaceId === workspaceId);
+    for (const item of runs) this.exchanges.get(item.exchangeId)!.stopped = true;
+    return runs.map(item => item.run);
+  }
 
   async listWorkspaces(): Promise<WorkspaceRecord[]> {
     return [...this.workspaces.values()].map(stored => stored.record).sort((a, b) => a.name.localeCompare(b.name) || a.workspaceId.localeCompare(b.workspaceId));
@@ -69,6 +130,7 @@ export class MemoryStore implements ContextStore, TeamStore {
     if (others.some(item => item.nameKey === input.nameKey)) throw new AppError('member_exists', 'Another member of this team has that name', 409);
     const member = { id: input.id, workspaceId: input.workspaceId, revision: 0, value: structuredClone(input.value) };
     this.members.set(input.id, { member, lead: input.lead, nameKey: input.nameKey, ordinal: ++this.ordinal });
+    await this.syncChatMember(member.id);
     return structuredClone(member);
   }
 

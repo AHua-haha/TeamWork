@@ -987,7 +987,7 @@ test('persisted context survives reopening the pool; corrupt stored schema fails
 
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 
-test('the lead saves a visible design, creates a worker, and assigns it through the real runtime and MySQL', { timeout: 15_000 }, async () => {
+test('the lead saves a design and cooperates through shared final responses over real runtime and MySQL', { timeout: 15_000 }, async () => {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'lead-prototype-')));
   const workspaceService = new WorkspaceService(store);
   const models = builtinModels();
@@ -1013,7 +1013,8 @@ test('the lead saves a visible design, creates a worker, and assigns it through 
       settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' },
     });
     await runtime.open();
-    const run = await team.runner.startUser(lead.memberId, 'Save the agreed design and ask Backend to implement it.');
+    const accepted = await team.runner.postUser(workspaceId, 'Save the agreed design and ask Backend to implement it.');
+    const run = accepted.runs[0]!;
     const firstStep = await requests.next();
     assert.ok(firstStep.request.tools.some(tool => tool.definition.name === 'save_design'));
     assert.match(firstStep.request.context.systemPrompt!, /wait for the user's answer/);
@@ -1026,12 +1027,12 @@ test('the lead saves a visible design, creates a worker, and assigns it through 
     const command = [process.execPath, '-e', 'process.stdout.write(require("node:fs").readFileSync("src/result.txt","utf8"))'];
     answer(thirdStep.events, call('configure_harness', { to: 'Backend', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'exact', argv: command }] } }));
     const fourthStep = await requests.next();
-    answer(fourthStep.events, call('assign_member', { to: 'Backend', text: 'Implement the design and report the changed file.' }));
+    answer(fourthStep.events, message('@Backend Implement the agreed design and report the changed file.'));
     const workerStep = await requests.next();
     assert.match(workerStep.request.context.systemPrompt!, /You are Backend/);
     assert.ok(!workerStep.request.tools.some(tool => ['read_design', 'save_design', 'assign_member', 'create_member'].includes(tool.definition.name)));
     const workerInput = workerStep.request.context.messages.at(-1)!;
-    assert.ok(workerInput.role === 'user' && typeof workerInput.content === 'string' && workerInput.content.includes('.context/user/design.json (revision '));
+    assert.ok(workerInput.role === 'user' && typeof workerInput.content === 'string' && workerInput.content.includes('[Group message 2 from Lead]'));
     answer(workerStep.events, call('write', { path: 'src/result.txt', content: 'Done' }));
     const workerCommand = await requests.next();
     assert.ok(workerCommand.request.tools.some(tool => tool.definition.name === 'run_command'));
@@ -1040,12 +1041,15 @@ test('the lead saves a visible design, creates a worker, and assigns it through 
     const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'run_command');
     assert.ok(commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text');
     if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.deepEqual([JSON.parse(commandResult.content[0].text).exitCode, JSON.parse(commandResult.content[0].text).stdout], [0, 'Done']);
-    answer(workerFinish.events, message('Implemented the design; src/result.txt contains Done.'));
+    answer(workerFinish.events, message('@Lead Implemented the design; src/result.txt contains Done.'));
     const leadFinish = await requests.next();
-    const report = leadFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'assign_member');
-    assert.ok(report?.role === 'toolResult' && report.content.some(part => part.type === 'text' && part.text.includes('src/result.txt contains Done')));
+    const report = leadFinish.request.context.messages.at(-1);
+    assert.ok(report?.role === 'user' && typeof report.content === 'string' && report.content.includes('src/result.txt contains Done'));
+    assert.ok(!leadFinish.request.context.messages.some(item => item.role === 'toolResult' && item.toolName === 'run_command'));
+    const secondLeadRun = (await runtime.getState(lead.memberId)).run!;
     answer(leadFinish.events, message('Design created and explained; Backend delivered src/result.txt.'));
-    assert.equal((await runtime.finished(lead.memberId, run.runId)).status, 'completed');
+    assert.equal((await runtime.finished(lead.memberId, secondLeadRun.runId)).status, 'completed');
+    assert.equal((await team.runner.snapshot(workspaceId)).messages.length, 4);
     assert.equal(await readFile(join(folder, 'project', 'src', 'result.txt'), 'utf8'), 'Done');
     const history = await store.runMessages(lead.memberId, run.runId);
     const save = history.find(record => record.message.role === 'toolResult' && record.message.toolName === 'save_design')!.message;
@@ -1141,4 +1145,150 @@ test('workspace registry refuses duplicates; context commits reload with history
     await reopened.close();
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+async function groupFixture() {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'group-chat-')));
+  const workspaceService = new WorkspaceService(store);
+  const service = new ConfigService(store, builtinModels());
+  const team = new TeamSystem(store, workspaceService, service);
+  const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
+  const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), request => {
+    const events = new Queue<AssistantMessageEvent>(); requests.push({ request, events }); return events;
+  });
+  team.attach(runtime);
+  const connectionId = `group-${randomUUID()}`;
+  await service.createConnection(connectionId, { label: 'Group test', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
+  const { workspaceId } = await workspaceService.create({ name: 'Group', directory: join(folder, 'project'), adopt: false });
+  const first = (await team.team(workspaceId)).members[0]!;
+  const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: first.harness, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
+  await team.designs.save(workspaceId, 'user/design.json', { content: 'Shared test design', implementation: ['.'] }, null, 'Test', { type: 'lead', memberId: lead.memberId, runId: 'fixture' });
+  const harness = { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] };
+  const backend = await team.create(workspaceId, { name: 'Backend', role: 'developer', harness });
+  const frontend = await team.create(workspaceId, { name: 'Frontend', role: 'developer', harness });
+  await runtime.open();
+  return { workspaceId, lead, backend, frontend, team, runtime, requests, async close() { await runtime.close(); team.runner.close(); await workspaceService.close(); await rm(folder, { recursive: true, force: true }); } };
+}
+
+test('group chat SQL/runtime: parallel work, private refusal feedback, deferred interleaving, and durable public-only history', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    const start = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');
+    const first = await f.requests.next(); const second = await f.requests.next();
+    const backendStep = /You are Backend,/.test(first.request.context.systemPrompt!) ? first : second;
+    const frontendStep = backendStep === first ? second : first;
+    assert.match(frontendStep.request.context.systemPrompt!, /You are Frontend,/);
+    const backendRun = start.runs.find(run => run.agentId === f.backend.memberId)!;
+    const frontendRun = start.runs.find(run => run.agentId === f.frontend.memberId)!;
+    assert.equal((await f.runtime.getState(f.backend.memberId)).run?.status, 'running');
+    assert.equal((await f.runtime.getState(f.frontend.memberId)).run?.status, 'running');
+    assert.equal((await store.getContext(f.lead.memberId)).entries.length, 1);
+    const user = await f.team.runner.postUser(f.workspaceId, '@Lead discuss');
+    const leadStep = await f.requests.next();
+    assert.match(leadStep.request.context.systemPrompt!, /You are Lead,/);
+    assert.equal((await store.getContext(f.backend.memberId)).entries.length, 1, 'busy member receives no mid-work insertion');
+    answer(backendStep.events, message('@Lead PRIVATE CANDIDATE: please review'));
+    const revision = await f.requests.next();
+    assert.match(revision.request.context.systemPrompt!, /You are Backend,/);
+    assert.ok(revision.request.context.messages.some(item => item.role === 'user' && typeof item.content === 'string' && item.content.includes('Group publication refused (member_busy)')));
+    assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 2);
+    assert.equal((await store.getContext(f.frontend.memberId)).entries.length, 1);
+    answer(revision.events, message('Backend finished without mentions.'));
+    await f.runtime.finished(f.backend.memberId, backendRun.runId);
+    const entries = (await store.getContext(f.backend.memberId)).entries;
+    assert.deepEqual(entries.map(entry => entry.metadata.groupPosition ?? entry.metadata.source ?? entry.message.role), [1, 'assistant', 'publication-feedback', 'assistant', 2, 3]);
+    assert.deepEqual((await store.runMessages(f.backend.memberId, backendRun.runId)).map(record => record.metadata.source ?? record.message.role), ['assistant', 'publication-feedback', 'assistant']);
+    assert.equal((await store.getContext(f.frontend.memberId)).entries.length, 1);
+    answer(frontendStep.events, message('Frontend finished.'));
+    await f.runtime.finished(f.frontend.memberId, frontendRun.runId);
+    answer(leadStep.events, message('Lead finished.'));
+    await f.runtime.finished(f.lead.memberId, user.runs[0]!.runId);
+    const transcript = await f.team.runner.snapshot(f.workspaceId);
+    assert.equal(transcript.position, 5);
+    assert.ok(!transcript.messages.some(item => item.text.includes('PRIVATE CANDIDATE')));
+    const frontendContext = (await store.getContext(f.frontend.memberId)).entries;
+    assert.ok(!frontendContext.some(entry => entry.metadata.source === 'publication-feedback'));
+    assert.deepEqual(frontendContext.filter(entry => entry.metadata.groupPosition).map(entry => entry.metadata.groupPosition), [1, 2, 3, 4, 5]);
+    const originalHistory = await store.runMessages(f.backend.memberId, backendRun.runId);
+    const context = await store.getContext(f.backend.memberId);
+    await store.replaceContext(f.backend.memberId, context.revision, [{ messageId: 'compacted-group', message: { role: 'user', content: 'Summary of my work', timestamp: 1 }, metadata: {} }]);
+    assert.deepEqual(await store.runMessages(f.backend.memberId, backendRun.runId), originalHistory);
+    assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 5);
+    const next = await f.team.runner.postUser(f.workspaceId, '@Backend continue');
+    const nextStep = await f.requests.next();
+    assert.deepEqual(nextStep.request.context.messages.map(item => item.role === 'user' ? item.content : item.role), ['Summary of my work', '[Group message 6 from User]\n@Backend continue']);
+    answer(nextStep.events, message('Continued.'));
+    await f.runtime.finished(f.backend.memberId, next.runs[0]!.runId);
+    const newcomer = await f.team.create(f.workspaceId, { name: 'New Member', role: 'developer' });
+    assert.equal((await store.getContext(newcomer.memberId)).entries.length, 7);
+    const reopened = new MySqlStore(databaseUrl!);
+    try { assert.deepEqual(await reopened.chatSnapshot(f.workspaceId), await store.chatSnapshot(f.workspaceId)); }
+    finally { await reopened.close(); }
+    // History query needs neither a running member nor a model call.
+    assert.equal((await f.team.runner.snapshot(f.workspaceId, 5, 1)).messages[0]?.position, 6);
+  } finally { await f.close(); }
+});
+
+test('group SQL publication is atomic under competing mentions and budgets; restart flushes pending delivery without replay', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    await f.team.runner.configure(f.workspaceId, 1);
+    await assert.rejects(f.team.runner.postUser(f.workspaceId, '@Backend @Frontend work'), code('mention_limit'));
+    assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 0);
+    const [counts] = await store.pool.execute<any[]>('SELECT COUNT(*) AS count FROM chat_exchanges WHERE workspace_id = ?', [f.workspaceId]);
+    assert.equal(counts[0].count, 0, 'failed publication creates no exchange');
+    await f.team.runner.configure(f.workspaceId, 32);
+    const results = await Promise.allSettled([f.team.runner.postUser(f.workspaceId, '@Backend one'), f.team.runner.postUser(f.workspaceId, '@Backend two')]);
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 1);
+    const step = await f.requests.next();
+    assert.match(step.request.context.systemPrompt!, /You are Backend,/);
+    await f.team.runner.stop(f.workspaceId);
+    const activity = (await f.team.runner.snapshot(f.workspaceId)).runs[0]!;
+    await f.runtime.finished(f.backend.memberId, activity.run.runId);
+    assert.equal((await f.team.runner.snapshot(f.workspaceId)).runs[0]!.run.status, 'cancelled');
+    await f.runtime.close();
+    // Simulate a crash after durable acceptance, before the model worker launches.
+    const abandoned = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: '@Backend abandoned', recipients: [f.backend.memberId] });
+    await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'Shared while Backend is working', recipients: [] });
+    assert.equal((await store.getContext(f.backend.memberId)).entries.at(-1)!.metadata.groupPosition, 2);
+    const recovery = new AgentRuntime(store, staticConfig, fixedPolicy(model), () => { throw new Error('Restart must not replay a model call'); });
+    await recovery.open();
+    try {
+      assert.equal((await recovery.getState(f.backend.memberId)).run?.status, 'interrupted');
+      assert.equal((await store.getContext(f.backend.memberId)).entries.at(-1)!.metadata.groupPosition, 3);
+      assert.equal((await store.runMessages(f.backend.memberId, abandoned.runs[0]!.runId)).length, 0);
+      assert.equal((await store.chatSnapshot(f.workspaceId)).position, 3);
+    } finally { await recovery.close(); }
+    const retained = await store.getContext(f.backend.memberId);
+    await f.team.service.retire(f.workspaceId, f.backend.memberId, f.backend.revision);
+    await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'After Backend retired', recipients: [] });
+    await store.syncChatMember(f.backend.memberId);
+    assert.deepEqual(await store.getContext(f.backend.memberId), retained, 'retirement excludes later messages even on explicit delivery');
+    assert.equal((await store.getContext(f.frontend.memberId)).entries.at(-1)!.metadata.groupPosition, 4);
+  } finally { await f.close(); }
+});
+
+
+test('shutdown waits for in-flight solo input acceptance, registers its run, then cancels it durably', { timeout: 15_000 }, async () => {
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const preparing = new Promise<void>(resolve => { entered = resolve; });
+  const runtime = new AgentRuntime(store, { resolveForRun: async () => { entered(); await gate; return staticConfig.resolveForRun(); } }, fixedPolicy(model), async function* () {
+    await new Promise<void>(() => undefined);
+    yield { type: 'done', reason: 'stop', message: message('unreachable') };
+  });
+  await runtime.open();
+  try {
+    const { agentId } = await store.createAgent();
+    const acceptance = runtime.start(agentId, 'accepted before shutdown');
+    await preparing;
+    const shutdown = runtime.close();
+    release();
+    const run = await acceptance;
+    await shutdown;
+    assert.equal((await store.getState(agentId)).run?.status, 'cancelled');
+    assert.equal((await store.runMessages(agentId, run.runId)).length, 1);
+  } finally { release(); await runtime.close(); }
 });

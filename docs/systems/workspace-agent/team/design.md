@@ -2,9 +2,9 @@
 
 ## Purpose and boundary
 
-The team belongs to one workspace and has two responsibilities: manage member creation, configuration and retirement; and coordinate work among members. The user talks to its lead, which helps maintain the user design, divides work based on that design, configures harnesses and assigns members. Members may be created or retired as the work changes. Designs and implementation survive member changes.
+The team belongs to one workspace and has two responsibilities: manage member creation, configuration and retirement; and coordinate work among members. The user and all active members participate in one shared workspace chat. The lead helps maintain the user design, divides work based on that design, configures harnesses and assigns members through shared responses. Members may be created or retired as the work changes. Designs and implementation survive member changes.
 
-Members exist only inside their team and are absent from the global agent list and agent config API. Each has its own continuing conversation. Model loops belong to the runtime, file authority and context delivery to the harness, and durable design records to the context base.
+Members exist only inside their team and are absent from the global agent list and agent config API. Each retains its own private execution history alongside individually delivered shared messages. Model loops belong to the runtime, file authority and context delivery to the harness, and durable design records to the context base.
 
 ## Inputs and preconditions
 
@@ -30,40 +30,42 @@ Member fields are `{memberId, workspaceId, revision, name, role, responsibility,
 
 ### Work and cooperation
 
-The user sends `{input}` to `POST /agents/:memberId/runs` for the lead, receiving 202 and the run. Input to a worker is refused. One active lead run is allowed; another input fails busy and is never queued.
+The user posts `{text}` to `POST /workspaces/:workspaceId/team/chat/messages`. Text is 1–20,000 characters. A user message without mentions triggers the lead. Explicit mentions select recipients using `@Name` or `@{Name With Spaces}`, matching active names ignoring case. A member response without mentions triggers nobody. Duplicate mentions select one recipient. All selected members may work in parallel, with at most one run per member.
 
-Every member has `send_message(to, text)`, where text is 1–20,000 characters. The recipient receives a user message prefixed with the caller's name, works in its own conversation, and returns only its final assistant text. The caller waits. The lead additionally has member-management, model-listing, design-read/save, harness-configuration and design-based assignment tools. An assignment objective is combined with the recipient's current design references within the same text limit.
+Every accepted shared message is delivered to every active member, including the sender. Idle members append it to their continuing context immediately. Working members buffer incoming shared messages and append them in group order after their private work ends, without waiting for or triggering another activation. Each member context interleaves shared messages and its private work. Its previous private history remains available, but no other member receives it. Tool calls, results, intermediate responses and rejected publication candidates stay private. Only an accepted final response is published in the group transcript.
 
-The harness supplies `ls`, `read`, and, when working implementation is mapped, `write` and `edit`. It supplies `run_command` only when command allowances exist. Generic file tools cannot write context. Workers see selected designs and mapped implementation; the lead may read the workspace to help design it. Allowed command matching is implemented; filesystem confinement of permitted commands is deferred. Arbitrary catalog tools are not supplied to members.
+A final response is checked before the sending activation ends. If any recipient is unknown, retired, unready, self, or busy, the whole publication is refused: no shared message, recipient activation or budget consumption. The sender receives private feedback and can revise or retry within its current run. There is no queue, automatic wait or retry. A successfully published final response completes the sending activation before its recipients begin, so a recipient can mention the sender in its own response.
 
-Every model call receives current member identity, responsibility, roster/readiness, run-snapshot standing instructions, current working/dependency designs and mapped implementation content. Each file-content section is bounded at 64 KiB and names omitted files. The lead also receives workspace context. Prior conversation messages remain; automatic maintenance is deferred.
+Each user-initiated exchange has a mention budget, initially 32 activations. Default lead routing counts one; each distinct recipient activation counts one. A response's activations belong to the same exchange. A message exceeding the remaining budget is refused in full. Already-started members can finish and publish without mentions. Cooperation ends when no members remain active. A new user message starts a new exchange and budget, subject to the same busy checks. `PUT /workspaces/:workspaceId/team/chat` with `{mentionLimit}` sets a 1–1,000 limit for later exchanges.
+
+`GET /workspaces/:workspaceId/team/chat?after=0&limit=100` returns `{workspaceId, position, mentionLimit, messages, more, runs}` from persistent records. Messages contain author, text, recipients, stable ID, position, time and exchange ID; runs pair exchange IDs with runtime state. History pages contain 1–500 messages. `GET /workspaces/:workspaceId/team/chat/follow?after=0` synchronizes messages then follows shared messages and activation state across runs using version 1 `message`, `sync`, and `state` SSE events. A disconnected follower does not stop work. Group observation does not expose private execution traces.
+
+`POST /workspaces/:workspaceId/team/chat/stop` stops existing exchanges and requests cancellation of active members. Later user messages may start new exchanges. Direct `POST /agents/:memberId/runs` refuses all team members; solo agents retain their own input API. Private member history/state/follow remains available for inspection. The [group chat contract](group-chat/design.md) provides the complete cooperation boundary.
+
+The harness supplies `ls`, `read`, mapped `write` and `edit`, and `run_command` when command allowances exist. Generic tools cannot write context. The lead has additional member management, model listing, design read/save and harness configuration tools. Assignments are shared final responses, with objectives and mentions; there is no private messaging or blocking assignment tool. Each model call receives current role/roster/readiness/running information, run-snapshot standing instructions and current harness design/file context. Design/file sections are bounded at 64 KiB with omissions named. The lead also receives workspace context.
 
 ## Outputs and observable effects
 
-Member changes update revisions. Model and standing-instruction changes apply next run. Harness/configured design mappings apply to subsequent tool invocations and model requests; the roster refreshes each model call. Reads create nothing. Retiring cancels the member's active run and leaves written files and durable designs intact.
+Member changes advance revisions. Model and standing-instruction changes apply next run. Harness/configured mappings apply to subsequent tool invocations and model requests. New members inherit existing shared history. Retirement cancels active work, ends participation, preserves history and files, and allows name reuse. Historical group authors are preserved even after rename or retirement.
 
-Calls execute sequentially. Every user chain begins with the lead, contains no member twice, and has at most five members. Workers can call other workers; they return questions for the lead in their report because calling an ancestor is refused. A final report is cut at 20,000 characters with a note; no text returns a note. Member reasoning and tool steps are not copied into the caller conversation.
-
-Stopping the caller cancels the recipient and any descendants. Completed effects remain. A completed, failed, cancelled or interrupted recipient ends its call; no automatic retry or resume occurs. Conversations can be observed through runtime history/state/follow, while the application displays only the lead.
+Publication and creation of all selected recipient run records are atomic. Model execution begins after acceptance; its failure becomes run status. A failed, cancelled or interrupted activation produces no fabricated shared response; already-published messages and completed file effects remain. Stopping a group exchange cancels all its active branches. Backend restart marks abandoned runs interrupted and delivers buffered messages after their private history, without replaying triggers.
 
 ## Failure behavior
 
-Malformed fields/configuration fail with 400; unknown workspace/member with 404; duplicate name, stale revision, size limit, retiring the lead, worker user input, or busy run with 409. Unavailable folder/storage fails explicitly. Refused management changes leave records unchanged. Expected tool refusals return normal results so the caller can recover; storage failures may end the run.
-
-Calls refuse unknown names, the caller itself, members already in the chain, a sixth member, busy or unready recipients, and invalid text. A failed recipient returns its failure reason. A cancelled or interrupted recipient returns that outcome. The backend shutdown interrupts active runtime runs; calls do not resume automatically.
+Malformed fields/configuration fail with 400; unknown workspace/member with 404; duplicate name, stale revision, size limit, retiring the lead, direct member input, busy recipient or exhausted exchange budget with 409. Invalid mention syntax fails with 400; unknown mentioned names with 404. Invalid/unavailable harness or model refuses publication before acceptance. Refused publication leaves shared history and recipient execution unchanged. Expected publication failures return private feedback to an agent; persistence failures may end its run. Publication is not idempotent: do not blindly retry uncertain acceptance.
 
 ## Guarantees and limits
 
-Exactly one unretirable lead per team, unique active names, persistent member conversations, no agent-config identity for members, sequential noncyclic calls, and only final reports crossing the call boundary. Design files and their implementation mappings are independent of membership. Permissions enforced by file tools do not sandbox permitted command effects. Model-generated decomposition and explanations are guided by instructions rather than deterministic guarantees.
+Exactly one unretirable lead, unique active names, shared ordered messages, retained private histories, independently triggered parallel members, and only accepted final responses shared between members. Design files and implementation mappings remain independent of membership. File tools do not sandbox permitted command effects. Model choices and decomposition are guided by instructions rather than deterministic guarantees.
 
-One lead conversation only grows; no compaction, automated harness-context maintenance, parallel workers, queues, rich cooperation rules or workspace reassignment. A retired member cannot return; a new member can receive its design scope. File tools support text up to 1 MiB and do not provide search or version-control-specific actions.
+No automated context maintenance, compaction policy, durable run resume, trigger queue, rich trigger rules or multiple chats per workspace. Mention tokens are routing syntax even inside code or quoted text; email addresses are ordinary text. Current frontend group-chat integration is deferred; backend APIs provide this cooperation mechanism, while the existing workspace composer still targets private lead input and receives refusal.
 
 ## Acceptance examples
 
-1. A new workspace has Lead, not ready until the user chooses a model. Reading its team again changes nothing.
-2. Lead saves a backend design with implementation `backend/src`, creates Backend and configures its working design plus API dependency. Backend becomes ready with the inherited model.
-3. Lead assigns Backend. It reads both designs, edits only backend implementation, and returns a report. The lead sees the report, and the user sees the assignment card and response.
-4. Backend edits dependency implementation or either design through file tools: refused. A proposed design change is returned to the lead for discussion.
-5. Backend calls Frontend; Frontend cannot call Backend or Lead in that chain. Stopping Lead cancels both. Their completed writes remain.
-6. Retiring Backend frees its name and preserves its design. A replacement Backend receives the same design references.
-7. An old stored scope migrates to an empty harness; its worker cannot run until its design scope is configured.
+1. An unmentioned user message starts the lead. Its final response mentions Backend and Frontend; both work concurrently and receive the same shared messages.
+2. Backend reports with `@Lead`; Lead can work again after finishing its assignment response. Frontend sees the shared report without receiving Backend's private trace.
+3. While Backend works, an accepted message mentioning only Frontend is appended to idle members and buffered for Backend. Backend receives it after finishing, without another activation.
+4. A response mentions busy Backend and free Frontend: refuse the whole publication and let the sender revise privately.
+5. A member can see every accepted shared message and still edit only its harness-authorized implementation. Proposed design changes are addressed to the lead.
+6. Budget exhaustion refuses new activations. Existing branches can finish with unmentioned reports.
+7. A replacement member receives the shared transcript and configured design scope, not the retired member's private execution history.

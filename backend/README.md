@@ -65,9 +65,32 @@ On open/refresh, omit `runId` to sync and follow the latest run. On reconnect, d
 
 SSE types: `message`, `sync`, `chunk`, `gap`, `state`, `end`; transport errors use `stream_error`. Pi payloads are preserved inside versioned JSON envelopes. `partial` in a Pi event is cumulative; a client using it should replace the current partial rather than appending the same delta again. There is no periodic frontend polling or connection spanning runs.
 
-## Workspace lead and harness prototype
+## Workspace group chat, lead and harness prototype
 
-Create or adopt a workspace in the frontend, select its lead's model, and talk to the lead. It can offer choices to settle the design, save discussed changes, form the team, configure harnesses and assign work. Design changes appear in tool results with exact before/after content and reason, and in context history attributed to the lead.
+Create or adopt a workspace and choose the lead model in the frontend. Post workspace requests through the group chat API below. The lead can offer choices, save discussed changes, form the team, configure harnesses and assign work through shared responses. Design changes are retained in private tool results with exact before/after content and reason, and in attributed context history; the lead explains them in its shared final response. The current frontend workspace composer still targets private member input and is refused; group-chat UI integration is a later task. Solo conversations remain supported.
+
+```sh
+# Replace WORKSPACE_ID with the registered workspace ID.
+curl -s http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/messages \
+  -H 'Content-Type: application/json' -d '{"text":"Help clarify the project design"}'
+
+# No mention in user input triggers Lead. Explicit mentions trigger only their recipients.
+curl -s http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/messages \
+  -H 'Content-Type: application/json' -d '{"text":"@Backend @{Frontend Worker} implement your assigned designs"}'
+
+# Persistent group history; use the last received position to fetch the next page.
+curl -s 'http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat?after=0&limit=100'
+# Follow spans member runs; it exposes shared final messages and run status, never private chunks.
+curl -N 'http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/follow?after=0'
+
+curl -s -X PUT http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat \
+  -H 'Content-Type: application/json' -d '{"mentionLimit":32}'
+curl -s -X POST http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/stop
+```
+
+Every accepted message is shared with all active members. Idle members append it immediately; working members append buffered messages after their private work finishes. Receiving messages alone does not activate a member. Mentioned members run in parallel. Each retains private execution history, with shared messages interleaved individually. Only accepted final responses enter the shared transcript.
+
+A busy, invalid, unavailable or self recipient refuses the entire publication with no partial delivery or queue. Agents receive private feedback to revise or retry. Each user message starts an exchange with an activation budget (default 32); duplicate mentions count once, refused attempts consume nothing, and subsequent response activations share the exchange budget. Stop cancels all active branches. Restart interrupts abandoned work, delivers buffered messages and never replays triggers. Private agent `/follow` APIs remain available for inspection; direct `/agents/:memberId/runs` refuses all members. Existing private history is preserved and is not converted into shared chat history.
 
 A design part is an ordinary user-context JSON file:
 
@@ -93,7 +116,7 @@ A member harness has two configuration parts:
 }
 ```
 
-The lead uses `save_design`, `create_member`, `configure_harness` and `assign_member`. Workers read and follow working designs, edit their mapped implementation through file tools, and only read dependency design/implementation. Dependency read-only access takes precedence on overlap. Generic file tools cannot edit context. Design records survive member retirement and replacement.
+The lead uses `save_design`, `create_member` and `configure_harness`, then mentions workers in its final response with objectives. The old `send_message` and `assign_member` tools are removed. Workers read and follow working designs, edit their mapped implementation through file tools, and only read dependency design/implementation. Dependency read-only access takes precedence on overlap. Generic file tools cannot edit context. Design records survive member retirement and replacement.
 
 New or migrated workers need a configured design scope before running. The old agent-context `scope` field is replaced once at startup with an empty harness; identity, conversations and settings are preserved. Members use harness tools and require empty catalog tool selections. Existing text design notes can be read and converted by the lead after discussion.
 

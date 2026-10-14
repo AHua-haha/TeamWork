@@ -50,26 +50,6 @@ test('stale design changes and worker changes refuse without modifying the desig
   assert.equal((await base.read({ path: input.path })).content, raw('user edit'));
 }));
 
-test('assignments use the configured designs and return the worker report', () => withTeam(async fixture => {
-  const { team, runtime, lead } = fixture;
-  const backend = await worker(fixture, 'Backend', ['src/api.ts']);
-  const part = await team.designs.read(fixture.workspaceId, backend.harness.designScope.working[0]);
-  const unconfigured = await team.service.create(fixture.workspaceId, { name: 'Empty', role: 'developer' });
-  const run = await team.runner.startUser(lead.memberId, 'Implement the backend design.');
-  const signal = new AbortController().signal;
-  for (const input of [{ to: 'Empty', text: 'Work' }, { to: 'Lead', text: 'Work' }, { to: 'Backend', text: 'x'.repeat(20_000) }, { to: 'Backend', text: ' ' }]) await assert.rejects(team.lead.assign(lead.memberId, run.runId, signal, input));
-  assert.equal(runtime.runs.length, 1);
-  assert.equal(unconfigured.ready, false);
-  await assert.rejects(team.lead.assign(backend.memberId, run.runId, signal, { to: 'Backend', text: 'Work' }), code('access_denied'));
-  const result = team.lead.assign(lead.memberId, run.runId, signal, { to: 'backend', text: 'Implement step 1 and report changed files.' });
-  await runtime.started(backend.memberId);
-  assert.match(String(runtime.active(backend.memberId)!.input), /Message from Lead:/);
-  assert.ok(String(runtime.active(backend.memberId)!.input).includes(`.context/${part.path} (revision ${part.revision}); implementation src/api.ts`));
-  runtime.end(backend.memberId, 'Implemented step 1; src/api.ts changed.');
-  assert.equal(await result, 'Implemented step 1; src/api.ts changed.');
-  runtime.end(lead.memberId);
-}));
-
 test('lead configures its own harness and member harness independently from model settings', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend');
   const value = { ...backend.harness, allowedCommands: [{ kind: 'executable', executable: 'node' }] };
@@ -80,17 +60,4 @@ test('lead configures its own harness and member harness independently from mode
   assert.deepEqual(leader.harness, changed.harness);
   await assert.rejects(fixture.team.lead.configureHarness(backend.memberId, 'Lead', emptyHarness()), code('access_denied'));
   await assert.rejects(fixture.team.lead.configureHarness(fixture.lead.memberId, 'Backend', { ...emptyHarness(), designScope: { working: ['user/missing.json'], dependencies: [] } }), code('not_found'));
-}));
-
-test('stopping a lead assignment cancels the worker call', () => withTeam(async fixture => {
-  const { team, runtime, lead } = fixture;
-  const backend = await worker(fixture, 'Backend');
-  const run = await team.runner.startUser(lead.memberId, 'Work');
-  const controller = new AbortController();
-  const pending = team.lead.assign(lead.memberId, run.runId, controller.signal, { to: 'Backend', text: 'Build it.' });
-  await runtime.started(backend.memberId);
-  controller.abort();
-  assert.equal(await pending, 'Backend was cancelled.');
-  assert.equal(runtime.last(backend.memberId)!.cancelled, true);
-  runtime.end(lead.memberId);
 }));

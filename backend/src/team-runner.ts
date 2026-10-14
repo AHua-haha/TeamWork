@@ -1,109 +1,128 @@
 import type { AgentRuntime } from './runtime.js';
-import type { StoredMember, TeamService } from './team.js';
+import type { TeamService } from './team.js';
+import { Changes } from './changes.js';
+import { chatText, mentions, mentionLimit, type ChatStore, type ChatMessage } from './group-chat.js';
 import { AppError, type RunState } from './types.js';
 
-/** A chain of calls has at most this many members, the lead included. */
-export const maxChainMembers = 5;
-export const maxMessageCharacters = 20_000;
-export const maxResponseCharacters = 20_000;
+export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback'>;
 
-/** The part of the runtime that the run part of the team uses. */
-export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'finalText' | 'getState'>;
-
-/**
- * The run part of the team. A call from one member to another is a blocking tool call: the recipient runs in its own
- * conversation, the caller waits, and only the recipient's final response comes back. Calls form one chain per run
- * the user started; no member is in a chain twice, and the lead starts every chain, so calls cannot loop.
- */
+/** Shared publication and independent member activations. Private calls and call chains do not exist here. */
 export class TeamRunner {
-  /** The members in each active run's chain, by run ID. */
-  private readonly chains = new Map<string, string[]>();
-  private readonly running = new Set<string>();
+  private readonly changes = new Changes();
+  private readonly active = new Map<string, { runId: string; exchangeId: string; workspaceId: string }>();
+  private closed = false;
+  private readonly publications = new Set<Promise<{ message: ChatMessage; runs: RunState[] }>>();
+  constructor(private readonly team: TeamService, private readonly store: ChatStore, private readonly runtime: () => RunHost) {}
 
-  constructor(private readonly team: TeamService, private readonly runtime: () => RunHost) {}
+  isRunning(memberId: string): boolean { return this.active.has(memberId); }
 
-  /** Whether the member has a run in progress. */
-  isRunning(memberId: string): boolean {
-    return this.running.has(memberId);
-  }
-
-  /** Input from the user to a conversation. Only the lead of a team takes it; any other agent is not the team's concern. */
   async startUser(agentId: string, input: Parameters<AgentRuntime['start']>[1]): Promise<RunState> {
-    const member = await this.team.find(agentId);
-    if (!member) return this.runtime().start(agentId, input);
-    if (!member.value.lead || member.value.retiredAt !== null) throw new AppError('member_conversation', 'The user talks to the lead; the lead gets work done through the other members', 409);
-    return this.launch(member, input, [member.id]);
+    if (await this.team.find(agentId)) throw new AppError('member_conversation', 'Post workspace input to the shared team chat', 409);
+    return this.runtime().start(agentId, input);
   }
 
-  /** One member asks another and gets its final response. A call that cannot happen is refused with a reason the caller can act on. */
-  async call(callerId: string, runId: string, signal: AbortSignal, toName: string, text: string): Promise<string> {
-    const caller = await this.team.find(callerId);
-    if (!caller || caller.value.retiredAt !== null) throw new AppError('not_found', 'Only active team members call others', 404);
-    if (typeof text !== 'string' || !text.trim() || text.length > maxMessageCharacters) throw new AppError('invalid_input', `A message has 1–${maxMessageCharacters} characters`);
-    const recipient = await this.team.byName(caller.workspaceId, toName);
-    if (!recipient) {
-      const names = (await this.team.active(caller.workspaceId)).map(member => member.value.name).join(', ');
-      throw new AppError('not_found', `No member named "${toName}". The team: ${names}`, 404);
-    }
-    const name = recipient.value.name;
-    const chain = this.chains.get(runId) ?? [callerId];
-    if (chain.includes(recipient.id)) {
-      throw new AppError('member_in_chain', `${name} is already part of this chain of calls (${await this.names(chain)}) and cannot be called. End your run with your question or result as your final response.`, 409);
-    }
-    if (chain.length >= maxChainMembers) throw new AppError('chain_full', `A chain of calls has at most ${maxChainMembers} members. Do the work yourself, or end your run with what is left.`, 409);
-    const [issues] = await this.team.issues([recipient]);
-    if (issues!.length) throw new AppError('member_unavailable', `${name} cannot run yet: ${issues!.join('; ')}`, 409);
-
-    let run: RunState;
-    try { run = await this.launch(recipient, `Message from ${caller.value.name}:\n\n${text}`, [...chain, recipient.id]); }
-    catch (error) {
-      if (error instanceof AppError && error.code === 'agent_busy') throw new AppError('member_busy', `${name} is already working`, 409);
-      throw error;
-    }
-    // Stopping the caller stops the recipient, and so on down the chain, because each recipient's own calls are wired the same way.
-    const cancel = () => { void this.runtime().cancel(recipient.id, run.runId).catch(() => undefined); };
-    if (signal.aborted) cancel(); else signal.addEventListener('abort', cancel, { once: true });
-    try { return await this.response(recipient, await this.runtime().finished(recipient.id, run.runId)); }
-    finally { signal.removeEventListener('abort', cancel); }
+  async postUser(workspaceId: string, value: unknown) {
+    return this.publish(workspaceId, chatText(value));
   }
 
-  /** Retires a member and cancels its active run, which ends any call waiting for it. What it wrote stays. */
-  async retire(workspaceId: string, memberId: string, revision: number): Promise<StoredMember> {
+  async publishFinal(memberId: string, runId: string, value: unknown): Promise<ChatMessage> {
+    const member = await this.team.find(memberId);
+    const active = this.active.get(memberId);
+    if (!member || member.value.retiredAt !== null || active?.runId !== runId) throw new AppError('member_unavailable', 'The sending member is no longer working', 409);
+    const result = await this.publish(member.workspaceId, chatText(value), { memberId, name: member.value.name, runId, exchangeId: active.exchangeId });
+    return result.message;
+  }
+
+  private publish(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string }) {
+    if (this.closed) return Promise.reject(new AppError('runtime_unavailable', 'Team is shutting down', 503));
+    const operation = this.acceptPublication(workspaceId, text, sender);
+    this.publications.add(operation);
+    void operation.finally(() => this.publications.delete(operation)).catch(() => undefined);
+    return operation;
+  }
+
+  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string }) {
+    if (this.closed) throw new AppError('runtime_unavailable', 'Team is shutting down', 503);
+    const roster = await this.team.active(workspaceId);
+    const names = mentions(text);
+    const recipients = names.map(name => {
+      const member = roster.find(item => item.value.name.toLowerCase() === name.toLowerCase());
+      if (!member) throw new AppError('not_found', `No active member named "${name}"`, 404);
+      if (member.id === sender?.memberId) throw new AppError('self_mention', 'A member cannot trigger itself; revise the response', 409);
+      return member;
+    });
+    if (!sender && !names.length) {
+      const lead = roster.find(item => item.value.lead);
+      if (!lead) throw new AppError('not_found', 'Workspace lead not found', 404);
+      recipients.push(lead);
+    }
+    const issues = await this.team.issues(recipients);
+    for (const [index, member] of recipients.entries()) {
+      if (issues[index]!.length) throw new AppError('member_unavailable', `${member.value.name} cannot run: ${issues[index]!.join('; ')}`, 409);
+      if (this.isRunning(member.id)) throw new AppError('member_busy', `${member.value.name} is working; revise or try again when it is free`, 409);
+    }
+    const configs = await Promise.all(recipients.map(member => this.runtime().prepareRun(member.id)));
+    // The store rechecks busy state and budget with publication and all run records in one transaction.
+    const result = await this.store.publishChat({ workspaceId, text, recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId } : {}) });
+    if (sender) this.active.delete(sender.memberId);
+    for (const [index, run] of result.runs.entries()) {
+      this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });
+      this.runtime().launch(run, configs[index]!);
+      void this.runtime().finished(run.agentId, run.runId).catch(() => undefined).finally(() => {
+        // A successor run may already have started after atomic final publication.
+        if (this.active.get(run.agentId)?.runId === run.runId) this.active.delete(run.agentId);
+        this.changes.publish();
+      });
+    }
+    this.changes.publish();
+    return result;
+  }
+
+  async snapshot(workspaceId: string, after = 0, limit = 100) { return this.store.chatSnapshot(workspaceId, after, limit); }
+  async configure(workspaceId: string, value: unknown) {
+    await this.store.configureChat(workspaceId, mentionLimit(value));
+    this.changes.publish();
+    return this.snapshot(workspaceId);
+  }
+
+  async *follow(workspaceId: string, after = 0, signal?: AbortSignal) {
+    let first = true;
+    let state = '';
+    while (!signal?.aborted && !this.closed) {
+      const version = this.changes.version;
+      const snapshot = await this.snapshot(workspaceId, after, 500);
+      for (const message of snapshot.messages) {
+        after = message.position;
+        yield { version: 1, type: 'message', workspaceId, message };
+      }
+      if (snapshot.more) continue;
+      if (first) { first = false; yield { version: 1, type: 'sync', workspaceId, position: after }; }
+      const current = JSON.stringify({ mentionLimit: snapshot.mentionLimit, runs: snapshot.runs });
+      if (current !== state) {
+        state = current;
+        yield { version: 1, type: 'state', workspaceId, mentionLimit: snapshot.mentionLimit, runs: snapshot.runs };
+      }
+      await this.changes.wait(version, signal);
+    }
+  }
+
+  async stop(workspaceId: string): Promise<void> {
+    const runs = await this.store.stopChat(workspaceId);
+    await Promise.all(runs.map(run => this.runtime().cancel(run.agentId, run.runId)));
+    this.changes.publish();
+  }
+
+  async retire(workspaceId: string, memberId: string, revision: number) {
     const member = await this.team.retire(workspaceId, memberId, revision);
     const { run } = await this.runtime().getState(memberId);
     if (run?.status === 'running') await this.runtime().cancel(memberId, run.runId);
+    this.changes.publish();
     return member;
   }
 
-  close(): void {
-    this.chains.clear();
-    this.running.clear();
-  }
-
-  private async launch(member: StoredMember, input: Parameters<AgentRuntime['start']>[1], chain: string[]): Promise<RunState> {
-    const run = await this.runtime().start(member.id, input);
-    this.chains.set(run.runId, chain);
-    this.running.add(member.id);
-    void this.runtime().finished(member.id, run.runId).catch(() => undefined).finally(() => {
-      this.chains.delete(run.runId);
-      this.running.delete(member.id);
-    });
-    return run;
-  }
-
-  private async names(chain: string[]): Promise<string> {
-    const members = await Promise.all(chain.map(id => this.team.find(id)));
-    return members.map(member => member?.value.name ?? 'unknown').join(' → ');
-  }
-
-  /** What the caller gets back: the final response, or a sentence saying how the run ended. */
-  private async response(recipient: StoredMember, run: RunState): Promise<string> {
-    const name = recipient.value.name;
-    if (run.status === 'cancelled') return `${name} was cancelled.`;
-    if (run.status === 'interrupted') return `${name} was interrupted.`;
-    if (run.status !== 'completed') return `${name} failed: ${run.error?.message ?? 'unknown error'}`;
-    const text = await this.runtime().finalText(recipient.id, run.runId);
-    if (!text) return `${name} finished without a response.`;
-    return text.length > maxResponseCharacters ? `${text.slice(0, maxResponseCharacters)}\n\n[The response was cut at ${maxResponseCharacters} characters.]` : text;
+  async close(): Promise<void> {
+    this.closed = true;
+    await Promise.allSettled(this.publications);
+    this.changes.publish();
   }
 }

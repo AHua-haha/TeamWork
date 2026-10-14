@@ -1,3 +1,5 @@
+import type { ChatStore } from './group-chat.js';
+import { AppError } from './types.js';
 import type { ConfigService } from './config.js';
 import { LeadService } from './lead.js';
 import { leadTools } from './lead-tools.js';
@@ -25,16 +27,16 @@ export class TeamSystem {
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
 
-  constructor(store: TeamStore, workspaces: WorkspaceService, private readonly config: ConfigService) {
+  constructor(store: TeamStore & ChatStore, workspaces: WorkspaceService, private readonly config: ConfigService) {
     this.designs = new DesignService(workspaces);
     this.service = new TeamService(store, workspaces, config, this.designs);
     this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id));
-    this.context = new MemberContext(this.service, workspaces);
-    this.runner = new TeamRunner(this.service, () => {
+    this.context = new MemberContext(this.service, workspaces, id => this.runner.isRunning(id));
+    this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
     });
-    this.lead = new LeadService(this.service, this.runner, this.designs);
+    this.lead = new LeadService(this.service, this.designs);
     this.runConfig = teamRunConfig(this.service, config);
   }
 
@@ -74,15 +76,31 @@ export class TeamSystem {
    * just before the call, and its tools. Every other agent is unchanged.
    */
   policy(base: RuntimePolicy): RuntimePolicy {
-    const { messaging, management } = teamTools(this.service, this.runner, this.config);
+    const { management } = teamTools(this.service, this.runner, this.config);
     const lead = leadTools(this.lead);
     return {
       ...base,
+      shouldContinue: async (scope, response, results) => {
+        const member = await this.service.find(scope.agentId);
+        if (!member) return base.shouldContinue ? base.shouldContinue(scope, response, results) : response.content.some(part => part.type === 'toolCall');
+        if (response.content.some(part => part.type === 'toolCall')) return true;
+        const text = response.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+        try {
+          scope.signal.throwIfAborted();
+          await this.runner.publishFinal(scope.agentId, scope.runId, text);
+          return false;
+        } catch (error) {
+          if (!(error instanceof AppError) || error.status >= 500 || error.code === 'exchange_stopped') throw error;
+          scope.signal.throwIfAborted();
+          await this.runtime!.feedback(scope.agentId, scope.runId, `Group publication refused (${error.code}): ${error.message}. This attempt was not shared and triggered no one. Revise your final response or retry when the recipient is free. Do not assume a task was delivered.`);
+          return true;
+        }
+      },
       buildRequest: async (scope, history) => {
         const request = await base.buildRequest(scope, history);
         const member = await this.service.find(scope.agentId);
         if (!member) return request;
-        const prepared = await this.harness.prepare(scope.agentId, [...messaging, ...(member.value.lead ? [...management, ...lead] : [])]);
+        const prepared = await this.harness.prepare(scope.agentId, member.value.lead ? [...management, ...lead] : []);
         const systemPrompt = [await this.context.instructions(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
         return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };
       },

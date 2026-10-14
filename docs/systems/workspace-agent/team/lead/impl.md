@@ -2,29 +2,28 @@
 
 ## Contract
 
-[Lead design](design.md). Preserve user-visible, revision-guarded changes and assignments derived from configured designs.
+[Lead design](design.md). Preserve revision-guarded, attributed design changes and independent member harness configuration.
 
-## Responsibilities and decomposition
+## Responsibilities and composition
 
-`LeadService` owns role-checked design maintenance, dedicated harness configuration, and preparing design-based assignments. It uses the neighboring [design parts](../../context-base/design-parts/design.md), [harness](../../harness/design.md), and parent [team](../design.md) contracts. `leadTools` exposes these actions to the runtime. Member lifecycle stays in TeamService; execution and chain cancellation stay in TeamRunner.
+LeadService owns role-checked design read/save and harness configuration. It uses [design parts](../../context-base/design-parts/design.md), [harness](../../harness/design.md) and parent [team](../design.md) contracts. Lead tools expose those capabilities. The lead assigns work through accepted shared final responses; the [group chat](../group-chat/impl.md) admits recipients and runs them independently.
 
 ## Coordination and data flow
 
-Save validates the reason and revision, asks DesignService to encode content and implementation mapping, and uses the context base's attributed save. Tool results include exact before/after content and parsed design. Read uses inspect so malformed existing files can be repaired.
-
-Configure resolves all design references before updating the member at its current revision and preserves its settings and identity. It may target the lead itself. Assignment resolves the recipient harness, requires a nonempty design scope, constructs references from current designs, validates total message length, and delegates to TeamRunner.call. The next recipient model request is independently prepared by the harness.
+Save validates revision and reason, delegates record encoding to DesignService and persistence to ContextBase, and returns exact before/after content. Read uses inspect to expose malformed records for repair. Configure resolves design references before revision-guarded member update and preserves settings/identity, including when configuring the lead itself. Every worker model request is prepared independently through its harness.
 
 ## Decisions and constraints
 
-Design awareness is provided by an explicit tool result, change feed, history attribution, and instructions to explain changes. There is no approval-token state. Choices use conversation text. Assignment references belong to the configured harness, avoiding a second assignment scope that can disagree with file permissions. No old agent-context scope is used.
+Design awareness uses attributed history/change feeds, exact private tool results available for inspection, and instructions to explain changes in the final shared response. No approval-token state exists. Assignments use objectives, mentions and configured design scope; there is no blocking assignment tool or separately copied assignment scope.
 
 ## Code map
 
 - [Lead coordination](../../../../../backend/src/lead.ts)
-- [Lead runtime tools](../../../../../backend/src/lead-tools.ts)
-- Parent [team implementation](../impl.md) owns member lifecycle, working instructions, and call scheduling.
-- [Design part implementation](../../context-base/design-parts/impl.md) owns record encoding and persistence delegation.
+- [Lead tools](../../../../../backend/src/lead-tools.ts)
+- [Parent team implementation](../impl.md) owns lifecycle and role instructions.
+- [Group chat implementation](../group-chat/impl.md) owns publication and triggering.
+- [Design parts implementation](../../context-base/design-parts/impl.md) owns record encoding and persistence delegation.
 
 ## Verification
 
-[Lead tests](../../../../../backend/test/lead.test.ts) cover visible exact changes, attribution, unchanged saves, stale revisions, worker refusals, own-harness configuration, design-based assignment, reports, and cancellation. [MySQL integration](../../../../../backend/test/integration/backend.test.ts) drives save, create, assign, scoped write and report through the real runtime and verifies author data after reopening storage.
+[Lead tests](../../../../../backend/test/lead.test.ts) cover exact changes, attribution, unchanged saves, stale revisions, worker refusal and own-harness configuration. [MySQL integration](../../../../../backend/test/integration/backend.test.ts) drives save, create, configure, shared assignment, scoped write, command and return mention through the real runtime, checking author persistence after reopening storage.

@@ -107,3 +107,11 @@ It persists each workspace's team members: a member record with its revision, an
 7. A context base commits change 1, creating `user/a.md`, then change 2, moving it to `user/b.md`. Loading the workspace returns `seq` 2 and one current file at `user/b.md`, and the file's history returns both versions.
 8. A workspace gets a lead and then a second member `Backend`. A second lead, or a second `backend`, is refused. `listAgents` returns neither member, and creating an agent config for the lead's ID is refused. Retiring Backend frees the name `Backend` and keeps its conversation readable.
 9. Two commits both expect sequence number 2. The first stores change 3. The second fails, and the records still end at 3.
+
+## Workspace group chat persistence
+
+The database also persists one shared transcript per workspace, chat settings, per-exchange activation budgets/stopped flags, run/exchange associations, and member delivery positions. `publishChat` atomically validates busy recipients and exchange budget, appends an authored shared message, ends a successfully publishing sender, delivers messages to idle member contexts, and creates all recipient run records. Invalid admission rolls back all these effects. Model snapshots are resolved before this operation and execution starts afterward.
+
+`chatSnapshot` returns database-backed group history pages and run status independent of member execution. `syncChatMember` appends unread shared messages to idle context only. Busy members retain their delivery position until terminal completion drains messages after private work. These appends do not manufacture private display-history records. Member creation inherits group history; retirement records its final delivery position, so later messages do not reach the retired member. Message identities/order and private history remain unchanged by context replacement.
+
+`configureChat` sets the 1–1,000 activation limit for subsequent exchanges. `stopChat` fences existing exchanges and returns active run records for cancellation. `finishRun` returns an already-terminal state without writing again, allowing sender publication and loop finalization to compose. Restart interrupts abandoned runs and drains pending group delivery without replaying triggers.

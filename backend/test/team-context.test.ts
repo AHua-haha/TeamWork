@@ -24,14 +24,15 @@ test('member requests get team rules and only their harness design and implement
   assert.doesNotMatch(request.context.systemPrompt!, /FRONTEND SOURCE|Design for Frontend/);
   assert.match(request.context.systemPrompt!, /never edit a working or dependency design/);
   assert.match(request.context.systemPrompt!, /standing words/);
-  assert.deepEqual(names(request).sort(), ['edit', 'ls', 'read', 'send_message', 'write']);
+  assert.deepEqual(names(request).sort(), ['edit', 'ls', 'read', 'write']);
   assert.deepEqual(request.context.tools!.map(tool => tool.name), names(request));
 }));
-test('the lead receives design maintenance, choices, configuration and assignment tools through the harness', () => withTeam(async fixture => {
+test('the lead receives design maintenance, choices and management tools with shared assignment instructions', () => withTeam(async fixture => {
   const request = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
-  assert.deepEqual(names(request).sort(), ['assign_member', 'configure_harness', 'create_member', 'list_models', 'ls', 'read', 'read_design', 'retire_member', 'save_design', 'send_message', 'update_member']);
+  assert.deepEqual(names(request).sort(), ['configure_harness', 'create_member', 'list_models', 'ls', 'read', 'read_design', 'retire_member', 'save_design', 'update_member']);
   assert.match(request.context.systemPrompt!, /offer concrete choices with their tradeoffs and your recommendation/);
   assert.match(request.context.systemPrompt!, /wait for the user's answer/);
+  assert.match(request.context.systemPrompt!, /Assign work in your final group response/);
   assert.match(request.context.systemPrompt!, /There are no context files yet/);
   await fixture.team.designs.save(fixture.workspaceId, 'user/design.json', { content: 'Project', implementation: ['.'] }, null, 'Test', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
   await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'executable', executable: 'node' }] });

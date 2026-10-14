@@ -23,3 +23,4 @@ export * from './design.js';
 export * from './harness-config.js';
 export * from './harness.js';
 export * from './harness-command.js';
+export * from './group-chat.js';

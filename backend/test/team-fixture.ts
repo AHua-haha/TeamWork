@@ -1,5 +1,6 @@
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { ResolvedRunConfig } from '../src/config.js';
 import type { ConfigService, RunSettings } from '../src/config.js';
 import type { RunHost } from '../src/team-runner.js';
 import { TeamSystem } from '../src/team-system.js';
@@ -36,23 +37,33 @@ const stateOf = (run: FakeRun): RunState => ({
 /** A runtime whose runs end when the test says so. One run per agent at a time, as in the real one. */
 export class FakeRuntime implements RunHost {
   readonly runs: FakeRun[] = [];
+  constructor(private readonly store?: MemoryStore) {
+    if (store) store.onPublicationComplete = runId => this.find(runId).settle('completed');
+  }
+  async prepareRun(): Promise<ResolvedRunConfig> { return {} as ResolvedRunConfig; }
+  launch(run: RunState): void { void this.start(run.agentId, undefined, run.runId); }
+  async feedback(): Promise<void> {}
   private readonly startWaiters = new Map<string, (() => void)[]>();
   started(agentId: string): Promise<void> {
     if (this.active(agentId)) return Promise.resolve();
     return new Promise(resolve => { const waiters = this.startWaiters.get(agentId) ?? []; waiters.push(resolve); this.startWaiters.set(agentId, waiters); });
   }
 
-  async start(agentId: string, input: unknown): Promise<RunState> {
+  async start(agentId: string, input: unknown, persistedId?: string): Promise<RunState> {
     if (this.active(agentId)) throw new AppError('agent_busy', 'Agent already has an active run', 409);
+    const store = this.store;
     let end!: () => void;
     const done = new Promise<void>(resolve => { end = resolve; });
     const run: FakeRun = {
-      agentId, runId: `run${this.runs.length + 1}`, input, status: 'running', text: '', error: null, cancelled: false, done,
+      agentId, runId: persistedId ?? `run${this.runs.length + 1}`, input, status: 'running', text: '', error: null, cancelled: false, done,
       settle(status, text = '', error) {
         if (run.status !== 'running') return;
         run.status = status;
         run.text = text;
         run.error = error ?? null;
+        const stored = store?.chatRuns.get(run.runId)?.run;
+        if (stored) Object.assign(stored, stateOf(run));
+        void store?.syncChatMember(run.agentId);
         end();
       },
     };
@@ -123,7 +134,7 @@ export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void
     const store = new MemoryStore();
     const workspaces = new WorkspaceService(store);
     const team = new TeamSystem(store, workspaces, stubConfig);
-    const runtime = new FakeRuntime();
+    const runtime = new FakeRuntime(store);
     team.attach(runtime);
     try {
       const root = await realpath(folder);
