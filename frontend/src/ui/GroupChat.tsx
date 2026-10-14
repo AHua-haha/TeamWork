@@ -97,20 +97,18 @@ function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
     return { iso: date.toISOString(), time: date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), full: date.toLocaleString() };
   }, [entry.run.startedAt]);
   return <article className="group-member" data-entry-id={entry.entryId} style={{ '--member-color': memberColor(entry.memberId) } as CSSProperties}>
+    <div className="group-member-identity"><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong className="group-member-name">{entry.name}</strong></div>
     <div className="group-run-area">
-      <div className="group-member-identity"><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong className="group-member-name">{entry.name}</strong></div>
-      <div className="group-run-details">
-        <button type="button" className="group-run-header" aria-expanded={expanded} aria-controls={`group-work-${entry.entryId}`}
-          aria-label={`${entry.name}: ${status}, ${duration}. ${expanded ? 'Hide' : 'Show'} working history`} onClick={() => setExpanded(value => !value)}>
-          <span className="run-header-status"><span className="run-header-dot" aria-hidden="true" />{status}</span>
-          <span className="run-header-duration">{duration}</span>
-          <time className="run-header-start" dateTime={started.iso} title={`Started ${started.full}`} aria-label={`Started ${started.full}`}>{started.time}</time>
-          <span className="run-header-chevron" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
-        </button>
-        {expanded && <WorkingHistory entry={entry} />}
-      </div>
+      <button type="button" className="group-run-header" aria-expanded={expanded} aria-controls={`group-work-${entry.entryId}`}
+        aria-label={`${entry.name}: ${status}, ${duration}. ${expanded ? 'Hide' : 'Show'} working history`} onClick={() => setExpanded(value => !value)}>
+        <span className="run-header-status"><span className="run-header-dot" aria-hidden="true" />{status}</span>
+        <span className="run-header-duration">{duration}</span>
+        <time className="run-header-start" dateTime={started.iso} title={`Started ${started.full}`} aria-label={`Started ${started.full}`}>{started.time}</time>
+        <span className="run-header-chevron" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+      </button>
     </div>
     <div className="group-member-body">
+      {expanded && <WorkingHistory entry={entry} />}
       {entry.text !== null && <div className="group-final"><Markdown source={entry.text} onLink={href => { window.open(href, '_blank', 'noopener,noreferrer'); }} /></div>}
       {!running && !entry.finalRef && <div className="group-terminal" role="status"><p>{entry.run.error?.message ?? (entry.run.status === 'completed' ? 'Finished without a published response.' : 'No final response was published.')}</p></div>}
     </div>
@@ -122,6 +120,7 @@ function WorkingHistory({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
   useEffect(() => { client.follow(entry.run.runId); return () => client.dispose(); }, [client, entry.run.runId]);
   const items = workingItems(snapshot, entry);
   return <div className="group-work" id={`group-work-${entry.entryId}`} aria-label={`${entry.name} working history`}>
+    <div className="group-work-label">Working history</div>
     {snapshot.error && <div className="group-work-error" role="alert">{snapshot.error}<button type="button" onClick={() => client.follow(entry.run.runId)}>Retry work history</button></div>}
     {!items.length && <p>{snapshot.synchronized ? 'No intermediate work recorded.' : 'Loading work…'}</p>}
     {items.map(item => item.kind === 'tool'
