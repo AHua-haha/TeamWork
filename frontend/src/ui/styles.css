@@ -516,19 +516,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 
 /* Centered reading column, outside avatar gutters, and right-side user bubbles. */
-.group-conversation { --group-reading-width: 800px; --group-avatar-size: 28px; --group-avatar-gutter: 40px; --group-edge-space: 20px; }
+.group-conversation { --group-reading-width: 800px; --group-avatar-size: 28px; --group-avatar-gutter: 40px; --group-edge-space: 20px; --group-run-line-width: 2px; --group-run-line-extension: 12px; }
 .group-viewport { flex: 1; min-height: 0; overflow-y: auto; padding: 28px var(--group-edge-space) 8px; }
 .group-timeline { width: 100%; max-width: calc(var(--group-reading-width) + 2 * var(--group-avatar-gutter)); margin-inline: auto; }
 .group-member, .group-user { display: grid; grid-template-columns: var(--group-avatar-gutter) minmax(0, 1fr) var(--group-avatar-gutter); align-items: start; }
 .group-member-body { grid-column: 2; min-width: 0; }
+.group-run-area { grid-column: 1 / -1; display: grid; grid-template-columns: var(--group-avatar-gutter) minmax(0, 1fr) var(--group-avatar-gutter); position: relative; padding-bottom: 12px; }
+.group-run-area::after { content: ""; position: absolute; left: calc(-1 * var(--group-run-line-extension)); right: calc(-1 * var(--group-run-line-extension)); bottom: 0; height: var(--group-run-line-width); background: var(--member-color); }
+.group-run-details { grid-column: 2; min-width: 0; }
 .group-member-identity { grid-column: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; width: var(--group-avatar-size); color: var(--member-color); }
 .group-member-name { width: calc(var(--group-avatar-gutter) + 6px); font-size: 10px; font-weight: 600; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
 .group-user-avatar { grid-column: 3; justify-self: end; color: #77857b; }
 .group-member { min-width: 0; padding-bottom: 36px; }
 .group-avatar { display: grid; place-items: center; width: var(--group-avatar-size); height: var(--group-avatar-size); border-radius: 50%; border: 1px solid currentColor; font-size: 12px; }
-.group-run-header { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 9px 12px; border: 0; border-block: 1px solid color-mix(in srgb, var(--member-color) 28%, white); background: color-mix(in srgb, var(--member-color) 7%, white); color: var(--member-color); font-size: 12px; text-align: left; }
-.group-run-header:hover { background: color-mix(in srgb, var(--member-color) 12%, white); }
-.group-run-header:focus-visible { outline-color: var(--member-color); }
+.group-run-header { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 4px 0 8px; border: 0; border-radius: 0; background: transparent; color: var(--member-color); font-size: 12px; text-align: left; }
+.group-run-header:hover { color: color-mix(in srgb, var(--member-color) 80%, black); }
+.group-run-header:focus-visible { outline: none; }
+.group-run-header:focus-visible .run-header-status { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 .run-header-status { display: flex; align-items: center; gap: 7px; font-weight: 600; }
 .run-header-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
 .run-header-duration, .run-header-start { white-space: nowrap; font-size: 11px; }
@@ -565,7 +569,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .member-settings h3 { margin: 0 0 8px; font-size: 13px; }
 .member-settings .model-popover { top: calc(100% + 7px); bottom: auto; width: min(360px, calc(100vw - 95px)); }
 @media (max-width: 760px) {
-  .group-conversation { --group-avatar-size: 24px; --group-avatar-gutter: 32px; --group-edge-space: 12px; }
+  .group-conversation { --group-avatar-size: 24px; --group-avatar-gutter: 32px; --group-edge-space: 12px; --group-run-line-extension: 8px; }
   .group-composer-footer { padding-bottom: 14px; }
   .group-member-name { font-size: 9px; }
   .group-user-body { max-width: 90%; }
