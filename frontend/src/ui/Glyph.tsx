@@ -5,6 +5,7 @@ const paths = {
   refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6',
   copy: 'M9 9h10v11H9zM15 9V4H5v11h4',
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  chevron: 'M9 6l6 6-6 6',
   history: 'M4 12a8 8 0 1 0 2.4-5.7M4 4v5h5M12 8v4.5l3 2',
   close: 'M6.5 6.5l11 11M17.5 6.5l-11 11',
   expand: 'M14 4h6v6M20 4l-6.5 6.5M10 20H4v-6M4 20l6.5-6.5',

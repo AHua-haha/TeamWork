@@ -98,19 +98,21 @@ function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
   }, [entry.run.startedAt]);
   return <article className="group-member" data-entry-id={entry.entryId} style={{ '--member-color': memberColor(entry.memberId) } as CSSProperties}>
     <div className="group-identity group-member-identity"><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong className="group-identity-name">{entry.name}</strong></div>
-    <div className="group-run-area">
-      <button type="button" className="group-run-header" aria-expanded={expanded} aria-controls={`group-work-${entry.entryId}`}
-        aria-label={`${entry.name}: ${status}, ${duration}. ${expanded ? 'Hide' : 'Show'} working history`} onClick={() => setExpanded(value => !value)}>
-        <span className="run-header-status"><span className="run-header-dot" aria-hidden="true" />{status}</span>
-        <span className="run-header-duration">{duration}</span>
-        <time className="run-header-start" dateTime={started.iso} title={`Started ${started.full}`} aria-label={`Started ${started.full}`}>{started.time}</time>
-        <span className="run-header-chevron" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
-      </button>
-    </div>
-    <div className="group-member-body">
-      {expanded && <WorkingHistory entry={entry} />}
-      {entry.text !== null && <div className="group-final"><Markdown source={entry.text} onLink={href => { window.open(href, '_blank', 'noopener,noreferrer'); }} /></div>}
-      {!running && !entry.finalRef && <div className="group-terminal" role="status"><p>{entry.run.error?.message ?? (entry.run.status === 'completed' ? 'Finished without a published response.' : 'No final response was published.')}</p></div>}
+    <div className="group-run-card">
+      <div className="group-run-area">
+        <button type="button" className="group-run-header" aria-expanded={expanded} aria-controls={`group-work-${entry.entryId}`}
+          aria-label={`${entry.name}: ${status}, ${duration}. ${expanded ? 'Hide' : 'Show'} working history`} onClick={() => setExpanded(value => !value)}>
+          <span className="run-header-status">{status}</span>
+          <span className="run-header-duration">{duration}</span>
+          <time className="run-header-start" dateTime={started.iso} title={`Started ${started.full}`} aria-label={`Started ${started.full}`}>{started.time}</time>
+          <span className="run-header-chevron"><Glyph name="chevron" /></span>
+        </button>
+      </div>
+      <div className="group-member-body">
+        {expanded && <WorkingHistory entry={entry} />}
+        {entry.text !== null && <div className="group-final"><Markdown source={entry.text} onLink={href => { window.open(href, '_blank', 'noopener,noreferrer'); }} /></div>}
+        {!running && !entry.finalRef && <div className="group-terminal" role="status"><p>{entry.run.error?.message ?? (entry.run.status === 'completed' ? 'Finished without a published response.' : 'No final response was published.')}</p></div>}
+      </div>
     </div>
   </article>;
 }
