@@ -21,7 +21,7 @@ This contract includes the approved UI defaults.
 
 - Position user messages on the right-hand side of the chat.
 - Preserve their backend-assigned timeline positions relative to reserved member response sections.
-- Use a subtle bubble background with left-aligned multiline text. A user avatar sits outside the bubble on its right, aligned with its top, with the user identity name beneath it like member names. In this prototype the user identity is You. The bubble contains only the submitted message text. Its right edge aligns with the member run box’s right edge. User and member avatars share a size derived from a single-line user message box, so the one-line bubble and its avatar have matching vertical centers and top edges. Both avatar types remain top-anchored at that same size for longer messages and have equal gaps to their boxes.
+- Use a subtle bubble background with left-aligned multiline text. A user avatar sits outside the bubble on its right, anchored near its start, with the user identity name beneath it like member names. In this prototype the user identity is You. The bubble contains only the submitted message text. Its right edge aligns with the member run box’s right edge. User and member avatars use smaller visible circles around the same centers established by the single-line message reference. Shrinking the circles does not move the message boxes, identity names or their centers. A one-line bubble and its avatar retain the same vertical center; longer messages retain the avatar anchor near their start. Both sender types have equal visible avatar gaps to their boxes.
 
 ### Member response sections
 
