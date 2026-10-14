@@ -4,7 +4,7 @@
 
 [Group chat design](design.md).
 
-## Responsibilities and composition
+## Responsibilities and decomposition
 
 Chat records and delivery cursors are durable in MySQL. Publication validates mentions and resolves recipient model snapshots before one transaction persists the shared message, exchange budget, member context delivery, and recipient run records. Busy checks occur again inside the transaction. A member final publication completes its sender run in that transaction, releasing the sender before recipients execute. Runtime terminal finalization is idempotent for this case.
 
@@ -25,3 +25,13 @@ Unit tests cover mention parsing, routing, parallel launch, atomic refusal, budg
 - [Group unit tests](../../../../../backend/test/team-group-chat.test.ts) and [MySQL integration](../../../../../backend/test/integration/backend.test.ts).
 
 Shutdown fences new publication, waits for accepted in-flight publications to register jobs, and then closes the runtime. Retirement records the final shared position before cancellation, so buffered prior messages can drain while later messages are excluded. No group transcript is reconstructed from private agent history.
+
+## Coordination and data flow
+
+MySqlStore’s chat_entries holds stable ordered user/member entries. chat_clock holds display position and change seq; chat_changes appends immutable lifecycle snapshots. Publication reserves recipient entries in mention order in the same transaction as shared acceptance and run creation. Successful final publication validates finalMessageId against the sender’s committed assistant record, stores only a FinalReference in member public records, and completes its existing entry with the terminal working-history bound. Readers resolve text from the immutable messages table. Finish/recovery appends terminal changes without a fake final. Names at completion reflect the accepted publication; member color remains a frontend ID projection.
+
+## Decisions and constraints
+
+Lock order is workspace then all relevant agents then clock for publication; runtime terminal writes use agent then clock and never take the workspace lock. The clock prevents concurrent writers from reusing display/change positions. Revisions are change cursors, distinct from publication/delivery positions. TeamRunner followTimeline reads paged durable changes and wakes on admission, completion, cancellation and settings updates. HTTP adds timeline and timeline-follow under team/chat; existing publication feeds remain the shared-context contract.
+
+Migration imports old prototype records once per workspace in publication order. Old atomic completed-run endPosition identifies the original committed final candidate; migration validates its text and never searches for the latest response. Missing/corrupt references fail explicitly. Old runs without an accepted final become retained status entries. Existing reference data and agent history are never deleted.

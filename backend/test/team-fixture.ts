@@ -63,6 +63,7 @@ export class FakeRuntime implements RunHost {
         run.error = error ?? null;
         const stored = store?.chatRuns.get(run.runId)?.run;
         if (stored) Object.assign(stored, stateOf(run));
+        store?.finishEntry(stateOf(run));
         void store?.syncChatMember(run.agentId);
         end();
       },

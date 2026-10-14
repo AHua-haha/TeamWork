@@ -1,3 +1,4 @@
+import { validateRun } from './codec.js';
 import type { RunState, ContextEntry } from './types.js';
 import { AppError, identity, position } from './types.js';
 
@@ -8,16 +9,47 @@ export interface ChatMessage {
   workspaceId: string; messageId: string; position: number; exchangeId: string;
   author: ChatAuthor; text: string; recipients: string[]; time: number;
 }
+export interface FinalReference { agentId: string; runId: string; messageId: string; position: number }
+export interface TimelineBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
+export type TimelineEntry = TimelineBase & (
+  | { kind: 'user'; text: string; messageId: string }
+  | { kind: 'member'; memberId: string; name: string; run: RunState; working: { after: number; through: number | null }; finalRef: FinalReference | null; text: string | null }
+);
+export interface TimelineChange { cursor: number; entry: TimelineEntry }
+export interface TimelineSnapshot { workspaceId: string; cursor: number; changes: TimelineChange[]; more: boolean; mentionLimit: number }
+export interface ChatAcceptance { message: ChatMessage; runs: RunState[]; entries: TimelineEntry[] }
+/** Stored member publications contain a reference, never a duplicate final body. */
+export type StoredChatMessage = Omit<ChatMessage, 'text'> & { text?: string; finalRef?: FinalReference };
+export function validateTimelineEntry(value: unknown): asserts value is TimelineEntry {
+  if (!value || typeof value !== 'object') throw new AppError('invalid_data', 'Invalid timeline entry');
+  const entry = value as TimelineEntry;
+  identity(entry.workspaceId); identity(entry.entryId); identity(entry.exchangeId);
+  position(entry.position); position(entry.revision);
+  if (!entry.position || !entry.revision || !Number.isSafeInteger(entry.time) || entry.time < 0) throw new AppError('invalid_data', 'Invalid timeline position or time');
+  if (entry.kind === 'user') { identity(entry.messageId); chatText(entry.text); return; }
+  if (entry.kind !== 'member') throw new AppError('invalid_data', 'Invalid timeline entry kind');
+  identity(entry.memberId); validateRun(entry.run);
+  if (entry.run.agentId !== entry.memberId || entry.run.runId !== entry.entryId || typeof entry.name !== 'string' || !entry.name || !entry.working) throw new AppError('invalid_data', 'Invalid timeline member');
+  position(entry.working.after);
+  if (entry.working.through !== null) { position(entry.working.through); if (entry.working.through < entry.working.after) throw new AppError('invalid_data', 'Invalid working range'); }
+  if (entry.working.through !== entry.run.endPosition || (entry.run.status === 'running' && entry.finalRef !== null)) throw new AppError('invalid_data', 'Invalid timeline lifecycle');
+  if (entry.finalRef) {
+    identity(entry.finalRef.messageId); position(entry.finalRef.position);
+    if (entry.run.status !== 'completed' || entry.finalRef.agentId !== entry.memberId || entry.finalRef.runId !== entry.run.runId || entry.finalRef.position !== entry.working.through || entry.finalRef.position <= entry.working.after) throw new AppError('invalid_data', 'Invalid timeline final reference');
+  }
+  if (entry.text !== null && typeof entry.text !== 'string') throw new AppError('invalid_data', 'Invalid timeline text');
+}
 export interface ChatSnapshot {
   workspaceId: string; position: number; mentionLimit: number; messages: ChatMessage[]; more: boolean;
   runs: { exchangeId: string; run: RunState }[];
 }
 export interface ChatPublication {
-  workspaceId: string; author: ChatAuthor; text: string; recipients: string[]; exchangeId?: string;
+  workspaceId: string; author: ChatAuthor; text: string; recipients: string[]; exchangeId?: string; finalMessageId?: string;
 }
 export interface ChatStore {
-  publishChat(input: ChatPublication): Promise<{ message: ChatMessage; runs: RunState[] }>;
+  publishChat(input: ChatPublication): Promise<ChatAcceptance>;
   chatSnapshot(workspaceId: string, after?: number, limit?: number): Promise<ChatSnapshot>;
+  chatTimeline(workspaceId: string, after?: number, limit?: number): Promise<TimelineSnapshot>;
   syncChatMember(memberId: string): Promise<void>;
   configureChat(workspaceId: string, mentionLimit: number): Promise<void>;
   stopChat(workspaceId: string): Promise<RunState[]>;

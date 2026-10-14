@@ -78,3 +78,13 @@ test('workspace input goes to group chat; direct member input is refused', () =>
   await call(`${base}/stop`, { method: 'POST', status: 202 });
   assert.equal(fixture.runtime.last(fixture.lead.memberId)?.status, 'cancelled');
 }));
+
+test('group timeline endpoints expose persisted reservations and paged changes', () => withServer(async (call, fixture) => {
+  const base = `/workspaces/${fixture.workspaceId}/team/chat`;
+  const accepted = await call(`${base}/messages`, { method: 'POST', data: { text: 'work' }, status: 202 });
+  assert.deepEqual(accepted.entries.map((entry: { kind: string }) => entry.kind), ['user', 'member']);
+  const page = await call(`${base}/timeline?after=0&limit=1`);
+  assert.equal(page.changes.length, 1); assert.equal(page.more, true);
+  const next = await call(`${base}/timeline?after=1`);
+  assert.equal(next.changes[0].entry.position, 2);
+}));

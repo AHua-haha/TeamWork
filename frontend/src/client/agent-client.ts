@@ -26,6 +26,7 @@ export async function createAgent(fetcher: typeof fetch = fetch, basePath = '/ag
 }
 
 interface Options {
+  historyAfter?: number;
   fetcher?: typeof fetch;
   basePath?: string;
   retryDelayMs?: (attempt: number) => number;
@@ -78,7 +79,7 @@ export class AgentClient {
     this.fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
     this.basePath = options.basePath ?? '/agents';
     this.retryDelayMs = options.retryDelayMs ?? (attempt => Math.min(500 * 2 ** Math.min(attempt, 4), 8000));
-    this.snapshot = { agentId, completed: [], live: [], historyPosition: 0, synchronized: false, connection: 'idle', run: null, sending: false, error: null };
+    this.snapshot = { agentId, completed: [], live: [], historyPosition: options.historyAfter ?? 0, synchronized: false, connection: 'idle', run: null, sending: false, error: null };
   }
 
   getSnapshot = (): ClientSnapshot => this.snapshot;

@@ -135,3 +135,17 @@ test('invalid protocol event is exposed and stops retrying', async () => {
   client.dispose();
   assert.ok(ProtocolError);
 });
+
+test('private range inspection begins at its stored boundary and remains scoped to the selected run', async () => {
+  const requests: string[] = [];
+  const completed = { ...run('completed'), endPosition: 12 };
+  const payload = event({ ...base, type: 'message', record: record(11, 'work', 'run work') })
+    + event({ ...base, type: 'message', record: record(12, 'final', 'final') })
+    + event({ ...base, type: 'sync', historyPosition: 12, run: completed })
+    + event({ ...base, type: 'end', historyPosition: 12, run: completed });
+  const client = new AgentClient(agentId, { historyAfter: 10, fetcher: async input => { requests.push(String(input)); return streamResponse(payload); } });
+  client.follow(runId); await until(() => client.getSnapshot().connection === 'idle');
+  assert.match(requests[0]!, /runId=run_1&after=10/);
+  assert.deepEqual(client.getSnapshot().completed.map(record => record.position), [11, 12]);
+  client.dispose();
+});

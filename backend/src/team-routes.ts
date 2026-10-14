@@ -13,10 +13,12 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
     if (area === 'chat') {
       if (extra.length) throw notFound();
-      if (method === 'GET' && (memberId === undefined || memberId === 'follow')) {
-        query(url, memberId === 'follow' ? ['after'] : ['after', 'limit']);
+      if (method === 'GET' && (memberId === undefined || memberId === 'follow' || memberId === 'timeline' || memberId === 'timeline-follow')) {
+        query(url, memberId === 'follow' || memberId === 'timeline-follow' ? ['after'] : ['after', 'limit']);
         const after = count(url, 'after', 0);
-        if (memberId === 'follow') await sse(response, team.runner.follow(workspaceId, after, signal), signal, { workspaceId });
+        if (memberId === 'timeline-follow') await sse(response, team.runner.followTimeline(workspaceId, after, signal), signal, { workspaceId });
+        else if (memberId === 'timeline') json(response, 200, await team.runner.timeline(workspaceId, after, count(url, 'limit', 100)));
+        else if (memberId === 'follow') await sse(response, team.runner.follow(workspaceId, after, signal), signal, { workspaceId });
         else json(response, 200, await team.runner.snapshot(workspaceId, after, count(url, 'limit', 100)));
       } else if (method === 'POST' && memberId === 'messages') {
         query(url, []);

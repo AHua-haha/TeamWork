@@ -4,7 +4,7 @@ import { BackendError } from '../src/client/agent-client.js';
 import type { Member, Team } from '../src/client/workspace-client.js';
 import { WorkspaceClient } from '../src/client/workspace-client.js';
 import { readRoute, routeUrl, sameRoute } from '../src/ui/routes.js';
-import { findLead, leadConfig, leadFields, memberStatus, modelText, pollIntervalMs, shouldPoll } from '../src/ui/team-state.js';
+import { findLead, memberConfig, memberFields, memberStatus, modelText, pollIntervalMs, shouldPoll } from '../src/ui/team-state.js';
 import { callRecipient, toolHeading, toolLabels } from '../src/ui/tool-label.js';
 
 const settings = { connectionId: 'main', modelId: 'm1', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'm1', reasoning: 'high' as const }] };
@@ -35,11 +35,11 @@ test('a refused member save keeps the backend code', async () => {
     error instanceof BackendError && error.status === 409 && error.code === 'config_conflict');
 });
 
-test('the lead is presented to the composer as an agent config and saved without changing its identity', () => {
+test('member settings use the agent config shape and saved without changing its identity', () => {
   const lead = member();
-  assert.deepEqual(leadConfig(lead), { id: 'lead-1', revision: 3, value: { name: 'Lead', ...settings }, issues: [] });
-  const edited = { ...leadConfig(lead).value, modelId: 'm2', name: 'Renamed in the composer' };
-  assert.deepEqual(leadFields(lead, edited), {
+  assert.deepEqual(memberConfig(lead), { id: 'lead-1', revision: 3, value: { name: 'Lead', ...settings }, issues: [] });
+  const edited = { ...memberConfig(lead).value, modelId: 'm2', name: 'Renamed in the composer' };
+  assert.deepEqual(memberFields(lead, edited), {
     name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] },
     settings: { connectionId: 'main', modelId: 'm2', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: settings.modelOptions },
   });
@@ -57,7 +57,7 @@ test('a member is working, idle, or unable to run, and the model shows its conne
   assert.equal(modelText(member({ settings: { ...settings, modelId: null } })), null);
 });
 
-test('the team is read on a timer only while the lead runs', () => {
+test('the team is read on a timer only while team work runs', () => {
   assert.equal(shouldPoll(true), true);
   assert.equal(shouldPoll(false), false);
   assert.ok(pollIntervalMs >= 1000 && pollIntervalMs <= 10_000);

@@ -7,7 +7,7 @@ import { Conversation } from './Thread.js';
 import type { SettingsControl } from './useAgentConfig.js';
 
 /**
- * One conversation with one agent: a solo agent, or a workspace's lead. The page that owns the agent's settings gives them
+ * One private conversation with a solo agent. The page that owns the agent's settings gives them
  * as `control`, and may ask to be told when the agent's run starts and ends.
  */
 export function ChatPage({ agentId, control, api, eyebrow, title, filesOpen, onFiles, onRunning, discussion }: {

@@ -53,7 +53,7 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 - Sharing a transcript does not expand a member's harness permissions or give it lead management/design-editing capabilities.
 - Shared chat publication and private execution are distinct. This distinction does not prevent members from reporting relevant results in their final responses.
 - Retained private history belongs to the member's execution continuity. Durable project design and knowledge remain organized independently of member identity; automated harness-context maintenance is deferred.
-- Bounded chat-history delivery and private-history maintenance remain open.
+- History retention and private-history maintenance remain open.
 - The new design replaces the private blocking-call mechanism; implementation must derive cooperation from shared messages and triggering rules.
 
 ## Acceptance examples
@@ -80,3 +80,11 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 - `POST /workspaces/:id/team/chat/stop` cancels active chat work and stops its exchanges.
 - Direct `POST /agents/:memberId/runs` refuses team members; solo agents retain their API. Private agent history/follow remains available for inspection.
 - Shared text is 1–20,000 characters. Rejected publication changes neither shared history, member delivery, nor activation budget. Accepted publication and creation of its recipient run records are atomic. Model execution begins after persistence; execution failures remain visible statuses.
+
+## Persisted presentation timeline
+
+Accepted admission reserves recipient response entries immediately in mention order, including the default lead. User input is stored directly. A member final completes its existing entry by referencing the exact accepted immutable agent-history message; its corresponding private history range is pinned when terminal. No private work is shared. Reservations and failed/cancelled/interrupted entries survive reload and restart. Refusal creates no timeline changes. Display order never depends on completion order.
+
+`GET /workspaces/:id/team/chat/timeline?after=0&limit=100` replays persisted entry changes (limit 1–500), returning `{workspaceId,cursor,changes:[{cursor,entry}],more,mentionLimit}`. Continue at the last returned change cursor, not the display position or latest watermark. `GET /workspaces/:id/team/chat/timeline-follow?after=0` emits version-1 `entry` events with `change`, `sync` with `cursor`, and `settings` with `mentionLimit`. This stream remains open between runs. POST acknowledgement also returns affected `entries`. Entry revisions identify updates; an older reserved entry finishing produces a new change cursor. Read results resolve public final text without exposing private work.
+
+Member entries identify member/name/run, stable display position, run status/times, final reference, and private working range `(after,through]`. While running, through is null; terminal ranges are immutable. Current prototype history is imported in original publication order, preserving its content; reservation order applies to new activations.

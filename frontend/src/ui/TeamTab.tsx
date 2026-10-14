@@ -1,3 +1,4 @@
+import { MemberRunSettings } from './MemberRunSettings.js';
 import { useEffect, useRef } from 'react';
 import type { DesignSummary, Member, Workspace } from '../client/workspace-client.js';
 import { implementationAccess, memberDesigns } from './design-state.js';
@@ -35,7 +36,7 @@ export function TeamTab({ team, workspace, designs, selected, onSelect, onDesign
             <span className="member-role">{member.role}</span>
             <span className={`member-status ${status.label.replace(' ', '-').toLowerCase()}`}><span className="status-dot" />{status.label}</span>
           </div>
-          {status.reasons.length > 0 && <p className="member-reasons">{status.reasons.join(' · ')}{member.lead && status.reasons.includes('Select a provider and model') ? '. Choose a model in the composer.' : ''}</p>}
+          {status.reasons.length > 0 && <p className="member-reasons">{status.reasons.join(' · ')}{member.lead && status.reasons.includes('Select a provider and model') ? '. Expand this member to choose a model.' : ''}</p>}
           <p className="member-responsibility">{member.responsibility || 'No responsibility given yet.'}</p>
           <dl className="member-facts">
             <dt>Model</dt><dd>{modelText(member) ?? 'None selected'}</dd>
@@ -45,6 +46,7 @@ export function TeamTab({ team, workspace, designs, selected, onSelect, onDesign
           <div className="member-actions"><button type="button" className="text-button" aria-expanded={expanded} onClick={() => onSelect(expanded ? null : member.memberId)}>{expanded ? 'Hide harness' : 'Inspect harness'}</button>
             <button type="button" className="text-button" onClick={() => onDiscuss(member)}>Discuss with lead</button></div>
           {expanded && <section className="member-harness" aria-label={`${member.name} harness`}>
+            <MemberRunSettings workspaceId={workspace.workspaceId} member={member} team={team} />
             <h3>File-tool scope</h3>
             <p>Working designs are read and followed. Dependency designs and implementation are read-only.</p>
             {member.lead && <p>The lead can inspect the workspace and context. Implementation edits follow its working designs.</p>}

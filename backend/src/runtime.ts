@@ -4,7 +4,7 @@ import { MySqlStore } from './database.js';
 import type { ResolvedRunConfig } from './config.js';
 import { encode, validateMessage } from './codec.js';
 import { Changes } from './changes.js';
-import { AppError, type ContextEntry, type ContextHistory, type CurrentState, type FollowEvent, type Retention, type RunState } from './types.js';
+import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowEvent, type Retention, type RunState } from './types.js';
 
 export interface StepScope {
   agentId: string;
@@ -34,7 +34,7 @@ export interface RuntimePolicy {
   beforeStep?(scope: StepScope): Promise<void>;
   buildRequest(scope: StepScope, history: ContextHistory): Promise<ModelRequest> | ModelRequest;
   executeTool?(tool: RuntimeTool, args: JsonObject, scope: StepScope, call: ToolCall): Promise<Pick<ToolResultMessage, 'content' | 'isError' | 'details'>>;
-  shouldContinue?(scope: StepScope, response: AssistantMessage, results: ToolResultMessage[]): Promise<boolean> | boolean;
+  shouldContinue?(scope: StepScope, response: AssistantMessage, results: ToolResultMessage[], record: CompletedMessage): Promise<boolean> | boolean;
   messageMetadata?(scope: StepScope, message: Message): JsonObject;
 }
 
@@ -258,7 +258,7 @@ export class AgentRuntime {
         signal.throwIfAborted();
         if (!response) throw new AppError('invalid_stream', 'Model stream ended without a final response');
         if (!['stop', 'length', 'toolUse'].includes(response.stopReason)) throw new AppError('model_error', `Unsupported terminal model state: ${response.stopReason}`);
-        await this.store.commitMessage(run.agentId, run.runId, { messageId, message: response, metadata: this.policy.messageMetadata?.(scope, response) ?? {} });
+        const record = await this.store.commitMessage(run.agentId, run.runId, { messageId, message: response, metadata: this.policy.messageMetadata?.(scope, response) ?? {} });
         this.changes.publish();
         const calls = response.content.filter(part => part.type === 'toolCall');
         if (new Set(calls.map(call => call.id)).size !== calls.length) throw new AppError('invalid_tool_calls', 'Duplicate tool-call identity');
@@ -286,7 +286,7 @@ export class AgentRuntime {
           results.push(result);
           if (toolError) throw toolError;
         }
-        const again = this.policy.shouldContinue ? await abortable(Promise.resolve(this.policy.shouldContinue(scope, response, results)), signal) : calls.length > 0;
+        const again = this.policy.shouldContinue ? await abortable(Promise.resolve(this.policy.shouldContinue(scope, response, results, record)), signal) : calls.length > 0;
         signal.throwIfAborted();
         if (!again) break;
       }

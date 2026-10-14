@@ -19,7 +19,7 @@ test('all members receive messages but only mentioned members activate, in paral
   assert.equal(f.runtime.active(f.lead.memberId), undefined);
   for (const member of [f.lead, backend, frontend]) assert.equal(f.store.agentContexts.get(member.memberId)?.length, 1);
   const firstRun = f.runtime.active(backend.memberId)!.runId;
-  await f.team.runner.publishFinal(backend.memberId, firstRun, 'Backend done without mentions');
+  await f.team.runner.publishFinal(backend.memberId, firstRun, 'Backend done without mentions', 'final');
   assert.equal(f.runtime.active(backend.memberId), undefined);
   assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 2);
   assert.equal(f.store.agentContexts.get(frontend.memberId)?.length, 1);
@@ -47,7 +47,7 @@ test('busy, unknown, self and unready recipients refuse entire publications with
   await f.team.service.create(f.workspaceId, { name: 'Unready', role: 'developer' });
   const first = await f.team.runner.postUser(f.workspaceId, '@Backend start');
   for (const [text, error] of [['@Backend @Frontend work', 'member_busy'], ['@Nobody work', 'not_found'], ['@Unready work', 'member_unavailable']] as const) await assert.rejects(f.team.runner.postUser(f.workspaceId, text), code(error));
-  await assert.rejects(f.team.runner.publishFinal(backend.memberId, first.runs[0]!.runId, '@Backend again'), code('self_mention'));
+  await assert.rejects(f.team.runner.publishFinal(backend.memberId, first.runs[0]!.runId, '@Backend again', 'final'), code('self_mention'));
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 1);
   assert.equal(f.runtime.active(frontend.memberId), undefined);
   assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 1);
@@ -58,12 +58,12 @@ test('default lead routing, return mentions, and limit count accepted activation
   await f.team.runner.configure(f.workspaceId, 2);
   const user = await f.team.runner.postUser(f.workspaceId, 'implement');
   assert.equal(user.runs[0]!.agentId, f.lead.memberId);
-  const assignment = await f.team.runner.publishFinal(f.lead.memberId, user.runs[0]!.runId, '@Backend @backend work');
+  const assignment = await f.team.runner.publishFinal(f.lead.memberId, user.runs[0]!.runId, '@Backend @backend work', 'final');
   assert.deepEqual(assignment.recipients, [backend.memberId]);
   const run = f.runtime.active(backend.memberId)!;
-  await assert.rejects(f.team.runner.publishFinal(backend.memberId, run.runId, '@Lead review'), code('mention_limit'));
+  await assert.rejects(f.team.runner.publishFinal(backend.memberId, run.runId, '@Lead review', 'final'), code('mention_limit'));
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 2);
-  await f.team.runner.publishFinal(backend.memberId, run.runId, 'Finished.');
+  await f.team.runner.publishFinal(backend.memberId, run.runId, 'Finished.', 'final');
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 3);
   const next = await f.team.runner.postUser(f.workspaceId, 'another exchange');
   assert.notEqual(next.message.exchangeId, user.message.exchangeId);
@@ -94,7 +94,7 @@ test('follow synchronizes stable shared records and continues across activations
   assert.equal((await stream.next()).value?.type, 'sync');
   assert.equal((await stream.next()).value?.type, 'state');
   const pending = stream.next();
-  await f.team.runner.publishFinal(f.lead.memberId, accepted.runs[0]!.runId, 'Finished.');
+  await f.team.runner.publishFinal(f.lead.memberId, accepted.runs[0]!.runId, 'Finished.', 'final');
   assert.equal((await pending).value?.type, 'message');
   controller.abort(); await stream.return();
   const next = await f.team.runner.postUser(f.workspaceId, 'more');
@@ -118,4 +118,22 @@ test('shutdown waits for in-flight publication to register work and rejects subs
   await shutdown;
   assert.ok(f.runtime.active(f.lead.memberId));
   assert.equal(accepted.runs.length, 1);
+}));
+
+test('timeline follow delivers terminal updates for earlier reserved sections while preserving positions', () => withTeam(async f => {
+  const accepted = await f.team.runner.postUser(f.workspaceId, 'work');
+  const controller = new AbortController();
+  const stream = f.team.runner.followTimeline(f.workspaceId, 0, controller.signal);
+  assert.equal((await stream.next()).value?.type, 'entry');
+  const reserved = (await stream.next()).value;
+  assert.equal(reserved?.type, 'entry');
+  assert.equal(reserved && 'change' in reserved ? reserved.change?.entry.position : undefined, 2);
+  assert.equal((await stream.next()).value?.type, 'sync');
+  assert.equal((await stream.next()).value?.type, 'settings');
+  const waiting = stream.next();
+  await f.team.runner.publishFinal(f.lead.memberId, accepted.runs[0]!.runId, 'Final report', 'committed-final');
+  const update = (await waiting).value;
+  assert.equal(update?.type, 'entry');
+  assert.equal(update && 'change' in update ? update.change?.entry.position : undefined, 2);
+  controller.abort(); await stream.return();
 }));

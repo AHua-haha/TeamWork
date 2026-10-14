@@ -1,7 +1,7 @@
 import type { AgentRuntime } from './runtime.js';
 import type { TeamService } from './team.js';
 import { Changes } from './changes.js';
-import { chatText, mentions, mentionLimit, type ChatStore, type ChatMessage } from './group-chat.js';
+import { chatText, mentions, mentionLimit, type ChatStore, type ChatMessage, type ChatAcceptance } from './group-chat.js';
 import { AppError, type RunState } from './types.js';
 
 export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback'>;
@@ -11,7 +11,7 @@ export class TeamRunner {
   private readonly changes = new Changes();
   private readonly active = new Map<string, { runId: string; exchangeId: string; workspaceId: string }>();
   private closed = false;
-  private readonly publications = new Set<Promise<{ message: ChatMessage; runs: RunState[] }>>();
+  private readonly publications = new Set<Promise<ChatAcceptance>>();
   constructor(private readonly team: TeamService, private readonly store: ChatStore, private readonly runtime: () => RunHost) {}
 
   isRunning(memberId: string): boolean { return this.active.has(memberId); }
@@ -25,15 +25,15 @@ export class TeamRunner {
     return this.publish(workspaceId, chatText(value));
   }
 
-  async publishFinal(memberId: string, runId: string, value: unknown): Promise<ChatMessage> {
+  async publishFinal(memberId: string, runId: string, value: unknown, finalMessageId: string): Promise<ChatMessage> {
     const member = await this.team.find(memberId);
     const active = this.active.get(memberId);
     if (!member || member.value.retiredAt !== null || active?.runId !== runId) throw new AppError('member_unavailable', 'The sending member is no longer working', 409);
-    const result = await this.publish(member.workspaceId, chatText(value), { memberId, name: member.value.name, runId, exchangeId: active.exchangeId });
+    const result = await this.publish(member.workspaceId, chatText(value), { memberId, name: member.value.name, runId, exchangeId: active.exchangeId, finalMessageId });
     return result.message;
   }
 
-  private publish(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string }) {
+  private publish(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string }) {
     if (this.closed) return Promise.reject(new AppError('runtime_unavailable', 'Team is shutting down', 503));
     const operation = this.acceptPublication(workspaceId, text, sender);
     this.publications.add(operation);
@@ -41,7 +41,7 @@ export class TeamRunner {
     return operation;
   }
 
-  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string }) {
+  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string }) {
     if (this.closed) throw new AppError('runtime_unavailable', 'Team is shutting down', 503);
     const roster = await this.team.active(workspaceId);
     const names = mentions(text);
@@ -63,7 +63,7 @@ export class TeamRunner {
     }
     const configs = await Promise.all(recipients.map(member => this.runtime().prepareRun(member.id)));
     // The store rechecks busy state and budget with publication and all run records in one transaction.
-    const result = await this.store.publishChat({ workspaceId, text, recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId } : {}) });
+    const result = await this.store.publishChat({ workspaceId, text, recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId, finalMessageId: sender.finalMessageId } : {}) });
     if (sender) this.active.delete(sender.memberId);
     for (const [index, run] of result.runs.entries()) {
       this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });
@@ -79,6 +79,28 @@ export class TeamRunner {
   }
 
   async snapshot(workspaceId: string, after = 0, limit = 100) { return this.store.chatSnapshot(workspaceId, after, limit); }
+  async timeline(workspaceId: string, after = 0, limit = 100) { return this.store.chatTimeline(workspaceId, after, limit); }
+
+  async *followTimeline(workspaceId: string, after = 0, signal?: AbortSignal) {
+    let first = true;
+    let settings: number | undefined;
+    while (!signal?.aborted && !this.closed) {
+      const version = this.changes.version;
+      const snapshot = await this.timeline(workspaceId, after, 500);
+      for (const change of snapshot.changes) {
+        after = change.cursor;
+        yield { version: 1, type: 'entry', workspaceId, change };
+      }
+      if (snapshot.more) continue;
+      if (first) { first = false; yield { version: 1, type: 'sync', workspaceId, cursor: after }; }
+      if (settings !== snapshot.mentionLimit) {
+        settings = snapshot.mentionLimit;
+        yield { version: 1, type: 'settings', workspaceId, mentionLimit: settings };
+      }
+      await this.changes.wait(version, signal);
+    }
+  }
+
   async configure(workspaceId: string, value: unknown) {
     await this.store.configureChat(workspaceId, mentionLimit(value));
     this.changes.publish();

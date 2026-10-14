@@ -80,14 +80,14 @@ export class TeamSystem {
     const lead = leadTools(this.lead);
     return {
       ...base,
-      shouldContinue: async (scope, response, results) => {
+      shouldContinue: async (scope, response, results, record) => {
         const member = await this.service.find(scope.agentId);
-        if (!member) return base.shouldContinue ? base.shouldContinue(scope, response, results) : response.content.some(part => part.type === 'toolCall');
+        if (!member) return base.shouldContinue ? base.shouldContinue(scope, response, results, record) : response.content.some(part => part.type === 'toolCall');
         if (response.content.some(part => part.type === 'toolCall')) return true;
         const text = response.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
         try {
           scope.signal.throwIfAborted();
-          await this.runner.publishFinal(scope.agentId, scope.runId, text);
+          await this.runner.publishFinal(scope.agentId, scope.runId, text, record.messageId);
           return false;
         } catch (error) {
           if (!(error instanceof AppError) || error.status >= 500 || error.code === 'exchange_stopped') throw error;

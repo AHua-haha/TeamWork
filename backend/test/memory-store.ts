@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/context-base.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore } from '../src/team.js';
 import { randomUUID } from 'node:crypto';
-import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot } from '../src/group-chat.js';
+import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/group-chat.js';
 import type { ContextEntry, RunState } from '../src/types.js';
 import { AppError } from '../src/types.js';
 
@@ -17,6 +17,27 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   private ordinal = 0;
   failNextCommit = false;
 
+  readonly timelineChanges = new Map<string, { cursor: number; entry: TimelineEntry }[]>();
+  private timelineEntries = new Map<string, TimelineEntry>();
+  private writeEntry(entry: TimelineEntry) {
+    const changes = this.timelineChanges.get(entry.workspaceId) ?? [];
+    const entries = [...this.timelineEntries.values()].filter(item => item.workspaceId === entry.workspaceId);
+    entry.position ||= Math.max(0, ...entries.map(item => item.position)) + 1;
+    entry.revision = changes.length + 1;
+    this.timelineEntries.set(entry.entryId, structuredClone(entry));
+    changes.push({ cursor: entry.revision, entry: structuredClone(entry) });
+    this.timelineChanges.set(entry.workspaceId, changes);
+    return entry;
+  }
+  finishEntry(run: RunState) {
+    const entry = this.timelineEntries.get(run.runId);
+    if (entry?.kind === 'member' && entry.run.status === 'running') this.writeEntry({ ...entry, run: structuredClone(run), working: { ...entry.working, through: run.endPosition } });
+  }
+  async chatTimeline(workspaceId: string, after = 0, limit = 100): Promise<TimelineSnapshot> {
+    this.stored(workspaceId);
+    const all = this.timelineChanges.get(workspaceId) ?? [];
+    return { workspaceId, cursor: all.length, changes: structuredClone(all.slice(after, after + limit)), more: after + limit < all.length, mentionLimit: this.limits.get(workspaceId) ?? 32 };
+  }
   readonly chatMessages = new Map<string, ChatMessage[]>();
   readonly chatRuns = new Map<string, { exchangeId: string; run: RunState }>();
   readonly agentContexts = new Map<string, ContextEntry[]>();
@@ -39,13 +60,20 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     const message: ChatMessage = { ...input, exchangeId, messageId: randomUUID(), position: messages.length + 1, time: Date.now() };
     messages.push(structuredClone(message)); this.chatMessages.set(input.workspaceId, messages);
     exchange.used += input.recipients.length; this.exchanges.set(exchangeId, exchange);
-    if (input.author.type === 'member') this.onPublicationComplete?.(input.author.runId);
+    const entries: TimelineEntry[] = [];
+    if (input.author.type === 'user') entries.push(this.writeEntry({ workspaceId: input.workspaceId, entryId: message.messageId, position: 0, revision: 0, exchangeId, time: message.time, kind: 'user', text: input.text, messageId: message.messageId }));
+    else {
+      this.onPublicationComplete?.(input.author.runId);
+      const entry = this.timelineEntries.get(input.author.runId)!;
+      if (entry.kind === 'member') entries.push(this.writeEntry({ ...entry, run: structuredClone(this.chatRuns.get(input.author.runId)!.run), text: input.text, working: { after: 0, through: 1 }, finalRef: { agentId: input.author.memberId, runId: input.author.runId, messageId: input.finalMessageId!, position: 1 } }));
+    }
     for (const member of await this.listMembers(input.workspaceId)) if (member.value.retiredAt === null) await this.syncChatMember(member.id);
     const runs = input.recipients.map(agentId => {
       const run: RunState = { agentId, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
-      this.chatRuns.set(run.runId, { exchangeId, run }); return run;
+      this.chatRuns.set(run.runId, { exchangeId, run });
+      entries.push(this.writeEntry({ workspaceId: input.workspaceId, entryId: run.runId, position: 0, revision: 0, exchangeId, time: run.startedAt, kind: 'member', memberId: agentId, name: this.members.get(agentId)!.member.value.name, run: structuredClone(run), working: { after: 0, through: null }, finalRef: null, text: null })); return run;
     });
-    return { message, runs };
+    return { message, runs, entries };
   }
 
   async syncChatMember(memberId: string) {

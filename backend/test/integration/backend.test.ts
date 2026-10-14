@@ -1292,3 +1292,92 @@ test('shutdown waits for in-flight solo input acceptance, registers its run, the
     assert.equal((await store.runMessages(agentId, run.runId)).length, 1);
   } finally { release(); await runtime.close(); }
 });
+
+test('group timeline reserves deterministic positions, pins final references and ranges, and replays older entry updates', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');
+    const first = await f.requests.next(); const second = await f.requests.next();
+    const backendStep = /You are Backend,/.test(first.request.context.systemPrompt!) ? first : second;
+    const frontendStep = backendStep === first ? second : first;
+    assert.deepEqual(accepted.entries.map(entry => entry.kind === 'member' ? entry.name : 'User'), ['User', 'Backend', 'Frontend']);
+    const cursor = (await store.chatTimeline(f.workspaceId)).cursor;
+    const later = await f.team.runner.postUser(f.workspaceId, '@Lead discuss'); const leadStep = await f.requests.next();
+    answer(frontendStep.events, message('Frontend final first'));
+    await f.runtime.finished(f.frontend.memberId, accepted.runs[1]!.runId);
+    answer(backendStep.events, message('Backend final second'));
+    await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId);
+    answer(leadStep.events, message('Lead final'));
+    await f.runtime.finished(f.lead.memberId, later.runs[0]!.runId);
+    const snapshot = await store.chatTimeline(f.workspaceId);
+    const current = new Map(snapshot.changes.map(change => [change.entry.entryId, change.entry]));
+    const ordered = [...current.values()].sort((a, b) => a.position - b.position);
+    assert.deepEqual(ordered.map(entry => entry.kind === 'member' ? entry.name : 'User'), ['User', 'Backend', 'Frontend', 'User', 'Lead']);
+    const backend = ordered[1]!;
+    assert.equal(backend.kind, 'member');
+    if (backend.kind !== 'member') throw new Error('member missing');
+    assert.equal(backend.text, 'Backend final second');
+    const records = await store.runMessages(f.backend.memberId, accepted.runs[0]!.runId);
+    assert.equal(backend.finalRef!.messageId, records.at(-1)!.messageId);
+    assert.equal(backend.working.through, records.at(-1)!.position);
+    const context = await store.getContext(f.backend.memberId);
+    await store.replaceContext(f.backend.memberId, context.revision, []);
+    await f.team.runner.retire(f.workspaceId, f.backend.memberId, f.backend.revision);
+    assert.deepEqual(await store.chatTimeline(f.workspaceId), snapshot, 'retirement/compaction preserve pinned history');
+    const changes = await store.chatTimeline(f.workspaceId, cursor, 1);
+    assert.equal(changes.changes.length, 1); assert.equal(changes.more, true);
+    assert.ok(snapshot.changes.filter(change => change.cursor > cursor).some(change => change.entry.position === 2), 'new cursor carries older response completion');
+    const [publicRows] = await store.pool.execute<any[]>('SELECT entry FROM chat_messages WHERE workspace_id = ?', [f.workspaceId]);
+    const storedFinals = publicRows.map(row => typeof row.entry === 'string' ? JSON.parse(row.entry).data : row.entry.data).filter(entry => entry.author.type === 'member');
+    assert.ok(storedFinals.every(entry => entry.finalRef && entry.text === undefined), 'public history stores references, not duplicate final text');
+    const reopened = new MySqlStore(databaseUrl!);
+    try { await reopened.migrate(); assert.deepEqual(await reopened.chatTimeline(f.workspaceId), snapshot); } finally { await reopened.close(); }
+  } finally { await f.close(); }
+});
+
+test('group timeline refusal creates no reservation, and cancellation/restart finalize retained entries without a final', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend work'); await f.requests.next();
+    const before = await store.chatTimeline(f.workspaceId);
+    await assert.rejects(f.team.runner.postUser(f.workspaceId, '@Backend @Frontend again'), (error: unknown) => (error as { code: string }).code === 'member_busy');
+    assert.deepEqual(await store.chatTimeline(f.workspaceId), before);
+    await assert.rejects(store.publishChat({ workspaceId: f.workspaceId, author: { type: 'member', memberId: f.backend.memberId, name: 'Backend', runId: accepted.runs[0]!.runId }, exchangeId: accepted.message.exchangeId, text: 'fake', recipients: [], finalMessageId: 'wrong' }));
+    assert.deepEqual(await store.chatTimeline(f.workspaceId), before);
+    await f.team.runner.stop(f.workspaceId);
+    await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId);
+    const entry = (await store.chatTimeline(f.workspaceId)).changes.at(-1)!.entry;
+    assert.equal(entry.kind, 'member');
+    if (entry.kind === 'member') { assert.equal(entry.run.status, 'cancelled'); assert.equal(entry.finalRef, null); assert.equal(entry.position, 2); assert.equal(entry.working.through, 0); }
+    const input = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'abandoned work', recipients: [f.frontend.memberId] });
+    await f.runtime.close(); // Persisted but unlaunched work remains abandoned until recovery.
+    const reopened = new AgentRuntime(store, teamFor(f.runtime).runConfig, configuredPolicy(), () => { throw new Error('Recovery must not run a model'); });
+    await reopened.open();
+    try {
+      const recovered = (await store.chatTimeline(f.workspaceId)).changes.at(-1)!.entry;
+      assert.equal(recovered.entryId, input.runs[0]!.runId);
+      if (recovered.kind === 'member') { assert.equal(recovered.run.status, 'interrupted'); assert.equal(recovered.finalRef, null); assert.equal(recovered.working.through, recovered.run.endPosition); }
+    } finally { await reopened.close(); }
+  } finally { await f.close(); }
+});
+
+test('old prototype group history imports once in publication order using the old terminal history bound', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    const accepted = await f.team.runner.postUser(f.workspaceId, 'work');
+    const step = await f.requests.next(); answer(step.events, message('Existing prototype final'));
+    await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    const history = await store.chatSnapshot(f.workspaceId);
+    const record = history.messages[1]!;
+    // Recreate the immediately previous committed storage format in this disposable workspace.
+    await store.pool.execute('UPDATE chat_messages SET entry = ? WHERE workspace_id = ? AND position = ?', [JSON.stringify({ version: 1, data: { workspaceId: record.workspaceId, messageId: record.messageId, position: record.position, exchangeId: record.exchangeId, author: record.author, text: record.text, recipients: record.recipients, time: record.time } }), f.workspaceId, record.position]);
+    for (const table of ['chat_changes', 'chat_entries', 'chat_clock']) await store.pool.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [f.workspaceId]);
+    await store.migrate();
+    const imported = await store.chatTimeline(f.workspaceId);
+    assert.deepEqual(imported.changes.map(change => change.entry.kind), ['user', 'member']);
+    const final = imported.changes[1]!.entry;
+    if (final.kind === 'member') { assert.equal(final.text, 'Existing prototype final'); assert.equal(final.finalRef!.position, final.run.endPosition); }
+    await store.migrate(); assert.deepEqual(await store.chatTimeline(f.workspaceId), imported, 'upgrade is repeatable');
+    assert.deepEqual((await store.chatSnapshot(f.workspaceId)).messages.map(message => message.text), history.messages.map(message => message.text));
+  } finally { await f.close(); }
+});

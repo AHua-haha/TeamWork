@@ -16,7 +16,7 @@ MySQL transactionally creates a member and its agent record, enforces unique lea
 
 Readiness combines valid resolved model settings, empty catalog selections and resolvable nonempty worker design scope. Team run config uses these checks and resolves model snapshots. Group publication validates all selected recipients and resolves every snapshot before persistent admission. Tools remain harness-owned and check current scope.
 
-The runtime policy wraps the standard policy for members: buildRequest augments current role/roster/running information and replaces tools with harness tools plus lead-only operations. Tool responses continue private execution. A response without tools is submitted to group publication. Successful acceptance ends the sender and triggers independent runs. Expected refusals append a private feedback message to the same run and continue it; runtime failure/step limits still apply. Solo policy behavior is unchanged.
+The runtime policy wraps the standard policy for members: buildRequest augments current role/roster/running information and replaces tools with harness tools plus lead-only operations. Tool responses continue private execution. A response without tools is submitted to group publication with its exact committed record identity. Successful acceptance ends the sender and triggers independent runs. Expected refusals append a private feedback message to the same run and continue it; runtime failure/step limits still apply. Solo policy behavior is unchanged.
 
 ## Decisions and constraints
 
@@ -34,3 +34,5 @@ Shared message delivery changes stored model context without manufacturing priva
 ## Verification
 
 [Lifecycle tests](../../../../backend/test/team.test.ts), [context/tool tests](../../../../backend/test/team-context.test.ts), [group chat tests](../../../../backend/test/team-group-chat.test.ts), [HTTP tests](../../../../backend/test/team-routes.test.ts), and [MySQL integration](../../../../backend/test/integration/backend.test.ts) verify the composed design. Integration drives real design save, member/harness configuration, shared assignments, scoped work and return mentions. Group tests verify parallel work, refusal feedback, deferred delivery, immutable private history and persistent group records.
+
+The group child persists display reservations and lifecycle changes alongside publication. Team management and runtime continue their existing responsibilities; frontend queries reconstruct presentation from these records and load private work separately. Model settings can be changed per member through its existing revision-checked management endpoint.
