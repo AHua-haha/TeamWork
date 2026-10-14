@@ -49,9 +49,9 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={client.refresh}>Retry</button></div>}
     <div className="group-viewport" ref={viewport} onScroll={() => { const view = viewport.current!; pinned.current = view.scrollHeight - view.scrollTop - view.clientHeight < 80; }}>
       {!snapshot.entries.length && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open design and team</button></div>}
-      {snapshot.entries.map(entry => entry.kind === 'user'
-        ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-label">You</div><p>{entry.text}</p></article>
-        : <MemberResponse key={entry.entryId} entry={entry} />)}
+      <div className="group-timeline">{snapshot.entries.map(entry => entry.kind === 'user'
+        ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body"><div className="group-user-label">You</div><p>{entry.text}</p></div><span className="group-avatar group-user-avatar" aria-hidden="true">Y</span></article>
+        : <MemberResponse key={entry.entryId} entry={entry} />)}</div>
     </div>
     <div className="group-composer-footer"><form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
       {discussion.reference && <div className="composer-reference"><span>{referenceLabel(discussion.reference)}</span><button type="button" aria-label="Remove discussion reference" onClick={discussion.clear}>×</button></div>}
@@ -92,13 +92,16 @@ function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
   useEffect(() => { if (!running) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [running]);
   const duration = workDuration(entry.run.startedAt, entry.run.endedAt ?? now);
   return <article className="group-member" data-entry-id={entry.entryId}>
-    <header className="group-sender" style={{ color: memberColor(entry.memberId) }}><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong>{entry.name}</strong></header>
-    <button type="button" className="work-disclosure" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-      {running ? 'Working' : 'Worked'} {duration} <span aria-hidden="true">{expanded ? '⌄' : '›'}</span>
-    </button>
-    {expanded && <WorkingHistory entry={entry} />}
-    {entry.text !== null && <div className="group-final"><Markdown source={entry.text} onLink={href => { window.open(href, '_blank', 'noopener,noreferrer'); }} /></div>}
-    {!running && !entry.finalRef && <div className="group-terminal" role="status"><strong>{entry.run.status === 'completed' ? 'Finished without a published response' : entry.run.status[0]!.toUpperCase() + entry.run.status.slice(1)}</strong>{entry.run.error && <p>{entry.run.error.message}</p>}</div>}
+    <span className="group-avatar group-member-avatar" style={{ color: memberColor(entry.memberId) }} aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span>
+    <div className="group-member-body">
+      <header className="group-sender" style={{ color: memberColor(entry.memberId) }}><strong>{entry.name}</strong></header>
+      <button type="button" className="work-disclosure" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+        {running ? 'Working' : 'Worked'} {duration} <span aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+      </button>
+      {expanded && <WorkingHistory entry={entry} />}
+      {entry.text !== null && <div className="group-final"><Markdown source={entry.text} onLink={href => { window.open(href, '_blank', 'noopener,noreferrer'); }} /></div>}
+      {!running && !entry.finalRef && <div className="group-terminal" role="status"><strong>{entry.run.status === 'completed' ? 'Finished without a published response' : entry.run.status[0]!.toUpperCase() + entry.run.status.slice(1)}</strong>{entry.run.error && <p>{entry.run.error.message}</p>}</div>}
+    </div>
   </article>;
 }
 function WorkingHistory({ entry }: { entry: Extract<GroupEntry, { kind: 'member' }> }) {

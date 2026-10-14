@@ -6,7 +6,7 @@
 
 ## Responsibilities and decomposition
 
-`GroupClient` in group-client.ts owns accepted group records, persisted response reservations, contiguous change-cursor tracking, synchronization, activity snapshots and submission/stop commands. Workspace chat presentation renders full-width Markdown response sections and author headers, ordered by the backend's timeline positions. Existing design/team/file panel capabilities remain composed beside it. Solo AgentClient behavior stays separate.
+`GroupClient` in group-client.ts owns accepted group records, persisted response reservations, contiguous change-cursor tracking, synchronization, activity snapshots and submission/stop commands. Workspace chat presentation renders centered Markdown response sections with outside avatar gutters and author names, ordered by the backend's timeline positions. Existing design/team/file panel capabilities remain composed beside it. Solo AgentClient behavior stays separate.
 
 A per-run inspection view owns private history loading and expansion state. It uses the existing private follow protocol and projects working messages/tool outcomes for the selected activation. Collapsed sections can derive duration/status from group activity without loading every private trace.
 
@@ -20,7 +20,7 @@ Private follow synchronization includes the agent's history prefix through the s
 
 Use the pinned final-message reference supplied by the backend to identify the accepted candidate. Render its resolved final text in the main section and project working history using the entry's stable range; hide accepted final text in the working projection while retaining any separate inspectable working content. Do not infer the reference from the member's latest message, mutate source records or delete private history. Record the start boundary at activation and fix the end at successful completion or terminal failure.
 
-Render with a compact header followed by a block-width body, using Markdown.tsx and markdown-parser.ts. The outer section has no bubble/card treatment or permanent avatar rail. Disclosure rows and tool activity remain subdued. Expansion state is keyed by run identity so later presentation changes can preserve it.
+GroupChat wraps entries in a centered group-timeline. Each member/user entry uses three grid columns: left avatar gutter, reading body, right avatar gutter. Member avatars occupy the left column, while the name, disclosure and Markdown share the middle column. User bubbles align right within the middle column and their avatars occupy the right column. styles.css defines an 800px reading-width variable and gutter sizes, with smaller gutters on narrow screens. The composer uses the same centered width and gutter-aware side padding. Markdown.tsx and markdown-parser.ts provide rendering. Member sections have no outer bubble/card treatment. Disclosure rows and tool activity remain subdued. Expansion state is keyed by run identity so later presentation changes can preserve it.
 
 ## Verification
 

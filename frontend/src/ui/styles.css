@@ -515,16 +515,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .design-detail { flex: 1; }
 }
 
-/* Workspace group: reserved, unboxed member documents and right-side user input. */
-.group-viewport { flex: 1; min-height: 0; overflow-y: auto; padding: 28px clamp(18px, 4vw, 48px) 8px; }
+/* Centered reading column, outside avatar gutters, and right-side user bubbles. */
+.group-conversation { --group-reading-width: 800px; --group-avatar-size: 28px; --group-avatar-gutter: 40px; --group-edge-space: 20px; }
+.group-viewport { flex: 1; min-height: 0; overflow-y: auto; padding: 28px var(--group-edge-space) 8px; }
+.group-timeline { width: 100%; max-width: calc(var(--group-reading-width) + 2 * var(--group-avatar-gutter)); margin-inline: auto; }
+.group-member, .group-user { display: grid; grid-template-columns: var(--group-avatar-gutter) minmax(0, 1fr) var(--group-avatar-gutter); align-items: start; }
+.group-member-body { grid-column: 2; min-width: 0; }
+.group-member-avatar { grid-column: 1; }
+.group-user-avatar { grid-column: 3; justify-self: end; color: #77857b; }
 .group-member { min-width: 0; padding-bottom: 36px; }
-.group-sender { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; font-size: 13px; }
-.group-avatar { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; border: 1px solid currentColor; font-size: 12px; }
+.group-sender { display: flex; min-height: var(--group-avatar-size); align-items: center; gap: 9px; margin-bottom: 13px; font-size: 13px; }
+.group-avatar { display: grid; place-items: center; width: var(--group-avatar-size); height: var(--group-avatar-size); border-radius: 50%; border: 1px solid currentColor; font-size: 12px; }
 .work-disclosure { display: flex; align-items: center; gap: 10px; background: none; border: 0; border-bottom: 1px solid #ecefeb; padding: 0 0 10px; width: 100%; text-align: left; color: #8a938c; font-size: 13px; }
 .group-final { margin-top: 18px; }
 .group-final .markdown { max-width: none; width: 100%; font-size: 15px; line-height: 1.75; }
 .group-final .markdown pre, .group-final .markdown-table { max-width: 100%; }
-.group-user { max-width: min(78%, 720px); width: fit-content; margin: 0 0 30px auto; padding: 12px 17px; border-radius: 15px; background: #f2f5f1; color: #34463a; }
+.group-user { margin-bottom: 30px; min-width: 0; }
+.group-user-body { grid-column: 2; justify-self: end; min-width: 0; max-width: min(78%, 720px); padding: 12px 17px; border-radius: 15px; background: #f2f5f1; color: #34463a; }
 .group-user-label { color: #77857b; font-size: 11px; margin-bottom: 5px; }
 .group-user p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; }
 .group-work { color: #6f7972; padding: 12px 0 0; font-size: 13px; }
@@ -538,8 +545,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-work-error button { margin-left: 8px; }
 .group-terminal { margin-top: 14px; color: #967261; font-size: 13px; }
 .group-terminal p { margin: 5px 0 0; }
-.group-composer-footer { padding: 12px clamp(18px, 4vw, 48px) 22px; background: #fff; }
-.group-composer-footer .composer { position: relative; }
+.group-composer-footer { padding: 12px calc(var(--group-edge-space) + var(--group-avatar-gutter)) 22px; background: #fff; }
+.group-composer-footer .composer { position: relative; width: 100%; max-width: var(--group-reading-width); margin-inline: auto; }
 .group-composer-hint { margin-right: auto; }
 .group-command-error { font-size: 12px; margin: 4px 5px 10px; line-height: 1.5; }
 .mention-suggestions { position: absolute; bottom: 100%; left: 12px; width: min(340px, calc(100% - 24px)); padding: 6px; border: 1px solid #dce5db; border-radius: 10px; background: white; box-shadow: 0 4px 20px #24352b18; max-height: 240px; overflow-y: auto; }
@@ -551,8 +558,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .member-settings h3 { margin: 0 0 8px; font-size: 13px; }
 .member-settings .model-popover { top: calc(100% + 7px); bottom: auto; width: min(360px, calc(100vw - 95px)); }
 @media (max-width: 760px) {
+  .group-conversation { --group-avatar-size: 24px; --group-avatar-gutter: 32px; --group-edge-space: 12px; }
   .group-composer-footer { padding-bottom: 14px; }
-  .group-user { max-width: 90%; }
+  .group-user-body { max-width: 90%; }
   .group-composer-hint { display: none; }
   .group-final .markdown { font-size: 14px; }
 }

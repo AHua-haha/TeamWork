@@ -21,7 +21,7 @@ This contract includes the approved UI defaults.
 
 - Position user messages on the right-hand side of the chat.
 - Preserve their backend-assigned timeline positions relative to reserved member response sections.
-- Use a subtle bubble background with left-aligned multiline text.
+- Use a subtle bubble background with left-aligned multiline text. A user avatar sits outside the bubble on its right, aligned with its top.
 
 ### Member response sections
 
@@ -32,10 +32,10 @@ This contract includes the approved UI defaults.
 - Refreshing the page or opening another client reconstructs the same reserved order from persistent backend records.
 - Completion updates an existing entry and is observed even when its reserved position precedes newer entries. Display ordering and incremental change synchronization have distinct positions.
 - Display every accepted final response completely as rendered Markdown. There is no default excerpt, maximum-height crop, or Read more control around the final response.
-- Use the full available chat content width. Opening the right panel changes the available width; the response fills the remaining chat pane.
+- Center a constrained reading column matching the proportions of the supplied Codex reference. Long Markdown fills that column. The column shrinks when the pane is narrower, including when the right panel is open; it never widens the page. The composer aligns with the same column.
 - Each member response is an unboxed section. Its outer area has no bubble/card border, colored background or full-height sender stripe.
-- Identify the sender at the start with a compact avatar/name header and member color. Identity is also readable as text; color alone is insufficient. Member color is stable for the same member identity, and historical author names remain as published.
-- The Markdown body begins at the normal chat content margin and uses the section width. A permanent avatar column does not indent or narrow the body. Code blocks and tables can scroll horizontally within their own bounds; they do not widen the page.
+- Place the member avatar in a left gutter outside the response area, aligned with the sender name at the top. The name stays at the beginning of the response area, using member color. Identity is also readable as text; color alone is insufficient. Member color is stable for the same member identity, and historical author names remain as published.
+- The sender name, work disclosure and Markdown body share the reading-column left edge. The avatar occupies its own outside gutter; it does not sit inside the response body. Code blocks and tables can scroll horizontally within their own bounds; they do not widen the page.
 - Separate responses with ordinary spacing. A final response stays visible when working history is collapsed or expanded.
 
 ### Folded working history
@@ -63,12 +63,14 @@ Private inspection failure does not remove or replace shared messages. Failed, c
 
 ## Acceptance examples
 
-1. Backend publishes a report with headings, lists, code and a table. It fills the chat content width without an outer box; the sender header identifies Backend.
+1. Backend publishes a report with headings, lists, code and a table. It fills the centered reading column without an outer box; Backend’s avatar is outside that column on the left and its name identifies it.
 2. The report shows a collapsed duration row above it. Expand to inspect Backend's commentary/tool activity; the final report remains fully displayed below.
 3. Backend has completed several earlier runs. Expanding this report exposes only its own activation's working history.
 4. The user mentions Backend and Frontend. Both response sections appear immediately in their reserved order. Frontend finishes first and fills its own section; Backend later fills its earlier section. Neither changes position.
 5. Private history cannot be loaded. Keep the report readable and show a retry action inside the expanded working section.
 6. Backend is working when the user sends a later message. Backend's response section already precedes that message. Its eventual final response fills that section in place.
+
+7. On a wide pane the response and composer stop growing together; avatars stay outside their edges. Open the workspace panel or use a narrow screen: the reading column shrinks without overlap or horizontal page scrolling, and user avatars remain on the right.
 
 ## Composer and controls
 
