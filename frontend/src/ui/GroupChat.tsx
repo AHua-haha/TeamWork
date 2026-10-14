@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { GroupClient, type GroupEntry } from '../client/group-client.js';
 import { AgentClient } from '../client/agent-client.js';
 import { discussionInput, referenceLabel, type Discussion } from '../client/discussion-reference.js';
@@ -91,16 +91,24 @@ function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
   const running = entry.run.status === 'running';
   useEffect(() => { if (!running) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [running]);
   const duration = workDuration(entry.run.startedAt, entry.run.endedAt ?? now);
-  return <article className="group-member" data-entry-id={entry.entryId}>
-    <span className="group-avatar group-member-avatar" style={{ color: memberColor(entry.memberId) }} aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span>
+  const status = running ? 'Working' : entry.run.status[0]!.toUpperCase() + entry.run.status.slice(1);
+  const started = useMemo(() => {
+    const date = new Date(entry.run.startedAt);
+    return { iso: date.toISOString(), time: date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), full: date.toLocaleString() };
+  }, [entry.run.startedAt]);
+  return <article className="group-member" data-entry-id={entry.entryId} style={{ '--member-color': memberColor(entry.memberId) } as CSSProperties}>
+    <div className="group-member-identity"><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong className="group-member-name">{entry.name}</strong></div>
     <div className="group-member-body">
-      <header className="group-sender" style={{ color: memberColor(entry.memberId) }}><strong>{entry.name}</strong></header>
-      <button type="button" className="work-disclosure" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-        {running ? 'Working' : 'Worked'} {duration} <span aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+      <button type="button" className="group-run-header" aria-expanded={expanded} aria-controls={`group-work-${entry.entryId}`}
+        aria-label={`${entry.name}: ${status}, ${duration}. ${expanded ? 'Hide' : 'Show'} working history`} onClick={() => setExpanded(value => !value)}>
+        <span className="run-header-status"><span className="run-header-dot" aria-hidden="true" />{status}</span>
+        <span className="run-header-duration">{duration}</span>
+        <time className="run-header-start" dateTime={started.iso} title={`Started ${started.full}`} aria-label={`Started ${started.full}`}>{started.time}</time>
+        <span className="run-header-chevron" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
       </button>
       {expanded && <WorkingHistory entry={entry} />}
       {entry.text !== null && <div className="group-final"><Markdown source={entry.text} onLink={href => { window.open(href, '_blank', 'noopener,noreferrer'); }} /></div>}
-      {!running && !entry.finalRef && <div className="group-terminal" role="status"><strong>{entry.run.status === 'completed' ? 'Finished without a published response' : entry.run.status[0]!.toUpperCase() + entry.run.status.slice(1)}</strong>{entry.run.error && <p>{entry.run.error.message}</p>}</div>}
+      {!running && !entry.finalRef && <div className="group-terminal" role="status"><p>{entry.run.error?.message ?? (entry.run.status === 'completed' ? 'Finished without a published response.' : 'No final response was published.')}</p></div>}
     </div>
   </article>;
 }
@@ -109,7 +117,7 @@ function WorkingHistory({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
   useEffect(() => { client.follow(entry.run.runId); return () => client.dispose(); }, [client, entry.run.runId]);
   const items = workingItems(snapshot, entry);
-  return <div className="group-work" aria-label={`${entry.name} working history`}>
+  return <div className="group-work" id={`group-work-${entry.entryId}`} aria-label={`${entry.name} working history`}>
     {snapshot.error && <div className="group-work-error" role="alert">{snapshot.error}<button type="button" onClick={() => client.follow(entry.run.runId)}>Retry work history</button></div>}
     {!items.length && <p>{snapshot.synchronized ? 'No intermediate work recorded.' : 'Loading work…'}</p>}
     {items.map(item => item.kind === 'tool'
