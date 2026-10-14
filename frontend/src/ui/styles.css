@@ -522,7 +522,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-member, .group-user { display: grid; grid-template-columns: var(--group-avatar-gutter) minmax(0, 1fr) var(--group-avatar-gutter); align-items: start; }
 .group-run-card { grid-column: 2; min-width: 0; padding: 8px var(--group-run-padding) var(--group-run-padding); border: var(--group-run-border) solid var(--member-outline); border-radius: 14px; background: #fff; }
 .group-member-body { min-width: 0; }
-.group-run-area { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.group-run-area { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; margin-left: -9px; }
 .group-identity { display: flex; flex-direction: column; align-items: center; gap: 6px; width: var(--group-avatar-size); }
 .group-member-identity { grid-column: 1; color: var(--member-color); }
 .group-identity-name { width: calc(var(--group-avatar-gutter) + 6px); font-size: 10px; font-weight: 600; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
@@ -545,7 +545,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-final .markdown { max-width: none; width: 100%; font-size: 15px; line-height: 1.75; }
 .group-final .markdown pre, .group-final .markdown-table { max-width: 100%; }
 .group-user { margin-bottom: 30px; min-width: 0; }
-.group-user-body { grid-column: 2; justify-self: end; min-width: 0; max-width: min(78%, 720px); margin-inline: calc(var(--group-run-padding) + var(--group-run-border)); padding: 12px 17px; border-radius: 15px; background: #f2f5f1; color: #34463a; }
+.group-user-body { grid-column: 2; justify-self: end; min-width: 0; max-width: min(78%, 720px); padding: 12px 17px; border-radius: 15px; background: #f2f5f1; color: #34463a; }
 .group-user p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; }
 .group-work { color: #6f7972; margin-top: 12px; padding: 12px 14px; background: #eef1ed; border-left: 2px solid color-mix(in srgb, var(--member-color) 35%, transparent); font-size: 13px; }
 .group-work > :last-child { margin-bottom: 0; }
@@ -578,7 +578,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .group-conversation { --group-avatar-size: 24px; --group-avatar-gutter: 32px; --group-edge-space: 12px; --group-run-padding: 14px; }
   .group-composer-footer { padding-bottom: 14px; }
   .group-identity-name { font-size: 9px; }
-  .group-user-body { max-width: min(90%, calc(100% - 2 * (var(--group-run-padding) + var(--group-run-border)))); }
+  .group-user-body { max-width: 90%; }
   .group-composer-hint { display: none; }
   .group-final .markdown { font-size: 14px; }
 }
