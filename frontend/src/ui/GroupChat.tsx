@@ -100,7 +100,7 @@ function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
     <div className="group-identity group-member-identity"><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong className="group-identity-name">{entry.name}</strong></div>
     <div className="group-run-card">
       <div className="group-run-area">
-        <button type="button" className="group-run-header" aria-expanded={expanded} aria-controls={`group-work-${entry.entryId}`}
+        <button type="button" className="group-run-header" data-status={entry.run.status} aria-expanded={expanded} aria-controls={`group-work-${entry.entryId}`}
           aria-label={`${entry.name}: ${status}, ${duration}. ${expanded ? 'Hide' : 'Show'} working history`} onClick={() => setExpanded(value => !value)}>
           <span className="run-header-status">{status}</span>
           <span className="run-header-duration">{duration}</span>
