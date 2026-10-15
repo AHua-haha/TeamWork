@@ -4,7 +4,7 @@ import { BackendError } from '../src/client/agent-client.js';
 import type { Member, Team } from '../src/client/workspace-client.js';
 import { WorkspaceClient } from '../src/client/workspace-client.js';
 import { readRoute, routeUrl, sameRoute } from '../src/ui/routes.js';
-import { findLead, memberConfig, memberFields, memberStatus, modelText, pollIntervalMs, shouldPoll } from '../src/ui/team-state.js';
+import { findLead, memberStatus, modelText, pollIntervalMs, shouldPoll } from '../src/ui/team-state.js';
 import { callRecipient, toolHeading, toolLabels } from '../src/ui/tool-label.js';
 
 const settings = { connectionId: 'main', modelId: 'm1', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'm1', reasoning: 'high' as const }] };
@@ -13,36 +13,35 @@ const member = (patch: Partial<Member> = {}): Member => ({
   settings, issues: [], ready: true, running: false, ...patch,
 });
 
-test('the team client reads a team and saves a member at its revision', async () => {
+test('the team client reads roster and consolidated member inspection without a member write API', async () => {
+  const calls: { path: string; method: string }[] = [];
+  const inspection = { member: member(), configuration: { path: '.team/members/lead/member.json', files: { 'member.json': '{}', 'prompts/member.md': 'Be brief' }, digest: 'digest', submittedBy: 'user', submittedAt: 1 }, harnesses: [{ id: 'project', tools: ['read'], parts: [], prompt: 'Fixed rules' }] };
+  const api = new WorkspaceClient((async (input, init) => {
+    calls.push({ path: String(input), method: init?.method ?? 'GET' });
+    return new Response(JSON.stringify(String(input).endsWith('/team') ? { workspaceId: 'w 1', members: [member()] } : inspection));
+  }) as typeof fetch);
+  assert.equal((await api.team('w 1')).members[0]!.name, 'Lead');
+  assert.deepEqual(await api.inspectMember('w 1', 'lead/1'), inspection);
+  assert.equal('updateMember' in api, false);
+  assert.deepEqual(calls, [{ path: '/workspaces/w%201/team', method: 'GET' }, { path: '/workspaces/w%201/team/members/lead%2F1', method: 'GET' }]);
+});
+
+test('workspace model settings preserve revisions and backend conflicts', async () => {
   const calls: { path: string; method: string; body?: unknown }[] = [];
+  const value = { models: [{ connectionId: 'main', modelId: 'm1', reasoning: 'high' as const }], defaultModel: { connectionId: 'main', modelId: 'm1' } };
   const api = new WorkspaceClient((async (input, init) => {
     calls.push({ path: String(input), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    return new Response(JSON.stringify(String(input).endsWith('/team') ? { workspaceId: 'w 1', members: [member()] } : member({ revision: 4 })));
+    return new Response(JSON.stringify({ revision: 4, value, issues: [] }));
   }) as typeof fetch);
-  const team = await api.team('w 1');
-  assert.equal(team.members[0]!.name, 'Lead');
-  const saved = await api.updateMember('w 1', 'lead/1', 3, { name: 'Lead', role: 'Lead', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, settings });
-  assert.equal(saved.revision, 4);
-  assert.deepEqual(calls, [
-    { path: '/workspaces/w%201/team', method: 'GET', body: undefined },
-    { path: '/workspaces/w%201/team/members/lead%2F1', method: 'PUT', body: { revision: 3, value: { name: 'Lead', role: 'Lead', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, settings } } },
-  ]);
+  assert.equal((await api.workspaceModels('w 1')).revision, 4);
+  assert.equal((await api.updateWorkspaceModels('w 1', 3, value)).revision, 4);
+  assert.deepEqual(calls, [{ path: '/workspaces/w%201/models', method: 'GET', body: undefined }, { path: '/workspaces/w%201/models', method: 'PUT', body: { revision: 3, value } }]);
+  const failing = new WorkspaceClient((async () => new Response(JSON.stringify({ error: { code: 'config_conflict', message: 'Workspace models changed' } }), { status: 409 })) as typeof fetch);
+  await assert.rejects(failing.updateWorkspaceModels('w1', 0, value), (error: unknown) => error instanceof BackendError && error.code === 'config_conflict');
 });
 
-test('a refused member save keeps the backend code', async () => {
-  const api = new WorkspaceClient((async () => new Response(JSON.stringify({ error: { code: 'config_conflict', message: 'Member revision changed' } }), { status: 409 })) as typeof fetch);
-  await assert.rejects(api.updateMember('w1', 'm', 0, { name: 'a', role: 'b', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, settings }), (error: unknown) =>
-    error instanceof BackendError && error.status === 409 && error.code === 'config_conflict');
-});
-
-test('member settings use the agent config shape and saved without changing its identity', () => {
+test('the lead is discovered independently of roster order', () => {
   const lead = member();
-  assert.deepEqual(memberConfig(lead), { id: 'lead-1', revision: 3, value: { name: 'Lead', ...settings }, issues: [] });
-  const edited = { ...memberConfig(lead).value, modelId: 'm2', name: 'Renamed in the composer' };
-  assert.deepEqual(memberFields(lead, edited), {
-    name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] },
-    settings: { connectionId: 'main', modelId: 'm2', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: settings.modelOptions },
-  });
   const team: Team = { workspaceId: 'w1', members: [member({ lead: false, memberId: 'b', name: 'Backend' }), lead] };
   assert.equal(findLead(team)?.memberId, 'lead-1');
   assert.equal(findLead(null), null);

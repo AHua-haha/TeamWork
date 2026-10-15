@@ -4,6 +4,7 @@ import { lstat, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } f
 import { dirname, join, sep } from 'node:path';
 import { Changes } from './changes.js';
 import type { NewMember } from './team.js';
+import type { WorkspaceModels, StoredWorkspaceModels } from './workspace-models.js';
 import { decodeText, encodeText, maxFileBytes, missing, sha256 } from './text.js';
 import { AppError, identity } from './types.js';
 
@@ -58,7 +59,9 @@ export interface ContextStore {
   listWorkspaces(): Promise<WorkspaceRecord[]>;
   getWorkspace(workspaceId: string): Promise<WorkspaceRecord | null>;
   /** Stores the workspace and its team's lead together, or neither. Fails with 409 `workspace_exists` for a duplicate ID or directory key. */
-  createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember): Promise<void>;
+  createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember, models?: WorkspaceModels): Promise<void>;
+  getWorkspaceModels(workspaceId: string): Promise<StoredWorkspaceModels | null>;
+  saveWorkspaceModels(workspaceId: string, revision: number | null, value: WorkspaceModels, initializeLead: boolean): Promise<StoredWorkspaceModels>;
   loadContext(workspaceId: string): Promise<{ seq: number; files: IndexedFile[] }>;
   /** Applies the commit only while the stored sequence still equals `expectedSeq`. */
   commitContext(workspaceId: string, expectedSeq: number, commit: ContextCommit): Promise<void>;

@@ -5,6 +5,7 @@ import { MemberConfigService } from './member-config.js';
 import { leadTools } from './lead-tools.js';
 import { DesignService } from './design.js';
 import { HarnessService } from './harness.js';
+import { inspectHarnesses } from './harness-bases.js';
 import { MemberContext } from './member-context.js';
 import { teamTools } from './member-tools.js';
 import type { RunConfigSource, RuntimePolicy } from './runtime.js';
@@ -46,8 +47,9 @@ export class TeamSystem {
   }
 
   /** Gives workspaces that have no lead one; the backend calls this once at startup. */
-  initialize(): Promise<void> {
-    return this.service.initialize((member, config) => this.harness.migrateLegacy(member, config));
+  async initialize(): Promise<void> {
+    await this.service.initialize((member, config) => this.harness.migrateLegacy(member, config));
+    await this.service.initializeWorkspaceModels();
   }
 
   async team(workspaceId: string): Promise<TeamStatus> {
@@ -57,6 +59,10 @@ export class TeamSystem {
 
   async member(workspaceId: string, memberId: string): Promise<MemberStatus> {
     return this.status(await this.service.get(workspaceId, memberId));
+  }
+  async inspect(workspaceId: string, memberId: string) {
+    const { stored, member } = await this.service.inspect(workspaceId, memberId);
+    return { member: this.status(member), configuration: stored.value.configuration ?? null, harnesses: inspectHarnesses(stored) };
   }
 
   async create(workspaceId: string, input: unknown): Promise<MemberStatus> {
@@ -78,7 +84,7 @@ export class TeamSystem {
    * just before the call, and its tools. Every other agent is unchanged.
    */
   policy(base: RuntimePolicy): RuntimePolicy {
-    const { management } = teamTools(this.service, this.runner, this.config);
+    const { management } = teamTools(this.service, this.runner);
     const lead = leadTools(this.configuration);
     const checkpointed = new Set<string>();
     return {

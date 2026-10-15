@@ -65,9 +65,25 @@ On open/refresh, omit `runId` to sync and follow the latest run. On reconnect, d
 
 SSE types: `message`, `sync`, `chunk`, `gap`, `state`, `end`; transport errors use `stream_error`. Pi payloads are preserved inside versioned JSON envelopes. `partial` in a Pi event is cumulative; a client using it should replace the current partial rather than appending the same delta again. There is no periodic frontend polling or connection spanning runs.
 
+## Workspace models
+
+Create/adopt requires `models: {models: [{connectionId, modelId, reasoning?, temperature?, maxTokens?, contextBudget?}], defaultModel: {connectionId, modelId}}`. Configure 1–50 distinct connection/model pairs and a default from that list. Models must already be available from configured providers. For example:
+
+```sh
+curl -s http://127.0.0.1:3000/workspaces -H 'Content-Type: application/json' -d '{
+  "name":"Example", "directory":"/absolute/path/example", "adopt":true,
+  "models":{"models":[{"connectionId":"openai-main","modelId":"gpt-4.1-mini"}],
+    "defaultModel":{"connectionId":"openai-main","modelId":"gpt-4.1-mini"}}
+}'
+```
+
+Workspace, models and initialized lead persist atomically; invalid model settings create no directory. `GET /workspaces/:id/models` returns `{revision,value,issues}`; `PUT` takes `{revision,value}` and rejects stale writes. **Team → Workspace models** edits this record. Changing the default preserves existing member selections. New members use the workspace default rather than copying the lead, and `list_models` exposes workspace choices to the lead. A file submission can select these models or retain an existing selection removed from the list. Provider validation still applies.
+
+Startup initializes legacy workspace choices once from existing member selections. Saving a default initializes a legacy lead only when it has no assigned provider/model. Member configuration remains read-only through HTTP and in the frontend; inspect the accepted source/prompts and harness policies through **Inspect harness**. Existing file review/history/acceptance APIs retain their behavior.
+
 ## Workspace group chat, lead and harness prototype
 
-Create or adopt a workspace and choose the lead model in the frontend. Post workspace requests through the group chat API below. The lead can offer choices, edit pending designs, form the team through submitted configuration files, and assign work through shared responses. Pending designs have independent harness history and require exact user acceptance to commit. The frontend displays the persistent group timeline, final responses and expandable private work. Solo conversations remain supported.
+Create or adopt a workspace with its model choices/default in the frontend. Its lead starts with the default model. Post workspace requests through the group chat API below. The lead can offer choices, edit pending designs, form the team through submitted configuration files, and assign work through shared responses. Pending designs have independent harness history and require exact user acceptance to commit. The frontend displays the persistent group timeline, final responses and expandable private work. Solo conversations remain supported.
 
 ```sh
 # Replace WORKSPACE_ID with the registered workspace ID.
@@ -135,11 +151,11 @@ Example manifest (`null` memberId/revision creates a member):
 }
 ```
 
-Use common `write`/`edit` tools, then `submit_member_config({"path":".team/members/backend/member.json"})`. The single submission validates current provider/model/catalog settings and all referenced bytes and atomically stores the exact accepted bundle and its projected member settings. A prompt file change also needs submission. Updates use the returned member ID/current revision and an idle target. Invalid files, stale revisions, busy/foreign targets, unsafe paths and unknown fields preserve the last valid configuration. Agent structured create/update/configure tools are removed; model listing and retirement remain. Existing accepted copies are materialized when missing, without overwriting drafts. `GET /workspaces/:workspaceId/team/members/:memberId/config` reads the stable submitted bundle including digest and attribution; user HTTP settings edits also generate an accepted bundle.
+Use common `write`/`edit` tools, then `submit_member_config({"path":".team/members/backend/member.json"})`. The single submission validates current provider/model/catalog settings and all referenced bytes and atomically stores the exact accepted bundle and its projected member settings. A prompt file change also needs submission. Updates use the returned member ID/current revision and an idle target. Invalid files, stale revisions, busy/foreign targets, unsafe paths and unknown fields preserve the last valid configuration. Agent structured create/update/configure tools are removed; model listing and retirement remain. Existing accepted copies are materialized when missing, without overwriting drafts. `GET /workspaces/:workspaceId/team/members/:memberId` returns `{member, configuration, harnesses}`: the accepted bundle including digest/attribution and effective project/command definitions, without creating worktrees. Member POST/PUT/DELETE and the separate GET .../config route are removed; member changes use lead file submission and retirement tools.
 
 The combined project base owns design management and implementation, including their tools, maintenance prompts and commit rules. Agents configure its designScope and implementationScope together. Its design part requires user acceptance; its implementation part permits agent commits. Both parts keep independent Git histories and pending state. Design implementation mappings do not grant access. Read-only overlap wins; implementation excludes .context, .team and Git metadata. The lead base has workspace-wide safe delegation authority and pending design/member-config file access. Workers cannot submit member configuration or replace fixed base policies.
 
-The separate command harness owns run_command and current exact-vector/executable matching. Richer command boundaries and agent configuration are deferred: new submitted members inherit the lead's current allowances and updates preserve their own. The manifest cannot change them; existing user management configuration remains available. Startup converts active members’ accepted version 1 bundles to version 2 project grouping without changing assigned scopes, command permissions, prompt bytes or Git histories. Existing pending drafts remain untouched; convert them to harnesses.project and update their revision before submitting.
+The separate command harness owns run_command and current exact-vector/executable matching. Richer command boundaries and agent configuration are deferred: new submitted members inherit the lead's current allowances and updates preserve their own. The manifest cannot change them; richer command configuration remains deferred. Startup converts active members’ accepted version 1 bundles to version 2 project grouping without changing assigned scopes, command permissions, prompt bytes or Git histories. Existing pending drafts remain untouched; convert them to harnesses.project and update their revision before submitting.
 
 The harness assembles purpose/maintenance rule text into the model system prompt. It automatically checkpoints each finished run, including failure/cancellation and interruption recovery. `commit_scope {part, message}` records a semantic implementation commit without user approval. Design commits require user acceptance of exact reviewed bytes/base. `scope_history` and `restore_scope` inspect/restore one part independently; no agent checkpoint tool is provided.
 

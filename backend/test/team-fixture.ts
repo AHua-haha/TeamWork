@@ -7,7 +7,7 @@ import { TeamSystem } from '../src/team-system.js';
 import type { MemberView } from '../src/team.js';
 import { AppError, type RunState } from '../src/types.js';
 import { WorkspaceService } from '../src/workspace.js';
-import { MemoryStore, withFolder } from './memory-store.js';
+import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 
 export const ready: Partial<RunSettings> = { connectionId: 'conn', modelId: 'model' };
 export const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
@@ -133,14 +133,14 @@ export interface Fixture {
 export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void> {
   return withFolder(async folder => {
     const store = new MemoryStore();
-    const workspaces = new WorkspaceService(store);
+    const workspaces = new WorkspaceService(store, testModelValidator);
     const team = new TeamSystem(store, workspaces, stubConfig);
     const runtime = new FakeRuntime(store);
     team.attach(runtime);
     try {
       const root = await realpath(folder);
       const directory = join(root, 'project');
-      const { workspaceId } = await workspaces.create({ workspaceId: 'w1', name: 'Project', directory, adopt: false });
+      const { workspaceId } = await workspaces.create({ workspaceId: 'w1', name: 'Project', directory, models: testModels(), adopt: false });
       const first = (await team.service.team(workspaceId)).members[0]!;
       const lead = await team.service.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: first.harness, settings: { ...first.settings, ...ready } });
       await run({ folder: root, store, workspaces, team, runtime, workspaceId, directory, lead });

@@ -10,7 +10,7 @@ import { createAgentServer } from '../src/http.js';
 import type { AgentRuntime } from '../src/runtime.js';
 import type { TeamSystem } from '../src/team-system.js';
 import { WorkspaceService } from '../src/workspace.js';
-import { MemoryStore, withFolder } from './memory-store.js';
+import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 
 type Body = Record<string, any>;
 type Call = (path: string, init?: { method?: string; data?: unknown; status?: number }) => Promise<Body>;
@@ -29,7 +29,7 @@ function send(server: Server, path: string, method = 'GET', data?: unknown): Pro
 /** The agent server with only its workspace routes in use, over a fresh store. */
 function withServer(run: (call: Call, server: Server, folder: string) => Promise<void>): Promise<void> {
   return withFolder(async folder => {
-    const service = new WorkspaceService(new MemoryStore());
+    const service = new WorkspaceService(new MemoryStore(), testModelValidator);
     const server = createAgentServer({} as AgentRuntime, {} as ConfigService, service, {} as TeamSystem);
     const call: Call = async (path, { method = 'GET', data, status = 200 } = {}) => {
       const response = await send(server, path, method, data);
@@ -67,13 +67,13 @@ async function events(response: IncomingMessage, until: string): Promise<{ type:
 
 test('workspace endpoints register workspaces and serve project files', () => withServer(async (call, _server, folder) => {
   const directory = join(folder, 'project');
-  const created = await call('/workspaces', { method: 'POST', data: { workspaceId: 'demo', name: 'Demo', directory, adopt: false }, status: 201 });
+  const created = await call('/workspaces', { method: 'POST', data: { workspaceId: 'demo', name: 'Demo', directory, models: testModels(), adopt: false }, status: 201 });
   assert.equal(created.directory, directory);
   assert.equal(created.context.seq, 0);
   assert.deepEqual((await call('/workspaces')).workspaces.map((item: Body) => item.workspaceId), ['demo']);
   assert.equal((await call('/workspaces/demo')).name, 'Demo');
-  assert.equal((await call('/workspaces', { method: 'POST', data: { workspaceId: 'again', name: 'Again', directory, adopt: true }, status: 409 })).error.code, 'workspace_exists');
-  assert.equal((await call('/workspaces', { method: 'POST', data: { name: 'Extra', directory: join(folder, 'other'), adopt: false, color: 'red' }, status: 400 })).error.code, 'invalid_input');
+  assert.equal((await call('/workspaces', { method: 'POST', data: { workspaceId: 'again', name: 'Again', directory, models: testModels(), adopt: true }, status: 409 })).error.code, 'workspace_exists');
+  assert.equal((await call('/workspaces', { method: 'POST', data: { name: 'Extra', directory: join(folder, 'other'), models: testModels(), adopt: false, color: 'red' }, status: 400 })).error.code, 'invalid_input');
   assert.equal((await call('/workspaces/missing', { status: 404 })).error.code, 'not_found');
   assert.equal((await call('/workspaces/demo/unknown', { status: 404 })).error.code, 'not_found');
 
@@ -92,7 +92,7 @@ test('workspace endpoints register workspaces and serve project files', () => wi
 }));
 
 test('workspace endpoints edit the context base and stream its changes', () => withServer(async (call, server, folder) => {
-  await call('/workspaces', { method: 'POST', data: { workspaceId: 'demo', name: 'Demo', directory: join(folder, 'project'), adopt: false }, status: 201 });
+  await call('/workspaces', { method: 'POST', data: { workspaceId: 'demo', name: 'Demo', directory: join(folder, 'project'), models: testModels(), adopt: false }, status: 201 });
   const created = await call('/workspaces/demo/context/file?path=user/notes/a.md', { method: 'PUT', data: { content: '# A\nalpha', baseRevision: null, reason: 'start' }, status: 201 });
   assert.equal(created.seq, 1);
   assert.equal((await call('/workspaces/demo/context/file?path=agent/plan.md', { method: 'PUT', data: { content: 'x', baseRevision: null }, status: 403 })).error.code, 'read_only');
@@ -122,8 +122,21 @@ test('workspace endpoints edit the context base and stream its changes', () => w
   assert.deepEqual((await events(response, 'sync')).map(event => [event.type, event.data.workspaceId, event.data.record?.seq ?? event.data.seq]), [['record', 'demo', 2], ['record', 'demo', 3], ['sync', 'demo', 3]]);
 }));
 
+test('workspace model endpoints support validated revision-checked settings and require models on creation', () => withServer(async (call, _server, folder) => {
+  await call('/workspaces', { method: 'POST', data: { name: 'No models', directory: join(folder, 'none'), adopt: false }, status: 400 });
+  const created = await call('/workspaces', { method: 'POST', data: { name: 'Models', directory: join(folder, 'models'), adopt: false, models: testModels() }, status: 201 });
+  const endpoint = `/workspaces/${created.workspaceId}/models`;
+  const initial = await call(endpoint);
+  assert.deepEqual(initial.value, testModels());
+  const changed = await call(endpoint, { method: 'PUT', data: { revision: initial.revision, value: testModels('conn', 'next') } });
+  assert.equal(changed.revision, initial.revision + 1);
+  await call(endpoint, { method: 'PUT', data: { revision: initial.revision, value: testModels() }, status: 409 });
+  await call(endpoint, { method: 'PUT', data: { revision: changed.revision, value: { ...testModels(), defaultModel: null } }, status: 400 });
+  assert.deepEqual(await call(endpoint), changed);
+}));
+
 test('read-only design endpoints discover current designs and explain invalid member references', () => withServer(async (call, _server, folder) => {
-  await call('/workspaces', { method: 'POST', data: { workspaceId: 'designs', name: 'Designs', directory: join(folder, 'designs'), adopt: false }, status: 201 });
+  await call('/workspaces', { method: 'POST', data: { workspaceId: 'designs', name: 'Designs', directory: join(folder, 'designs'), models: testModels(), adopt: false }, status: 201 });
   const record = { content: '# Backend', implementation: ['backend/src'] };
   await call('/workspaces/designs/context/file?path=user/design/backend.json', { method: 'PUT', status: 201, data: { content: JSON.stringify(record), baseRevision: null } });
   await call('/workspaces/designs/context/file?path=user/notes.md', { method: 'PUT', status: 201, data: { content: '# Notes', baseRevision: null } });

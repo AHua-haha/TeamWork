@@ -7,6 +7,7 @@ import { memberManifestVersion, sourceBundle, type MemberConfigSource } from './
 import { projectPath } from './project-files.js';
 import { memberFields, type TeamService, type StoredMember } from './team.js';
 import { AppError, identity } from './types.js';
+import { sameModel } from './workspace-models.js';
 
 const prefix = '.team/members/';
 function manifestPath(value: unknown): string {
@@ -97,14 +98,21 @@ export class MemberConfigService {
         prompts.push(content);
       }
       if (Object.values(bundleFiles).reduce((n, s) => n + Buffer.byteLength(s), 0) > 256 * 1024) throw new AppError('invalid_config', 'Member bundle exceeds 256 KiB');
+      const pool = await this.team.models(lead.workspaceId);
+      const submittedSettings = { ...(current?.value.settings ?? await this.team.defaultSettings(lead.workspaceId)), ...settings, prompt: prompts.join('\n\n') };
+      const configuredModel = pool.value.models.find(m => m.connectionId === submittedSettings.connectionId && m.modelId === submittedSettings.modelId);
+      if (settings.modelOptions === undefined && configuredModel && !submittedSettings.modelOptions.some(m => sameModel(m, configuredModel))) submittedSettings.modelOptions = [...submittedSettings.modelOptions, configuredModel];
       const fields = memberFields({
         name: manifest.name, role: manifest.role, responsibility: manifest.responsibility,
-        settings: { ...(current?.value.settings ?? lead.value.settings), ...settings, prompt: prompts.join('\n\n') },
+        settings: submittedSettings,
         harness: { ...emptyHarness(), designScope: project.designScope, implementationScope: project.implementationScope, allowedCommands: (current ?? lead).value.harness.allowedCommands },
       });
       if (fields.settings.toolOptionIds.length) throw new AppError('invalid_config', 'Tools are fixed by the harness bases');
       if (current?.value.lead && JSON.stringify(fields.settings) !== JSON.stringify(current.value.settings)) throw new AppError('access_denied', 'Only the user changes the lead model and instructions', 403);
       await this.team.validateSubmittedSettings(fields.settings);
+      const selected = { connectionId: fields.settings.connectionId!, modelId: fields.settings.modelId! };
+      const previousSelection = current ? { connectionId: current.value.settings.connectionId!, modelId: current.value.settings.modelId! } : null;
+      if (!sameModel(selected, previousSelection) && !pool.value.models.some(m => sameModel(m, selected))) throw new AppError('invalid_config', 'Select a model configured for this workspace');
       await resolveHarness(this.harness.designs, lead.workspaceId, fields.harness);
       // All referenced bytes were captured under the same file-operation lock. The DB write
       // atomically stores that exact bundle and its validated projection, guarded by revision.

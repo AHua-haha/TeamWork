@@ -7,7 +7,7 @@ import { teamTools } from '../src/member-tools.js';
 import type { StepScope } from '../src/runtime.js';
 import { maxMembers, newLead, TeamService } from '../src/team.js';
 import { WorkspaceService } from '../src/workspace.js';
-import { MemoryStore, withFolder } from './memory-store.js';
+import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 import { code, stubConfig, withTeam, worker } from './team-fixture.js';
 
 const scope = (agentId: string, runId = 'r'): StepScope => ({ agentId, runId, step: 1, signal: new AbortController().signal, config: { systemPrompt: 'own words' } } as unknown as StepScope);
@@ -26,15 +26,15 @@ test('a workspace is created with its lead, and reading the team changes nothing
 
 test('a failed lead leaves no workspace, and the startup step gives an older workspace its lead', () => withFolder(async folder => {
   const store = new MemoryStore();
-  const workspaces = new WorkspaceService(store);
+  const workspaces = new WorkspaceService(store, testModelValidator);
   try {
     const failing = store.createMember.bind(store);
     store.createMember = async () => { throw new Error('store down'); };
-    await assert.rejects(workspaces.create({ name: 'Lost', directory: join(folder, 'lost'), adopt: false }), /store down/);
+    await assert.rejects(workspaces.create({ name: 'Lost', directory: join(folder, 'lost'), models: testModels(), adopt: false }), /store down/);
     assert.deepEqual(await workspaces.list(), []);
     store.createMember = failing;
 
-    const { workspaceId } = await workspaces.create({ name: 'Older', directory: join(folder, 'older'), adopt: false });
+    const { workspaceId } = await workspaces.create({ name: 'Older', directory: join(folder, 'older'), models: testModels(), adopt: false });
     const team = new TeamService(store, workspaces, stubConfig, new DesignService(workspaces));
     store.members.clear();
     await assert.rejects(team.team(workspaceId), code('corrupt_data'));
@@ -82,7 +82,7 @@ test('retiring frees the name, keeps the lead, and a team has a size limit', () 
 
 test('the lead forms the team with tools; other members cannot', () => withTeam(async fixture => {
   const { team, lead } = fixture;
-  const { management } = teamTools(team.service, team.runner, stubConfig as never);
+  const { management } = teamTools(team.service, team.runner);
   const run = async (name: string, agentId: string, args: Record<string, unknown>) => {
     const tool = management.find(item => item.definition.name === name)!;
     return (await tool.execute(args as never, scope(agentId), {} as never)).content.map(part => ('text' in part ? part.text : '')).join('');
@@ -94,7 +94,7 @@ test('the lead forms the team with tools; other members cannot', () => withTeam(
   assert.match(await run('retire_member', helper.memberId, { name: 'Server' }), /^Refused \(access_denied\): Only the lead changes the team/);
   assert.match(await run('retire_member', lead.memberId, { name: 'Server' }), /^Retired Server/);
   assert.equal(await team.service.byName(fixture.workspaceId, 'Server'), undefined);
-  assert.match(await run('list_models', lead.memberId, {}), /conn \(Test\):\n {2}model/);
+  assert.match(await run('list_models', lead.memberId, {}), /"connectionId": "conn"/);
 }));
 
 test('startup replaces legacy scopes with empty harnesses once and preserves the member identity and settings', () => withTeam(async fixture => {

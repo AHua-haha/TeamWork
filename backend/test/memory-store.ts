@@ -7,6 +7,12 @@ import { randomUUID } from 'node:crypto';
 import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/group-chat.js';
 import type { ContextEntry, RunState } from '../src/types.js';
 import { AppError } from '../src/types.js';
+import { defaultRunSettings, type WorkspaceModels, type StoredWorkspaceModels } from '../src/workspace-models.js';
+import { generatedSource } from '../src/member-config-format.js';
+import type { RunSettings } from '../src/config.js';
+
+export const testModels = (connectionId = 'conn', modelId = 'model'): WorkspaceModels => ({ models: [{ connectionId, modelId }], defaultModel: { connectionId, modelId } });
+export const testModelValidator = { issuesFor: async (settings: readonly RunSettings[]) => settings.map(s => s.connectionId && s.modelId ? [] : ['Select a provider and model']) };
 
 interface Stored { record: WorkspaceRecord; key: string; seq: number; blobs: Map<string, string>; versions: StoredVersion[]; files: Map<string, IndexedFile>; records: ChangeRecord[] }
 
@@ -14,6 +20,7 @@ interface Stored { record: WorkspaceRecord; key: string; seq: number; blobs: Map
 export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   readonly workspaces = new Map<string, Stored>();
   readonly members = new Map<string, { member: StoredMember; lead: boolean; nameKey: string | null; ordinal: number }>();
+  readonly workspaceModels = new Map<string, StoredWorkspaceModels>();
   private ordinal = 0;
   failNextCommit = false;
 
@@ -112,15 +119,35 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     return this.workspaces.get(workspaceId)?.record ?? null;
   }
 
-  async createWorkspace(record: WorkspaceRecord, key: string, lead: NewMember): Promise<void> {
+  async createWorkspace(record: WorkspaceRecord, key: string, lead: NewMember, models?: WorkspaceModels): Promise<void> {
     if (this.workspaces.has(record.workspaceId) || [...this.workspaces.values()].some(stored => stored.key === key)) throw new AppError('workspace_exists', 'A workspace with this ID or folder already exists', 409);
     this.workspaces.set(record.workspaceId, { record, key, seq: 0, blobs: new Map(), versions: [], files: new Map(), records: [] });
-    try { await this.createMember(lead); }
+    try { await this.createMember(lead); if (models) this.workspaceModels.set(record.workspaceId, { revision: 0, value: structuredClone(models) }); }
     catch (error) {
       // Like the real store's transaction: a workspace is never stored without its lead.
       this.workspaces.delete(record.workspaceId);
       throw error;
     }
+  }
+
+  async getWorkspaceModels(id: string): Promise<StoredWorkspaceModels | null> { return structuredClone(this.workspaceModels.get(id) ?? null); }
+  async saveWorkspaceModels(id: string, expected: number | null, value: WorkspaceModels, initializeLead: boolean): Promise<StoredWorkspaceModels> {
+    this.stored(id);
+    const previous = this.workspaceModels.get(id);
+    if (previous ? previous.revision !== expected : expected !== null) throw new AppError('config_conflict', 'Workspace models changed', 409);
+    const next = { revision: previous ? previous.revision + 1 : initializeLead ? 1 : 0, value: structuredClone(value) };
+    if (initializeLead) {
+      const entry = [...this.members.values()].find(m => m.member.workspaceId === id && m.lead);
+      if (entry && entry.member.value.settings.connectionId === null && entry.member.value.settings.modelId === null) {
+        const defaults = defaultRunSettings(value), member = entry.member;
+        const updated = { ...member.value, settings: { ...member.value.settings, connectionId: defaults.connectionId, modelId: defaults.modelId, modelOptions: defaults.modelOptions } };
+        updated.configuration = generatedSource(updated, member.id, member.revision + 1);
+        if (member.value.configuration) updated.configuration.path = member.value.configuration.path;
+        entry.member = { ...member, revision: member.revision + 1, value: updated };
+      }
+    }
+    this.workspaceModels.set(id, next);
+    return structuredClone(next);
   }
 
   async loadContext(workspaceId: string): Promise<{ seq: number; files: IndexedFile[] }> {

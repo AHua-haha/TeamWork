@@ -592,3 +592,24 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .group-composer-hint { display: none; }
   .group-final .markdown { font-size: 14px; }
 }
+
+/* Workspace-level model setup and read-only member inspection. */
+.team-header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.workspace-model-editor { margin-top: 20px; padding-top: 15px; border-top: 1px solid #e5ebe3; }
+.workspace-model-editor h3 { margin: 0 0 7px; color: #365341; font-size: 14px; }
+.workspace-model-editor p, .workspace-model-hint { color: #728176; font-size: 11px; line-height: 1.6; }
+.workspace-model-row { border: 1px solid #e0e8dd; border-radius: 10px; padding: 11px; margin: 10px 0; }
+.workspace-model-heading { display: flex; align-items: flex-start; gap: 8px; justify-content: space-between; }
+.workspace-model-heading label.check-line { margin-bottom: 8px; flex: 1; min-width: 0; }
+.workspace-model-heading strong { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.workspace-model-heading small { display: block; margin-top: 4px; }
+.workspace-model-row summary { color: #64776b; font-size: 11px; cursor: pointer; margin: 5px 0; }
+.workspace-model-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; padding-top: 8px; }
+.inspected-harness, .member-config-source { padding-top: 12px; margin-top: 14px; border-top: 1px solid #e5ebe3; }
+.member-inspection pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow-y: auto; padding: 10px; background: #f7f9f6; border-radius: 7px; color: #44564a; font-size: 11px; line-height: 1.6; }
+.member-inspection summary { cursor: pointer; color: #52705d; font-size: 12px; padding: 7px 0; overflow-wrap: anywhere; }
+.member-inspection ul { padding-left: 18px; color: #6d8073; font-size: 11px; }
+.member-config-source p, .member-config-source small { overflow-wrap: anywhere; }
+.member-inspection .harness-tools { display: flex; flex-wrap: wrap; gap: 5px; }
+.harness-tools code { background: #f0f4ee; padding: 3px 6px; border-radius: 5px; font-size: 10px; }
+@media (max-width: 440px) { .workspace-model-options { grid-template-columns: 1fr; } .team-header-actions { justify-content: flex-start; } }

@@ -4,7 +4,7 @@
 
 A workspace is one project: a directory on the backend's machine, its [context base](../context-base/design.md), and its [team](../team/design.md). The Workspace module registers workspaces and serves the frontend's HTTP API for listing them and for browsing and editing the project's own files. It also gives the workspace's agents file actions inside the directory. It opens each workspace's context base on first use and closes them when the backend stops.
 
-The project-file API lists, reads, saves, and finds files. It does not move or delete project files, keep their history, or deliver live updates; the project's own version control does that. The agent file actions read and write the same folder, with an access rule that the caller supplies; the [harness](../harness/design.md) supplies the rule for each member. Command execution belongs to the harness; version-control-specific operations are deferred.
+The project-file API lists, reads, saves, and finds files. It does not move or delete project files, keep their history, or deliver live updates; the project's own version control does that. The agent file actions read and write the same folder, with an access rule that the caller supplies; the [harness](../harness/design.md) supplies the rule for each member. Command execution and scoped agent history belong to the harness.
 
 ## Inputs and preconditions
 
@@ -29,14 +29,14 @@ Four actions work on the workspace folder for an agent: list, read, write, and e
 | Operation | Request | Response |
 | --- | --- | --- |
 | List workspaces | `GET /workspaces` | 200, `{workspaces: [{workspaceId, name, directory, createdAt}]}`, ordered by name |
-| Create or adopt | `POST /workspaces`, JSON `{workspaceId?, name, directory, adopt}` | 201, the workspace with `context`, its context overview |
+| Create or adopt | `POST /workspaces`, JSON `{workspaceId?, name, directory, adopt, models}` | 201, the workspace with `context`, its context overview |
 | Get a workspace | `GET /workspaces/:workspaceId` | 200, the workspace with `context` |
 | List project files | `GET /workspaces/:workspaceId/files/tree?path=&depth=` | 200, `{path, entries, truncated}` |
 | Read a project file | `GET /workspaces/:workspaceId/files/file?path=` | 200, `{path, revision, content, size, updatedAt}` |
 | Save a project file | `PUT /workspaces/:workspaceId/files/file?path=`, JSON `{content, baseRevision}` | 201 when created, 200 when updated, `{path, revision}` |
 | Find project files | `GET /workspaces/:workspaceId/files/find?q=` | 200, `{paths, truncated}` |
 
-- **Create.** Creating a workspace also creates its [team](../team/design.md) with the team's lead, and opens its context base, which creates `.context/user/` and `.context/agent/` in the directory. The workspace and its lead are registered together: if either cannot be stored, neither is, and a directory the backend created is removed. Adopting a directory that already has a `.context/` folder records its files as the first change, authored by `external`.
+- **Create.** Creating a workspace also creates its [team](../team/design.md) with the team's lead, and opens its context base, which creates `.context/user/` and `.context/agent/` in the directory. The workspace, model settings and lead initialized with the default model are registered together: if any cannot be stored, none is, and a directory the backend created is removed. Adopting a directory that already has a `.context/` folder records its files as the first change, authored by `external`.
 - **List.** `path` names a folder; empty is the workspace directory. `depth` is 1–16 and defaults to 1. A file entry is `{path, type: "file", size, updatedAt}`; a folder entry is `{path, type: "folder"}`. Symbolic links and hidden folders are omitted. At most 2,000 entries are returned, ordered by path.
 - **Read.** `revision` is the SHA-256 of the file's bytes, so any change on disk changes it.
 - **Save.** `baseRevision: null` creates the file and its missing folders, and fails if the file exists. A non-null `baseRevision` must equal the current revision. The file is replaced in one step and keeps its permissions. Saving identical content changes nothing.
@@ -44,7 +44,7 @@ Four actions work on the workspace folder for an agent: list, read, write, and e
 
 Requests follow the context base's rules for fields, bodies, and errors.
 
-Agent file actions have no HTTP form; the harness's tools call them inside the backend. Workspace members cannot write context through these generic actions; discussed design saves use a dedicated context-base operation. A file an action changes under `.context/` is an outside change for the context base, recorded as an `external` version the next time the context base looks, and a file it changes elsewhere is like any other change made outside the application.
+Agent file actions have no HTTP form; the harness's tools call them inside the backend. Workspace members use these common actions through harness rules in their separate worktrees; design edits remain pending until user acceptance. A file an action changes under `.context/` is an outside change for the context base, recorded as an `external` version the next time the context base looks, and a file it changes elsewhere is like any other change made outside the application.
 
 ## Failure behavior
 
@@ -70,7 +70,7 @@ Agent file actions have no HTTP form; the harness's tools call them inside the b
 
 ## Acceptance examples
 
-1. **New project.** The user creates `reading-list` at `/home/me/reading-list`, which does not exist. The response is 201, the directory exists with `.context/user/` and `.context/agent/`, the overview has `seq` 0, and the workspace's team has its lead.
+1. **New project.** The user creates `reading-list` with a valid workspace model list/default at `/home/me/reading-list`, which does not exist. The response is 201, the directory exists with `.context/user/` and `.context/agent/`, the overview has `seq` 0, and the workspace's team has its lead.
 2. **Adopt.** The user adopts this repository. Listing the top shows `backend`, `docs`, and `frontend` as folders, and not `.git`.
 3. **Overlap.** Adopting `/home/me/reading-list/docs` while `reading-list` exists returns 409 `workspace_exists`.
 4. **Edit a project file.** The user reads `README.md`, edits it, and saves with its revision. The response has a new revision. Saving again with the old revision returns 409 `stale_revision`.
@@ -79,3 +79,9 @@ Agent file actions have no HTTP form; the harness's tools call them inside the b
 7. **Agent writes.** A member explicitly assigned implementation path `src/backend` writes `src/backend/api.ts` in its managed worktree. Common tools can edit its working design as pending changes; design commits require user acceptance. Agent context remains read-only.
 8. **Hidden from an agent.** A worker whose implementation scope does not include `frontend` cannot list or read its implementation; a dependency file can be read but not edited.
 9. **Edit.** Editing `src/a.ts` with text that is not in the file is reported to the agent and leaves the file unchanged. A path like `../outside/secret.txt`, or one through a link, is refused.
+
+## Workspace models
+
+Create/adopt input includes models: {models: [{connectionId, modelId, reasoning?, temperature?, maxTokens?, contextBudget?}], defaultModel: {connectionId, modelId}}. Configure 1–50 unique connection/model choices with a default in that list. Provider/model/parameter validation completes before directory creation or registry writes. Workspace, model settings (revision 0), and the lead initialized with the default are stored atomically. A failure activates none of them.
+
+GET /workspaces/:workspaceId/models returns {revision, value, issues}; value is the model list/default. Legacy workspaces may have an empty list with a null default and an actionable issue. PUT at that endpoint takes {revision, value}, validates the whole configuration, revision-checks and atomically stores it. It initializes only a lead with no assigned provider/model; other members keep their settings. New members use the current workspace default rather than the lead's current model. Model settings reads come from durable records. A changed default never silently rewrites assigned members. Existing choices unavailable at their provider remain visible with issues for repair. Startup derives model settings from legacy member selections once, without overwriting existing configuration.

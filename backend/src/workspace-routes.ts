@@ -1,6 +1,6 @@
 import { DesignService } from './design.js';
 import { body, count, fields, json, optionalString, query, sse, text, type Route } from './http-helpers.js';
-import { AppError, identity } from './types.js';
+import { AppError, identity, position } from './types.js';
 import type { WorkspaceService } from './workspace.js';
 
 const maxBodyBytes = 4 * 1024 * 1024;
@@ -47,8 +47,8 @@ export function workspaceRoutes(workspaces: WorkspaceService): (route: Route) =>
       if (method === 'POST') {
         query(url, []);
         const input = await body(request, maxBodyBytes);
-        fields(input, ['workspaceId', 'name', 'directory', 'adopt']);
-        json(response, 201, await workspaces.create({ workspaceId: input.workspaceId, name: input.name, directory: input.directory, adopt: input.adopt }));
+        fields(input, ['workspaceId', 'name', 'directory', 'adopt', 'models']);
+        json(response, 201, await workspaces.create({ workspaceId: input.workspaceId, name: input.name, directory: input.directory, adopt: input.adopt, models: input.models }));
         return;
       }
       throw notFound();
@@ -64,6 +64,15 @@ export function workspaceRoutes(workspaces: WorkspaceService): (route: Route) =>
       return;
     }
 
+    if (area === 'models' && operation === undefined) {
+      query(url, []);
+      if (method === 'GET') json(response, 200, await workspaces.models(workspaceId));
+      else if (method === 'PUT') {
+        const input = await body(request, maxBodyBytes); fields(input, ['revision', 'value']); position(input.revision);
+        json(response, 200, await workspaces.updateModels(workspaceId, input.revision, input.value));
+      } else throw notFound();
+      return;
+    }
     if (area === 'designs') {
       if (operation === undefined && method === 'GET') {
         query(url, []);

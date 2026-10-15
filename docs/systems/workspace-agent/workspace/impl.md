@@ -27,9 +27,9 @@
    - a new project requires a missing path or an empty folder, and resolves the real path of its nearest existing parent;
 3. compares the planned path, without letter case, with every registered directory, in both directions;
 4. creates the folder for a new project;
-5. stores the record, together with the workspace's lead from `newLead`, in one store call: the SHA-256 of the lower-cased real path is its directory key, whose unique key also stops another process from registering the same directory at the same time, and the lead's record is the team's initial one. The store registers both in one transaction.
+5. stores the record, together with the workspace's lead from `newLead`, in one store call: the SHA-256 of the lower-cased real path is its directory key, whose unique key also stops another process from registering the same directory at the same time, and the lead's record is initialized from the validated workspace default. The store registers workspace, model settings and lead in one transaction.
 
-If storing fails, the folder the service created is removed, and no workspace or lead is left. The response is `get`, which opens the context base and returns its overview.
+Model choices/default and provider parameters are validated before any directory creation. If storing fails, the folder the service created is removed, and no workspace, model record or lead is left. The response is `get`, which opens the context base and returns its overview.
 
 **Opening context bases.** The first request for a workspace starts `ContextBase.open` and caches the pending result, so concurrent requests share one open. A failed open is removed from the cache, so the next request tries again, for example after a missing folder returns.
 
@@ -74,3 +74,11 @@ Project-file tests cover path rules, hidden folders, listing depth and order, re
 Route tests send requests through the agent server over an in-memory connection, so they need no network. They cover registering and listing workspaces, project and context endpoints, status codes and error codes, unknown fields and query parameters, and the follow stream.
 
 The MySQL integration tests register a workspace with the MySQL store, refuse a duplicate ID, folder, or overlapping folder, and reopen the workspace in a second service.
+
+## Workspace model coordination
+
+workspace-models.ts owns the strict model-list/default shape and projects a selected profile into RunSettings. WorkspaceService validates every configured model with ConfigService. GET returns the durable record and current provider issues; PUT validates and revision-checks the complete record. The store locks the workspace row, saves workspace_models, and initializes only an unconfigured lead with a generated accepted source bundle in that transaction. Default edits preserve configured members. New creation and file submission obtain default settings here rather than copying the lead.
+
+Startup initializes missing legacy workspace_models once from active members' selected models in lead-first order, retaining selected per-model options; no selections yield an empty repairable record. Existing records are never overwritten by discovery. Model records are read independently of context files and worktree creation.
+
+[Workspace models](../../../../backend/src/workspace-models.ts), [model tests](../../../../backend/test/workspace-models.test.ts), [HTTP tests](../../../../backend/test/workspace-routes.test.ts), and [SQL integration](../../../../backend/test/integration/backend.test.ts) cover invalid input without side effects, atomic lead initialization, conflicts, preservation and reopen durability.

@@ -5,8 +5,9 @@ import { emptyHarness, harnessConfig, type HarnessConfig } from './harness-confi
 import { resolveHarness } from './harness.js';
 import { AppError } from './types.js';
 import { generatedSource, migrateMemberSource, type MemberConfigSource } from './member-config-format.js';
-import type { WorkspaceRecord } from './context-base.js';
 import type { RunConfigSource } from './runtime.js';
+import type { WorkspaceService } from './workspace.js';
+import { defaultRunSettings } from './workspace-models.js';
 
 export const maxMembers = 20;
 const namePattern = /^[A-Za-z0-9](?:[A-Za-z0-9 _.-]{0,38}[A-Za-z0-9])?$/;
@@ -40,10 +41,10 @@ export interface TeamStore {
 
 export const leadResponsibility = 'Works with the user on this project: helps maintain the user design, forms the team the project needs, gives work to the members, and reports results.';
 
-/** The lead every workspace is created with: no model, so the user chooses one before it can run. */
-export function newLead(workspaceId: string): NewMember {
+/** A workspace lead initialized with supplied default settings; empty settings support legacy imports. */
+export function newLead(workspaceId: string, settings: RunSettings = emptyRunSettings): NewMember {
   const id = randomUUID();
-  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: emptyHarness(), settings: emptyRunSettings };
+  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: emptyHarness(), settings };
   return {
     id, workspaceId, lead: true, nameKey: 'lead',
     value: { workspaceId, ...fields, configuration: generatedSource(fields, id, 0), lead: true, createdAt: Date.now(), retiredAt: null },
@@ -86,7 +87,7 @@ const nameKey = (name: string) => name.toLowerCase();
 export class TeamService {
   constructor(
     private readonly store: TeamStore,
-    private readonly workspaces: { record(workspaceId: string): Promise<WorkspaceRecord>; list(): Promise<WorkspaceRecord[]> },
+    private readonly workspaces: Pick<WorkspaceService, 'record' | 'list' | 'models' | 'defaultSettings' | 'initializeModels'>,
     private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> },
     private readonly designs: DesignService,
   ) {}
@@ -124,7 +125,8 @@ export class TeamService {
         await this.store.updateMember(member.id, member.revision, value.retiredAt === null ? value.name.toLowerCase() : null, value);
       }
       if ((await this.store.listMembers(workspace.workspaceId)).some(member => member.value.lead)) continue;
-      try { await this.store.createMember(newLead(workspace.workspaceId)); }
+      const models = await this.workspaces.models(workspace.workspaceId);
+      try { await this.store.createMember(newLead(workspace.workspaceId, models.value.defaultModel ? defaultRunSettings(models.value) : emptyRunSettings)); }
       catch (error) {
         // Another backend process created it first; either unique key may report it.
         if (!(error instanceof AppError && (error.code === 'lead_exists' || error.code === 'member_exists'))) throw error;
@@ -147,6 +149,15 @@ export class TeamService {
   async get(workspaceId: string, memberId: string): Promise<MemberView> {
     return (await this.views([await this.member(workspaceId, memberId)]))[0]!;
   }
+  async inspect(workspaceId: string, memberId: string) {
+    const stored = await this.member(workspaceId, memberId);
+    return { stored, member: await this.view(stored) };
+  }
+  models(workspaceId: string) { return this.workspaces.models(workspaceId); }
+  defaultSettings(workspaceId: string) { return this.workspaces.defaultSettings(workspaceId); }
+  async initializeWorkspaceModels(): Promise<void> {
+    for (const workspace of await this.workspaces.list()) await this.workspaces.initializeModels(workspace.workspaceId, (await this.active(workspace.workspaceId)).map(m => m.value.settings));
+  }
 
   /** The active members, the lead first. */
   async active(workspaceId: string): Promise<StoredMember[]> {
@@ -160,13 +171,13 @@ export class TeamService {
     return (await this.active(workspaceId)).find(member => nameKey(member.value.name) === nameKey(name));
   }
 
-  /** Fields left out of `settings` copy the lead's; the instructions start empty. */
+  /** New members start with workspace default model settings and empty direct instructions. */
   async create(workspaceId: string, input: unknown, source?: MemberConfigSource): Promise<MemberView> {
-    const lead = await this.lead(workspaceId);
+    await this.lead(workspaceId);
     const data = obj(input, 'Member');
     keys(data, ['name', 'role', 'responsibility', 'harness', 'settings']);
     if (data.settings !== undefined && (typeof data.settings !== 'object' || data.settings === null || Array.isArray(data.settings))) throw new AppError('invalid_input', 'settings is an object');
-    const fields = memberFields({ responsibility: '', harness: emptyHarness(), ...data, settings: { ...lead.value.settings, prompt: '', ...(data.settings as object | undefined) } });
+    const fields = memberFields({ responsibility: '', harness: emptyHarness(), ...data, settings: { ...(await this.defaultSettings(workspaceId)), ...(data.settings as object | undefined) } });
     if ((await this.active(workspaceId)).length >= maxMembers) throw new AppError('team_full', `A team has at most ${maxMembers} members`, 409);
     return this.view(await this.insert(workspaceId, fields, source));
   }

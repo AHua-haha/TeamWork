@@ -1,22 +1,10 @@
-import type { AgentConfig, AgentSettings } from '../client/config-client.js';
-import type { Member, MemberFields, Team } from '../client/workspace-client.js';
+import type { Member, Team } from '../client/workspace-client.js';
 
 /** How often the team is read again while team work is active. */
 export const pollIntervalMs = 3000;
 
 export function findLead(team: Team | null): Member | null {
   return team?.members.find(member => member.lead) ?? null;
-}
-
-/** A member's record in the shape of an agent config, for the reusable settings controls. */
-export function memberConfig(member: Member): AgentConfig {
-  return { id: member.memberId, revision: member.revision, value: { name: member.name, ...member.settings }, issues: member.issues };
-}
-
-/** Settings edits preserve the member's team identity and harness. */
-export function memberFields(member: Member, value: AgentSettings): MemberFields {
-  const { name: _name, ...settings } = value;
-  return { name: member.name, role: member.role, responsibility: member.responsibility, harness: member.harness, settings };
 }
 
 /** Whether the team is read on a timer: only while team work is active. */

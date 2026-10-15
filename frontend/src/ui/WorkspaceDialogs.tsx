@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { Workspace, WorkspaceClient } from '../client/workspace-client.js';
+import type { Workspace, WorkspaceClient, WorkspaceModels } from '../client/workspace-client.js';
 import { errorText } from './FileTree.js';
+import { WorkspaceModelsEditor } from './WorkspaceModelsEditor.js';
+import { workspaceModelsError } from './workspace-model-state.js';
 
 /** A modal in the providers-dialog style, portaled so panel transforms and clipping do not affect it. */
 export function Dialog({ eyebrow, title, busy, onClose, children }: { eyebrow: string; title: string; busy: boolean; onClose(): void; children: ReactNode }) {
@@ -52,7 +54,12 @@ export function CreateWorkspaceDialog({ client, onCreated, onClose }: { client: 
   const [name, setName] = useState('');
   const [directory, setDirectory] = useState('');
   const [adopt, setAdopt] = useState(false);
-  const { busy, error, submit } = useSubmit(async () => onCreated(await client.createWorkspace({ name: name.trim(), directory: directory.trim(), adopt })));
+  const [models, setModels] = useState<WorkspaceModels>({ models: [], defaultModel: null });
+  const modelError = workspaceModelsError(models);
+  const { busy, error, submit } = useSubmit(async () => {
+    if (modelError) throw new Error(modelError);
+    onCreated(await client.createWorkspace({ name: name.trim(), directory: directory.trim(), adopt, models }));
+  });
   return <Dialog eyebrow="WORKSPACE" title="New workspace" busy={busy} onClose={onClose}>
     <form onSubmit={event => void submit(event)}>
       {error && <div className="form-error" role="alert">{error}</div>}
@@ -61,8 +68,40 @@ export function CreateWorkspaceDialog({ client, onCreated, onClose }: { client: 
         <small>An absolute path on the machine running the backend. Workspaces cannot overlap.</small></label>
       <label className="check-line"><input type="radio" name="workspace-folder" checked={!adopt} disabled={busy} onChange={() => setAdopt(false)} />Create a new folder</label>
       <label className="check-line"><input type="radio" name="workspace-folder" checked={adopt} disabled={busy} onChange={() => setAdopt(true)} />Use an existing folder</label>
+      <WorkspaceModelsEditor value={models} onChange={setModels} disabled={busy} />
+      {modelError && <p className="workspace-model-hint">{modelError}</p>}
       <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
-        <button type="submit" className="primary-button" disabled={busy}>{busy ? 'Creating…' : 'Create workspace'}</button></div>
+        <button type="submit" className="primary-button" disabled={busy || !!modelError}>{busy ? 'Creating…' : 'Create workspace'}</button></div>
+    </form>
+  </Dialog>;
+}
+
+export function WorkspaceModelsDialog({ client, workspaceId, onSaved, onClose }: { client: WorkspaceClient; workspaceId: string; onSaved(): void; onClose(): void }) {
+  const [value, setValue] = useState<WorkspaceModels>({ models: [], defaultModel: null });
+  const [revision, setRevision] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<string[]>([]);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    let current = true; setRevision(null); setLoadError(null);
+    client.workspaceModels(workspaceId).then(record => { if (current) { setValue(record.value); setRevision(record.revision); setIssues(record.issues); } }, cause => { if (current) setLoadError(errorText(cause)); });
+    return () => { current = false; };
+  }, [client, workspaceId, reload]);
+  const modelError = workspaceModelsError(value);
+  const { busy, error, submit } = useSubmit(async () => {
+    if (modelError || revision === null) throw new Error(modelError ?? 'Wait for workspace models');
+    await client.updateWorkspaceModels(workspaceId, revision, value); onSaved();
+  });
+  return <Dialog eyebrow="WORKSPACE" title="Workspace models" busy={busy} onClose={onClose}>
+    <form onSubmit={e => void submit(e)}>
+      {loadError && <p className="form-error" role="alert">{loadError}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {issues.length > 0 && <p className="workspace-model-hint">{issues.join('; ')}</p>}
+      {revision === null ? <p>Loading workspace models…</p> : <WorkspaceModelsEditor value={value} onChange={setValue} disabled={busy} />}
+      {modelError && revision !== null && <p className="workspace-model-hint">{modelError}</p>}
+      <p className="workspace-model-hint">A lead without a model will be initialized when you save a default.</p>
+      <button type="button" className="text-button" disabled={busy} onClick={() => setReload(n => n + 1)}>Reload saved settings</button>
+      <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy || revision === null || !!modelError}>{busy ? 'Saving…' : 'Save workspace models'}</button></div>
     </form>
   </Dialog>;
 }

@@ -8,6 +8,7 @@ export * from './text.js';
 export * from './context-base.js';
 export * from './project-files.js';
 export * from './workspace.js';
+export * from './workspace-models.js';
 export * from './http-helpers.js';
 export * from './workspace-routes.js';
 export * from './team.js';

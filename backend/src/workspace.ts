@@ -6,9 +6,11 @@ import { ProjectFiles } from './project-files.js';
 import { newLead } from './team.js';
 import { missing, sha256 } from './text.js';
 import { AppError, identity } from './types.js';
+import type { RunSettings } from './config.js';
+import { defaultRunSettings, emptyWorkspaceModels, modelRunSettings, workspaceModels, type WorkspaceModelsView } from './workspace-models.js';
 
 export interface Workspace extends WorkspaceRecord { context: ContextOverview }
-export interface WorkspaceInput { workspaceId?: unknown; name: unknown; directory: unknown; adopt: unknown }
+export interface WorkspaceInput { workspaceId?: unknown; name: unknown; directory: unknown; adopt: unknown; models: unknown }
 
 const controlCharacter = /[\u0000-\u001f\u007f-\u009f]/;
 const folderKey = (directory: string) => directory.toLowerCase();
@@ -21,7 +23,42 @@ export class WorkspaceService {
   private creating: Promise<unknown> = Promise.resolve();
   private closed = false;
 
-  constructor(private readonly store: ContextStore) {}
+  constructor(private readonly store: ContextStore, private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> }) {}
+
+  async models(workspaceId: string): Promise<WorkspaceModelsView> {
+    await this.record(workspaceId);
+    const stored = await this.store.getWorkspaceModels(workspaceId);
+    const result = stored ?? { revision: 0, value: emptyWorkspaceModels() };
+    const issues = result.value.models.length ? (await this.config.issuesFor(result.value.models.map(modelRunSettings))).flat() : ['Configure workspace models and a default'];
+    return { ...result, issues };
+  }
+  async defaultSettings(workspaceId: string): Promise<RunSettings> { return defaultRunSettings((await this.models(workspaceId)).value); }
+  async initializeModels(workspaceId: string, settings: RunSettings[]): Promise<void> {
+    if (await this.store.getWorkspaceModels(workspaceId)) return;
+    const models = new Map<string, ReturnType<typeof modelRunSettings>['modelOptions'][number]>();
+    for (const item of settings) {
+      if (!item.connectionId || !item.modelId) continue;
+      const selected = item.modelOptions.find(m => m.connectionId === item.connectionId && m.modelId === item.modelId) ?? { connectionId: item.connectionId, modelId: item.modelId };
+      const key = JSON.stringify([selected.connectionId, selected.modelId]);
+      if (!models.has(key)) models.set(key, selected);
+    }
+    const choices = [...models.values()], first = choices[0];
+    await this.store.saveWorkspaceModels(workspaceId, null, { models: choices, defaultModel: first ? { connectionId: first.connectionId, modelId: first.modelId } : null }, false);
+  }
+  private async validateModels(value: unknown) {
+    const models = workspaceModels(value);
+    const issues = (await this.config.issuesFor(models.models.map(modelRunSettings))).flat();
+    if (issues.length) throw new AppError('invalid_config', issues.join('; '));
+    return models;
+  }
+  async updateModels(workspaceId: string, revision: number, value: unknown): Promise<WorkspaceModelsView> {
+    await this.record(workspaceId);
+    const models = await this.validateModels(value);
+    const previous = await this.store.getWorkspaceModels(workspaceId);
+    if (!previous && revision !== 0) throw new AppError('config_conflict', 'Workspace models changed', 409);
+    const saved = await this.store.saveWorkspaceModels(workspaceId, previous ? revision : null, models, true);
+    return { ...saved, issues: [] };
+  }
 
   async list(): Promise<WorkspaceRecord[]> {
     this.assertOpen();
@@ -56,6 +93,7 @@ export class WorkspaceService {
     if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 200 || controlCharacter.test(input.name)) throw new AppError('invalid_input', 'name has 1–200 characters without control characters');
     if (typeof input.directory !== 'string' || !isAbsolute(input.directory) || input.directory.length > 1024) throw new AppError('invalid_input', 'directory is an absolute path of at most 1024 characters');
     if (typeof input.adopt !== 'boolean') throw new AppError('invalid_input', 'adopt is true or false');
+    const models = await this.validateModels(input.models);
     const { name, directory, adopt } = input;
     // One create at a time, so the overlap check sees every earlier workspace.
     const created = this.creating.then(async () => {
@@ -70,7 +108,7 @@ export class WorkspaceService {
       const made = adopt ? undefined : await mkdir(directory, { recursive: true });
       try {
         const record: WorkspaceRecord = { workspaceId, name, directory: await realpath(directory), createdAt: Date.now() };
-        await this.store.createWorkspace(record, sha256(folderKey(record.directory)), newLead(workspaceId));
+        await this.store.createWorkspace(record, sha256(folderKey(record.directory)), newLead(workspaceId, defaultRunSettings(models)), models);
         this.records.set(workspaceId, record);
       } catch (error) {
         if (made) await rm(made, { recursive: true, force: true }).catch(() => undefined);

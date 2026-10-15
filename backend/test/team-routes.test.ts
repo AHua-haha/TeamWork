@@ -4,6 +4,7 @@ import { duplexPair } from 'node:stream';
 import { text } from 'node:stream/consumers';
 import { test } from 'node:test';
 import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
 import { createAgentServer } from '../src/http.js';
 import type { AgentRuntime } from '../src/runtime.js';
 import { emptyHarness } from '../src/harness-config.js';
@@ -38,39 +39,34 @@ function withServer(run: (call: (path: string, init?: { method?: string; data?: 
   });
 }
 
-test('the team is viewed, formed, changed, and retired over HTTP', () => withServer(async (call, fixture) => {
+test('member inspection is read-only, returns accepted configuration and both harnesses without opening a worktree', () => withServer(async (call, fixture) => {
   const base = `/workspaces/${fixture.workspaceId}/team`;
-  const team = await call(base);
-  assert.deepEqual(team.members.map((member: Body) => [member.name, member.lead, member.ready, member.running]), [['Lead', true, true, false]]);
-
-  const created = await call(`${base}/members`, { method: 'POST', status: 201, data: { name: 'Backend', role: 'backend developer', harness: emptyHarness() } });
-  assert.deepEqual([created.name, created.harness, created.ready, created.running, created.revision], ['Backend', emptyHarness(), false, false, 0]);
-  assert.equal((await call(`${base}/members/${created.memberId}`)).name, 'Backend');
-  await fixture.team.runner.postUser(fixture.workspaceId, 'go');
-  assert.deepEqual((await call(base)).members.map((member: Body) => member.running), [true, false]);
-  fixture.runtime.end(fixture.lead.memberId);
-
-  const changed = await call(`${base}/members/${created.memberId}`, { method: 'PUT', data: { revision: 0, value: { name: 'Backend', role: 'api developer', responsibility: 'The API', harness: emptyHarness(), settings: created.settings } } });
-  assert.deepEqual([changed.role, changed.revision, changed.running], ['api developer', 1, false]);
-  const source = await call(`${base}/members/${created.memberId}/config`);
-  assert.equal(source.submittedBy, 'user');
-  assert.equal(JSON.parse(source.files['member.json']).revision, changed.revision);
-  assert.equal(JSON.parse(source.files['member.json']).role, changed.role);
-  await call(`/workspaces/other/team/members/${created.memberId}/config`, { status: 404 });
-  assert.equal((await call(`${base}/members/${created.memberId}`, { method: 'PUT', status: 409, data: { revision: 0, value: { name: 'Backend', role: 'x', responsibility: '', harness: emptyHarness(), settings: created.settings } } })).error.code, 'config_conflict');
-  assert.equal((await call(`${base}/members`, { method: 'POST', status: 409, data: { name: 'backend', role: 'x' } })).error.code, 'member_exists');
-  assert.equal((await call(`${base}/members`, { method: 'POST', status: 400, data: { name: 'X', role: 'x', surprise: 1 } })).error.code, 'invalid_input');
-
-  assert.equal((await call(`${base}/members/${fixture.lead.memberId}`, { method: 'DELETE', status: 409, data: { revision: fixture.lead.revision } })).error.code, 'lead_required');
-  assert.deepEqual(await call(`${base}/members/${created.memberId}`, { method: 'DELETE', data: { revision: 1 } }), { retired: created.memberId });
-  await call(`${base}/members/${created.memberId}`, { status: 404 });
-  await call(`/workspaces/missing/team`, { status: 404 });
-  await call(`${base}/other`, { status: 404 });
+  const created = await worker(fixture, 'Backend', ['backend']);
+  const root = join(fixture.folder, '.rsi-harness');
+  await assert.rejects(stat(root));
+  const view = await call(`${base}/members/${created.memberId}`);
+  assert.equal(view.member.name, 'Backend');
+  assert.equal(JSON.parse(view.configuration.files['member.json']).name, 'Backend');
+  assert.deepEqual(view.harnesses.map((h: Body) => h.id), ['project', 'command']);
+  assert.equal(view.harnesses[0].parts.find((p: Body) => p.id === 'design').commit, 'user');
+  await assert.rejects(stat(root), 'inspection creates no harness Git storage');
+  const before = await fixture.team.service.find(created.memberId);
+  for (const [method, path, data] of [
+    ['POST', `${base}/members`, { name: 'Other', role: 'developer' }],
+    ['PUT', `${base}/members/${created.memberId}`, { revision: created.revision, value: {} }],
+    ['DELETE', `${base}/members/${created.memberId}`, { revision: created.revision }],
+    ['GET', `${base}/members/${created.memberId}/config`, undefined],
+  ] as const) await call(path, { method, data, status: 404 });
+  assert.deepEqual(await fixture.team.service.find(created.memberId), before);
+  await call(`/workspaces/other/team/members/${created.memberId}`, { status: 404 });
+  const lead = await call(`${base}/members/${fixture.lead.memberId}`);
+  assert.ok(lead.harnesses[0].tools.includes('submit_member_config'));
+  assert.deepEqual((await call(base)).members.map((m: Body) => m.name), ['Lead', 'Backend']);
 }));
 
 test('workspace input goes to group chat; direct member input is refused', () => withServer(async (call, fixture) => {
-  const worker = await call(`/workspaces/${fixture.workspaceId}/team/members`, { method: 'POST', status: 201, data: { name: 'Backend', role: 'developer' } });
-  for (const id of [fixture.lead.memberId, worker.memberId]) assert.equal((await call(`/agents/${id}/runs`, { method: 'POST', status: 409, data: { input: 'hello' } })).error.code, 'member_conversation');
+  const member = await worker(fixture, 'Backend');
+  for (const id of [fixture.lead.memberId, member.memberId]) assert.equal((await call(`/agents/${id}/runs`, { method: 'POST', status: 409, data: { input: 'hello' } })).error.code, 'member_conversation');
   const base = `/workspaces/${fixture.workspaceId}/team/chat`;
   const accepted = await call(`${base}/messages`, { method: 'POST', status: 202, data: { text: 'Build a reading list' } });
   assert.deepEqual(accepted.message.author, { type: 'user' });

@@ -6,7 +6,7 @@ The lead is the default recipient of unmentioned user group messages. It helps t
 
 ## Inputs and preconditions
 
-The user selects a model and posts group messages. The lead can propose concrete choices and wait for answers. Design records remain JSON `{content: "Markdown", implementation: [paths]}` in user context, with up to 50 distinct workspace-relative mappings, `.` allowed and `.git`/`.context` excluded.
+The user configures workspace model choices/default and posts group messages. The lead starts from that default; list_models exposes workspace choices rather than the global provider catalog. The lead can propose concrete choices and wait for answers. Design records remain JSON `{content: "Markdown", implementation: [paths]}` in user context, with up to 50 distinct workspace-relative mappings, `.` allowed and `.git`/`.context` excluded.
 
 The lead receives common file tools through its combined project harness and can edit pending user-design files in its separate worktree. It has no special direct-save tool that bypasses approval. All design commits, including the lead's, require user acceptance of the selected revision. Implementation tools follow its explicit editable paths and read-only use paths and permit implementation commits under harness rules.
 
@@ -36,3 +36,7 @@ The lead has broad bootstrap read and pending user-design edit access through it
 ## File configuration workflow
 
 Use common file tools to edit .team/members/<bundle>/member.json and referenced prompts/*.md, then submit_member_config({path}). The fixed project base permits design working/dependency references and implementation paths/usePaths together under version 2 harnesses.project as its customization. Base tools, mandatory prompts and design approval cannot change. Runtime uses the last valid submitted bundle; pending edits or failed validation do not affect active configuration. Create uses null memberId/revision; updates name a member and its current revision and refuse a running target. A lead cannot submit self-updates while running. Existing command permissions are inherited for new members and preserved for updates. Retirement and model listing remain separate team operations.
+
+## Workspace model selection
+
+New members start with the workspace default and its configured per-model options, independently of the lead's current selection. The lead may choose another workspace model in the submitted manifest. An existing member may keep a selection removed from workspace choices, but switching to an outside choice is refused. Provider/model validity is checked on submission. The frontend only inspects member configuration; workspace default edits preserve already assigned members.

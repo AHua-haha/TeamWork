@@ -4,6 +4,8 @@ import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, validateEvent, validateRun } from './codec.js';
 import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from './context-base.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore } from './team.js';
+import { defaultRunSettings, workspaceModels, type WorkspaceModels, type StoredWorkspaceModels } from './workspace-models.js';
+import { generatedSource } from './member-config-format.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
 
 import { defaultMentionLimit, groupEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance } from './group-chat.js';
@@ -91,6 +93,12 @@ const schema = [
     directory_key CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
     seq BIGINT UNSIGNED NOT NULL DEFAULT 0,
     created_at BIGINT NOT NULL
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS workspace_models (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    data JSON NOT NULL,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS context_blobs (
     workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -836,7 +844,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
   }
 
   /** Registers the workspace and its team's lead together; if either fails, neither is stored. */
-  async createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember): Promise<void> {
+  async createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember, models?: WorkspaceModels): Promise<void> {
     await this.transaction(async db => {
       try {
         await db.execute('INSERT INTO workspaces (id, name, directory, directory_key, created_at) VALUES (?, ?, ?, ?, ?)', [workspace.workspaceId, workspace.name, workspace.directory, directoryKey, workspace.createdAt]);
@@ -845,6 +853,37 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
         throw error;
       }
       await this.insertMember(db, lead);
+      if (models) await db.execute('INSERT INTO workspace_models (workspace_id, data) VALUES (?, ?)', [workspace.workspaceId, encode(models)]);
+    });
+  }
+
+  async getWorkspaceModels(workspaceId: string): Promise<StoredWorkspaceModels | null> {
+    const [row] = await rows(this.pool, 'SELECT revision, data FROM workspace_models WHERE workspace_id = ?', [workspaceId]);
+    return row ? { revision: Number(row.revision), value: decode<WorkspaceModels>(row.data, value => { workspaceModels(value, true); }) } : null;
+  }
+  async saveWorkspaceModels(workspaceId: string, expected: number | null, value: WorkspaceModels, initializeLead: boolean): Promise<StoredWorkspaceModels> {
+    return this.transaction(async db => {
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      const [previous] = await rows(db, 'SELECT revision FROM workspace_models WHERE workspace_id = ?', [workspaceId]);
+      if (previous ? Number(previous.revision) !== expected : expected !== null) throw new AppError('config_conflict', 'Workspace models changed', 409);
+      const revision = previous ? Number(previous.revision) + 1 : initializeLead ? 1 : 0;
+      if (previous) await db.execute('UPDATE workspace_models SET revision = ?, data = ? WHERE workspace_id = ?', [revision, encode(value), workspaceId]);
+      else await db.execute('INSERT INTO workspace_models (workspace_id, revision, data) VALUES (?, ?, ?)', [workspaceId, revision, encode(value)]);
+      if (initializeLead) {
+        const [row] = await rows(db, 'SELECT id, workspace_id, revision, data FROM members WHERE workspace_id = ? AND is_lead = 1', [workspaceId]);
+        if (row) {
+          const lead = memberRow(row);
+          if (lead.value.settings.connectionId === null && lead.value.settings.modelId === null) {
+            const defaults = defaultRunSettings(value);
+            const settings = { ...lead.value.settings, connectionId: defaults.connectionId, modelId: defaults.modelId, modelOptions: defaults.modelOptions };
+            const next = { ...lead.value, settings };
+            next.configuration = generatedSource(next, lead.id, lead.revision + 1);
+            if (lead.value.configuration) next.configuration.path = lead.value.configuration.path;
+            await db.execute('UPDATE members SET data = ?, revision = revision + 1 WHERE id = ?', [encode(next), lead.id]);
+          }
+        }
+      }
+      return { revision, value };
     });
   }
 

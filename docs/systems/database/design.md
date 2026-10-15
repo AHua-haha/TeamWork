@@ -8,7 +8,7 @@ The completed frontend message history and the model-facing context history are 
 
 The database also persists editable app, provider-connection, tool/prompt catalog, and per-agent config records, plus saved model-discovery results. It preserves their values and revisions; the config system interprets and validates them.
 
-It also persists the workspace registry and, for each workspace's context base, the index of current files, every file version, version content, and the ordered change records. The workspace module and the context base decide what to store; the files themselves stay on disk.
+It also persists workspace model choices/default with revisions, the workspace registry and, for each workspace's context base, the index of current files, every file version, version content, and the ordered change records. The workspace module and the context base decide what to store; the files themselves stay on disk.
 
 It persists each workspace's team members: a member record with its revision, and the member's conversation, which is an agent in the runtime's sense. The team decides what a member record holds; the database keeps the lead unique and the names of active members unique.
 
@@ -53,7 +53,8 @@ It persists each workspace's team members: a member record with its revision, an
 - **Workspace registry:**
   - `listWorkspaces` returns `{workspaceId, name, directory, createdAt}` records ordered by name.
   - `getWorkspace` returns one record, or null.
-  - `createWorkspace(record, directoryKey, lead)` stores a record and its team's lead, with the lead's conversation, in one transaction. `directoryKey` identifies the directory, and no two workspaces share one. If any part fails, nothing is stored.
+  - `createWorkspace(record, directoryKey, lead, models?)` stores a record, its model settings when supplied, and its team's lead with the lead's conversation in one transaction. Optional models support low-level legacy import; normal workspace creation supplies them. `directoryKey` identifies the directory, and no two workspaces share one. If any part fails, nothing is stored.
+- **Workspace models.** `getWorkspaceModels` returns `{revision,value}` or null. `saveWorkspaceModels(workspaceId, expectedRevision, value, initializeLead)` writes the validated choices/default atomically; a null revision requires an absent record, otherwise the revision must match. With initializeLead, a lead with both connection/model unassigned receives the default and its accepted source bundle in that same transaction. Other members are unchanged. Stale writes fail with `config_conflict` and change nothing.
 - **Run results.** `runMessages(agentId, runId)` returns the completed messages of one run in order, so a caller can read a run's last assistant message without reading the agent's whole history.
 - **Loading.** `loadContext(workspaceId)` returns the workspace's sequence number and its current files from one consistent read. Each file has its path, file ID, revision, content hash, size, modification time, and its version's time, author, and reason.
 - **Committing.** `commitContext(workspaceId, expectedSeq, commit)` stores one change in one transaction:

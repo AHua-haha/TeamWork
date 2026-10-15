@@ -5,6 +5,7 @@ import { ContextFeed, WorkspaceClient, type ChangeRecord } from '../src/client/w
 import { streamResponse, until } from './fixtures.js';
 
 const workspaceId = 'w 1';
+const models = { models: [{ connectionId: 'main', modelId: 'm1' }], defaultModel: { connectionId: 'main', modelId: 'm1' } };
 const user = { type: 'user' } as const;
 
 function change(seq: number, path = `user/${seq}.md`): ChangeRecord {
@@ -33,7 +34,7 @@ test('workspace client sends paths, queries and bodies in the backend format', a
     return new Response(JSON.stringify({}));
   }) as typeof fetch);
   assert.deepEqual(await api.listWorkspaces(), []);
-  await api.createWorkspace({ name: 'Billing', directory: '/srv/billing', adopt: true });
+  await api.createWorkspace({ name: 'Billing', directory: '/srv/billing', adopt: true, models });
   await api.projectTree(workspaceId, 'src');
   await api.saveProject(workspaceId, 'docs/a b.md', 'text', null);
   await api.contextTree(workspaceId, 'user', 2);
@@ -48,7 +49,7 @@ test('workspace client sends paths, queries and bodies in the backend format', a
   await api.searchContext(workspaceId, 'todo', 'user');
   assert.deepEqual(calls, [
     { path: '/workspaces', method: 'GET', body: undefined },
-    { path: '/workspaces', method: 'POST', body: { name: 'Billing', directory: '/srv/billing', adopt: true } },
+    { path: '/workspaces', method: 'POST', body: { name: 'Billing', directory: '/srv/billing', adopt: true, models } },
     { path: '/workspaces/w%201/files/tree?path=src&depth=1', method: 'GET', body: undefined },
     { path: '/workspaces/w%201/files/file?path=docs%2Fa+b.md', method: 'PUT', body: { content: 'text', baseRevision: null } },
     { path: '/workspaces/w%201/context/tree?path=user&depth=2', method: 'GET', body: undefined },

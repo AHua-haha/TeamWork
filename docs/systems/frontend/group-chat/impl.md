@@ -44,7 +44,7 @@ MySqlStore owns chat timeline entries, immutable change records and a per-worksp
 - GroupClient: frontend/src/client/group-client.ts; group timeline reconciliation, commands and reconnect.
 - GroupChat and WorkingHistory: frontend/src/ui/GroupChat.tsx; rendering, composer, private disclosure.
 - Private projection: frontend/src/ui/group-work.ts; run/range filtering, tool-result pairing and accepted-text deduplication.
-- MemberRunSettings: frontend/src/ui/MemberRunSettings.tsx; revision-checked per-member model edits.
+- MemberInspector: frontend/src/ui/MemberInspector.tsx; read-only accepted member configuration and effective harnesses. WorkspaceModelsDialog edits workspace initialization choices/default independently of shared chat.
 - Integration: frontend/src/ui/WorkspacePage.tsx, useTeam.ts and TeamTab.tsx.
 - Tests: frontend/test/group.test.ts and backend/test/integration/backend.test.ts.
 

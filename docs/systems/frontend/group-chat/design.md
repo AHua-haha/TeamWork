@@ -78,7 +78,7 @@ Private inspection failure does not remove or replace shared messages. Failed, c
 
 - Enter submits; Shift+Enter inserts a newline. User drafts remain editable during member work. Show @ suggestions with current names and working/unavailable status; unavailable suggestions cannot be selected. Manually typed mentions are validated by the backend.
 - A refused send preserves draft and discussion reference and displays the reason beside the composer. An accepted send clears the submitted draft/reference without erasing edits made during submission.
-- Model settings are per member in Team, with no model selector implying one model for the entire group. Settings changes apply to subsequent runs.
+- Team shows accepted model settings per member read-only. Workspace models configures available choices/default for initialization; the lead manages member selections through file submission. There is no group model selector. Active runs retain their starting settings.
 - Chat-level Stop requests cancellation of current group work. Existing entries, completed effects and inspectable history remain.
 - Lost group connections reconnect from the last contiguous change cursor. Submission acknowledgements can show entries immediately but cannot advance that cursor or overwrite newer versions.
 - Follow only expanded private sections. Final responses remain visible if private inspection fails, with section-local retry.

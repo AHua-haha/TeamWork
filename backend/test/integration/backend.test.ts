@@ -1,3 +1,4 @@
+import { testModels, testModelValidator } from '../memory-store.js';
 import { emptyHarness } from '../../src/harness-config.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
@@ -25,7 +26,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a disposable MySQL 8.4 database (see README)');
 const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, createModels());
-const workspaces = new WorkspaceService(store);
+const workspaces = new WorkspaceService(store, testModelValidator);
 const testEncryptionKey = Buffer.alloc(32, 7).toString('base64');
 before(async () => {
   await store.migrate();
@@ -718,7 +719,7 @@ test('an agent config has no workspace, and one stored by the earlier binding is
 
 test('team members are stored with their conversation and kept out of the agent list', async () => {
   const directory = join(await mkdtemp(join(tmpdir(), 'members-')), 'project');
-  const { workspaceId } = await workspaces.create({ name: 'Members', directory, adopt: false });
+  const { workspaceId } = await workspaces.create({ name: 'Members', directory, models: testModels(), adopt: false });
   try {
     const record = (name: string, lead = false) => ({ workspaceId, name, role: 'developer', responsibility: '', harness: emptyHarness(), lead, settings: { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, createdAt: 1, retiredAt: null });
     const add = (name: string, lead = false) => store.createMember({ id: randomUUID(), workspaceId, lead, nameKey: name.toLowerCase(), value: record(name, lead) });
@@ -1020,7 +1021,7 @@ const code = (expected: string) => (error: unknown) => (error as { code?: string
 
 test('member harnesses edit in isolated worktrees, checkpoint runs and separate agent commits from user design acceptance', { timeout: 30_000 }, async () => {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'harness-prototype-')));
-  const workspaceService = new WorkspaceService(store);
+  const workspaceService = new WorkspaceService(store, { issuesFor: settings => service.issuesFor(settings) });
   const service = new ConfigService(store, builtinModels());
   const team = new TeamSystem(store, workspaceService, service);
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
@@ -1034,7 +1035,7 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
   try {
     const connectionId = `harness-test-${randomUUID()}`;
     await service.createConnection(connectionId, { label: 'Test model', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
-    const { workspaceId } = await workspaceService.create({ name: 'Harness prototype', directory: join(folder, 'project'), adopt: false });
+    const { workspaceId } = await workspaceService.create({ name: 'Harness prototype', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: false });
     const base = await workspaceService.context(workspaceId);
     const design = { content: 'Create src/result.txt with Done.', implementation: ['src/result.txt'] };
     await base.save('user/design.json', JSON.stringify(design), null, 'Initial accepted design');
@@ -1124,7 +1125,7 @@ test('workspace registry refuses duplicates; context commits reload with history
   const reopened = new MySqlStore(databaseUrl!);
   try {
     const directory = join(folder, 'project');
-    const { workspaceId } = await workspaces.create({ name: 'Integration', directory, adopt: false });
+    const { workspaceId } = await workspaces.create({ name: 'Integration', directory, models: testModels(), adopt: false });
     const record = (await store.getWorkspace(workspaceId))!;
     assert.equal(record.directory, directory);
     assert.ok((await store.listWorkspaces()).some(item => item.workspaceId === workspaceId));
@@ -1137,7 +1138,7 @@ test('workspace registry refuses duplicates; context commits reload with history
     await assert.rejects(store.getState(rival.id), code('not_found'));
     await assert.rejects(store.createWorkspace(record, sha256(randomUUID()), newLead(workspaceId)), code('workspace_exists'));
     assert.equal((await store.listMembers(workspaceId)).length, 1, 'a refused workspace adds no second lead');
-    await assert.rejects(workspaces.create({ name: 'Inner', directory: join(directory, 'inner'), adopt: false }), code('workspace_exists'));
+    await assert.rejects(workspaces.create({ name: 'Inner', directory: join(directory, 'inner'), models: testModels(), adopt: false }), code('workspace_exists'));
 
     const context = await workspaces.context(workspaceId);
     const saved = await context.save('user/a.md', 'alpha', null, 'first');
@@ -1157,7 +1158,7 @@ test('workspace registry refuses duplicates; context commits reload with history
     ]);
 
     // A second process reloads the index and finds nothing to record.
-    const service = new WorkspaceService(reopened);
+    const service = new WorkspaceService(reopened, testModelValidator);
     try {
       assert.equal((await service.get(workspaceId)).context.seq, 2);
       assert.equal((await (await service.context(workspaceId)).read({ path: 'user/b.md' })).content, 'alpha');
@@ -1189,9 +1190,55 @@ test('workspace registry refuses duplicates; context commits reload with history
   }
 });
 
+test('workspace model SQL persistence initializes leads atomically and default edits preserve assigned members', async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'workspace-models-')));
+  const service = new ConfigService(store, builtinModels());
+  const workspaceService = new WorkspaceService(store, service);
+  const team = new TeamSystem(store, workspaceService, service);
+  const connectionId = `workspace-models-${randomUUID()}`;
+  try {
+    await service.createConnection(connectionId, { label: 'Workspace models', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
+    const first = { connectionId, modelId: 'gpt-4.1-mini', maxTokens: 100 };
+    const second = { connectionId, modelId: 'gpt-4.1' };
+    const pool = { models: [first, second], defaultModel: { connectionId, modelId: first.modelId } };
+    const created = await workspaceService.create({ name: 'Models', directory: join(folder, 'project'), adopt: false, models: pool });
+    const lead = (await team.service.active(created.workspaceId))[0]!;
+    assert.equal(lead.value.settings.modelId, first.modelId);
+    assert.equal(lead.value.settings.modelOptions[0]?.maxTokens, 100);
+    const initial = await workspaceService.models(created.workspaceId);
+    const raced = await Promise.allSettled([
+      workspaceService.updateModels(created.workspaceId, initial.revision, { ...pool, defaultModel: second }),
+      workspaceService.updateModels(created.workspaceId, initial.revision, { ...pool, defaultModel: second }),
+    ]);
+    assert.equal(raced.filter(r => r.status === 'fulfilled').length, 1);
+    assert.equal(raced.filter(r => r.status === 'rejected' && code('config_conflict')(r.reason)).length, 1);
+    assert.deepEqual(await team.service.find(lead.id), lead);
+    const member = await team.service.create(created.workspaceId, { name: 'Worker', role: 'developer' });
+    assert.equal(member.settings.modelId, second.modelId);
+    const reopened = new MySqlStore(databaseUrl!);
+    try { assert.deepEqual(await reopened.getWorkspaceModels(created.workspaceId), { revision: initial.revision + 1, value: { ...pool, defaultModel: second } }); }
+    finally { await reopened.close(); }
+    const legacyId = randomUUID();
+    await store.createWorkspace({ workspaceId: legacyId, name: 'Legacy', directory: join(folder, 'legacy'), createdAt: Date.now() }, sha256(legacyId), newLead(legacyId));
+    const saved = await workspaceService.updateModels(legacyId, 0, pool);
+    const legacyLead = (await team.service.active(legacyId))[0]!;
+    assert.equal(legacyLead.value.settings.modelId, first.modelId);
+    assert.equal(JSON.parse(legacyLead.value.configuration!.files['member.json']!).settings.modelId, first.modelId);
+    await workspaceService.updateModels(legacyId, saved.revision, { ...pool, defaultModel: second });
+    assert.deepEqual(await team.service.find(legacyLead.id), legacyLead);
+    const failedId = randomUUID();
+    const collision = { ...newLead(failedId), id: lead.id };
+    await assert.rejects(store.createWorkspace({ workspaceId: failedId, name: 'Fail', directory: join(folder, 'fail'), createdAt: Date.now() }, sha256(failedId), collision, pool));
+    assert.equal(await store.getWorkspace(failedId), null);
+    assert.equal(await store.getWorkspaceModels(failedId), null);
+    await assert.rejects(workspaceService.create({ name: 'Bad provider', directory: join(folder, 'bad'), adopt: false, models: testModels('missing', 'missing') }), code('invalid_config'));
+    await assert.rejects(stat(join(folder, 'bad')), code('ENOENT'));
+  } finally { await team.runner.close(); await workspaceService.close(); await rm(folder, { recursive: true, force: true }); }
+});
+
 async function groupFixture() {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'group-chat-')));
-  const workspaceService = new WorkspaceService(store);
+  const workspaceService = new WorkspaceService(store, { issuesFor: settings => service.issuesFor(settings) });
   const service = new ConfigService(store, builtinModels());
   const team = new TeamSystem(store, workspaceService, service);
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
@@ -1201,7 +1248,7 @@ async function groupFixture() {
   team.attach(runtime);
   const connectionId = `group-${randomUUID()}`;
   await service.createConnection(connectionId, { label: 'Group test', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
-  const { workspaceId } = await workspaceService.create({ name: 'Group', directory: join(folder, 'project'), adopt: false });
+  const { workspaceId } = await workspaceService.create({ name: 'Group', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: false });
   const first = (await team.team(workspaceId)).members[0]!;
   const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: first.harness, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
   await team.designs.save(workspaceId, 'user/design.json', { content: 'Shared test design', implementation: ['.'] }, null, 'Test', { type: 'lead', memberId: lead.memberId, runId: 'fixture' });

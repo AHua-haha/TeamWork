@@ -4,7 +4,7 @@
 
 The frontend lets a user:
 
-- add a workspace, converse with its team in shared group chat, inspect folded member work, and choose each member’s model and reasoning;
+- add a workspace, converse with its team in shared group chat, inspect folded member work, and configure workspace model choices/default and inspect member settings;
 - read the current project designs and their implementation mappings, inspect members and their harnesses, and view and edit the workspace's files: its context base and the project's own files;
 - open a conversation with an agent that belongs to no workspace, follow its run, and choose its model and reasoning;
 - manage the provider connections from which models are available.
@@ -22,7 +22,7 @@ The backend owns execution, durable group history and response ordering, private
 - A model selection is identified by both the provider connection ID and model ID. Names and model IDs alone need not be unique across connections.
 - A connection includes its display name, provider, request protocol, endpoint URL, and whether a key is configured. The API key is write-only to the backend; read responses do not contain it.
 - A model choice supplies its display label, its reasoning levels (the shared scale `off, low, medium, high, xhigh` for reasoning models, none otherwise), the level each scale step is actually sent as for that model, its effective default level, maximum output, context window, and whether its metadata is verified. A listed model is an available choice, not proof that a credential can invoke it.
-- A solo agent's config holds the selected model and a separate settings entry per model for that conversation: reasoning, maximum output tokens, temperature, and context budget. Each member’s run settings hold the same fields, as the [Config design](../config/design.md) defines, and are saved through that member’s record. Omitted values use the model's defaults. Existing configs may also contain prompts and tools; this UI revision does not expose editors for them and preserves their saved values.
+- A solo agent's config holds the selected model and a separate settings entry per model for that conversation: reasoning, maximum output tokens, temperature, and context budget. Each member’s run settings hold the same fields, as the [Config design](../config/design.md) defines, and are activated through validated file submission by the lead. Omitted values use the model's defaults. Existing configs may also contain prompts and tools; this UI revision does not expose editors for them and preserves their saved values.
 - For solo conversations, sending a message supplies user input only. The backend resolves a copy of the agent's saved config at run start and constructs the model request from its own context history. Edits made during a run take effect from the next run.
 - The backend supplies a current design catalog with valid user-design summaries, independent of membership and explicitly marked when truncated, plus current selected design content or an invalid-record issue.
 - The backend supplies registered workspaces and their project files as the [Workspace design](../workspace-agent/workspace/design.md) defines, and each workspace's context base as the [Context base design](../workspace-agent/context-base/design.md) defines. Both include listings, reads, saves guarded by revisions, and find. The context base also supplies moves, deletes, history, and an ordered change feed. User context is writable through the frontend; agent context is read-only.
@@ -44,11 +44,11 @@ The backend owns execution, durable group history and response ordering, private
 ### Conversations destination
 
 - The secondary sidebar has two sections that are not nested: **Workspaces**, with an **Add workspace** action and the registered workspaces ordered by name, and **Conversations**, with a **New conversation** action and the solo agents. Each entry opens its page. A solo agent is listed by its saved name, or a neutral short-ID fallback. Neither list claims to be sorted by recent activity because the backend does not provide activity time. The sidebar does not list team members.
-- **Add workspace** opens a dialog for a name, an absolute folder on the backend's machine, and a choice between creating a new folder and using an existing one. On success it opens the new workspace, whose lead is ready to be given a model. A refused request keeps the dialog open with the backend's message.
+- **Add workspace** opens a dialog for a name, an absolute folder on the backend's machine, and a choice between creating a new folder and using an existing one, and workspace model choices with a default. On success it opens the new workspace, whose lead is initialized with that default. A refused request keeps the dialog open with the backend's message.
 - A solo conversation may be renamed from its sidebar entry by editing the agent's saved name, preserving every other config field. The UI does not offer deleting or renaming workspaces or deleting conversations in this revision because the backend has no operation for them.
 - **New conversation** creates a backend agent and initializes its config with empty optional fields. It opens immediately, shows the model choices needed before sending, and starts no run on creation. If app config disallows agent creation, the action is disabled and explains why.
 - The main area shows the selected conversation's visible message history and current run state. Opening, refreshing, or reconnecting synchronizes completed history before following available live output. Leaving and returning to a conversation does not cancel its run.
-- A workspace page opens shared group chat. Configure member models in Team. The composer can address free members while others work; refused busy/unready mentions preserve the draft. Stop team cancels current group work.
+- A workspace page opens shared group chat. Inspect member models and configure workspace model choices in Team. The composer can address free members while others work; refused busy/unready mentions preserve the draft. Stop team cancels current group work.
 - Leaving a workspace page, by the sidebar, the rail, or the browser's back and forward, while one of its open files has unsaved edits first asks to discard them. Staying keeps the conversation, its files, and the edits.
 
 ### Config destination and Providers page
@@ -59,7 +59,7 @@ The backend owns execution, durable group history and response ordering, private
 - Provider presets may prefill provider, protocol, and endpoint, but all saved values remain reviewable before submission. Refresh attempts endpoint model discovery. The page distinguishes Pi-known models from endpoint-discovered models and indicates unverified metadata. A refresh failure leaves the connection and any previously saved choices visible when still applicable.
 - Delete asks for confirmation and explains that agents using the connection will need another model before their next run. The page never displays a raw API key. After a successful add, edit, refresh, or delete, the overview uses backend results rather than pretending a request succeeded before confirmation.
 
-### Composer model and reasoning controls
+### Solo composer model and reasoning controls
 
 - The composer contains one compact trigger showing the selected model and reasoning state. With a selected model, opening its popover shows a compact model button and reasoning control; the full model list starts collapsed. Clicking that model expands the list to switch models. With no selected model, the list opens directly. The list includes models from **all** configured connections, grouped or labeled by connection. It does not require a provider selection step. A selected row has a checkmark; duplicate model names remain distinguishable by connection label. An unavailable saved choice is shown as unavailable rather than silently replaced.
 - A search icon at the top of the popover reveals or hides the model search field; the field starts hidden. Revealing search also expands the model list. Selecting a model saves its connection ID and model ID, then folds the list back to the compact view.
@@ -67,7 +67,7 @@ The backend owns execution, durable group history and response ordering, private
 - The reasoning control is a compact stepped slider with the same five stops for every reasoning model: Off, Low, Medium, High, XHigh. It has a slim pill-shaped track, a blue filled portion with subtle sparkle dots, a round white thumb, and small dots marking the unfilled stops. The current level's name appears prominently in the header button above the model name. With no saved level, the slider shows Off without writing it. Dragging or keyboard adjustment saves the named level when the interaction finishes. When the selected model does not support the chosen level, a small “Sent as …” note under the slider names the level actually sent. A model without reasoning support shows “No reasoning” instead of a slider. The slider never sends an arbitrary numeric value.
 - Below the slider, a **More settings** section edits maximum output tokens, temperature, and context budget for the selected model. These change rarely, so the section is folded each time the popover opens, and each field defaults to unset. When folded, it indicates how many of the selected model's values are customized. When expanded, each unset field reads Default with the model's limit (maximum output and context window, or 0–2 for temperature), and each customized field can be cleared back to Default. Its edits are staged and applied as one update for that model; invalid values are explained before saving. Context budget is labeled as saved for future context management.
 - Choosing a model, reasoning level, or More settings change persists it for this conversation's later runs once the save succeeds. During a run, a changed choice is labeled as applying to the next run. In a solo conversation, Send is unavailable while a model or settings change is unsaved, saving, failed, or invalid, or while the selected model's saved settings no longer fit it. The composer does not offer provider selection.
-- On a workspace page expanded Team cards offer these controls for each member. There is no group-wide model choice. Member settings are saved through its revision-checked record; active runs keep their starting settings.
+- Workspace Team cards show accepted member model settings read-only. Workspace models controls edit initialization choices/default; the lead manages member choices through configuration files. Active runs keep their starting settings.
 - On opening the picker, the frontend refreshes the connection list and model choices. Config writes use the revision last read. A stale revision requires reviewing the latest stored value before saving; the UI does not overwrite another edit without review.
 
 ### Conversation synchronization and display
@@ -105,14 +105,14 @@ The Design and Team views expose current information only. New design-history, v
 - **Discuss with lead.** A design or member action adds a removable reference to the group composer without sending a message or discarding typed text. The next user-submitted message includes that reference in its text. It works while members are busy, but submission follows the normal busy/readiness rules. A successful accepted submission clears its reference; a refused submission preserves it. References belong to their workspace and reset when leaving it.
 - **Team view.** It lists the workspace's members, the lead first, each as a card:
   - the name, with the lead marked, and the role;
-  - a status: **Working** while the member is running, **Idle** when it can run, or **Cannot run** with the reasons when it has issues; the member without a model says to expand its card and select one;
+  - a status: **Working** while the member is running, **Idle** when it can run, or **Cannot run** with the reasons when it has issues; an unconfigured lead points to Workspace models for initial model setup; other member issues are discussed with the lead;
   - the responsibility, selected model, working design paths and dependency design paths, linked to the Design view;
-  - per-member model/reasoning controls in the expanded card;
+  - read-only model/run settings, accepted JSON/Markdown config files and fixed harness operating rules in the expanded card;
   - an expandable harness section with explicit editable implementation paths and read-only use paths and exact command vectors or allowed executable names; dependency read-only precedence is explained;
   - Discuss with lead, plus a selected member indication when navigating from a design;
   - a design path opens the current Design view; implementation files open in file tabs and directories are revealed in Files. Design references stay separate from actual file permissions; implementation mapping edits do not change the displayed permission scope.
 
-  A note says the lead manages team responsibilities and harnesses. The user can edit member model settings, and discusses other changes with the lead. Team reads refresh on group updates and focus, every three seconds during team work, and when work ends. Failed reads show Retry and retain the last team shown.
+  A note says the lead manages team responsibilities and harnesses. The user edits workspace model choices/default through Workspace models, and discusses member changes with the lead. Team reads refresh on group updates and focus, every three seconds during team work, and when work ends. Failed reads show Retry and retain the last team shown.
 - **Trees.** The tree shows two sections:
   - **Context base**: the **User context** tree with its file count, and the read-only **Agent context** tree. A status shows whether changes arrive live: Connecting, Live, Reconnecting, or Updates stopped. Files the backend cannot serve are listed, folded, with the reason for each.
   - **Project**: the workspace folder's files, as the backend lists them, with a refresh action.
@@ -157,7 +157,7 @@ The Design and Team views expose current information only. New design-history, v
 - Group ordering and lifecycle state come from backend persistence. Private work is loaded separately and never added to shared communication by the UI.
 - Member color is stable by identity; names are readable and retain their publication attribution. Color alone does not convey identity.
 - Model choices come from backend metadata. Settings are persistent per solo agent or member and per model; active runs keep their start configuration. Provider keys are write-only.
-- Team model saves preserve identity, responsibility and harness. Other management/design changes are discussed with the lead. The frontend never changes model context or agent-context files.
+- Workspace model saves preserve existing member selections, identity, responsibility and harness. Member configuration/design changes are discussed with the lead. The frontend never changes model context or agent-context files.
 - Workspace user-context/project edits use explicit revisions. File content is plain text or safely rendered Markdown without raw HTML execution.
 - One group chat per workspace. No design-version UI, group attachments/edit/delete, automatic retry of refused publications, or automatic harness-context maintenance. Team readiness is refreshed on group updates, focus and every three seconds while team work is active.
 - Full final reports have no excerpt/crop. Long histories remain loaded in the current page; initial group replay is paged by the backend but no transcript virtualization is promised. Existing file-tab persistence and supported Markdown limits remain.
@@ -166,7 +166,7 @@ The Design and Team views expose current information only. New design-history, v
 
 1. **Collapse navigation:** with a conversation open, the user collapses the Conversations sidebar. The icon rail and conversation remain; reopening the sidebar highlights the same conversation.
 2. **Start a conversation:** New conversation creates an agent, opens its empty history, and asks for a model. No run begins until the user sends input with a valid saved config.
-2a. **Add a workspace:** Add workspace with a name and a new folder registers the workspace and opens its page. The group chat is empty; model settings are available in Team; the sidebar lists the workspace under Workspaces and not under Conversations. After a member is configured, accepted input reserves its response and displays its final in place.
+2a. **Add a workspace:** Add workspace with a name and a new folder registers the workspace and opens its page. The group chat is empty; the lead uses the selected workspace default and workspace model settings are available in Team; the sidebar lists the workspace under Workspaces and not under Conversations. After a member is configured, accepted input reserves its response and displays its final in place.
 2b. **See the team:** the user opens the panel on a workspace page. The Team view lists current members and their working status when refreshed. Workers created through the backend's lead tools appear with their configured harness. Shared final responses appear in the chat and each activation has a folded working section.
 2c. **Observe a working lead:** while members are working, the user may address free members. Busy mentions are refused without losing the draft. Stop team cancels current branches.
 
@@ -198,3 +198,9 @@ The Design and Team views expose current information only. New design-history, v
 
 26. **Reverse completion:** Backend and Frontend receive one accepted message. Both sections appear immediately; Frontend finishing first leaves it after Backend’s reserved section. Reload reproduces that order.
 27. **Failure and inspection:** cancel a member with intermediate work. Its section shows Cancelled with the folded trace; no final response is invented. A private-history error offers local retry and keeps completed reports readable.
+
+## Workspace models and member inspection
+
+Creating or adopting a workspace requires selecting its model choices and a default before submission. Provider/model discovery comes from configured providers. The same workspace models editor can update choices/default with revision protection from the Team view. Unsaved/error states remain visible; invalid choices are not silently replaced. A missing provider list explains how to configure providers. A default change affects future initialization; the editor explains that existing selections remain. A legacy unconfigured lead becomes usable when workspace models are saved.
+
+Member details are read-only and loaded from the member inspection endpoint. Show model/configuration, Project and Command harness tools/scopes/rules and the accepted manifest/prompt files. Pending drafts are not presented as active configuration. Remove model-setting save controls and the frontend member update client. Workspace inspection and provider configuration remain available. Existing Design/Files review behavior is retained.

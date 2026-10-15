@@ -11,11 +11,6 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     identity(workspaceId, 'workspaceId');
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
-    if (area === 'members' && memberId && extra.length === 1 && extra[0] === 'config' && method === 'GET') {
-      query(url, []);
-      json(response, 200, await team.configuration.accepted(workspaceId, memberId));
-      return;
-    }
     if (area === 'members' && memberId && extra[0] === 'harness') {
       identity(memberId, 'memberId');
       await team.member(workspaceId, memberId);
@@ -73,27 +68,8 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
       json(response, 200, await team.team(workspaceId));
       return;
     }
-    if (memberId === undefined) {
-      if (method !== 'POST') throw notFound();
-      const input = await body(request, maxBodyBytes);
-      fields(input, ['name', 'role', 'responsibility', 'harness', 'settings']);
-      json(response, 201, await team.create(workspaceId, input));
-      return;
-    }
+    if (method !== 'GET' || memberId === undefined) throw notFound();
     identity(memberId, 'memberId');
-    if (method === 'GET') {
-      json(response, 200, await team.member(workspaceId, memberId));
-    } else if (method === 'PUT') {
-      const input = await body(request, maxBodyBytes);
-      fields(input, ['revision', 'value']);
-      position(input.revision);
-      json(response, 200, await team.update(workspaceId, memberId, input.revision, input.value));
-    } else if (method === 'DELETE') {
-      const input = await body(request, maxBodyBytes);
-      fields(input, ['revision']);
-      position(input.revision);
-      await team.runner.retire(workspaceId, memberId, input.revision);
-      json(response, 200, { retired: memberId });
-    } else throw notFound();
+    json(response, 200, await team.inspect(workspaceId, memberId));
   };
 }

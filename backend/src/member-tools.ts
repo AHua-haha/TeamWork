@@ -1,19 +1,12 @@
 import { Type } from '@earendil-works/pi-ai';
-import type { ConnectionView, ModelChoice } from './config.js';
-import type { StoredConfig } from './database.js';
 import type { RuntimeTool } from './runtime.js';
 import type { TeamRunner } from './team-runner.js';
 import { type StoredMember, type TeamService } from './team.js';
 import { AppError } from './types.js';
 import { refusing } from './tool-result.js';
 
-export interface ModelDirectory {
-  listConnections(): Promise<StoredConfig<ConnectionView>[]>;
-  modelChoices(connectionId: string): Promise<ModelChoice[]>;
-}
-
 /** The tools that belong to the team: team management for the lead. */
-export function teamTools(team: TeamService, runner: TeamRunner, models: ModelDirectory): { management: RuntimeTool[] } {
+export function teamTools(team: TeamService, runner: TeamRunner): { management: RuntimeTool[] } {
   const lead = async (agentId: string): Promise<StoredMember> => {
     const member = await team.find(agentId);
     if (!member?.value.lead || member.value.retiredAt !== null) throw new AppError('access_denied', 'Only the lead changes the team', 403);
@@ -40,15 +33,8 @@ export function teamTools(team: TeamService, runner: TeamRunner, models: ModelDi
         }),
       },
       {
-        definition: { name: 'list_models', description: 'List the provider connections and the models each offers, for choosing a member\'s model.', parameters: Type.Object({}) },
-        execute: () => refusing(async () => {
-          const lines: string[] = [];
-          for (const connection of await models.listConnections()) {
-            lines.push(`${connection.id} (${connection.value.label}):`);
-            for (const choice of await models.modelChoices(connection.id)) lines.push(`  ${choice.modelId}${choice.reasoning ? ' [reasoning]' : ''}${choice.verified ? '' : ' [unverified]'}`);
-          }
-          return lines.length ? lines.join('\n') : 'No provider connections are configured.';
-        }),
+        definition: { name: 'list_models', description: 'List this workspace’s configured model choices and default for member configuration.', parameters: Type.Object({}) },
+        execute: (_args, scope) => refusing(async () => JSON.stringify(await team.models((await lead(scope.agentId)).workspaceId), null, 2)),
       },
     ],
   };

@@ -1,9 +1,12 @@
 import { BackendError, waitForRetry } from './agent-client.js';
-import { json, type RunSettings } from './config-client.js';
+import { json, type RunSettings, type ModelOptions } from './config-client.js';
 import { ProtocolError, readSse, type SseFrame } from './sse.js';
 
 export interface WorkspaceRecord { workspaceId: string; name: string; directory: string; createdAt: number }
-export interface WorkspaceInput { name: string; directory: string; adopt: boolean }
+export interface ModelReference { connectionId: string; modelId: string }
+export interface WorkspaceModels { models: ModelOptions[]; defaultModel: ModelReference | null }
+export interface WorkspaceModelsRecord { revision: number; value: WorkspaceModels; issues: string[] }
+export interface WorkspaceInput { name: string; directory: string; adopt: boolean; models: WorkspaceModels }
 export interface Problem { path: string; code: string; message: string }
 export interface ContextOverview { workspaceId: string; seq: number; user: { files: number; bytes: number }; agent: { files: number; bytes: number }; problems: Problem[] }
 export interface Workspace extends WorkspaceRecord { context: ContextOverview }
@@ -33,7 +36,13 @@ export interface Member {
   lead: boolean; settings: RunSettings; issues: string[]; ready: boolean; running: boolean;
 }
 export interface Team { workspaceId: string; members: Member[] }
-export type MemberFields = Pick<Member, 'name' | 'role' | 'responsibility' | 'harness' | 'settings'>;
+export interface HarnessPart { id: string; paths: string[]; exclude: string[]; commit: 'agent' | 'user'; prompt: string }
+export interface HarnessDefinition { id: string; tools: string[]; prompt: string; parts: HarnessPart[] }
+export interface MemberInspection {
+  member: Member;
+  configuration: { path: string; files: Record<string, string>; digest: string; submittedBy: string; submittedAt: number } | null;
+  harnesses: HarnessDefinition[];
+}
 
 const query = (path: string, values: Record<string, string | number | null | undefined>) => {
   const params = new URLSearchParams();
@@ -56,10 +65,9 @@ export class WorkspaceClient {
   getWorkspace(workspaceId: string): Promise<Workspace> { return this.get(this.base(workspaceId)); }
 
   team(workspaceId: string): Promise<Team> { return this.get(`${this.base(workspaceId)}/team`); }
-  /** Changes a member at the revision last read; the lead's run settings are changed this way. */
-  updateMember(workspaceId: string, memberId: string, revision: number, value: MemberFields): Promise<Member> {
-    return this.write(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}`, 'PUT', { revision, value });
-  }
+  inspectMember(workspaceId: string, memberId: string): Promise<MemberInspection> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}`); }
+  workspaceModels(workspaceId: string): Promise<WorkspaceModelsRecord> { return this.get(`${this.base(workspaceId)}/models`); }
+  updateWorkspaceModels(workspaceId: string, revision: number, value: WorkspaceModels): Promise<WorkspaceModelsRecord> { return this.write(`${this.base(workspaceId)}/models`, 'PUT', { revision, value }); }
 
   designs(workspaceId: string): Promise<DesignCatalog> { return this.get(`${this.base(workspaceId)}/designs`); }
   readDesign(workspaceId: string, path: string): Promise<CurrentDesign> { return this.get(query(`${this.base(workspaceId)}/designs/file`, { path })); }

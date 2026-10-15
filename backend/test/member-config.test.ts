@@ -1,3 +1,4 @@
+import { testModels, testModelValidator } from './memory-store.js';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -102,7 +103,7 @@ test('submission enforces accepted lead authority, target workspace, revisions a
   const both = await Promise.allSettled([submit(f), submit(f)]);
   assert.equal(both.filter(r => r.status === 'fulfilled').length, 1);
   assert.equal(both.filter(r => r.status === 'rejected' && code('config_conflict')(r.reason)).length, 1);
-  const other = await f.workspaces.create({ name: 'Other', directory: join(f.folder, 'other'), adopt: false });
+  const other = await f.workspaces.create({ name: 'Other', directory: join(f.folder, 'other'), models: testModels(), adopt: false });
   const foreign = (await f.team.service.team(other.workspaceId)).members[0]!;
   await draft(f, { ...m, memberId: foreign.memberId, revision: foreign.revision });
   await assert.rejects(submit(f), code('not_found'));
@@ -128,6 +129,25 @@ test('source persistence failures activate nothing and user edits retain an acce
   assert.equal(source.files['prompts/member.md'], updated.settings.prompt);
   assert.equal(source.submittedBy, 'user');
   await assert.rejects(submit(f), code('config_conflict'));
+}));
+
+test('member submission follows workspace defaults and choices while preserving an existing model removed from the list', () => withTeam(async f => {
+  const model = { connectionId: 'conn', modelId: 'second', reasoning: 'high' as const };
+  const current = await f.workspaces.models(f.workspaceId);
+  await f.workspaces.updateModels(f.workspaceId, current.revision, { models: [...current.value.models, model], defaultModel: { connectionId: model.connectionId, modelId: model.modelId } });
+  const first = manifest(); await draft(f, first); const created = await submit(f);
+  assert.equal(created.member.settings.modelId, 'second');
+  assert.equal(created.member.settings.modelOptions.find(m => m.modelId === 'second')?.reasoning, 'high');
+  assert.equal((await f.team.service.find(f.lead.memberId))!.value.settings.modelId, 'model');
+  const pool = await f.workspaces.models(f.workspaceId);
+  await f.workspaces.updateModels(f.workspaceId, pool.revision, { models: current.value.models, defaultModel: current.value.defaultModel });
+  first.memberId = created.member.memberId; first.revision = created.member.revision;
+  await draft(f, first); const retained = await submit(f);
+  assert.equal(retained.member.settings.modelId, 'second', 'scope edits preserve the existing assigned model');
+  const source = await f.team.service.find(retained.member.memberId);
+  await draft(f, { ...first, revision: retained.member.revision, settings: { connectionId: 'conn', modelId: 'outside' } });
+  await assert.rejects(submit(f), code('invalid_config'));
+  assert.deepEqual(await f.team.service.find(retained.member.memberId), source);
 }));
 
 test('fixed purpose bases keep tools and approval while scope grants are independent of design mappings', () => withTeam(async f => {

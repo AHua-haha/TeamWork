@@ -107,7 +107,7 @@ export class HarnessService {
     }
     const history = await opening;
     const root = await history.worktree(id);
-    const definitions = purposeHarnesses(member, resolved);
+    const definitions = purposeHarnesses(member);
     const parts = definitions.flatMap(d => d.parts);
     validateParts(parts);
     for (const part of parts) await history.ensure(id, part, root);
@@ -210,9 +210,9 @@ export class HarnessService {
     const member = await this.active(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const env = await this.operation(id, () => this.environment(id));
-    const available = [...harnessFileTools(this, env.parts.length > 0), ...harnessHistoryTools(this), ...(member.value.harness.allowedCommands.length ? [harnessCommandTool(this)] : [])];
+    const available = [...harnessFileTools(this, env.parts.length > 0), ...harnessHistoryTools(this), ...(member.value.harness.allowedCommands.length ? [harnessCommandTool(this)] : []), ...teamTools];
     const selected = new Set(env.definitions.flatMap(d => d.tools));
-    const tools = [...available.filter(tool => selected.has(tool.definition.name)), ...teamTools];
+    const tools = available.filter(tool => selected.has(tool.definition.name));
     const parts = [
       '## Your harness',
       `Your private worktree is ${env.root}. Use paths relative to it. Other members have separate working files.`,

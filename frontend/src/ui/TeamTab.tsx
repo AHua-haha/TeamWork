@@ -1,5 +1,7 @@
-import { MemberRunSettings } from './MemberRunSettings.js';
-import { useEffect, useRef } from 'react';
+import { MemberInspector } from './MemberInspector.js';
+import { WorkspaceModelsDialog } from './WorkspaceDialogs.js';
+import { WorkspaceClient } from '../client/workspace-client.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DesignSummary, Member, Workspace } from '../client/workspace-client.js';
 import { implementationAccess } from './design-state.js';
 import { memberStatus, modelText } from './team-state.js';
@@ -12,12 +14,15 @@ export function TeamTab({ team, workspace, selected, onSelect, onDesign, onImple
   onDiscuss(member: Member): void; onBrowse(): void;
 }) {
   const members = team.team?.members ?? [];
+  const client = useMemo(() => new WorkspaceClient(), []);
+  const [modelsOpen, setModelsOpen] = useState(false);
   const cards = useRef(new Map<string, HTMLLIElement>());
   useEffect(() => { if (selected) cards.current.get(selected)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [selected]);
   return <div className="team-tab">
+    {modelsOpen && <WorkspaceModelsDialog client={client} workspaceId={workspace.workspaceId} onClose={() => setModelsOpen(false)} onSaved={() => { setModelsOpen(false); void team.refresh(); }} />}
     <div className="team-head">
       <div><span className="eyebrow">TEAM</span><h2>{workspace.name}</h2></div>
-      <button type="button" className="secondary-button" onClick={onBrowse}>Browse files</button>
+      <div className="team-header-actions"><button type="button" className="secondary-button" onClick={() => setModelsOpen(true)}>Workspace models</button><button type="button" className="secondary-button" onClick={onBrowse}>Browse files</button></div>
     </div>
     <p className="team-note">The lead manages the team. Select a member to inspect its harness, or discuss changes with the lead.</p>
     {team.error && <div className="sidebar-error" role="alert">{team.error}<button type="button" onClick={() => void team.refresh()}>Retry</button></div>}
@@ -35,7 +40,7 @@ export function TeamTab({ team, workspace, selected, onSelect, onDesign, onImple
             <span className="member-role">{member.role}</span>
             <span className={`member-status ${status.label.replace(' ', '-').toLowerCase()}`}><span className="status-dot" />{status.label}</span>
           </div>
-          {status.reasons.length > 0 && <p className="member-reasons">{status.reasons.join(' · ')}{member.lead && status.reasons.includes('Select a provider and model') ? '. Expand this member to choose a model.' : ''}</p>}
+          {status.reasons.length > 0 && <p className="member-reasons">{status.reasons.join(' · ')}{member.lead && status.reasons.includes('Select a provider and model') ? '. Open Workspace models to configure its initial model.' : ''}</p>}
           <p className="member-responsibility">{member.responsibility || 'No responsibility given yet.'}</p>
           <dl className="member-facts">
             <dt>Model</dt><dd>{modelText(member) ?? 'None selected'}</dd>
@@ -45,7 +50,7 @@ export function TeamTab({ team, workspace, selected, onSelect, onDesign, onImple
           <div className="member-actions"><button type="button" className="text-button" aria-expanded={expanded} onClick={() => onSelect(expanded ? null : member.memberId)}>{expanded ? 'Hide harness' : 'Inspect harness'}</button>
             <button type="button" className="text-button" onClick={() => onDiscuss(member)}>Discuss with lead</button></div>
           {expanded && <section className="member-harness" aria-label={`${member.name} harness`}>
-            <MemberRunSettings workspaceId={workspace.workspaceId} member={member} team={team} />
+            <MemberInspector workspaceId={workspace.workspaceId} member={member} />
             <h3>File-tool scope</h3>
             <p>Working designs can be edited as pending changes; only the user accepts design commits. Dependency designs are read-only.</p>
             {member.lead && <p>The lead can inspect the workspace and maintain user designs and member configuration drafts.</p>}
@@ -54,10 +59,6 @@ export function TeamTab({ team, workspace, selected, onSelect, onDesign, onImple
             <h4>Read-only use paths</h4>
             {readonly.length ? <ScopePaths paths={readonly} access={() => 'Read only'} onOpen={onImplementation} /> : <p>No use paths assigned.</p>}
             <p>Implementation paths are assigned explicitly. Design mappings do not grant file access. Read-only use paths take precedence on overlap.</p>
-            <h4>Allowed commands</h4>
-            {member.harness.allowedCommands.length ? <ul className="command-rules">{member.harness.allowedCommands.map((rule, index) => <li key={index}>
-              <span>{rule.kind === 'exact' ? 'Exact command' : 'Executable with arguments'}</span><code>{rule.kind === 'exact' ? JSON.stringify(rule.argv) : rule.executable}</code>
-            </li>)}</ul> : <p>None allowed.</p>}
           </section>}
         </li>;
       })}

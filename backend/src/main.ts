@@ -11,7 +11,7 @@ if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
 const models = builtinModels();
 const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
-const workspaces = new WorkspaceService(store);
+const workspaces = new WorkspaceService(store, config);
 const team = new TeamSystem(store, workspaces, config);
 const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models));
 team.attach(runtime);
