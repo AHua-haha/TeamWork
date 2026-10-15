@@ -521,6 +521,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-timeline { width: 100%; max-width: calc(var(--group-reading-width) + 2 * var(--group-run-padding) + 2 * var(--group-avatar-gutter)); margin-inline: auto; }
 .group-member, .group-user { display: grid; grid-template-columns: var(--group-avatar-gutter) minmax(0, 1fr) var(--group-avatar-gutter); align-items: start; }
 .group-run-card { grid-column: 2; grid-row: 2; min-width: 0; min-height: var(--group-avatar-size); padding: 18px var(--group-run-padding) var(--group-run-padding); border: 0; border-top: 1px solid #e9ede8; background: transparent; }
+/* Match the first text line to the fixed avatar center, using its own typography. */
+.group-run-card:has(> .group-member-body > .group-final:first-child > .markdown > :is(p, h1, h2, h3, h4, h5, h6):first-child) { padding-top: 0; }
+.group-final:first-child > .markdown > :is(p, h1, h2, h3, h4, h5, h6):first-child { padding-top: calc((var(--group-avatar-size) - 1lh) / 2 - 1px); }
 .group-member-body { min-width: 0; }
 .group-run-area { grid-column: 2; grid-row: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; padding-bottom: 8px; }
 .group-identity { display: flex; flex-direction: column; align-items: center; gap: 6px; width: var(--group-avatar-size); }
