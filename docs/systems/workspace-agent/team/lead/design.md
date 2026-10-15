@@ -40,3 +40,7 @@ Use common file tools to edit .team/members/<bundle>/member.json and referenced 
 ## Workspace model selection
 
 New members start with the workspace default and its configured per-model options, independently of the lead's current selection. The lead may choose another workspace model in the submitted manifest. An existing member may keep a selection removed from workspace choices, but switching to an outside choice is refused. Provider/model validity is checked on submission. The frontend only inspects member configuration; workspace default edits preserve already assigned members.
+
+## Completing a shared reply
+
+The lead uses the project harness final_response({text}) action to finish with a shared report, question/choices or assignment. Ordinary commentary stays in private Work and does not finish the activation, including a sentence promising to check something. Response text may stream to the user before acceptance, but only accepted publication delivers its mentions to members.

@@ -1,3 +1,4 @@
+import { finalResponseTool, responseOutput } from './response-output.js';
 import { createHash, randomUUID } from 'node:crypto';
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
@@ -621,8 +622,13 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       let finalRef: FinalReference | undefined;
       if (sender && input.author.type === 'member') {
         const [record] = await rows(db, 'SELECT id, run_id, position, entry FROM messages WHERE agent_id = ? AND id = ?', [sender.id, input.finalMessageId ?? '']);
-        if (!record || record.run_id !== input.author.runId || record.position !== sender.history_position) throw new AppError('invalid_input', 'Final reference must identify the committed response of this activation');
-        finalRef = { agentId: sender.id, runId: record.run_id, messageId: record.id, position: record.position };
+        if (!record || record.run_id !== input.author.runId) throw new AppError('invalid_input', 'Final reference must identify the committed response of this activation');
+        if (input.finalToolCallId) {
+          const [tail] = await rows(db, 'SELECT run_id, entry FROM messages WHERE agent_id = ? AND position = ?', [sender.id, sender.history_position]);
+          const result = tail ? decode<ContextEntry>(tail.entry, value => validateEntries([value])).message : null;
+          if (record.position + 1 !== sender.history_position || tail?.run_id !== input.author.runId || result?.role !== 'toolResult' || result.toolName !== finalResponseTool || result.toolCallId !== input.finalToolCallId || result.isError) throw new AppError('invalid_input', 'Final response action must have its successful stored result and no later private work');
+        } else if (record.position !== sender.history_position) throw new AppError('invalid_input', 'Final reference must identify the latest committed response');
+        finalRef = { agentId: sender.id, runId: record.run_id, messageId: record.id, position: record.position, ...(input.finalToolCallId ? { toolCallId: input.finalToolCallId } : {}) };
         if (await this.finalText(db, finalRef) !== input.text) throw new AppError('invalid_input', 'Final response text does not match its committed reference');
       }
       const entries: TimelineEntry[] = [];
@@ -702,6 +708,11 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     const [row] = await rows(db, 'SELECT id, run_id, entry FROM messages WHERE agent_id = ? AND position = ?', [ref.agentId, ref.position]);
     if (!row || row.id !== ref.messageId || row.run_id !== ref.runId) throw new AppError('corrupt_data', 'Referenced final message is unavailable', 500);
     const entry = decode<ContextEntry>(row.entry, value => validateEntries([value]));
+    if (ref.toolCallId) {
+      const output = responseOutput(entry.message);
+      if (output?.response.toolCallId !== ref.toolCallId) throw new AppError('invalid_input', 'Final reference does not identify its response action');
+      return output.response.text;
+    }
     if (entry.message.role !== 'assistant' || entry.message.content.some(part => part.type === 'toolCall')) throw new AppError('invalid_input', 'Final reference must identify an assistant response without tool calls');
     return entry.message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
   }

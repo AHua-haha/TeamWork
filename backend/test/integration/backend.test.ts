@@ -57,6 +57,7 @@ class Queue<T> implements AsyncIterable<T> {
 const model = fauxProvider().getModel();
 const staticConfig = { resolveForRun: async () => ({ model, tools: [], systemPrompt: '', options: {}, source: { appRevision: 0, agentRevision: 0, catalogRevisions: {} } }) };
 const message = (text = 'answer') => fauxAssistantMessage(text);
+const finalResponse = (text: string) => fauxAssistantMessage([{ type:'toolCall', id:randomUUID(), name:'final_response', arguments:{text} }], {stopReason:'toolUse'});
 const user = { role: 'user' as const, content: 'hello', timestamp: 1 };
 const limits = { maxChunks: 2, maxBytes: 100_000 };
 
@@ -1069,7 +1070,7 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     await assert.rejects(team.configuration.submit(lead.memberId, '.team/members/backend/member.json'), code('invalid_config'));
     assert.deepEqual(await store.getMember(configuredWorker.id), configuredWorker, 'invalid model references preserve the whole accepted record');
     await writeFile(join(configFiles.root, '.team/members/backend/member.json'), JSON.stringify(manifest));
-    answer(fourthStep.events, message('@Backend Implement the accepted design.'));
+    answer(fourthStep.events, finalResponse('@Backend Implement the accepted design.'));
     const workerStep = await requests.next();
     assert.match(workerStep.request.context.systemPrompt!, /You are Backend/);
     assert.match(workerStep.request.context.systemPrompt!, /Keep the result concise/);
@@ -1093,10 +1094,10 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'run_command');
     assert.ok(commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text');
     if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.equal(JSON.parse(commandResult.content[0].text).stdout, 'Done');
-    answer(workerFinish.events, message('@Lead Implemented src/result.txt and committed implementation.'));
+    answer(workerFinish.events, finalResponse('@Lead Implemented src/result.txt and committed implementation.'));
     const leadFinish = await requests.next();
     const secondLeadRun = (await runtime.getState(lead.memberId)).run!;
-    answer(leadFinish.events, message('Implementation is committed; design refinement awaits user approval.'));
+    answer(leadFinish.events, finalResponse('Implementation is committed; design refinement awaits user approval.'));
     assert.equal((await runtime.finished(lead.memberId, secondLeadRun.runId)).status, 'completed');
     const backend = (await team.team(workspaceId)).members.find(m => m.name === 'Backend')!;
     const env = await team.harness.environment(backend.memberId);
@@ -1259,6 +1260,42 @@ async function groupFixture() {
   return { workspaceId, lead, backend, frontend, team, runtime, requests, async close() { await runtime.close(); team.runner.close(); await workspaceService.close(); await rm(folder, { recursive: true, force: true }); } };
 }
 
+test('persisted working text never publishes; explicit response arguments stream with backend routing before acceptance', {timeout:30_000}, async () => {
+  const f=await groupFixture();
+  try {
+    const accepted=await f.team.runner.postUser(f.workspaceId,'Inspect model');
+    const first=await f.requests.next();
+    answer(first.events,message('Let me check the available models.'));
+    const second=await f.requests.next();
+    assert.equal((await store.chatSnapshot(f.workspaceId)).position,1,'ordinary tool-free prose stays private');
+    assert.ok(second.request.context.messages.some(m=>m.role==='user' && typeof m.content==='string' && m.content.includes('private working output')));
+    const action=finalResponse('Model answer');
+    const call=action.content.find(part=>part.type==='toolCall')!;
+    second.events.push({type:'start',partial:{...action,content:[],stopReason:'pending'}});
+    const partial={...action,content:[{...call,arguments:{text:'Model'}}]};
+    second.events.push({type:'toolcall_delta',contentIndex:0,delta:'Model',partial});
+    const stream=f.runtime.follow(f.lead.memberId,{runId:accepted.runs[0]!.runId})[Symbol.asyncIterator]();
+    const chunk=await until(stream,'chunk');
+    let designated=chunk.type==='chunk' ? chunk.output : undefined;
+    while(!designated){const next=await until(stream,'chunk');if(next.type==='chunk') designated=next.output;}
+    assert.equal(designated.response.text,'Model');
+    const persisted=await store.followSnapshot(f.lead.memberId,accepted.runs[0]!.runId,0);
+    assert.ok(persisted.live?.chunks.some(c=>c.event.type==='toolcall_delta'),'read API projects retained database chunks');
+    second.events.push({type:'done',reason:'toolUse',message:action});
+    const finished=await f.runtime.finished(f.lead.memberId,accepted.runs[0]!.runId);
+    assert.equal(finished.status,'completed');
+    const timeline=await store.chatTimeline(f.workspaceId);
+    const entry=timeline.changes.at(-1)!.entry;
+    if(entry.kind!=='member')throw new Error('Missing member entry');
+    assert.equal(entry.text,'Model answer');assert.equal(entry.finalRef?.toolCallId,call.id);
+    assert.ok(entry.finalRef!.position<entry.working.through!,'working range includes response tool acknowledgement');
+    assert.deepEqual((await store.chatSnapshot(f.workspaceId)).messages.map(m=>m.text),['Inspect model','Model answer']);
+    const finalEvents=await collect(f.runtime.follow(f.lead.memberId,{runId:accepted.runs[0]!.runId}));
+    assert.ok(finalEvents.some(e=>e.type==='message' && e.record.output?.response.text==='Model answer'));
+    await stream.return?.(undefined);
+  }finally{await f.close();}
+});
+
 test('group chat SQL/runtime: parallel work, private refusal feedback, deferred interleaving, and durable public-only history', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
@@ -1276,21 +1313,21 @@ test('group chat SQL/runtime: parallel work, private refusal feedback, deferred 
     const leadStep = await f.requests.next();
     assert.match(leadStep.request.context.systemPrompt!, /You are Lead,/);
     assert.equal((await store.getContext(f.backend.memberId)).entries.length, 1, 'busy member receives no mid-work insertion');
-    answer(backendStep.events, message('@Lead PRIVATE CANDIDATE: please review'));
+    answer(backendStep.events, finalResponse('@Lead PRIVATE CANDIDATE: please review'));
     const revision = await f.requests.next();
     assert.match(revision.request.context.systemPrompt!, /You are Backend,/);
     assert.ok(revision.request.context.messages.some(item => item.role === 'user' && typeof item.content === 'string' && item.content.includes('Group publication refused (member_busy)')));
     assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 2);
     assert.equal((await store.getContext(f.frontend.memberId)).entries.length, 1);
-    answer(revision.events, message('Backend finished without mentions.'));
+    answer(revision.events, finalResponse('Backend finished without mentions.'));
     await f.runtime.finished(f.backend.memberId, backendRun.runId);
     const entries = (await store.getContext(f.backend.memberId)).entries;
-    assert.deepEqual(entries.map(entry => entry.metadata.groupPosition ?? entry.metadata.source ?? entry.message.role), [1, 'assistant', 'publication-feedback', 'assistant', 2, 3]);
-    assert.deepEqual((await store.runMessages(f.backend.memberId, backendRun.runId)).map(record => record.metadata.source ?? record.message.role), ['assistant', 'publication-feedback', 'assistant']);
+    assert.deepEqual(entries.map(entry => entry.metadata.groupPosition ?? entry.metadata.source ?? entry.message.role), [1, 'assistant', 'toolResult', 'publication-feedback', 'assistant', 'toolResult', 2, 3]);
+    assert.deepEqual((await store.runMessages(f.backend.memberId, backendRun.runId)).map(record => record.metadata.source ?? record.message.role), ['assistant', 'toolResult', 'publication-feedback', 'assistant', 'toolResult']);
     assert.equal((await store.getContext(f.frontend.memberId)).entries.length, 1);
-    answer(frontendStep.events, message('Frontend finished.'));
+    answer(frontendStep.events, finalResponse('Frontend finished.'));
     await f.runtime.finished(f.frontend.memberId, frontendRun.runId);
-    answer(leadStep.events, message('Lead finished.'));
+    answer(leadStep.events, finalResponse('Lead finished.'));
     await f.runtime.finished(f.lead.memberId, user.runs[0]!.runId);
     const transcript = await f.team.runner.snapshot(f.workspaceId);
     assert.equal(transcript.position, 5);
@@ -1306,7 +1343,7 @@ test('group chat SQL/runtime: parallel work, private refusal feedback, deferred 
     const next = await f.team.runner.postUser(f.workspaceId, '@Backend continue');
     const nextStep = await f.requests.next();
     assert.deepEqual(nextStep.request.context.messages.map(item => item.role === 'user' ? item.content : item.role), ['Summary of my work', '[Group message 6 from User]\n@Backend continue']);
-    answer(nextStep.events, message('Continued.'));
+    answer(nextStep.events, finalResponse('Continued.'));
     await f.runtime.finished(f.backend.memberId, next.runs[0]!.runId);
     const newcomer = await f.team.create(f.workspaceId, { name: 'New Member', role: 'developer' });
     assert.equal((await store.getContext(newcomer.memberId)).entries.length, 7);
@@ -1339,7 +1376,7 @@ test('group harness checkpoints failed and cancelled runs and refuses publicatio
     try {
       const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend report');
       const pending = await f.requests.next();
-      answer(pending.events, message('Must not be shared without checkpoint'));
+      answer(pending.events, finalResponse('Must not be shared without checkpoint'));
       assert.equal((await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId)).status, 'failed');
       assert.ok(!(await f.team.runner.snapshot(f.workspaceId)).messages.some(m => m.text === 'Must not be shared without checkpoint'));
     } finally { f.team.harness.checkpoint = checkpoint; }
@@ -1428,11 +1465,11 @@ test('group timeline reserves deterministic positions, pins final references and
     assert.deepEqual(accepted.entries.map(entry => entry.kind === 'member' ? entry.name : 'User'), ['User', 'Backend', 'Frontend']);
     const cursor = (await store.chatTimeline(f.workspaceId)).cursor;
     const later = await f.team.runner.postUser(f.workspaceId, '@Lead discuss'); const leadStep = await f.requests.next();
-    answer(frontendStep.events, message('Frontend final first'));
+    answer(frontendStep.events, finalResponse('Frontend final first'));
     await f.runtime.finished(f.frontend.memberId, accepted.runs[1]!.runId);
-    answer(backendStep.events, message('Backend final second'));
+    answer(backendStep.events, finalResponse('Backend final second'));
     await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId);
-    answer(leadStep.events, message('Lead final'));
+    answer(leadStep.events, finalResponse('Lead final'));
     await f.runtime.finished(f.lead.memberId, later.runs[0]!.runId);
     const snapshot = await store.chatTimeline(f.workspaceId);
     const current = new Map(snapshot.changes.map(change => [change.entry.entryId, change.entry]));
@@ -1443,7 +1480,7 @@ test('group timeline reserves deterministic positions, pins final references and
     if (backend.kind !== 'member') throw new Error('member missing');
     assert.equal(backend.text, 'Backend final second');
     const records = await store.runMessages(f.backend.memberId, accepted.runs[0]!.runId);
-    assert.equal(backend.finalRef!.messageId, records.at(-1)!.messageId);
+    assert.equal(backend.finalRef!.messageId, records.at(-2)!.messageId);
     assert.equal(backend.working.through, records.at(-1)!.position);
     const context = await store.getContext(f.backend.memberId);
     await store.replaceContext(f.backend.memberId, context.revision, []);
@@ -1489,9 +1526,12 @@ test('group timeline refusal creates no reservation, and cancellation/restart fi
 test('old prototype group history imports once in publication order using the old terminal history bound', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
-    const accepted = await f.team.runner.postUser(f.workspaceId, 'work');
-    const step = await f.requests.next(); answer(step.events, message('Existing prototype final'));
-    await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    const accepted = await store.publishChat({workspaceId:f.workspaceId,author:{type:'user'},text:'work',recipients:[f.lead.memberId]});
+    const run=accepted.runs[0]!;
+    const messageId=randomUUID();
+    await store.beginMessage(f.lead.memberId,run.runId,messageId,1);
+    await store.commitMessage(f.lead.memberId,run.runId,{messageId,message:message('Existing prototype final'),metadata:{}});
+    await store.publishChat({workspaceId:f.workspaceId,author:{type:'member',memberId:f.lead.memberId,name:'Lead',runId:run.runId},exchangeId:accepted.message.exchangeId,text:'Existing prototype final',recipients:[],finalMessageId:messageId});
     const history = await store.chatSnapshot(f.workspaceId);
     const record = history.messages[1]!;
     // Recreate the immediately previous committed storage format in this disposable workspace.

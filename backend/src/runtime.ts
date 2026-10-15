@@ -1,3 +1,4 @@
+import { responseOutput } from './response-output.js';
 import { randomUUID } from 'node:crypto';
 import { getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type AssistantMessageEvent, type Context, type JsonObject, type Message, type Model, type Models, type SimpleStreamOptions, type Tool, type ToolCall, type ToolResultMessage, type UserMessage } from '@earendil-works/pi-ai';
 import { MySqlStore } from './database.js';
@@ -334,7 +335,7 @@ export class AgentRuntime {
       const base = { version: 1 as const, agentId, runId: selected };
       for (const record of snapshot.history) {
         after = record.position;
-        yield { ...base, type: 'message', record };
+        yield { ...base, type: 'message', record: { ...record, output: responseOutput(record.message) } };
       }
       if (first) {
         first = false;
@@ -360,7 +361,8 @@ export class AgentRuntime {
           for (const chunk of live.chunks) {
             if (chunk.sequence < active.next) continue;
             active.next = chunk.sequence + 1;
-            yield { ...base, type: 'chunk', messageId: live.messageId, ...chunk };
+            const message = chunk.event.type === 'done' ? chunk.event.message : chunk.event.type === 'error' ? chunk.event.error : chunk.event.partial;
+            yield { ...base, type: 'chunk', messageId: live.messageId, ...chunk, output: responseOutput(message) };
           }
         }
       }

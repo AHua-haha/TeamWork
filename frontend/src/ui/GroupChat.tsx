@@ -137,10 +137,10 @@ function ResponseContent({ entry, expanded = false, snapshot, retry }: {
   entry: Extract<GroupEntry, { kind: 'member' }>; expanded?: boolean; snapshot?: ClientSnapshot; retry?(): void;
 }) {
   const preview = snapshot ? responsePreview(snapshot, entry) : null;
-  const items = snapshot && expanded ? workingItems(snapshot, entry, preview?.id) : [];
+  const items = snapshot ? workingItems(snapshot, entry, preview ?? undefined) : [];
   const error = snapshot?.error && <div className="group-work-error" role="alert">{snapshot.error}<button type="button" onClick={retry}>Retry member output</button></div>;
   return <>
-    {expanded && (items.length > 0 || error) && <div className="group-work" id={`group-work-${entry.entryId}`} aria-label={`${entry.name} working history`}>
+    {(items.length > 0 || (expanded && error)) && <div hidden={!expanded} className="group-work" id={`group-work-${entry.entryId}`} aria-label={`${entry.name} working history`}>
       {error}
       {items.map(item => item.kind === 'tool' ? <WorkTool key={item.id} item={item} running={entry.run.status === 'running'} />
         : item.kind === 'reasoning' ? <details key={item.id} className="work-reasoning"><summary><span className="work-icon"><Glyph name="thinking" /></span><span className="work-line-label">Reasoning</span><span className="work-disclosure"><Glyph name="chevron" /></span></summary><p>{item.text}</p></details>

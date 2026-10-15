@@ -52,3 +52,7 @@ Tool implementations are role-independent. Fixed bases determine tool selection,
 3. Writable src with usePaths src/shared allows read but refuses writes under src/shared.
 4. The lead edits a member bundle, checkpoints it, and the active member remains unchanged until submit succeeds.
 5. Configuration asks to change fixed commit policy or tools: refuse submission and retain active state.
+
+## Response capability
+
+The fixed project harness supplies final_response({text}) to every member. It is the explicit capability for composing the final group response, distinct from ordinary private working commentary. It must be called alone after other tools finish. Its text may stream for user observation, but the team admits publication only after validation and durable tool completion. The harness does not bypass busy recipients, mention budgets or group acceptance.

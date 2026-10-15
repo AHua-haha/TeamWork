@@ -1,5 +1,7 @@
 import type { AssistantMessage, AssistantMessageEvent, JsonObject, Message, UserMessage } from '@earendil-works/pi-ai';
 
+export interface MessageOutput { response: { toolCallId: string; text: string } }
+
 /** Backend-owned records and Pi payloads. No assistant-ui types cross this boundary. */
 export interface CompletedRecord {
   agentId: string;
@@ -8,6 +10,7 @@ export interface CompletedRecord {
   position: number;
   message: Message;
   metadata: JsonObject;
+  output?: MessageOutput;
 }
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
@@ -27,7 +30,7 @@ export interface RunState {
 export type FollowEvent = { version: 1; agentId: string; runId: string | null } & (
   | { type: 'message'; record: CompletedRecord }
   | { type: 'sync'; historyPosition: number; run: RunState | null }
-  | { type: 'chunk'; messageId: string; sequence: number; event: AssistantMessageEvent }
+  | { type: 'chunk'; messageId: string; sequence: number; event: AssistantMessageEvent; output?: MessageOutput }
   | { type: 'gap'; messageId: string; expectedSequence: number; firstAvailable: number }
   | { type: 'state'; run: RunState }
   | { type: 'end'; historyPosition: number; run: RunState | null }
@@ -41,6 +44,7 @@ export interface LiveMessage {
   message: AssistantMessage;
   nextSequence: number;
   lastEvent: AssistantMessageEvent;
+  output?: MessageOutput;
 }
 
 export type ConnectionStatus = 'idle' | 'syncing' | 'following' | 'disconnected' | 'error';

@@ -92,19 +92,27 @@ test('private working tools pair reused IDs with their own chronological result'
 });
 
 
-test('live replies stream outside Work, preserve reasoning, and reconcile with the exact published final', () => {
-  const partial = { ...assistant('Hello'), content: [{ type: 'thinking' as const, thinking: 'Private thought' }, { type: 'text' as const, text: 'Hello' }] };
-  const snapshot = { agentId, completed: [], live: [{ messageId: 'm1', runId, message: partial, nextSequence: 2, lastEvent: { type: 'text_delta' as const, contentIndex: 1, delta: 'Hello', partial } }], historyPosition: 0, synchronized: true, connection: 'following' as const, run: run(), sending: false, error: null };
+test('only backend-designated response text streams outside Work, with ordinary prose kept inside', () => {
+  const partial = { ...assistant('Let me check'), content: [{ type: 'thinking' as const, thinking: 'Private thought' }, { type: 'text' as const, text: 'Let me check' }, { type: 'toolCall' as const, id: 'response-call', name: 'final_response', arguments: { text: 'Hello' } }] };
+  const output = {response:{toolCallId:'response-call',text:'Hello'}};
+  const snapshot = { agentId, completed: [], live: [{ messageId: 'm1', runId, message: partial, output, nextSequence: 2, lastEvent: { type: 'text_delta' as const, contentIndex: 1, delta: 'Let me check', partial } }], historyPosition: 0, synchronized: true, connection: 'following' as const, run: run(), sending: false, error: null };
   const first = responsePreview(snapshot, member)!;
-  assert.deepEqual(first, { id: 'm1', text: 'Hello' });
-  assert.deepEqual(workingItems(snapshot, member, first.id).map(item => item.text), ['Private thought']);
-  const next = { ...snapshot, live: snapshot.live.map(live => ({ ...live, message: assistant('Hello world') })) };
+  assert.deepEqual(first, { id: 'm1', toolCallId:'response-call', text: 'Hello' });
+  assert.deepEqual(workingItems(snapshot, member, first).map(item => item.text), ['Private thought','Let me check']);
+  const next = { ...snapshot, live: snapshot.live.map(live => ({ ...live, output:{response:{...output.response,text:'Hello world'}} })) };
   assert.equal(responsePreview(next, member)?.text, 'Hello world');
-  const committed = { ...snapshot, live: [], completed: [record(1, 'm1', 'Hello world')], run: { ...run('completed'), activeMessageId: null } };
-  assert.equal(responsePreview(committed, member)?.text, 'Hello world', 'committed candidate stays visible while group publication arrives');
-  const published = { ...member, run: run('completed'), working: { after: 0, through: 1 }, text: 'Hello world', finalRef: { agentId, runId, messageId: 'm1', position: 1 } };
+  assert.equal(responsePreview({...snapshot,live:snapshot.live.map(({output,...live})=>live)},member),null,'Frontend never guesses placement from Pi text/tool name');
+  const final = {...record(1,'m1',''),message:partial,output:{response:{...output.response,text:'Hello world'}}};
+  const ack = {...record(2,'ack',''),message:{role:'toolResult' as const,toolCallId:'response-call',toolName:'final_response',content:[{type:'text' as const,text:'Prepared'}],isError:false,timestamp:1}};
+  const committed = { ...snapshot, live: [], completed: [final,ack], run: { ...run('completed'), activeMessageId: null } };
+  assert.equal(responsePreview(committed, member)?.text, 'Hello world');
+  const feedback={...record(3,'feedback',''),message:{role:'user' as const,content:'Group publication refused',timestamp:1}};
+  assert.equal(responsePreview({...committed,completed:[...committed.completed,feedback]},member),null,'Refusal feedback retracts only the explicit response attempt');
+  const published = { ...member, run: run('completed'), working: { after: 0, through: 2 }, text: 'Hello world', finalRef: { agentId, runId, messageId: 'm1', position: 1,toolCallId:'response-call' } };
   assert.equal(responsePreview(committed, published), null);
-  assert.deepEqual(workingItems(committed, published), [], 'plain final has no intermediate work');
+  assert.deepEqual(workingItems(committed,published).map(item=>item.text),['Private thought','Let me check']);
+  const onlyFinal={...committed,completed:[{...final,message:{...partial,content:[partial.content[2]!]}} as typeof final,ack]};
+  assert.deepEqual(workingItems(onlyFinal,published),[],'A response action alone has no intermediate work');
 });
 
 test('tool-bearing, rejected, failed, foreign and out-of-range output never becomes a final preview', () => {
@@ -127,4 +135,17 @@ test('tool summaries expose useful action arguments without replacing inspectabl
   assert.deepEqual(workToolSummary({id:'tool',kind:'tool',text:'run_command',args:'{"argv":["node","--version"]}',result:'v26'}), {icon:'terminal',label:'Ran node --version'});
   assert.deepEqual(workToolSummary({id:'read',kind:'tool',text:'read',args:'{"path":"src/main.ts"}',result:'source'}), {icon:'book',label:'Read src/main.ts'});
   assert.equal(workToolSummary({id:'partial',kind:'tool',text:'edit',args:'null'}).label,'Updating file');
+});
+
+
+test('response routing hides only the exact designated action, even when calls reuse IDs', () => {
+  const action=(position:number,id:string)=>({...record(position,id,''),message:{...assistant(''),content:[{type:'toolCall' as const,id:'reused',name:'final_response',arguments:{text:id}}]},output:{response:{toolCallId:'reused',text:id}}});
+  const ack=(position:number)=>({...record(position,`ack-${position}`,''),message:{role:'toolResult' as const,toolCallId:'reused',toolName:'final_response',content:[{type:'text' as const,text:'Prepared'}],isError:false,timestamp:1}});
+  const snapshot={agentId,completed:[action(1,'rejected'),ack(2),action(3,'accepted'),ack(4)],live:[],historyPosition:4,synchronized:true,connection:'idle' as const,run:run('completed'),sending:false,error:null};
+  const published={...member,run:run('completed'),working:{after:0,through:4},text:'accepted',finalRef:{agentId,runId,messageId:'accepted',position:3,toolCallId:'reused'}};
+  assert.deepEqual(workingItems(snapshot,published).map(item=>[item.text,item.result]),[['final_response','Prepared']]);
+  const current={...snapshot,completed:[{...action(1,'m1'),output:{response:{toolCallId:'reused',text:''}}}]};
+  const pending=responsePreview(current,member)!;
+  assert.equal(pending.text,'');
+  assert.deepEqual(workingItems(current,member,pending),[],'Empty response argument already belongs outside Work');
 });

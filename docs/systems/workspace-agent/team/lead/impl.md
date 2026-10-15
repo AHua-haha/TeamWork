@@ -26,3 +26,5 @@ JSON is configuration and Markdown carries optional member instructions. The com
 ## Verification
 
 [Bundle tests](../../../../../backend/test/member-config.test.ts) verify exact submitted bytes, pending isolation, schema/policy/path validation, source persistence failures, revisions, busy/foreign targets and commands. [Lead tests](../../../../../backend/test/lead.test.ts) verify common design editing and user acceptance. [MySQL integration](../../../../../backend/test/integration/backend.test.ts) drives actual lead file editing/submission, worker prompts/tools, semantic implementation commits and user-only design acceptance.
+
+The fixed project tool registry also includes the reusable final_response action for every member. MemberContext instructs the lead to finish through that action and keep ordinary prose as working commentary. TeamSystem publishes after its stored acknowledgement; backend follow projects the explicit action from persisted records/chunks. The lead has no special frontend classification or direct model stream.

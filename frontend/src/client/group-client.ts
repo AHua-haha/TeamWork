@@ -2,7 +2,7 @@ import { BackendError, waitForRetry } from './agent-client.js';
 import { ProtocolError, readSse } from './sse.js';
 import type { RunState } from './protocol.js';
 
-export interface FinalReference { agentId: string; runId: string; messageId: string; position: number }
+export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; toolCallId?: string }
 interface EntryBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
 export type GroupEntry = EntryBase & (
   | { kind: 'user'; text: string; messageId: string }

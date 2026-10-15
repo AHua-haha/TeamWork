@@ -1,3 +1,4 @@
+import type { MessageOutput } from './response-output.js';
 import type { AssistantMessageEvent, JsonObject, Message } from '@earendil-works/pi-ai';
 
 export class AppError extends Error {
@@ -18,6 +19,7 @@ export interface ContextHistory {
 }
 
 export interface CompletedMessage extends ContextEntry {
+  output?: MessageOutput;
   agentId: string;
   runId: string;
   position: number;
@@ -66,7 +68,7 @@ export interface FollowSnapshot {
 export type FollowEvent = { version: 1; agentId: string; runId: string | null } & (
   | { type: 'message'; record: CompletedMessage }
   | { type: 'sync'; historyPosition: number; run: RunState | null }
-  | { type: 'chunk'; messageId: string; sequence: number; event: AssistantMessageEvent }
+  | { type: 'chunk'; messageId: string; sequence: number; event: AssistantMessageEvent; output?: MessageOutput }
   | { type: 'gap'; messageId: string; expectedSequence: number; firstAvailable: number }
   | { type: 'state'; run: RunState }
   | { type: 'end'; historyPosition: number; run: RunState | null }

@@ -121,3 +121,7 @@ The default buffer retains up to 256 events and 8 MiB of serialized event data f
 7. Private member history is followed like any agent. Direct input to Lead or Backend returns 409 `member_conversation`; shared workspace input can trigger either according to the team rule. `GET /agents` lists neither.
 
 Team coordination resolves configurations using `prepareRun`, persists run creation atomically with group publication, and starts execution using `launch`. Expected publication refusals are recorded by `feedback` as private user messages and let the same loop continue. Successful publication can persist terminal sender state before recipient launch; subsequent runtime terminal finalization returns that stored state. Group-message delivery changes canonical context separately from private display history.
+
+## Stored output presentation
+
+Completed follow records and chunk envelopes may include output.response {toolCallId,text}, designating text from an explicit final_response action. All other content remains ordinary working activity for the team UI. These annotations are computed from persisted message/chunk content read through the existing follow operation. They do not make a response accepted; the group final reference establishes that. The standalone policy and raw Pi payloads remain unchanged.

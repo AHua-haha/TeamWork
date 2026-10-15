@@ -28,7 +28,7 @@ Shutdown fences new publication, waits for accepted in-flight publications to re
 
 ## Coordination and data flow
 
-MySqlStore’s chat_entries holds stable ordered user/member entries. chat_clock holds display position and change seq; chat_changes appends immutable lifecycle snapshots. Publication reserves recipient entries in mention order in the same transaction as shared acceptance and run creation. Successful final publication validates finalMessageId against the sender’s committed assistant record, stores only a FinalReference in member public records, and completes its existing entry with the terminal working-history bound. Readers resolve text from the immutable messages table. Finish/recovery appends terminal changes without a fake final. Names at completion reflect the accepted publication; member color remains a frontend ID projection.
+MySqlStore’s chat_entries holds stable ordered user/member entries. chat_clock holds display position and change seq; chat_changes appends immutable lifecycle snapshots. Publication reserves recipient entries in mention order in the same transaction as shared acceptance and run creation. Successful final publication validates finalMessageId and optional finalToolCallId against the sender’s committed assistant response action and its following successful tool result, stores only a FinalReference in member public records, and completes its existing entry with the terminal working-history bound. Readers resolve text from the immutable messages table. Finish/recovery appends terminal changes without a fake final. Names at completion reflect the accepted publication; member color remains a frontend ID projection.
 
 ## Decisions and constraints
 
@@ -37,3 +37,9 @@ Lock order is workspace then all relevant agents then clock for publication; run
 Migration imports old prototype records once per workspace in publication order. Old atomic completed-run endPosition identifies the original committed final candidate; migration validates its text and never searches for the latest response. Missing/corrupt references fail explicitly. Old runs without an accepted final become retained status entries. Existing reference data and agent history are never deleted.
 
 TeamSystem checkpoints harness state before invoking final publication. Its runtime afterRun hook finalizes failed/cancelled/interrupted work after policy/tool effects settle and skips a successfully checkpointed publication, preventing an older sender from checkpointing a successor activation. No filesystem or Git policy is added to SQL group admission.
+
+## Response action and stored stream reads
+
+TeamSystem requires the sole final_response tool for a new member publication. Runtime records its tool result before the publication transaction. The FinalReference adds toolCallId to identify the exact text argument within that assistant record; its position may precede the terminal working bound by one tool acknowledgement. MySqlStore validates the last two private records belong to that run/call, validates the explicit action text, then atomically pins the reference, completes the reserved entry and admits mentions. Existing plain-text references remain valid historical records. New tool-free commentary never enters this path.
+
+The private follow API derives optional output.response {toolCallId,text} from each stored assistant record or persisted chunk partial containing the explicit action. Ordinary text/reasoning/tool activity has no response designation and stays working output. The frontend does not read model memory or decide intent from text. Accepted group history continues to contain only final references; private working output never enters peer context.

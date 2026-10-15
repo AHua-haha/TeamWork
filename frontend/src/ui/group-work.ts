@@ -1,31 +1,42 @@
 import type { Message } from '@earendil-works/pi-ai';
-import type { ClientSnapshot } from '../client/protocol.js';
+import type { ClientSnapshot, MessageOutput } from '../client/protocol.js';
 import type { GroupEntry } from '../client/group-client.js';
 export interface WorkItem { id: string; kind: 'text' | 'reasoning' | 'tool'; text: string; args?: string; result?: string; failed?: boolean }
-function runMessages(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): { id: string; message: Message }[] {
+function runMessages(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): { id: string; message: Message; output?: MessageOutput }[] {
   const records = snapshot.completed.filter(record => record.runId === entry.run.runId && record.position > entry.working.after && (entry.working.through === null || record.position <= entry.working.through));
   return [
-    ...records.map(record => ({ id: record.messageId, message: record.message })),
-    ...snapshot.live.filter(live => entry.run.status === 'running' && live.runId === entry.run.runId && !records.some(record => record.messageId === live.messageId)).map(live => ({ id: live.messageId, message: live.message })),
+    ...records.map(record => ({ id: record.messageId, message: record.message, output: record.output })),
+    ...snapshot.live.filter(live => entry.run.status === 'running' && live.runId === entry.run.runId && !records.some(record => record.messageId === live.messageId)).map(live => ({ id: live.messageId, message: live.message, output: live.output })),
   ];
 }
-/** Private text is a provisional preview; only the group final reference establishes publication. */
-export function responsePreview(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): { id: string; text: string } | null {
+/** Response placement comes from the backend's explicit output annotation, never assistant prose. */
+export function responsePreview(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): { id: string; toolCallId: string; text: string } | null {
   if (entry.run.status !== 'running' || entry.finalRef || entry.text !== null) return null;
   if (snapshot.run && snapshot.run.status !== 'running' && snapshot.run.status !== 'completed') return null;
-  const latest = runMessages(snapshot, entry).at(-1);
-  if (!latest || latest.message.role !== 'assistant' || latest.message.content.some(part => part.type === 'toolCall') || ['error', 'aborted'].includes(latest.message.stopReason)) return null;
-  if (snapshot.run?.activeMessageId && snapshot.run.activeMessageId !== latest.id) return null;
-  const text = latest.message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
-  return text.trim() ? { id: latest.id, text } : null;
-}
-export function workingItems(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>, previewId?: string): WorkItem[] {
   const messages = runMessages(snapshot, entry);
+  let latest = messages.at(-1);
+  // The response tool's persisted acknowledgement may follow its assistant record before publication.
+  if (latest?.message.role === 'toolResult' && !latest.message.isError) {
+    const callId = latest.message.toolCallId;
+    const previous = messages.at(-2);
+    latest = previous?.output?.response.toolCallId === callId ? previous : undefined;
+  }
+  const designated = latest?.output?.response;
+  if (!latest || !designated) return null;
+  if (snapshot.run?.activeMessageId && snapshot.run.activeMessageId !== latest.id) return null;
+  return { id: latest.id, toolCallId: designated.toolCallId, text: designated.text };
+}
+export function workingItems(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>, preview?: { id: string; toolCallId: string }): WorkItem[] {
+  const messages = runMessages(snapshot, entry);
+  const hiddenCall = preview?.toolCallId ?? entry.finalRef?.toolCallId;
+  const hiddenRecord = preview?.id ?? entry.finalRef?.messageId;
+  const hiddenIndex = messages.findIndex(record => record.id === hiddenRecord);
   const items: WorkItem[] = [];
   const pending = new Map<string, WorkItem>();
-  for (const record of messages) {
+  for (const [recordIndex, record] of messages.entries()) {
     const message = record.message;
     if (message.role === 'toolResult') {
+      if (hiddenIndex >= 0 && recordIndex === hiddenIndex + 1 && message.toolCallId === hiddenCall) continue;
       const result = message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
       const owner = pending.get(message.toolCallId);
       if (owner) { owner.result = result; owner.failed = message.isError; pending.delete(message.toolCallId); }
@@ -39,9 +50,10 @@ export function workingItems(snapshot: ClientSnapshot, entry: Extract<GroupEntry
     for (const [index, part] of message.content.entries()) {
       const id = `${record.id}-${index}`;
       if (part.type === 'text') {
-        if (record.id !== entry.finalRef?.messageId && record.id !== previewId && part.text.trim()) items.push({ id, kind: 'text', text: part.text });
+        if ((record.id !== entry.finalRef?.messageId || entry.finalRef.toolCallId) && part.text.trim()) items.push({ id, kind: 'text', text: part.text });
       } else if (part.type === 'thinking' && part.thinking.trim()) items.push({ id, kind: 'reasoning', text: part.thinking });
       else if (part.type === 'toolCall') {
+        if (record.id === hiddenRecord && part.id === hiddenCall) continue;
         const item: WorkItem = { id, kind: 'tool', text: part.name, args: JSON.stringify(part.arguments, null, 2) };
         items.push(item); pending.set(part.id, item);
       }

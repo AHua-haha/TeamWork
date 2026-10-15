@@ -86,3 +86,7 @@ Runtime startup can pass a beforeFinish callback to recoverInterruptedRuns. The 
 ## Workspace model records
 
 workspace_models stores one revisioned JSON choices/default value per workspace, with a foreign key to workspaces. createWorkspace inserts it with the workspace and initialized lead in one transaction. saveWorkspaceModels locks the workspace row, checks the expected revision, and optionally initializes a lead whose connection and model are both null; that lead update includes generated accepted source and its revision in the same transaction. Existing configured members are untouched. Missing-record startup initialization uses an expected-null write; a first user save advances to revision 1 so a stale revision-0 placeholder cannot overwrite it. SQL integration checks rollback on lead insertion failure, competing revisions, reopen durability and one-time lead bootstrap.
+
+## Response-action references
+
+FinalReference carries optional toolCallId in the existing JSON records. For a new explicit response, publishChat checks the assistant row and the next/last tool-result row against run, action identity, tool name and success, then finalText resolves the action’s text argument. Legacy references resolve plain assistant text as before. The terminal range includes the acknowledgement. No new table or schema alteration is required. Runtime follow’s presentation annotation is a deterministic projection of immutable messages or retained stored Pi chunks, not extra mutable runtime state.

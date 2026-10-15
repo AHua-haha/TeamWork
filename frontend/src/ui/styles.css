@@ -522,8 +522,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-member, .group-user { display: grid; grid-template-columns: var(--group-avatar-gutter) minmax(0, 1fr) var(--group-avatar-gutter); align-items: start; }
 .group-run-card { grid-column: 2; grid-row: 2; min-width: 0; min-height: var(--group-avatar-size); padding: 18px var(--group-run-padding) var(--group-run-padding); border: 0; border-top: 1px solid #e9ede8; background: transparent; }
 /* Match the first text line to the fixed avatar center, using its own typography. */
-.group-run-card:has(> .group-member-body > .group-final:first-child > .markdown > :is(p, h1, h2, h3, h4, h5, h6):first-child) { padding-top: 0; }
-.group-final:first-child > .markdown > :is(p, h1, h2, h3, h4, h5, h6):first-child { padding-top: calc((var(--group-avatar-size) - 1lh) / 2 - 1px); }
+.group-run-card:not(:has(> .group-member-body > .group-work:not([hidden]))):has(> .group-member-body > .group-final > .markdown > :is(p, h1, h2, h3, h4, h5, h6):first-child) { padding-top: 0; }
+.group-member-body:not(:has(> .group-work:not([hidden]))) > .group-final > .markdown > :is(p, h1, h2, h3, h4, h5, h6):first-child { padding-top: calc((var(--group-avatar-size) - 1lh) / 2 - 1px); }
 .group-member-body { min-width: 0; }
 .group-run-area { grid-column: 2; grid-row: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; padding-bottom: 8px; }
 .group-identity { display: flex; flex-direction: column; align-items: center; gap: 6px; width: var(--group-avatar-size); }
@@ -548,7 +548,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .run-header-chevron svg { display: block; width: 12px; height: 12px; }
 .group-work-toggle[aria-expanded="true"] .run-header-chevron { transform: rotate(90deg); }
 .group-final { margin-top: 0; }
-.group-work + .group-final { margin-top: 18px; }
+.group-work:not([hidden]) + .group-final { margin-top: 18px; }
 .group-final .markdown { max-width: none; width: 100%; font-size: 15px; line-height: 1.75; }
 .group-final .markdown pre, .group-final .markdown-table { max-width: 100%; }
 .group-user { margin-bottom: 30px; min-width: 0; }
@@ -577,7 +577,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .work-tool.failed, .group-command-error, .group-work-error { color: #a14e40; }
 .group-work-error button { margin-left: 8px; }
 .group-terminal { margin-top: 0; color: #967261; font-size: 13px; }
-.group-work + .group-terminal { margin-top: 14px; }
+.group-work:not([hidden]) + .group-terminal { margin-top: 14px; }
 .group-terminal p { margin: 0; }
 .group-composer-footer { padding: 12px calc(var(--group-edge-space) + var(--group-avatar-gutter) + var(--group-run-padding)) 22px; background: #fff; }
 .group-composer-footer .composer-actions { flex-wrap: wrap; }

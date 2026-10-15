@@ -149,3 +149,19 @@ test('private range inspection begins at its stored boundary and remains scoped 
   assert.deepEqual(client.getSnapshot().completed.map(record => record.position), [11, 12]);
   client.dispose();
 });
+
+test('private follow retains backend response annotations on incremental and committed records', async () => {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({start(value){controller=value;}});
+  const client = new AgentClient(agentId,{fetcher:async()=>streamResponse(body)});
+  client.follow(runId);
+  const partial = assistant('Working prose');
+  const output = {response:{toolCallId:'response-call',text:'Final text'}};
+  controller.enqueue(new TextEncoder().encode(event({version:1,agentId,runId,type:'sync',historyPosition:0,run:run()})+event({version:1,agentId,runId,type:'chunk',messageId:'m1',sequence:0,event:{type:'start',partial},output})));
+  await until(()=>client.getSnapshot().live.length===1);
+  assert.deepEqual(client.getSnapshot().live[0]?.output,output);
+  controller.enqueue(new TextEncoder().encode(event({version:1,agentId,runId,type:'message',record:{...record(1,'m1','Working prose'),output}})+event({version:1,agentId,runId,type:'end',historyPosition:1,run:run('completed')})));
+  await until(()=>client.getSnapshot().connection==='idle');
+  assert.deepEqual(client.getSnapshot().completed[0]?.output,output);
+  client.dispose();controller.close();
+});
