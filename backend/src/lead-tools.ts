@@ -7,7 +7,7 @@ export function leadTools(configuration: MemberConfigService): RuntimeTool[] {
   return [{
     definition: {
       name: 'submit_member_config',
-      description: 'Validate and submit a member JSON manifest and its referenced Markdown prompts from your worktree. Use common file tools to edit .team/members/<bundle>/member.json first. Creation uses null memberId/revision; updates require the current member revision and an idle target. Only scope assignments are configurable within fixed harness bases. Existing command permissions are preserved. Returns the member ID and revision for your next edit; no draft or checkpoint activates configuration.',
+      description: 'Validate and submit a member JSON manifest and its referenced Markdown prompts from your worktree. Use common file tools to edit .team/members/<bundle>/member.json first. Creation uses null memberId/revision; updates require the current member revision and an idle target. Use manifest version 2 with designScope and implementationScope inside harnesses.project. Only project assignments are configurable; a separate command harness retains the existing command policy. Existing command permissions are preserved. Returns the member ID and revision for your next edit; no draft or checkpoint activates configuration.',
       parameters: Type.Object({ path: Type.String({ description: '.team/members/<bundle>/member.json' }) }, { additionalProperties: false }),
     },
     execute: (args, scope) => refusing(async () => {

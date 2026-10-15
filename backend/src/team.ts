@@ -4,7 +4,7 @@ import type { DesignService } from './design.js';
 import { emptyHarness, harnessConfig, type HarnessConfig } from './harness-config.js';
 import { resolveHarness } from './harness.js';
 import { AppError } from './types.js';
-import { generatedSource, type MemberConfigSource } from './member-config-format.js';
+import { generatedSource, migrateMemberSource, type MemberConfigSource } from './member-config-format.js';
 import type { WorkspaceRecord } from './context-base.js';
 import type { RunConfigSource } from './runtime.js';
 
@@ -97,7 +97,13 @@ export class TeamService {
       for (const member of await this.store.listMembers(workspace.workspaceId)) {
         const data = member.value as unknown as Record<string, unknown>;
         const oldHarness = data.harness as HarnessConfig | undefined;
-        if (oldHarness?.implementationScope && data.configuration) continue;
+        if (oldHarness?.implementationScope && data.configuration) {
+          // Retired bundles are historical records; a format upgrade must not replay retirement effects.
+          if (member.value.retiredAt !== null) continue;
+          const configuration = migrateMemberSource(data.configuration as MemberConfigSource, member.id, member.revision + 1);
+          if (configuration) await this.store.updateMember(member.id, member.revision, member.value.retiredAt === null ? member.value.name.toLowerCase() : null, { ...member.value, configuration });
+          continue;
+        }
         const { scope: _oldScope, ...rest } = data;
         let harness = oldHarness ? { ...emptyHarness(), ...oldHarness } : emptyHarness();
         if (oldHarness && !oldHarness.implementationScope) {

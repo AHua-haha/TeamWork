@@ -14,7 +14,7 @@ Before each lead request the team materializes missing member bundles from accep
 
 ## Decisions and constraints
 
-JSON is configuration and Markdown carries optional member instructions. Harness maintenance prompts, tools and commit policy are backend base code. Implementation scopes are explicit. Command-boundary configuration is deferred; file submissions inherit the lead's existing command allowances for new members and preserve the target's allowances on update. User model settings remain available through existing HTTP and produce accepted source bundles. Self-updates require idle state; a running lead cannot change its own assignment or model. Catalog publishing and peer worktree integration remain deferred.
+JSON is configuration and Markdown carries optional member instructions. The combined project base owns maintenance prompts, reusable file tools and separate design/implementation commit policy. Its version 2 manifest assignment is harnesses.project {designScope, implementationScope}. Implementation scopes are explicit. The separate command base owns run_command and current command matching; richer boundary configuration is deferred; file submissions inherit the lead's existing command allowances for new members and preserve the target's allowances on update. User model settings remain available through existing HTTP and produce accepted source bundles. Self-updates require idle state; a running lead cannot change its own assignment or model. Catalog publishing and peer worktree integration remain deferred.
 
 ## Code map
 

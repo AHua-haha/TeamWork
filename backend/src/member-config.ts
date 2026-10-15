@@ -3,7 +3,7 @@ import { keys, obj } from './config.js';
 import { emptyHarness } from './harness-config.js';
 import { resolveHarness, type HarnessService } from './harness.js';
 import { HarnessQueue } from './harness-history.js';
-import { sourceBundle, type MemberConfigSource } from './member-config-format.js';
+import { memberManifestVersion, sourceBundle, type MemberConfigSource } from './member-config-format.js';
 import { projectPath } from './project-files.js';
 import { memberFields, type TeamService, type StoredMember } from './team.js';
 import { AppError, identity } from './types.js';
@@ -64,7 +64,7 @@ export class MemberConfigService {
       const read = async (relative: string) => Buffer.from(await files.read.readFile(join(files.root, relative))).toString('utf8');
       const text = await read(path), manifest = parse(text);
       keys(manifest, ['version', 'memberId', 'revision', 'name', 'role', 'responsibility', 'settings', 'promptFiles', 'harnesses']);
-      if (manifest.version !== 1) throw new AppError('invalid_config', 'Member manifest version must be 1');
+      if (manifest.version !== memberManifestVersion) throw new AppError('invalid_config', 'Use member manifest version 2 with designScope and implementationScope inside harnesses.project');
       const creating = manifest.memberId === null && manifest.revision === null;
       let current: StoredMember | null = null;
       if (!creating) {
@@ -80,7 +80,9 @@ export class MemberConfigService {
         if (member.id !== current?.id && member.value.configuration?.path.toLowerCase() === path.toLowerCase()) throw new AppError('config_conflict', 'This bundle already belongs to another member', 409);
       }
       const bases = obj(manifest.harnesses, 'Purpose harnesses');
-      keys(bases, ['design', 'implementation']);
+      keys(bases, ['project']);
+      const project = obj(bases.project, 'Project harness');
+      keys(project, ['designScope', 'implementationScope']);
       const settings = obj(manifest.settings, 'Member settings');
       keys(settings, ['connectionId', 'modelId', 'modelOptions', 'promptOptionIds', 'toolOptionIds']);
       if (!Array.isArray(manifest.promptFiles) || manifest.promptFiles.length > 10 || manifest.promptFiles.some(p => typeof p !== 'string' || !/^prompts\/(?:[^/]+\/)*[^/]+\.md$/.test(p))) throw new AppError('invalid_config', 'promptFiles lists at most 10 bundle-relative prompts/*.md files');
@@ -98,7 +100,7 @@ export class MemberConfigService {
       const fields = memberFields({
         name: manifest.name, role: manifest.role, responsibility: manifest.responsibility,
         settings: { ...(current?.value.settings ?? lead.value.settings), ...settings, prompt: prompts.join('\n\n') },
-        harness: { ...emptyHarness(), designScope: bases.design, implementationScope: bases.implementation, allowedCommands: (current ?? lead).value.harness.allowedCommands },
+        harness: { ...emptyHarness(), designScope: project.designScope, implementationScope: project.implementationScope, allowedCommands: (current ?? lead).value.harness.allowedCommands },
       });
       if (fields.settings.toolOptionIds.length) throw new AppError('invalid_config', 'Tools are fixed by the harness bases');
       if (current?.value.lead && JSON.stringify(fields.settings) !== JSON.stringify(current.value.settings)) throw new AppError('access_denied', 'Only the user changes the lead model and instructions', 403);

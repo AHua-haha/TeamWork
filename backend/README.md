@@ -112,7 +112,7 @@ Example manifest (`null` memberId/revision creates a member):
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "memberId": null,
   "revision": null,
   "name": "Backend",
@@ -121,13 +121,15 @@ Example manifest (`null` memberId/revision creates a member):
   "settings": {},
   "promptFiles": ["prompts/member.md"],
   "harnesses": {
-    "design": {
-      "working": ["user/design/backend.json"],
-      "dependencies": ["user/design/api.json"]
-    },
-    "implementation": {
-      "paths": ["backend/src", "backend/test"],
-      "usePaths": ["shared/api.ts"]
+    "project": {
+      "designScope": {
+        "working": ["user/design/backend.json"],
+        "dependencies": ["user/design/api.json"]
+      },
+      "implementationScope": {
+        "paths": ["backend/src", "backend/test"],
+        "usePaths": ["shared/api.ts"]
+      }
     }
   }
 }
@@ -135,9 +137,9 @@ Example manifest (`null` memberId/revision creates a member):
 
 Use common `write`/`edit` tools, then `submit_member_config({"path":".team/members/backend/member.json"})`. The single submission validates current provider/model/catalog settings and all referenced bytes and atomically stores the exact accepted bundle and its projected member settings. A prompt file change also needs submission. Updates use the returned member ID/current revision and an idle target. Invalid files, stale revisions, busy/foreign targets, unsafe paths and unknown fields preserve the last valid configuration. Agent structured create/update/configure tools are removed; model listing and retirement remain. Existing accepted copies are materialized when missing, without overwriting drafts. `GET /workspaces/:workspaceId/team/members/:memberId/config` reads the stable submitted bundle including digest and attribution; user HTTP settings edits also generate an accepted bundle.
 
-The design-management base fixes tools, maintenance prompts and user-only design commit permission. Agents choose working/dependency design references. The implementation base fixes tools, prompts and agent commit permission; agents choose editable paths and read-only usePaths. Design implementation mappings do not grant access. Read-only overlap wins; implementation excludes .context, .team and Git metadata. The lead base has workspace-wide safe delegation authority and pending design/member-config file access. Workers cannot submit member configuration or replace fixed base policies.
+The combined project base owns design management and implementation, including their tools, maintenance prompts and commit rules. Agents configure its designScope and implementationScope together. Its design part requires user acceptance; its implementation part permits agent commits. Both parts keep independent Git histories and pending state. Design implementation mappings do not grant access. Read-only overlap wins; implementation excludes .context, .team and Git metadata. The lead base has workspace-wide safe delegation authority and pending design/member-config file access. Workers cannot submit member configuration or replace fixed base policies.
 
-The third command-boundary harness is deferred. Existing allowed commands keep exact-vector/executable matching: new submitted members inherit the lead's current allowances and updates preserve their own. The manifest cannot change them; existing user management configuration remains available.
+The separate command harness owns run_command and current exact-vector/executable matching. Richer command boundaries and agent configuration are deferred: new submitted members inherit the lead's current allowances and updates preserve their own. The manifest cannot change them; existing user management configuration remains available. Startup converts active members’ accepted version 1 bundles to version 2 project grouping without changing assigned scopes, command permissions, prompt bytes or Git histories. Existing pending drafts remain untouched; convert them to harnesses.project and update their revision before submitting.
 
 The harness assembles purpose/maintenance rule text into the model system prompt. It automatically checkpoints each finished run, including failure/cancellation and interruption recovery. `commit_scope {part, message}` records a semantic implementation commit without user approval. Design commits require user acceptance of exact reviewed bytes/base. `scope_history` and `restore_scope` inspect/restore one part independently; no agent checkpoint tool is provided.
 

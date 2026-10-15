@@ -1055,7 +1055,7 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     answer(secondStep.events, call('commit_scope', { part: 'design', message: 'Cannot self-approve' }));
     const thirdStep = await requests.next();
     assert.match(JSON.stringify(thirdStep.request.context.messages), /approval_required/);
-    const manifest = { version: 1, memberId: null, revision: null, name: 'Backend', role: 'developer', responsibility: 'Implement the result', settings: {}, promptFiles: ['prompts/member.md'], harnesses: { design: { working: ['user/design.json'], dependencies: [] }, implementation: { paths: ['src/result.txt'], usePaths: [] } } };
+    const manifest = { version: 2, memberId: null, revision: null, name: 'Backend', role: 'developer', responsibility: 'Implement the result', settings: {}, promptFiles: ['prompts/member.md'], harnesses: { project: { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: ['src/result.txt'], usePaths: [] } } } };
     answer(thirdStep.events, call('write', { path: '.team/members/backend/prompts/member.md', content: 'Keep the result concise.' }));
     const manifestStep = await requests.next();
     answer(manifestStep.events, call('write', { path: '.team/members/backend/member.json', content: JSON.stringify(manifest) }));

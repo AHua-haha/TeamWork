@@ -218,10 +218,8 @@ export class HarnessService {
       `Your private worktree is ${env.root}. Use paths relative to it. Other members have separate working files.`,
       ...env.definitions.map(d => `## ${d.id} harness\n${d.prompt}\n${d.parts.map(p => `Part ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
       'The harness automatically checkpoints each finished run. Use commit_scope for meaningful commits only. A design commit requires user approval of the exact revision. Checkpoints never imply approval. Accepted snapshots are retained in harness history; they are not automatically merged into the original workspace or other worktrees.',
-      'File scope and allowed commands are separate. Command effects are not filesystem-confined by file-tool scope in this prototype. Keep commands within the assignment.',
       '## Accepted working designs', await this.acceptedDesignView(id, env, resolved.working),
       '## Dependency designs', await this.designView(resolved.dependencies),
-      `## Allowed commands\n${JSON.stringify(member.value.harness.allowedCommands)}`,
       '## Implementation files', await this.implementationView(env.root, resolved.readable, member),
     ];
     return { tools, context: parts.join('\n\n') };

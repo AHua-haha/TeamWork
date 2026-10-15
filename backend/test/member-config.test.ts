@@ -6,14 +6,15 @@ import { emptyHarness } from '../src/harness-config.js';
 import { TeamSystem } from '../src/team-system.js';
 import { leadTools } from '../src/lead-tools.js';
 import { HarnessHistory, harnessStorage, type HarnessPart } from '../src/harness-history.js';
+import { sourceBundle } from '../src/member-config-format.js';
 import { code, configureHarness, settle, stubConfig, withTeam, worker, type Fixture } from './team-fixture.js';
 
 const path = '.team/members/backend/member.json';
 const manifest = () => ({
-  version: 1, memberId: null as string | null, revision: null as number | null,
+  version: 2, memberId: null as string | null, revision: null as number | null,
   name: 'Backend', role: 'developer', responsibility: 'Implement the project', settings: {},
   promptFiles: ['prompts/member.md'],
-  harnesses: { design: { working: [] as string[], dependencies: [] as string[] }, implementation: { paths: ['src'], usePaths: ['shared'] } },
+  harnesses: { project: { designScope: { working: [] as string[], dependencies: [] as string[] }, implementationScope: { paths: ['src'], usePaths: ['shared'] } } },
 });
 async function draft(f: Fixture, value: unknown, prompts = 'Be concise.\n') {
   const files = await f.team.harness.files(f.lead.memberId);
@@ -59,12 +60,12 @@ test('invalid fields, fixed policy overrides, escaping prompts and missing refer
   m.memberId = initial.member.memberId; m.revision = initial.member.revision;
   const before = await f.team.service.find(m.memberId);
   const invalid: unknown[] = [
-    { ...m, version: 2 }, { ...m, extra: true },
+    { ...m, version: 1 }, { ...m, extra: true },
     { ...m, harnesses: { ...m.harnesses, command: { allowedCommands: [] } } },
-    { ...m, harnesses: { ...m.harnesses, design: { working: [], dependencies: [], commit: 'agent' } } },
-    { ...m, harnesses: { ...m.harnesses, implementation: { paths: ['.team'], usePaths: [] } } },
-    { ...m, harnesses: { ...m.harnesses, implementation: { paths: ['../outside'], usePaths: [] } } },
-    { ...m, harnesses: { ...m.harnesses, design: { working: ['user/missing.json'], dependencies: [] } } },
+    { ...m, harnesses: { project: { ...m.harnesses.project, designScope: { working: [], dependencies: [], commit: 'agent' } } } },
+    { ...m, harnesses: { project: { ...m.harnesses.project, implementationScope: { paths: ['.team'], usePaths: [] } } } },
+    { ...m, harnesses: { project: { ...m.harnesses.project, implementationScope: { paths: ['../outside'], usePaths: [] } } } },
+    { ...m, harnesses: { project: { ...m.harnesses.project, designScope: { working: ['user/missing.json'], dependencies: [] } } } },
     { ...m, promptFiles: ['../outside.md'] }, { ...m, promptFiles: ['prompts/../../outside.md'] },
     { ...m, promptFiles: ['prompts/missing.md'] }, { ...m, settings: { prompt: 'Inline instructions are forbidden' } },
     { ...m, settings: { modelId: null } },
@@ -131,10 +132,17 @@ test('source persistence failures activate nothing and user edits retain an acce
 
 test('fixed purpose bases keep tools and approval while scope grants are independent of design mappings', () => withTeam(async f => {
   const design = await worker(f, 'Example', ['mapped']);
-  const m = manifest(); m.harnesses.design.working = design.harness.designScope.working;
-  m.harnesses.implementation = { paths: ['src'], usePaths: ['src/shared'] };
+  const m = manifest(); m.harnesses.project.designScope.working = design.harness.designScope.working;
+  m.harnesses.project.implementationScope = { paths: ['src'], usePaths: ['src/shared'] };
   await draft(f, m); const result = await submit(f);
   const id = result.member.memberId, files = await f.team.harness.files(id);
+  const env = await f.team.harness.environment(id);
+  assert.deepEqual(env.definitions.map(d => d.id), ['project', 'command']);
+  const project = env.definitions[0]!, command = env.definitions[1]!;
+  assert.deepEqual(project.parts.map(p => [p.id, p.commit]), [['design', 'user'], ['implementation', 'agent']]);
+  assert.ok(!project.tools.includes('run_command'));
+  assert.deepEqual(command.parts, []);
+  assert.deepEqual(command.tools, []);
   await files.write.mkdir(join(files.root, 'src')); await files.write.writeFile(join(files.root, 'src/result.ts'), 'ok');
   await assert.rejects(files.write.writeFile(join(files.root, 'mapped/result.ts'), 'no'));
   await assert.rejects(files.write.writeFile(join(files.root, 'src/shared/types.ts'), 'no'));
@@ -144,6 +152,19 @@ test('fixed purpose bases keep tools and approval while scope grants are indepen
   assert.match(context.context, /Design commits require explicit user approval/);
   await assert.rejects(f.team.harness.commit(id, 'design', 'Self approval', { type: 'agent', memberId: id }), code('approval_required'));
   assert.equal((await f.team.harness.commit(id, 'implementation', 'Implement result', { type: 'agent', memberId: id })).kind, 'commit');
+  const enabled = await configureHarness(f, 'Backend', { ...result.member.harness, allowedCommands: [{ kind: 'exact', argv: [process.execPath, '--version'] }] });
+  const enabledEnv = await f.team.harness.environment(id);
+  assert.deepEqual(enabledEnv.definitions[1]!.tools, ['run_command']);
+  assert.ok(!enabledEnv.definitions[0]!.tools.includes('run_command'));
+  assert.deepEqual(enabledEnv.parts, env.parts, 'command changes do not change project parts');
+  const prepared = await f.team.harness.prepare(id, []);
+  assert.match(prepared.context, /## project harness/);
+  assert.match(prepared.context, /## command harness/);
+  const tool = prepared.tools.find(t => t.definition.name === 'run_command')!;
+  const scope = { agentId: id, runId: 'command-run', signal: new AbortController().signal };
+  assert.match(JSON.stringify((await tool.execute({ argv: [process.execPath, '--version'] }, scope as never, {} as never)).content), /exitCode/);
+  await configureHarness(f, 'Backend', { ...enabled.harness, allowedCommands: [] });
+  assert.match(JSON.stringify((await tool.execute({ argv: [process.execPath, '--version'] }, scope as never, {} as never)).content), /command_denied/);
 }));
 
 test('migration freezes old mapped scopes once and command allowances remain outside agent-editable assignments', () => withTeam(async f => {
@@ -212,4 +233,58 @@ test('legacy Git boundary migration preserves accepted and pending implementatio
   assert.equal(await history.readSnapshot(implementation.state.committed, 'src/result.txt'), 'Accepted implementation');
   assert.match(implementation.diff, /Pending follow-up/);
   assert.ok((await history.history(member.memberId, previous, root)).some(r => r.message === 'Implement result'), 'old history remains reachable');
+}));
+
+test('accepted split-harness bundles upgrade once while prompts, command permissions, pending drafts and scope Git state survive', () => withTeam(async f => {
+  const member = await worker(f, 'Backend', ['src']);
+  const configured = await configureHarness(f, 'Backend', { ...member.harness, allowedCommands: [{ kind: 'executable', executable: process.execPath }] });
+  const old = (await f.team.service.find(configured.memberId))!;
+  const oldManifest = {
+    version: 1, memberId: old.id, revision: old.revision, name: old.value.name, role: old.value.role,
+    responsibility: old.value.responsibility, settings: {}, promptFiles: ['prompts/first.md', 'prompts/second.md'],
+    harnesses: { design: old.value.harness.designScope, implementation: old.value.harness.implementationScope },
+  };
+  const files = { 'member.json': JSON.stringify(oldManifest), 'prompts/first.md': 'First\n', 'prompts/second.md': 'Second\n' };
+  const source = sourceBundle(path, files, f.lead.memberId);
+  const stored = f.store.members.get(old.id)!.member;
+  stored.value.configuration = source;
+  stored.value.settings.prompt = 'First\n\n\nSecond\n';
+  const previous = structuredClone(stored);
+  const work = await f.team.harness.files(old.id);
+  await work.write.mkdir(join(work.root, 'src'));
+  await work.write.writeFile(join(work.root, 'src/result.ts'), 'Pending implementation');
+  const state = await f.team.harness.inspect(old.id);
+  const draftFiles = await draft(f, { ...oldManifest, role: 'Pending role' }, 'Pending prompt');
+  const draftText = await readFile(join(draftFiles.root, path), 'utf8');
+  const archived = await worker(f, 'Archive', ['archive']);
+  await f.team.runner.retire(f.workspaceId, archived.memberId, archived.revision);
+  const archivedRecord = f.store.members.get(archived.memberId)!.member;
+  const archivedSource = archivedRecord.value.configuration!;
+  const archivedManifest = JSON.parse(archivedSource.files['member.json']!);
+  archivedRecord.value.configuration = sourceBundle(archivedSource.path, {
+    ...archivedSource.files,
+    'member.json': JSON.stringify({ ...archivedManifest, version: 1, harnesses: { design: archivedManifest.harnesses.project.designScope, implementation: archivedManifest.harnesses.project.implementationScope } }),
+  }, f.lead.memberId);
+  const archivedBefore = structuredClone(archivedRecord);
+  await f.team.initialize();
+  const upgraded = (await f.team.service.find(old.id))!;
+  assert.equal(upgraded.revision, old.revision + 1);
+  assert.deepEqual(upgraded.value.settings, previous.value.settings);
+  assert.deepEqual(upgraded.value.harness, previous.value.harness);
+  assert.deepEqual(await f.team.service.find(archived.memberId), archivedBefore, 'retired source records and lifecycle boundaries stay historical');
+  const accepted = await f.team.configuration.accepted(f.workspaceId, old.id);
+  const manifest = JSON.parse(accepted.files['member.json']!);
+  assert.equal(manifest.version, 2);
+  assert.equal(manifest.revision, upgraded.revision);
+  assert.deepEqual(manifest.harnesses, { project: { designScope: oldManifest.harnesses.design, implementationScope: oldManifest.harnesses.implementation } });
+  assert.equal(accepted.files['prompts/first.md'], files['prompts/first.md']);
+  assert.equal(accepted.files['prompts/second.md'], files['prompts/second.md']);
+  assert.equal(accepted.submittedBy, 'harness');
+  assert.notEqual(accepted.digest, source.digest);
+  assert.deepEqual(await f.team.harness.inspect(old.id), state, 'combining harnesses does not reinitialize project parts');
+  await f.team.configuration.materialize(f.lead.memberId);
+  assert.equal(await readFile(join(draftFiles.root, path), 'utf8'), draftText);
+  await assert.rejects(submit(f), code('invalid_config'), 'old pending format requires explicit conversion');
+  await f.team.initialize();
+  assert.deepEqual(await f.team.service.find(old.id), upgraded, 'upgrade is idempotent');
 }));
