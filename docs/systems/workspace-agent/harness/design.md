@@ -1,31 +1,19 @@
-# Agent harness
+# Harness
 
 ## Purpose and boundary
-
-A harness collects reusable tools, operating scope and rules for one purpose. It owns that purpose's file/command authority, supplied context, context maintenance prompts, edit history and commit policy. An agent can have several harnesses and work on several independently versioned parts. The runtime runs the model/tool loop using the assembled harness environment.
-
-The lead manages members and assigns working/dependency designs through the existing assignment fields. This increment implements the harness system; a new harness configuration interface and approval UI are deferred. Backend review and user acceptance operations are available.
+A harness supplies reusable tools, file scope, commit permission, and operating/maintenance rules for one purpose. The runtime assembles those capabilities and executes the model loop. Members have separate working trees and independent scoped histories. The two prototype bases are design management and implementation. Bases are fixed backend policy; agents configure assignments only. A future command-boundary harness is deferred; existing allowed commands retain their current behavior.
 
 ## Inputs and preconditions
+Member assignments contain designScope {working, dependencies}, implementationScope {paths, usePaths}, and existing allowedCommands. Each scope list has at most 50 distinct safe relative paths. Designs must be user design references; working and dependency lists are disjoint. Implementation paths exclude .git, .context and .team control files; dot means the project root with those exclusions. Read-only use paths override writable paths on overlap. A design's implementation mappings describe the project but never grant access.
 
-- Git must be installed and executable. One backend process owns the database and harness operations.
-- Each team member, including the lead, receives a separate managed Git worktree seeded from the original workspace's nonignored regular files and context files. Existing managed worktrees are reopened rather than reset. Source symbolic links are omitted; file tools cannot follow links.
-- Existing assignment input remains `{designScope: {working: [paths], dependencies: [paths]}, allowedCommands: [rules]}`. Each design list has at most 50 distinct valid user-context design records, with no overlap. Command rules are exact argv vectors or exact executable names/paths, at most 50, with no implicit shell parsing.
-- A design record is JSON `{content: "Markdown", implementation: [paths]}`. Up to 50 distinct implementation paths may name future files/directories, or `.`; mappings exclude `.git` and `.context`.
-- A member's working design files and corresponding implementation are editable through common read/write/edit tools in its worktree. Dependency design and implementation are read-only. Dependency read-only authority wins on overlap. Scope changes still follow original-workspace assignment mappings, not unapproved edits in an agent's files.
-- The lead's default design-maintenance harness can read the workspace/context and edit `.context/user`; workers can read selected designs and mapped implementation. Ordinary tools never edit `.git` or `.context/agent`.
-- Default purpose bundles are design maintenance and implementation. Their writable parts have IDs `design` and `implementation`; the former requires user commits, the latter allows agent commits. Implementation excludes context and dependency paths. Empty implementation assignments do not grant implementation writes. The core accepts typed purpose/part definitions in process; no new configuration endpoint is provided.
-- A part has an ID, managed paths, exclusions, commit policy (`user` or `agent`) and rule text. Independently managed parts in one worktree must have disjoint effective paths. Durable scope identity follows the path/exclusion set, not the member. Members retain separate pending histories and committed bases for that scope.
+The fixed design base grants common list/read/write/edit and scope history/restore/commit tools. Working designs can be edited as pending files; dependencies can only be read. Design semantic commits require explicit user acceptance. The lead base includes bootstrap user-design management and a separate member-config draft part; ordinary implementation scopes cannot own these files. The fixed implementation base grants the same reusable operations on explicit implementation paths; use paths are read-only. Implementation semantic commits permit the agent. Mandatory base prompts describe operation, maintenance, checkpoints and approval. Submitted Markdown prompts supplement member instructions without changing enforced authority.
+
+The lead has fixed workspace-wide delegation authority for safe design and implementation assignments, and common file access to .team/members bundles. Workers cannot configure members. An editable configuration file cannot grant management authority, replace tools/prompts/policies, or change command permissions. Commands continue to match exact argv or executable names and run in the member worktree, without filesystem confinement.
 
 ## Outputs and observable effects
+File operations use current accepted assignments; edits to draft member configuration do not change them. Design mappings changing do not change permissions. Each purpose owns an independent scoped part and checkpoint/committed references. Member-config draft checkpoints and commits never activate configuration: explicit validated submission is required.
 
-### Tools, prompts and execution
-
-The harness supplies reusable `ls`, `read`, `write`, `edit`, `commit_scope`, `scope_history`, `restore_scope`, and optionally `run_command`. Writable file tools are omitted without writable parts. Tool implementations are shared across agents; current harness rules determine authority. Existing lead team-management/assignment tools remain available.
-
-All configured purpose and part rule prompts are assembled into the system prompt. Automated context maintenance is model-guided text only. Requests include bounded accepted working-design content, dependency designs and the member's implementation files (64 KiB per section, omitted paths named). Pending design edits can be inspected with file tools, but do not replace accepted design content in the supplied working-design section.
-
-Commands run in the member's private worktree, match allowed vectors/executable names exactly, have no implicit shell parsing, retain up to 64 KiB combined output and time out after 60 seconds. Cancellation terminates the process/process group where supported. Allowed command effects remain outside file-tool confinement in this prototype.
+The harness checkpoints finished runs (completed, failed, cancelled, interrupted) after outstanding effects settle, and before successful group publication. Checkpoints preserve recoverable edits without semantic acceptance. commit_scope creates an intentional commit of one authorized part; scope_history lists revisions and restore_scope restores only that part. User design acceptance names exact reviewed revision/base and requires an idle member. Accepted snapshots are retained in private harness Git, without automatically merging original workspace or peer files.
 
 ### Independent checkpoints and commits
 
@@ -53,24 +41,14 @@ Review creates a stable snapshot if current edits are not yet checkpointed. User
 Design acceptance validates JSON design records before committing. The user must review again if files, the selected checkpoint or the committed base have changed. Acceptance records `actor.type = user` and applies only to that part. Git checkpoint objects, conversation text and implementation commits do not constitute design approval.
 
 ## Failure behavior
-
-Out-of-scope file operations, dependency writes and disallowed commands are refused with reasons. Expected tool refusals remain private tool results so an agent can recover. Invalid definitions/overlap, malformed design records and input errors fail explicitly. Foreign/unreachable restore revisions are refused. Stale reviews/bases fail with `stale_revision` and change no committed references. A commit without permission fails with `approval_required` or `access_denied`. Missing members/parts fail with 404; busy user acceptance/restore fails with 409.
-
-Git/storage failure is observable and never represented as a successful commit. Reference updates for committed state/base are transactional. Restore validates paths/links first and attempts to restore the previous file snapshot on failure; if rollback also fails the operation fails and retained history remains available. Filesystem restoration and Git storage are not one cross-filesystem transaction. A checkpoint failure prevents successful final group publication and becomes run failure; a recovery checkpoint failure prevents startup from announcing recovery complete.
-
-Snapshots refuse symbolic links in managed state and cap capture at 20,000 regular files, 64 MiB per file and 256 MiB total. Tool text/path limits remain in force. Git processes time out after 60 seconds and have bounded output. Failure after a file edit can leave pending files, which remain available in the retained worktree for inspection/retry.
+Unsafe paths, unauthorized edits/commands, unknown parts, invalid design acceptance, stale reviewed bytes/base or unapproved design commits fail explicitly. Dependencies stay read-only. Failed snapshots do not advance accepted state; checkpoint failure prevents successful final publication. Scope restoration preserves other parts and refuses foreign revisions and symbolic links. Abrupt interruption during disk restoration can leave pending partial edits; recorded revisions remain available.
 
 ## Guarantees and limits
-
-Different agents have separate working files. Parts have independent history/reference state; restoring one part never performs a whole-worktree reset. Scope history and committed snapshots survive agent replacement and backend restart. Retired member worktrees/history are retained; ending runs still checkpoint their effects. Worktree garbage collection is deferred.
-
-The backend manages checkpoints, commit permission and approval records. It does not sandbox permitted commands, automatically merge accepted changes into project branches, add configuration/approval UI, or implement automatic compaction/knowledge consolidation. Original workspace edits are not live-synchronized into existing member worktrees. Assignment mappings continue to come from the original design catalog until explicit integration/configuration changes them.
+Tool implementations are role-independent. Fixed bases determine tool selection, commit policy and mandatory rules; assignment files only narrow the available workspace domain. Each agent has an isolated worktree and scope indexes share Git objects. Checkpointing and committing one part do not accept another. Accepted design publishing to original catalog and automatic peer synchronization are deferred. File tools enforce scope; permitted command effects remain outside that enforcement. Prompt compliance is instruction-driven, with access/approval enforced by code.
 
 ## Acceptance examples
-
-1. Backend edits design and implementation in its worktree. The original workspace and Frontend's files remain unchanged.
-2. Backend commits implementation with an intent. Its pending design remains uncommitted; the run-end checkpoint supplies no approval.
-3. A user reviews design revision D3 and accepts it against base D1. If new edits arrive before acceptance, refuse rather than commit unreviewed content.
-4. A workspace contains design D3, implementation I7 and usage U2. Restoring earlier design content records a new design checkpoint while I7/U2 and the accepted design revision stay unchanged.
-5. Another work area commits the same scope first. Refuse a stale commit; explicitly restoring the latest committed revision refreshes the local base without erasing its prior checkpoints.
-6. A tool finishes cancellation cleanup before checkpointing. Its partial file effects are preserved, and the run is cancelled without a fabricated final group response.
+1. A member edits its working design and src assigned explicitly; design commit is refused without user acceptance while implementation commit succeeds.
+2. A dependency design maps shared/, but shared/ is readable only if listed in implementation usePaths or paths. Editing a design mapping grants no new path.
+3. Writable src with usePaths src/shared allows read but refuses writes under src/shared.
+4. The lead edits a member bundle, checkpoints it, and the active member remains unchanged until submit succeeds.
+5. Configuration asks to change fixed commit policy or tools: refuse submission and retain active state.

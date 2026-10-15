@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-A design part is the user's design for a project or one of its parts. It holds design content and the corresponding implementation files or directories together. The lead helps the user maintain it through pending harness copies. The original-workspace record supplies assignment mappings; pending edits do not expand file permissions.
+A design part is the user's design for a project or one of its parts. It holds design content and the corresponding implementation files or directories together. The lead helps the user maintain it through pending harness copies. The original-workspace record supplies descriptive implementation mappings; explicit harness assignments determine file permissions.
 
 ## Inputs and preconditions
 
@@ -28,8 +28,8 @@ Design identity is its context file, independent of member identity. Implementat
 
 ## Acceptance examples
 
-1. user/design/backend.json holds the backend design and implementation ["backend/src", "backend/test"]. A working assignment can edit those paths.
-2. A dependency references user/design/api.json, whose implementation is ["shared/api.ts"]. The member can read the dependency design and shared/api.ts and cannot edit either through file tools.
-3. A mapping changes after a user discussion. The next model call and file action use the resulting mapping.
+1. user/design/backend.json holds the backend design and implementation ["backend/src", "backend/test"]. A member can edit those implementation paths only when explicitly assigned through its implementation harness.
+2. A dependency references user/design/api.json, whose implementation is ["shared/api.ts"]. The member can read the dependency design. It can read shared/api.ts only when its implementation paths or usePaths include it; a use path grants no write access.
+3. A mapping changes after a user discussion. The next design read shows the resulting mapping, while implementation authority remains fixed until a new member configuration is accepted.
 
 Committing a harness design snapshot does not automatically integrate it into this original-workspace catalog. The harness presents its scoped committed design content to that member separately. Current discovery endpoints continue to inspect original workspace files, independent of pending member worktrees.

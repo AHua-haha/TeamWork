@@ -2,27 +2,27 @@
 
 ## Contract
 
-[Lead design](design.md). Preserve design collaboration, user-only design acceptance, team management and independent harness assignment.
+[Lead design](design.md). Preserve design collaboration, user-only design acceptance, file-based member configuration and shared mention assignment.
 
-## Responsibilities and composition
+## Responsibilities and decomposition
 
-LeadService owns existing role-checked assignment configuration and uses [design parts](../../context-base/design-parts/design.md), [harness](../../harness/design.md) and [team](../design.md) contracts. Design editing, history and approval are provided by the shared harness rather than a lead-specific service. The [group chat](../group-chat/design.md) owns publication and activation.
+The team owns MemberConfigService and lifecycle persistence. The lead tool adapter exposes only submit_member_config for creation/update, with a path argument; retire_member and list_models remain team operations. The [harness](../../harness/design.md) supplies common file tools, mandatory base rules and .team/members draft scope. The [group chat](../group-chat/design.md) owns publication and activation. No separate lead design-save or structured assignment service remains.
 
 ## Coordination and data flow
 
-The lead's default design harness grants pending `.context/user` edits. Common file tools execute in its managed worktree; commit_scope enforces the same user design-approval policy used for any member. MemberContext prompts guide choices and explaining pending changes. configure_harness validates existing references and revision-updates a member without changing its model. Assignments use shared final responses and configured designs, with no blocking private call.
+Before each lead request the team materializes missing member bundles from accepted source records without overwriting drafts. Roster instructions include member IDs, current revisions and bundle paths, plus a complete manifest example. The lead edits manifests/prompts with common tools, submits the path, then uses a shared response to mention the accepted member. MemberConfigService validates caller authority from the active lead record, captures exact bytes and resolves design references before an atomic member write. Busy/stale/refused submissions return private recoverable feedback. Pending design edits and their user acceptance still use independent harness Git history.
 
 ## Decisions and constraints
 
-The lead has no read_design/save_design tools and cannot directly update original context as an agent. Existing original-workspace DesignService attributed saves remain backend import/setup primitives, not a model tool. Approval records and checkpoint/semantic-commit distinction belong to the harness. Original-catalog publication of accepted harness snapshots is deferred.
+JSON is configuration and Markdown carries optional member instructions. Harness maintenance prompts, tools and commit policy are backend base code. Implementation scopes are explicit. Command-boundary configuration is deferred; file submissions inherit the lead's existing command allowances for new members and preserve the target's allowances on update. User model settings remain available through existing HTTP and produce accepted source bundles. Self-updates require idle state; a running lead cannot change its own assignment or model. Catalog publishing and peer worktree integration remain deferred.
 
 ## Code map
 
-- [Assignment configuration](../../../../../backend/src/lead.ts), [tool adapter](../../../../../backend/src/lead-tools.ts)
+- [Submission tool](../../../../../backend/src/lead-tools.ts)
 - [Role/cooperation instructions](../../../../../backend/src/member-context.ts)
+- [Team implementation](../impl.md) owns file submission, lifecycle and stable source records.
 - [Harness implementation](../../harness/impl.md) owns generic tools, pending history and user commit authority.
-- [Team implementation](../impl.md) owns lifecycle and management; [group chat implementation](../group-chat/impl.md) owns publication and triggering.
 
 ## Verification
 
-[Lead tests](../../../../../backend/test/lead.test.ts) verify generic pending design writes and explicit user acceptance plus assignment/model independence. [MySQL integration](../../../../../backend/test/integration/backend.test.ts) verifies lead/worker worktrees, common file tools, semantic implementation commits, user-only design commits and retained runtime/group history.
+[Bundle tests](../../../../../backend/test/member-config.test.ts) verify exact submitted bytes, pending isolation, schema/policy/path validation, source persistence failures, revisions, busy/foreign targets and commands. [Lead tests](../../../../../backend/test/lead.test.ts) verify common design editing and user acceptance. [MySQL integration](../../../../../backend/test/integration/backend.test.ts) drives actual lead file editing/submission, worker prompts/tools, semantic implementation commits and user-only design acceptance.

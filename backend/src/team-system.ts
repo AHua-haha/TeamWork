@@ -1,7 +1,7 @@
 import type { ChatStore } from './group-chat.js';
 import { AppError } from './types.js';
 import type { ConfigService } from './config.js';
-import { LeadService } from './lead.js';
+import { MemberConfigService } from './member-config.js';
 import { leadTools } from './lead-tools.js';
 import { DesignService } from './design.js';
 import { HarnessService } from './harness.js';
@@ -21,7 +21,7 @@ export class TeamSystem {
   readonly service: TeamService;
   readonly runner: TeamRunner;
   readonly context: MemberContext;
-  readonly lead: LeadService;
+  readonly configuration: MemberConfigService;
   readonly designs: DesignService;
   readonly harness: HarnessService;
   readonly runConfig: RunConfigSource;
@@ -36,7 +36,7 @@ export class TeamSystem {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
     });
-    this.lead = new LeadService(this.service, this.designs);
+    this.configuration = new MemberConfigService(this.service, this.harness, id => this.runner.isRunning(id));
     this.runConfig = teamRunConfig(this.service, config);
   }
 
@@ -47,7 +47,7 @@ export class TeamSystem {
 
   /** Gives workspaces that have no lead one; the backend calls this once at startup. */
   initialize(): Promise<void> {
-    return this.service.initialize();
+    return this.service.initialize((member, config) => this.harness.migrateLegacy(member, config));
   }
 
   async team(workspaceId: string): Promise<TeamStatus> {
@@ -64,7 +64,9 @@ export class TeamSystem {
   }
 
   async update(workspaceId: string, memberId: string, revision: number, value: unknown): Promise<MemberStatus> {
-    return this.status(await this.service.update(workspaceId, memberId, revision, value));
+    const current = await this.service.get(workspaceId, memberId);
+    if (this.runner.isRunning(memberId) && JSON.stringify((value as { harness?: unknown })?.harness) !== JSON.stringify(current.harness)) throw new AppError('member_busy', 'Wait for the member before changing harness scope', 409);
+    return this.harness.operation(memberId, async () => this.status(await this.service.update(workspaceId, memberId, revision, value)));
   }
 
   private status(member: MemberView): MemberStatus {
@@ -77,7 +79,7 @@ export class TeamSystem {
    */
   policy(base: RuntimePolicy): RuntimePolicy {
     const { management } = teamTools(this.service, this.runner, this.config);
-    const lead = leadTools(this.lead);
+    const lead = leadTools(this.configuration);
     const checkpointed = new Set<string>();
     return {
       ...base,
@@ -112,6 +114,7 @@ export class TeamSystem {
         const request = await base.buildRequest(scope, history);
         const member = await this.service.find(scope.agentId);
         if (!member) return request;
+        if (member.value.lead) await this.configuration.materialize(scope.agentId);
         const prepared = await this.harness.prepare(scope.agentId, member.value.lead ? [...management, ...lead] : []);
         const systemPrompt = [await this.context.instructions(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
         return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };

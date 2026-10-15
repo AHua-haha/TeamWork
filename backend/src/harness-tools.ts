@@ -4,15 +4,6 @@ import type { HarnessService } from './harness.js';
 import type { RuntimeTool } from './runtime.js';
 import { refusing, toolText, type ToolOutput } from './tool-result.js';
 
-export const harnessSchema = Type.Object({
-  designScope: Type.Object({ working: Type.Array(Type.String(), { maxItems: 50 }), dependencies: Type.Array(Type.String(), { maxItems: 50 }) }),
-  allowedCommands: Type.Array(Type.Union([
-    Type.Object({ kind: Type.Literal('exact'), argv: Type.Array(Type.String(), { minItems: 1, maxItems: 128 }) }),
-    Type.Object({ kind: Type.Literal('executable'), executable: Type.String() }),
-  ]), { maxItems: 50 }),
-});
-
-
 export function harnessFileTools(harness: HarnessService, writable: boolean): RuntimeTool[] {
   const wrap = (definition: Tool, build: (id: string) => Promise<{ execute(id: string, args: never, signal?: AbortSignal): Promise<{ content: ToolOutput['content'] }> }>): RuntimeTool => ({
     definition: { name: definition.name, description: definition.description, parameters: definition.parameters },

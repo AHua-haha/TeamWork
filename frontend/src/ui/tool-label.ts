@@ -13,7 +13,7 @@ export function toolHeading(toolName: string, argsText: string | undefined): str
   if (toolName === 'save_design') return 'Update design';
   if (toolName === 'read_design') return 'Read design';
   if (toolName === 'run_command') return 'Run command';
-  if (toolName === 'configure_harness') return `Configure harness${callRecipient(argsText) ? ' → ' + callRecipient(argsText) : ''}`;
+  if (toolName === 'submit_member_config') return 'Submit member configuration';
   if (toolName !== 'send_message' && toolName !== 'assign_member') return toolName;
   const to = callRecipient(argsText);
   return to ? `${toolName === 'assign_member' ? 'Assign →' : '→'} ${to}` : toolName;
@@ -23,7 +23,7 @@ export function toolHeading(toolName: string, argsText: string | undefined): str
 export function toolLabels(toolName: string): { input: string; output: string } {
   if (toolName === 'send_message') return { input: 'Message', output: 'Response' };
   if (toolName === 'assign_member') return { input: 'Assignment', output: 'Report' };
-  if (toolName === 'configure_harness') return { input: 'Design scope and allowed commands', output: 'Member harness' };
+  if (toolName === 'submit_member_config') return { input: 'Configuration file', output: 'Validated member configuration' };
   if (toolName === 'run_command') return { input: 'Command', output: 'Exit status and output' };
   if (toolName === 'save_design') return { input: 'Design change', output: 'Applied change' };
   if (toolName === 'read_design') return { input: 'Design file', output: 'Current design and revision' };

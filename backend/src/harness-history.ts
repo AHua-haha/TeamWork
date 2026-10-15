@@ -178,14 +178,15 @@ export class HarnessHistory {
   }
   private async snapshot(root: string, part: HarnessPart, seed = false): Promise<string> {
     const files = await this.files(root, part, seed);
+    const entries: Entry[] = [];
+    for (const file of files) entries.push({ path: file.path, mode: file.mode, object: await this.text(['hash-object', '-w', '--stdin'], file.bytes) });
+    return this.tree(entries);
+  }
+  private async tree(files: Entry[]): Promise<string> {
     const index = join(this.storage, `index-${randomUUID()}`);
     try {
       await this.text(['read-tree', '--empty'], undefined, index);
-      const entries: string[] = [];
-      for (const file of files) {
-        const blob = await this.text(['hash-object', '-w', '--stdin'], file.bytes);
-        entries.push(`${file.mode} ${blob}\t${file.path}\0`);
-      }
+      const entries = files.map(file => `${file.mode} ${file.object}\t${file.path}\0`);
       if (entries.length) await this.git(['update-index', '-z', '--index-info'], entries.join(''), index);
       return await this.text(['write-tree'], undefined, index);
     } finally { await rm(index, { force: true }); }
@@ -280,6 +281,29 @@ export class HarnessHistory {
       const base = await this.ref(refs.base);
       if (!base) throw new AppError('corrupt_data', 'Scope is missing its committed base', 500);
       return { part, checkpoint, committed, base };
+    });
+  }
+
+  /** One-time policy migration: narrow exclusions without resetting existing pending files. */
+  async migrateExclusions(memberId: string, previous: HarnessPart, next: HarnessPart, root: string): Promise<void> {
+    if (this.key(previous) === this.key(next)) return;
+    if (JSON.stringify([...previous.paths].sort()) !== JSON.stringify([...next.paths].sort()) || previous.exclude.some(path => !next.exclude.includes(path))) throw new AppError('invalid_config', 'Boundary migration can only add exclusions');
+    const old = this.refs(memberId, previous), refs = this.refs(memberId, next);
+    await this.queue.run(`scope:${this.key(next)}`, async () => {
+      if (!(await this.ref(old.checkpoint)) || await this.ref(refs.checkpoint)) return;
+      const actor: HistoryActor = { type: 'harness', memberId };
+      const project = async (revision: string) => this.tree((await this.entries(revision)).filter(entry => partOwns(next, entry.path)));
+      const oldCommitted = (await this.ref(old.committed))!;
+      let committed = await this.ref(refs.committed);
+      if (!committed) {
+        committed = await this.record(await project(oldCommitted), null, 'baseline', actor, `Boundary migration from accepted ${oldCommitted}`);
+        await this.update(refs.committed, committed, null);
+      }
+      const oldBase = (await this.ref(old.base))!;
+      const baseTree = await project(oldBase);
+      const base = baseTree === (await this.revision(committed)).tree ? committed : await this.record(baseTree, null, 'baseline', actor, `Boundary migration from stale base ${oldBase}`);
+      const checkpoint = await this.record(await this.snapshot(root, next), base, 'checkpoint', actor, 'Preserve pending files while narrowing control-file exclusions');
+      await this.text(['update-ref', '--stdin'], `start\ncreate ${refs.base} ${base}\ncreate ${refs.checkpoint} ${checkpoint}\nprepare\ncommit\n`);
     });
   }
 

@@ -108,9 +108,9 @@ The Design and Team views expose current information only. New design-history, v
   - a status: **Working** while the member is running, **Idle** when it can run, or **Cannot run** with the reasons when it has issues; the member without a model says to expand its card and select one;
   - the responsibility, selected model, working design paths and dependency design paths, linked to the Design view;
   - per-member model/reasoning controls in the expanded card;
-  - an expandable harness section with current derived working and dependency implementation mappings and exact command vectors or allowed executable names; dependency read-only precedence is explained;
+  - an expandable harness section with explicit editable implementation paths and read-only use paths and exact command vectors or allowed executable names; dependency read-only precedence is explained;
   - Discuss with lead, plus a selected member indication when navigating from a design;
-  - a design path opens the current Design view; implementation files open in file tabs and directories are revealed in Files. Missing design mappings remain visible with an unavailable label.
+  - a design path opens the current Design view; implementation files open in file tabs and directories are revealed in Files. Design references stay separate from actual file permissions; implementation mapping edits do not change the displayed permission scope.
 
   A note says the lead manages team responsibilities and harnesses. The user can edit member model settings, and discusses other changes with the lead. Team reads refresh on group updates and focus, every three seconds during team work, and when work ends. Failed reads show Retry and retain the last team shown.
 - **Trees.** The tree shows two sections:

@@ -11,6 +11,11 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     identity(workspaceId, 'workspaceId');
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
+    if (area === 'members' && memberId && extra.length === 1 && extra[0] === 'config' && method === 'GET') {
+      query(url, []);
+      json(response, 200, await team.configuration.accepted(workspaceId, memberId));
+      return;
+    }
     if (area === 'members' && memberId && extra[0] === 'harness') {
       identity(memberId, 'memberId');
       await team.member(workspaceId, memberId);

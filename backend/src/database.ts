@@ -589,7 +589,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [input.workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
       await db.execute('INSERT IGNORE INTO chat_settings (workspace_id) VALUES (?)', [input.workspaceId]);
       const [settings] = await rows(db, 'SELECT * FROM chat_settings WHERE workspace_id = ?', [input.workspaceId]);
-      const memberRows = await rows(db, 'SELECT id, data FROM members WHERE workspace_id = ? ORDER BY id', [input.workspaceId]);
+      const memberRows = await rows(db, 'SELECT id, data, revision FROM members WHERE workspace_id = ? ORDER BY id', [input.workspaceId]);
       const active = memberRows.filter(row => decode<MemberRecord>(row.data, () => undefined).retiredAt === null);
       const agents = new Map<string, RowDataPacket>();
       for (const member of active) agents.set(member.id, await this.agent(db, member.id, true));
@@ -600,6 +600,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
         if (!origin || origin.exchange_id !== input.exchangeId) throw new AppError('invalid_input', 'Response does not belong to this exchange');
       }
       for (const recipient of input.recipients) {
+        if (input.memberRevisions && Number(active.find(member => member.id === recipient)?.revision) !== input.memberRevisions[recipient]) throw new AppError('config_conflict', 'Recipient configuration changed before activation; retry publication', 409);
         const agent = agents.get(recipient);
         if (!agent) throw new AppError('member_unavailable', 'A mentioned member has retired', 409);
         if (agent.active_run_id) throw new AppError('member_busy', 'A mentioned member is already working; revise or try again when it is free', 409);
@@ -799,12 +800,13 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     });
   }
 
-  async updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord): Promise<StoredMember> {
+  async updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord, requireIdle = false): Promise<StoredMember> {
     identity(memberId, 'memberId');
     position(revision);
     const data = encode(value);
     await this.transaction(async db => {
       if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [value.workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      if (requireIdle && (await this.agent(db, memberId, true)).active_run_id) throw new AppError('member_busy', 'Wait for the member before submitting configuration', 409);
       let result: ResultSetHeader;
       try {
         [result] = await db.execute<ResultSetHeader>('UPDATE members SET data = ?, name_key = ?, revision = revision + 1 WHERE id = ? AND revision = ?', [data, nameKey, memberId, revision]);

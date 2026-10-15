@@ -13,7 +13,7 @@
   - a project-file view for each request.
 - `ProjectFiles` serves one workspace folder: path rules, list, read, save, find, and internal kind inspection for mapped implementation paths. It holds no state between requests.
 - The workspace routes map `/workspaces` requests to the service, the project files, the context base, and DesignService current catalog/inspect operations. Semantic design validation belongs to the [design parts implementation](../context-base/design-parts/impl.md); routes expose only current reads. The agent server sends every `/workspaces` request to them, except team requests.
-- The neighboring [harness](../harness/design.md) owns MemberFiles and agent file tools; it supplies the access rule from design mappings. Workspace supplies project-file reads/listings for context delivery.
+- The neighboring [harness](../harness/design.md) owns MemberFiles and agent file tools; it supplies the access rule from accepted explicit design and implementation assignments. Workspace supplies project-file reads/listings for context delivery.
 - The shared HTTP helpers are used by every route: agent, config, and workspace. They read bounded JSON bodies, reject unknown fields and query parameters, parse counts, write JSON, map errors to responses, abort work when the client disconnects, and send SSE streams.
 - The text helpers apply the same text rules and hashing to project files and context files.
 - The backend entry point creates the workspace service with the MySQL store, passes it to the agent server, and closes it on shutdown or a failed start.

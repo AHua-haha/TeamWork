@@ -9,7 +9,7 @@ import { callRecipient, toolHeading, toolLabels } from '../src/ui/tool-label.js'
 
 const settings = { connectionId: 'main', modelId: 'm1', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'm1', reasoning: 'high' as const }] };
 const member = (patch: Partial<Member> = {}): Member => ({
-  memberId: 'lead-1', workspaceId: 'w1', revision: 3, name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] }, lead: true,
+  memberId: 'lead-1', workspaceId: 'w1', revision: 3, name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, lead: true,
   settings, issues: [], ready: true, running: false, ...patch,
 });
 
@@ -21,17 +21,17 @@ test('the team client reads a team and saves a member at its revision', async ()
   }) as typeof fetch);
   const team = await api.team('w 1');
   assert.equal(team.members[0]!.name, 'Lead');
-  const saved = await api.updateMember('w 1', 'lead/1', 3, { name: 'Lead', role: 'Lead', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, allowedCommands: [] }, settings });
+  const saved = await api.updateMember('w 1', 'lead/1', 3, { name: 'Lead', role: 'Lead', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, settings });
   assert.equal(saved.revision, 4);
   assert.deepEqual(calls, [
     { path: '/workspaces/w%201/team', method: 'GET', body: undefined },
-    { path: '/workspaces/w%201/team/members/lead%2F1', method: 'PUT', body: { revision: 3, value: { name: 'Lead', role: 'Lead', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, allowedCommands: [] }, settings } } },
+    { path: '/workspaces/w%201/team/members/lead%2F1', method: 'PUT', body: { revision: 3, value: { name: 'Lead', role: 'Lead', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, settings } } },
   ]);
 });
 
 test('a refused member save keeps the backend code', async () => {
   const api = new WorkspaceClient((async () => new Response(JSON.stringify({ error: { code: 'config_conflict', message: 'Member revision changed' } }), { status: 409 })) as typeof fetch);
-  await assert.rejects(api.updateMember('w1', 'm', 0, { name: 'a', role: 'b', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, allowedCommands: [] }, settings }), (error: unknown) =>
+  await assert.rejects(api.updateMember('w1', 'm', 0, { name: 'a', role: 'b', responsibility: '', harness: { designScope: { working: [], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, settings }), (error: unknown) =>
     error instanceof BackendError && error.status === 409 && error.code === 'config_conflict');
 });
 
@@ -40,7 +40,7 @@ test('member settings use the agent config shape and saved without changing its 
   assert.deepEqual(memberConfig(lead), { id: 'lead-1', revision: 3, value: { name: 'Lead', ...settings }, issues: [] });
   const edited = { ...memberConfig(lead).value, modelId: 'm2', name: 'Renamed in the composer' };
   assert.deepEqual(memberFields(lead, edited), {
-    name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] },
+    name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] },
     settings: { connectionId: 'main', modelId: 'm2', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: settings.modelOptions },
   });
   const team: Team = { workspaceId: 'w1', members: [member({ lead: false, memberId: 'b', name: 'Backend' }), lead] };

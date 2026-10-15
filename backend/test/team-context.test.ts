@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import type { ModelRequest, RuntimePolicy, StepScope } from '../src/runtime.js';
 import { viewBudget } from '../src/harness.js';
-import { withTeam, worker } from './team-fixture.js';
+import { configureHarness, withTeam, worker } from './team-fixture.js';
 
 const names = (request: ModelRequest) => request.tools.map(tool => tool.definition.name);
 const scope = (agentId: string) => ({ agentId, runId: 'r', step: 1, signal: new AbortController().signal, config: { systemPrompt: 'standing words' } } as StepScope);
@@ -29,13 +29,13 @@ test('member requests get team rules and only their harness design and implement
 }));
 test('the lead receives design maintenance, choices and management tools with shared assignment instructions', () => withTeam(async fixture => {
   const request = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
-  assert.deepEqual(names(request).sort(), ['commit_scope', 'configure_harness', 'create_member', 'edit', 'list_models', 'ls', 'read', 'restore_scope', 'retire_member', 'scope_history', 'update_member', 'write']);
+  assert.deepEqual(names(request).sort(), ['commit_scope', 'edit', 'list_models', 'ls', 'read', 'restore_scope', 'retire_member', 'scope_history', 'submit_member_config', 'write']);
   assert.match(request.context.systemPrompt!, /offer concrete choices with their tradeoffs and your recommendation/);
   assert.match(request.context.systemPrompt!, /wait for the user's answer/);
   assert.match(request.context.systemPrompt!, /Assign work in your final group response/);
   assert.match(request.context.systemPrompt!, /Design commits require explicit user approval/);
   await fixture.team.designs.save(fixture.workspaceId, 'user/design.json', { content: 'Project', implementation: ['.'] }, null, 'Test', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
-  await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'executable', executable: 'node' }] });
+  await configureHarness(fixture, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: ['.'], usePaths: [] }, allowedCommands: [{ kind: 'executable', executable: 'node' }] });
   const configured = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
   for (const name of ['write', 'edit', 'run_command']) assert.ok(names(configured).includes(name));
 }));

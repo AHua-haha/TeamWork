@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { createEditTool, createLsTool, createReadTool, createWriteTool } from '@earendil-works/pi-coding-agent';
 import type { MemberFiles } from '../src/member-files.js';
 import { maxFileBytes } from '../src/text.js';
-import { withTeam, worker, type Fixture } from './team-fixture.js';
+import { configureHarness, withTeam, worker, type Fixture } from './team-fixture.js';
 
 const fail = (pattern: RegExp) => (error: unknown) => pattern.test((error as Error).message);
 async function open(fixture: Fixture, memberId: string) { const files = await fixture.team.harness.files(memberId); return tools(files, files.root); }
@@ -21,13 +21,13 @@ function tools(files: MemberFiles, root: string) {
 }
 async function writableLead(fixture: Fixture) {
   await fixture.team.designs.save(fixture.workspaceId, 'user/design.json', { content: 'Whole project', implementation: ['.'] }, null, 'Test design', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
-  await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] });
+  await configureHarness(fixture, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: ['.'], usePaths: [] }, allowedCommands: [] });
   return open(fixture, fixture.lead.memberId);
 }
 test('file tools edit pending working design and implementation while dependencies remain read-only', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['backend']);
   await fixture.team.designs.save(fixture.workspaceId, 'user/api.json', { content: 'API contract', implementation: ['backend/shared', 'shared/api.ts'] }, null, 'Test dependency', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
-  await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Backend', { designScope: { working: backend.harness.designScope.working, dependencies: ['user/api.json'] }, allowedCommands: [] });
+  await configureHarness(fixture, 'Backend', { designScope: { working: backend.harness.designScope.working, dependencies: ['user/api.json'] }, implementationScope: { paths: ['backend'], usePaths: ['backend/shared', 'shared/api.ts'] }, allowedCommands: [] });
   await mkdir(join(fixture.directory, 'shared'), { recursive: true });
   await mkdir(join(fixture.directory, 'backend', 'shared'), { recursive: true });
   await writeFile(join(fixture.directory, 'shared', 'api.ts'), 'api');
@@ -43,7 +43,7 @@ test('file tools edit pending working design and implementation while dependenci
   assert.match(await readFile(join(fixture.directory, '.context/user/design/backend.json'), 'utf8'), /Design for Backend/);
   await assert.rejects(file.write('.context/user/api.json', 'x'), fail(/read-only/));
   await assert.rejects(file.write('backend/shared/types.ts', 'x'), fail(/Dependency implementation is read-only/));
-  await assert.rejects(file.write('shared/api.ts', 'x'), fail(/read-only|outside your working design/));
+  await assert.rejects(file.write('shared/api.ts', 'x'), fail(/read-only|outside your configured implementation scope/));
   await assert.rejects(file.write('frontend/a.ts', 'x'), fail(/not found/));
 }));
 test('scope hides unrelated implementation and context while exposing ancestors for navigation', () => withTeam(async fixture => {
@@ -63,7 +63,7 @@ test('scope hides unrelated implementation and context while exposing ancestors 
   await file.write('src/backend.ts', 'updated');
   const lead = await open(fixture, fixture.lead.memberId);
   assert.match(await lead.read('README.md'), /readme/);
-  await assert.rejects(lead.write('README.md', 'x'), fail(/working design/));
+  await assert.rejects(lead.write('README.md', 'x'), fail(/implementation scope/));
 }));
 test('exact-file implementation mapping permits creating its missing parent directories', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['new/src/a.ts']);

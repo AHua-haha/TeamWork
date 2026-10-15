@@ -52,6 +52,11 @@ test('the team is viewed, formed, changed, and retired over HTTP', () => withSer
 
   const changed = await call(`${base}/members/${created.memberId}`, { method: 'PUT', data: { revision: 0, value: { name: 'Backend', role: 'api developer', responsibility: 'The API', harness: emptyHarness(), settings: created.settings } } });
   assert.deepEqual([changed.role, changed.revision, changed.running], ['api developer', 1, false]);
+  const source = await call(`${base}/members/${created.memberId}/config`);
+  assert.equal(source.submittedBy, 'user');
+  assert.equal(JSON.parse(source.files['member.json']).revision, changed.revision);
+  assert.equal(JSON.parse(source.files['member.json']).role, changed.role);
+  await call(`/workspaces/other/team/members/${created.memberId}/config`, { status: 404 });
   assert.equal((await call(`${base}/members/${created.memberId}`, { method: 'PUT', status: 409, data: { revision: 0, value: { name: 'Backend', role: 'x', responsibility: '', harness: emptyHarness(), settings: created.settings } } })).error.code, 'config_conflict');
   assert.equal((await call(`${base}/members`, { method: 'POST', status: 409, data: { name: 'backend', role: 'x' } })).error.code, 'member_exists');
   assert.equal((await call(`${base}/members`, { method: 'POST', status: 400, data: { name: 'X', role: 'x', surprise: 1 } })).error.code, 'invalid_input');

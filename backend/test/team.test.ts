@@ -52,8 +52,8 @@ test('member names stay unique, and fields are checked', () => withTeam(async fi
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'backend', role: 'x' }), code('member_exists'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: ' Bad', role: 'x' }), code('invalid_input'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: '' }), code('invalid_input'));
-  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { designScope: { working: ['agent/spec'], dependencies: [] }, allowedCommands: [] } }), code('read_only'));
-  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { designScope: { working: ['user/a', 'user/A'], dependencies: [] }, allowedCommands: [] } }), code('invalid_config'));
+  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { ...emptyHarness(), designScope: { working: ['agent/spec'], dependencies: [] }, allowedCommands: [] } }), code('read_only'));
+  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { ...emptyHarness(), designScope: { working: ['user/a', 'user/A'], dependencies: [] }, allowedCommands: [] } }), code('invalid_config'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', extra: 1 }), code('invalid_config'));
   await assert.rejects(fixture.team.service.team('missing'), code('not_found'));
 }));
@@ -88,20 +88,10 @@ test('the lead forms the team with tools; other members cannot', () => withTeam(
     return (await tool.execute(args as never, scope(agentId), {} as never)).content.map(part => ('text' in part ? part.text : '')).join('');
   };
 
-  assert.match(await run('create_member', lead.memberId, { name: 'Backend', role: 'backend developer', responsibility: 'API', harness: emptyHarness(), instructions: 'Be brief' }), /^Created Backend \(backend developer\); model: conn\/model; working designs: none/);
-  assert.match(await run('create_member', lead.memberId, { name: 'backend', role: 'x' }), /^Refused \(member_exists\)/);
-  assert.match(await run('create_member', lead.memberId, { name: 'Half', role: 'x', connectionId: 'conn' }), /^Refused \(invalid_input\): Give connectionId and modelId together/);
-
-  const backend = (await team.service.byName(fixture.workspaceId, 'Backend'))!;
-  assert.equal(backend.value.settings.prompt, 'Be brief');
-  assert.match(await run('update_member', lead.memberId, { name: 'backend', newName: 'Server', responsibility: 'API and data', harness: emptyHarness() }), /^Updated Server \(backend developer\)/);
-  const server = (await team.service.byName(fixture.workspaceId, 'Server'))!;
-  assert.deepEqual([server.value.responsibility, server.value.harness, server.value.settings.prompt], ['API and data', emptyHarness(), 'Be brief']);
-  assert.match(await run('update_member', lead.memberId, { name: 'Lead', role: 'x' }), /^Refused \(lead_required\)/);
-
+  assert.deepEqual(management.map(t => t.definition.name).sort(), ['list_models', 'retire_member']);
+  await worker(fixture, 'Server');
   const helper = await worker(fixture, 'Helper');
   assert.match(await run('retire_member', helper.memberId, { name: 'Server' }), /^Refused \(access_denied\): Only the lead changes the team/);
-  assert.match(await run('create_member', helper.memberId, { name: 'Sneaky', role: 'x' }), /^Refused \(access_denied\)/);
   assert.match(await run('retire_member', lead.memberId, { name: 'Server' }), /^Retired Server/);
   assert.equal(await team.service.byName(fixture.workspaceId, 'Server'), undefined);
   assert.match(await run('list_models', lead.memberId, {}), /conn \(Test\):\n {2}model/);

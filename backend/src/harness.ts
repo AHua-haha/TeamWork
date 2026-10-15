@@ -1,16 +1,18 @@
+import { purposeHarnesses } from './harness-bases.js';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DesignService, designPart, type ResolvedDesign } from './design.js';
 import { commandAllowed, commandArgv, type HarnessConfig } from './harness-config.js';
 import { executeCommand, type CommandResult } from './harness-command.js';
 import { harnessCommandTool, harnessFileTools, harnessHistoryTools } from './harness-tools.js';
-import { HarnessHistory, HarnessQueue, coversPath, harnessStorage, partOwns, validateParts, type HarnessDefinition, type HarnessPart, type HistoryActor } from './harness-history.js';
+import { HarnessHistory, HarnessQueue, harnessStorage, partOwns, validateParts, type HarnessDefinition, type HarnessPart, type HistoryActor } from './harness-history.js';
 import { ProjectFiles } from './project-files.js';
 import { MemberFiles, type FileAccess } from './member-files.js';
 import type { RuntimeTool } from './runtime.js';
 import type { StoredMember } from './team.js';
 import { AppError } from './types.js';
 import type { WorkspaceService } from './workspace.js';
+import { missing } from './text.js';
 
 export const viewBudget = 64 * 1024;
 export interface ResolvedHarness { working: ResolvedDesign[]; dependencies: ResolvedDesign[]; readable: string[]; writable: string[]; readonly: string[] }
@@ -20,17 +22,19 @@ const ancestor = (path: string, scope: string) => !path || scope === '.' || scop
 export async function resolveHarness(designs: DesignService, workspaceId: string, config: HarnessConfig): Promise<ResolvedHarness> {
   const working = await Promise.all(config.designScope.working.map(path => designs.read(workspaceId, path)));
   const dependencies = await Promise.all(config.designScope.dependencies.map(path => designs.read(workspaceId, path)));
-  return { working, dependencies, readable: [...working, ...dependencies].flatMap(part => part.implementation), writable: working.flatMap(part => part.implementation), readonly: dependencies.flatMap(part => part.implementation) };
+  return { working, dependencies, readable: [...config.implementationScope.paths, ...config.implementationScope.usePaths], writable: config.implementationScope.paths, readonly: config.implementationScope.usePaths };
 }
 
-/** File permissions follow current design references. Dependencies take precedence over working writes. */
+/** Purpose assignments define authority; read-only use paths take precedence over writes. */
 export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): FileAccess {
   const designFiles = [...resolved.working, ...resolved.dependencies].map(part => `.context/${part.path}`);
   return { deny(path, mode) {
     const key = path.toLowerCase();
+    if (key === '.team' || key.startsWith('.team/')) return member.value.lead ? null : 'Member configuration is outside your scope';
     if (key === '.context' || key.startsWith('.context/')) {
       if (mode === 'write' || mode === 'mkdir') {
         const working = resolved.working.map(part => `.context/${part.path}`);
+        if (resolved.dependencies.some(p => key === `.context/${p.path}`.toLowerCase())) return 'Dependency design is read-only';
         return member.value.lead && (key === '.context/user' || key.startsWith('.context/user/')) || working.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'Dependency design and agent context are read-only';
       }
       if (member.value.lead || designFiles.some(file => key === file.toLowerCase() || (mode === 'see' && ancestor(path, file)))) return null;
@@ -39,7 +43,7 @@ export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): 
     if (!path && mode === 'see') return null;
     if (mode === 'write' || mode === 'mkdir') {
       if (resolved.readonly.some(scope => covers(scope, path))) return 'Dependency implementation is read-only';
-      return resolved.writable.some(scope => covers(scope, path) || (mode === 'mkdir' && ancestor(path, scope))) ? null : 'This implementation is outside your working design';
+      return resolved.writable.some(scope => covers(scope, path) || (mode === 'mkdir' && ancestor(path, scope))) ? null : 'This implementation is outside your configured implementation scope';
     }
     if (member.value.lead || resolved.readable.some(scope => covers(scope, path) || (mode === 'see' && ancestor(path, scope)))) return null;
     return 'This implementation is outside your design scope';
@@ -54,7 +58,6 @@ export interface HarnessEnvironment {
 }
 export interface HarnessOptions {
   storage?: (workspaceDirectory: string) => string;
-  definitions?: (member: StoredMember, resolved: ResolvedHarness) => HarnessDefinition[];
 }
 
 /** Member integration: purpose bundles, scoped history and current authority, independent of the model loop. */
@@ -67,19 +70,23 @@ export class HarnessService {
     if (!member || member.value.retiredAt !== null) throw new AppError('not_found', 'This agent is not an active team member', 404);
     return member;
   }
-  private defaults(member: StoredMember, resolved: ResolvedHarness): HarnessDefinition[] {
-    const designPaths = member.value.lead ? ['.context/user'] : resolved.working.map(p => `.context/${p.path}`);
-    const design: HarnessDefinition = {
-      id: 'design', prompt: 'Use common file tools to edit pending design JSON (content and implementation). Discuss unresolved choices with the user. Design commits require explicit user approval; a checkpoint is not acceptance.',
-      tools: ['ls', 'read', 'write', 'edit', 'commit_scope', 'scope_history', 'restore_scope'],
-      parts: designPaths.length ? [{ id: 'design', paths: designPaths, exclude: [], commit: 'user', prompt: 'Keep design and subdesign knowledge continuous across team changes. Explain pending changes in your final reply; ask the user to review and accept the exact revision.' }] : [],
-    };
-    const implementation: HarnessDefinition = {
-      id: 'implementation', prompt: 'Implement the accepted design within the configured file boundary. Dependencies are read-only. Use commit_scope with a meaningful intent when a coherent implementation change is ready; implementation commits need no user approval.',
-      tools: ['ls', 'read', 'write', 'edit', 'commit_scope', 'scope_history', 'restore_scope', ...(member.value.harness.allowedCommands.length ? ['run_command'] : [])],
-      parts: resolved.writable.length ? [{ id: 'implementation', paths: [...new Set(resolved.writable)], exclude: ['.context', ...resolved.readonly], commit: 'agent', prompt: 'Maintain useful implementation notes in your final report. Automatic run-end checkpoints preserve state and do not replace semantic commits.' }] : [],
-    };
-    return [design, implementation];
+  /** Startup conversion is separate from the runtime's fixed-base assignment flow. */
+  async migrateLegacy(member: StoredMember, config: HarnessConfig): Promise<void> {
+    const source = (await this.workspaces.record(member.workspaceId)).directory;
+    const storage = (this.options.storage ?? harnessStorage)(source);
+    try { await lstat(join(storage, 'repository.git', 'HEAD')); }
+    catch (error) { if (missing(error)) return; throw error; }
+    const history = new HarnessHistory(storage, source);
+    await history.open();
+    const root = await history.worktree(member.id);
+    if (config.implementationScope.paths.length) {
+      const previous: HarnessPart = { id: 'implementation', paths: [...new Set(config.implementationScope.paths)], exclude: ['.context', ...config.implementationScope.usePaths], commit: 'agent', prompt: '' };
+      await history.migrateExclusions(member.id, previous, { ...previous, exclude: ['.context', '.team', ...config.implementationScope.usePaths] }, root);
+    }
+    if (member.value.lead && config.designScope.dependencies.length) {
+      const previous: HarnessPart = { id: 'design', paths: ['.context/user'], exclude: [], commit: 'user', prompt: '' };
+      await history.migrateExclusions(member.id, previous, { ...previous, exclude: config.designScope.dependencies.map(path => `.context/${path}`) }, root);
+    }
   }
   async environment(id: string): Promise<HarnessEnvironment> {
     const member = await this.active(id);
@@ -100,7 +107,7 @@ export class HarnessService {
     }
     const history = await opening;
     const root = await history.worktree(id);
-    const definitions = (this.options.definitions ?? ((m, r) => this.defaults(m, r)))(member, resolved);
+    const definitions = purposeHarnesses(member, resolved);
     const parts = definitions.flatMap(d => d.parts);
     validateParts(parts);
     for (const part of parts) await history.ensure(id, part, root);
@@ -108,7 +115,7 @@ export class HarnessService {
     // without granting its paths to a writable part or refreshing another agent's edits.
     const dependencies: HarnessPart[] = [
       ...resolved.dependencies.map(p => ({ id: `dep-${p.revision.slice(0, 32)}`, paths: [`.context/${p.path}`], exclude: [], commit: 'user' as const, prompt: '' })),
-      ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.context'], commit: 'user' as const, prompt: '' }] : []),
+      ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.context', '.team'], commit: 'user' as const, prompt: '' }] : []),
     ];
     for (const part of dependencies) await history.ensure(id, part, root);
     return { root, history, definitions, parts };
@@ -215,7 +222,7 @@ export class HarnessService {
       '## Accepted working designs', await this.acceptedDesignView(id, env, resolved.working),
       '## Dependency designs', await this.designView(resolved.dependencies),
       `## Allowed commands\n${JSON.stringify(member.value.harness.allowedCommands)}`,
-      '## Implementation files', await this.implementationView(env.root, resolved.readable),
+      '## Implementation files', await this.implementationView(env.root, resolved.readable, member),
     ];
     return { tools, context: parts.join('\n\n') };
   }
@@ -242,7 +249,7 @@ export class HarnessService {
       return heading + '\n' + part.content;
     }).join('\n\n') || '(none configured)';
   }
-  private async implementationView(root: string, scopes: string[]): Promise<string> {
+  private async implementationView(root: string, scopes: string[], member: StoredMember): Promise<string> {
     const files = new ProjectFiles(root);
     const candidates = new Set<string>(), notes: string[] = [];
     for (const scope of new Set(scopes)) {
@@ -256,8 +263,10 @@ export class HarnessService {
         if (listing.truncated) notes.push(`Listing truncated: ${scope}; use ls to inspect further.`);
       }
     }
+    const access = harnessAccess(member, await resolveHarness(this.designs, member.workspaceId, member.value.harness));
     let used = 0;
     for (const path of [...candidates].sort()) {
+      if (path.toLowerCase() === '.team' || path.toLowerCase().startsWith('.team/') || access.deny(path, 'read') !== null) continue;
       try {
         const file = await files.read(path);
         if (used + file.size > viewBudget) { notes.push(`Not loaded: ${path}`); continue; }

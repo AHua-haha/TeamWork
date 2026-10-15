@@ -26,7 +26,7 @@ export interface CurrentDesign extends ContextFile { design: DesignPart | null; 
 export interface History { versions: ContextVersion[]; next: number | null }
 export interface Match { path: string; line: number; text: string }
 export type CommandRule = { kind: 'exact'; argv: string[] } | { kind: 'executable'; executable: string };
-export interface HarnessConfig { designScope: { working: string[]; dependencies: string[] }; allowedCommands: CommandRule[] }
+export interface HarnessConfig { designScope: { working: string[]; dependencies: string[] }; implementationScope: { paths: string[]; usePaths: string[] }; allowedCommands: CommandRule[] }
 /** A team member as the backend reports it. `memberId` is also the ID of the member's conversation. */
 export interface Member {
   memberId: string; workspaceId: string; revision: number; name: string; role: string; responsibility: string; harness: HarnessConfig;

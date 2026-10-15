@@ -44,6 +44,7 @@ export interface ChatSnapshot {
   runs: { exchangeId: string; run: RunState }[];
 }
 export interface ChatPublication {
+  memberRevisions?: Record<string, number>;
   workspaceId: string; author: ChatAuthor; text: string; recipients: string[]; exchangeId?: string; finalMessageId?: string;
 }
 export interface ChatStore {

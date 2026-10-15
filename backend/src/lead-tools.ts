@@ -1,19 +1,18 @@
 import { Type } from '@earendil-works/pi-ai';
-import type { LeadService } from './lead.js';
+import type { MemberConfigService } from './member-config.js';
 import { refusing } from './tool-result.js';
-import { harnessSchema } from './harness-tools.js';
 import type { RuntimeTool } from './runtime.js';
 
-/** Existing harness assignment configuration; design edits use the common harness file tools. */
-export function leadTools(lead: LeadService): RuntimeTool[] {
-  return [
-    {
-      definition: {
-        name: 'configure_harness',
-        description: 'Configure a member\'s working and dependency designs and allowed commands. Working design and implementation are editable in the member worktree; design commits need user approval. Dependencies are read-only. You may configure your own harness without changing your model.',
-        parameters: Type.Object({ to: Type.String(), harness: harnessSchema }),
-      },
-      execute: (args, scope) => refusing(async () => JSON.stringify(await lead.configureHarness(scope.agentId, args.to, args.harness), null, 2)),
+export function leadTools(configuration: MemberConfigService): RuntimeTool[] {
+  return [{
+    definition: {
+      name: 'submit_member_config',
+      description: 'Validate and submit a member JSON manifest and its referenced Markdown prompts from your worktree. Use common file tools to edit .team/members/<bundle>/member.json first. Creation uses null memberId/revision; updates require the current member revision and an idle target. Only scope assignments are configurable within fixed harness bases. Existing command permissions are preserved. Returns the member ID and revision for your next edit; no draft or checkpoint activates configuration.',
+      parameters: Type.Object({ path: Type.String({ description: '.team/members/<bundle>/member.json' }) }, { additionalProperties: false }),
     },
-  ];
+    execute: (args, scope) => refusing(async () => {
+      scope.signal.throwIfAborted();
+      return JSON.stringify(await configuration.submit(scope.agentId, args.path), null, 2);
+    }),
+  }];
 }

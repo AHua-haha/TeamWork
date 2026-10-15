@@ -27,8 +27,8 @@ The neighboring [workspace implementation](../../workspace/impl.md) owns the HTT
 
 ## Verification
 
-[Lead tests](../../../../../backend/test/lead.test.ts) exercise serialized records, revisions, author and unchanged saves. [Harness tests](../../../../../backend/test/harness.test.ts) validate mappings and malformed-record repair. [MySQL integration](../../../../../backend/test/integration/backend.test.ts) checks design author/history persistence through the runtime.
+[Lead tests](../../../../../backend/test/lead.test.ts) exercise pending design records and user-only acceptance. [Harness tests](../../../../../backend/test/harness.test.ts) validate mappings and malformed-record repair. [MySQL integration](../../../../../backend/test/integration/backend.test.ts) checks design author/history persistence through the runtime.
 
 [Catalog tests](../../../../../backend/test/design-catalog.test.ts) cover schema discovery of unassigned designs, invalid/ordinary files, revision summaries and retirement/deletion. [HTTP tests](../../../../../backend/test/workspace-routes.test.ts) cover read-only catalog/inspect routes, missing/invalid references and query validation.
 
-DesignService read/inspect/list and original-context encoding remain backend catalog operations. The reusable pending design file tools and user-only semantic commits are owned by the harness. Original assignment mappings remain the permission source until explicit integration updates the catalog; no direct lead read/save runtime tools remain.
+DesignService read/inspect/list and original-context encoding remain backend catalog operations. The reusable pending design file tools and user-only semantic commits are owned by the harness. Original design mappings are descriptive; validated explicit harness paths are the permission source; no direct lead read/save runtime tools remain.

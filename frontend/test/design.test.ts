@@ -4,7 +4,7 @@ import { WorkspaceClient, type Member, type DesignSummary } from '../src/client/
 import { discussionInput, referenceLabel } from '../src/client/discussion-reference.js';
 import { designMembers, designTitle, implementationAccess, memberDesigns } from '../src/ui/design-state.js';
 
-const member = (name: string, working: string[], dependencies: string[]): Member => ({ memberId: name, name, workspaceId: 'w', revision: 0, role: 'developer', responsibility: '', lead: false, settings: { connectionId: 'c', modelId: 'm', toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, ready: true, running: false, issues: [], harness: { designScope: { working, dependencies }, allowedCommands: [] } });
+const member = (name: string, working: string[], dependencies: string[]): Member => ({ memberId: name, name, workspaceId: 'w', revision: 0, role: 'developer', responsibility: '', lead: false, settings: { connectionId: 'c', modelId: 'm', toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, ready: true, running: false, issues: [], harness: { designScope: { working, dependencies }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] } });
 const design: DesignSummary = { path: 'user/design/api.json', revision: 'r', implementation: ['backend/api', 'shared/api.ts'] };
 
 test('design relationships come from current harness references and empty membership preserves the design', () => {

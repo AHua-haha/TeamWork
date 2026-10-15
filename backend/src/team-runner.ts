@@ -63,7 +63,7 @@ export class TeamRunner {
     }
     const configs = await Promise.all(recipients.map(member => this.runtime().prepareRun(member.id)));
     // The store rechecks busy state and budget with publication and all run records in one transaction.
-    const result = await this.store.publishChat({ workspaceId, text, recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId, finalMessageId: sender.finalMessageId } : {}) });
+    const result = await this.store.publishChat({ workspaceId, text, memberRevisions: Object.fromEntries(recipients.map((member, index) => [member.id, configs[index]!.source?.agentRevision ?? member.revision])), recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId, finalMessageId: sender.finalMessageId } : {}) });
     if (sender) this.active.delete(sender.memberId);
     for (const [index, run] of result.runs.entries()) {
       this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });

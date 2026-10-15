@@ -4,6 +4,7 @@ import type { DesignService } from './design.js';
 import { emptyHarness, harnessConfig, type HarnessConfig } from './harness-config.js';
 import { resolveHarness } from './harness.js';
 import { AppError } from './types.js';
+import { generatedSource, type MemberConfigSource } from './member-config-format.js';
 import type { WorkspaceRecord } from './context-base.js';
 import type { RunConfigSource } from './runtime.js';
 
@@ -15,6 +16,7 @@ const controlCharacter = /[\u0000-\u001f\u007f-\u009f]/;
 export interface MemberRecord {
   workspaceId: string; name: string; role: string; responsibility: string; harness: HarnessConfig;
   lead: boolean; settings: RunSettings; createdAt: number; retiredAt: number | null;
+  configuration?: MemberConfigSource;
 }
 /** The fields a caller may set. */
 export interface MemberFields { name: string; role: string; responsibility: string; harness: HarnessConfig; settings: RunSettings }
@@ -33,16 +35,18 @@ export interface TeamStore {
   /** Fails with `lead_exists` for a second lead and `member_exists` for a name an active member has. */
   createMember(member: NewMember): Promise<StoredMember>;
   /** `nameKey` is null for a retired member, which frees its name. */
-  updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord): Promise<StoredMember>;
+  updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord, requireIdle?: boolean): Promise<StoredMember>;
 }
 
 export const leadResponsibility = 'Works with the user on this project: helps maintain the user design, forms the team the project needs, gives work to the members, and reports results.';
 
 /** The lead every workspace is created with: no model, so the user chooses one before it can run. */
 export function newLead(workspaceId: string): NewMember {
+  const id = randomUUID();
+  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: emptyHarness(), settings: emptyRunSettings };
   return {
-    id: randomUUID(), workspaceId, lead: true, nameKey: 'lead',
-    value: { workspaceId, name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: emptyHarness(), lead: true, settings: emptyRunSettings, createdAt: Date.now(), retiredAt: null },
+    id, workspaceId, lead: true, nameKey: 'lead',
+    value: { workspaceId, ...fields, configuration: generatedSource(fields, id, 0), lead: true, createdAt: Date.now(), retiredAt: null },
   };
 }
 
@@ -71,7 +75,7 @@ function stored(member: StoredMember): StoredMember {
     const data = obj(value, 'Member record');
     const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, harness: data.harness, settings: data.settings });
     if (typeof data.workspaceId !== 'string' || typeof data.lead !== 'boolean' || !Number.isSafeInteger(data.createdAt) || !(data.retiredAt === null || Number.isSafeInteger(data.retiredAt))) throw new Error('shape');
-    return { ...member, value: { ...fields, workspaceId: data.workspaceId, lead: data.lead, createdAt: data.createdAt as number, retiredAt: data.retiredAt as number | null } };
+    return { ...member, value: { ...fields, configuration: data.configuration as MemberConfigSource | undefined, workspaceId: data.workspaceId, lead: data.lead, createdAt: data.createdAt as number, retiredAt: data.retiredAt as number | null } };
   } catch { throw new AppError('corrupt_data', `Stored member ${member.id} cannot be read`, 500); }
 }
 
@@ -88,13 +92,29 @@ export class TeamService {
   ) {}
 
   /** Gives each workspace that has no lead one, so workspaces registered before teams existed get theirs. Safe to repeat. */
-  async initialize(): Promise<void> {
+  async initialize(beforeMigration?: (member: StoredMember, harness: HarnessConfig) => Promise<void>): Promise<void> {
     for (const workspace of await this.workspaces.list()) {
       for (const member of await this.store.listMembers(workspace.workspaceId)) {
         const data = member.value as unknown as Record<string, unknown>;
-        if ('harness' in data) continue;
+        const oldHarness = data.harness as HarnessConfig | undefined;
+        if (oldHarness?.implementationScope && data.configuration) continue;
         const { scope: _oldScope, ...rest } = data;
-        const value = { ...rest, harness: emptyHarness() } as unknown as MemberRecord;
+        let harness = oldHarness ? { ...emptyHarness(), ...oldHarness } : emptyHarness();
+        if (oldHarness && !oldHarness.implementationScope) {
+          const mapped = async (paths: string[]) => {
+            const result: string[] = [];
+            for (const path of paths) {
+              try { result.push(...(await this.designs.read(workspace.workspaceId, path)).implementation); }
+              catch (error) { if (!(error instanceof AppError) || error.status >= 500) throw error; }
+            }
+            return [...new Set(result)];
+          };
+          harness = { ...harness, implementationScope: { paths: await mapped(oldHarness.designScope.working), usePaths: await mapped(oldHarness.designScope.dependencies) } };
+        }
+        const value = { ...rest, harness } as unknown as MemberRecord;
+        value.harness = harnessConfig(harness);
+        if (oldHarness) await beforeMigration?.(member, harness);
+        value.configuration = generatedSource(value, member.id, member.revision + 1);
         await this.store.updateMember(member.id, member.revision, value.retiredAt === null ? value.name.toLowerCase() : null, value);
       }
       if ((await this.store.listMembers(workspace.workspaceId)).some(member => member.value.lead)) continue;
@@ -135,21 +155,24 @@ export class TeamService {
   }
 
   /** Fields left out of `settings` copy the lead's; the instructions start empty. */
-  async create(workspaceId: string, input: unknown): Promise<MemberView> {
+  async create(workspaceId: string, input: unknown, source?: MemberConfigSource): Promise<MemberView> {
     const lead = await this.lead(workspaceId);
     const data = obj(input, 'Member');
     keys(data, ['name', 'role', 'responsibility', 'harness', 'settings']);
     if (data.settings !== undefined && (typeof data.settings !== 'object' || data.settings === null || Array.isArray(data.settings))) throw new AppError('invalid_input', 'settings is an object');
     const fields = memberFields({ responsibility: '', harness: emptyHarness(), ...data, settings: { ...lead.value.settings, prompt: '', ...(data.settings as object | undefined) } });
     if ((await this.active(workspaceId)).length >= maxMembers) throw new AppError('team_full', `A team has at most ${maxMembers} members`, 409);
-    return this.view(await this.insert(workspaceId, fields));
+    return this.view(await this.insert(workspaceId, fields, source));
   }
 
-  async update(workspaceId: string, memberId: string, revision: number, value: unknown): Promise<MemberView> {
+  async update(workspaceId: string, memberId: string, revision: number, value: unknown, source?: MemberConfigSource): Promise<MemberView> {
     const current = await this.member(workspaceId, memberId);
     const fields = memberFields(value);
-    const next: MemberRecord = { ...current.value, ...fields };
-    return this.view(await this.store.updateMember(memberId, revision, nameKey(fields.name), next));
+    const generated = generatedSource(fields, memberId, revision + 1);
+    if (current.value.configuration) generated.path = current.value.configuration.path;
+    const next: MemberRecord = { ...current.value, ...fields, configuration: source ?? generated };
+    const changedScope = JSON.stringify(fields.harness) !== JSON.stringify(current.value.harness);
+    return this.view(await this.store.updateMember(memberId, revision, nameKey(fields.name), next, Boolean(source) || changedScope));
   }
 
   /** Marks the member retired. The lead cannot be retired. */
@@ -159,13 +182,19 @@ export class TeamService {
     return this.store.updateMember(memberId, revision, null, { ...current.value, retiredAt: Date.now() });
   }
 
+  /** Reject unresolved provider/model/catalog settings before activating a file submission. */
+  async validateSubmittedSettings(settings: RunSettings): Promise<void> {
+    const [issues] = await this.config.issuesFor([settings]);
+    if (issues!.length) throw new AppError('invalid_config', issues!.join('; '));
+  }
+
   /** What stops each of these members from running. */
   async issues(members: readonly StoredMember[]): Promise<string[][]> {
     const issues = await this.config.issuesFor(members.map(member => member.value.settings));
     for (const [index, member] of members.entries()) {
       if (member.value.settings.toolOptionIds.length) issues[index]!.push('Workspace member tools are supplied by the harness; clear catalog tool selections');
       const scope = member.value.harness.designScope;
-      if (!member.value.lead && !scope.working.length && !scope.dependencies.length) issues[index]!.push('Configure a design scope for this member');
+      if (!member.value.lead && !scope.working.length && !scope.dependencies.length && !member.value.harness.implementationScope.paths.length && !member.value.harness.implementationScope.usePaths.length) issues[index]!.push('Configure a design scope or implementation scope for this member');
       try { await resolveHarness(this.designs, member.workspaceId, member.value.harness); }
       catch (error) {
         if (!(error instanceof AppError) || error.status >= 500) throw error;
@@ -188,8 +217,9 @@ export class TeamService {
     return found;
   }
 
-  private async insert(workspaceId: string, fields: MemberFields): Promise<StoredMember> {
-    return this.store.createMember({ id: randomUUID(), workspaceId, lead: false, nameKey: nameKey(fields.name), value: { ...fields, workspaceId, lead: false, createdAt: Date.now(), retiredAt: null } });
+  private async insert(workspaceId: string, fields: MemberFields, source?: MemberConfigSource): Promise<StoredMember> {
+    const id = randomUUID();
+    return this.store.createMember({ id, workspaceId, lead: false, nameKey: nameKey(fields.name), value: { ...fields, configuration: source ?? generatedSource(fields, id, 0), workspaceId, lead: false, createdAt: Date.now(), retiredAt: null } });
   }
 
   private async view(member: StoredMember): Promise<MemberView> {

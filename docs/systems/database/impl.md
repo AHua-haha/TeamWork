@@ -38,7 +38,7 @@ Context bases use five tables:
 5. Insert the new current-file rows.
 6. Insert the record.
 
-The codec accepts context authors of user, external, and lead with validated member/run identities. Existing JSON author columns store the lead variant without schema changes. The team owns one-time migration of member scope to harness; the database treats member values as opaque.
+The codec accepts context authors of user, external, and lead with validated member/run identities. Existing JSON author columns store the lead variant without schema changes. The team owns one-time migration of member scope to harness; the database retains accepted manifest/prompt bytes, source path, digest, submitter/time and their validated projection together in member JSON. The team owns their format and validation. updateMember optionally requires idle state under workspace/agent locks; group publication checks prepared recipient revisions under the same workspace lock.
 
 `loadContext` reads the sequence number and the current files joined with their versions in one transaction. `lastFileId` orders by `seq` and, at the same `seq`, prefers a file created at the path over one deleted from it, which matters after an outside move that changes only letter case.
 

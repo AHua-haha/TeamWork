@@ -5,12 +5,12 @@ import { test } from 'node:test';
 import { designPart } from '../src/design.js';
 import { commandAllowed, commandArgv, emptyHarness, harnessConfig } from '../src/harness-config.js';
 import { executeCommand } from '../src/harness-command.js';
-import { code, withTeam, worker } from './team-fixture.js';
+import { code, configureHarness, withTeam, worker } from './team-fixture.js';
 
 test('design and harness config reject ambiguous scopes and command rules', () => {
   assert.deepEqual(designPart({ content: 'Design', implementation: ['backend/'] }), { content: 'Design', implementation: ['backend'] });
   for (const implementation of [['../outside'], ['.context/user/design.json'], ['.git/config'], ['src', 'SRC']]) assert.throws(() => designPart({ content: 'x', implementation }));
-  const config = { designScope: { working: ['.context/user/api.json'], dependencies: ['user/client.json'] }, allowedCommands: [{ kind: 'exact', argv: ['npm', 'test'] }, { kind: 'executable', executable: 'node' }] };
+  const config = { ...emptyHarness(), designScope: { working: ['.context/user/api.json'], dependencies: ['user/client.json'] }, allowedCommands: [{ kind: 'exact', argv: ['npm', 'test'] }, { kind: 'executable', executable: 'node' }] };
   const parsed = harnessConfig(config);
   assert.deepEqual(parsed.designScope.working, ['user/api.json']);
   for (const designScope of [{ working: ['user/a', 'user/A'], dependencies: [] }, { working: ['user/a'], dependencies: ['user/A'] }]) assert.throws(() => harnessConfig({ ...config, designScope }));
@@ -24,28 +24,28 @@ test('design and harness config reject ambiguous scopes and command rules', () =
   assert.equal(commandAllowed(parsed.allowedCommands, ['/usr/bin/node']), false);
 });
 
-test('mapped design changes take effect at the next file tool operation', () => withTeam(async fixture => {
+test('design mapping edits never change explicit file permissions', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['old.ts']);
   const prepared = await fixture.team.harness.prepare(backend.memberId, []);
   const write = prepared.tools.find(tool => tool.definition.name === 'write')!;
   const scope = { agentId: backend.memberId, runId: 'r', signal: new AbortController().signal };
   const part = await fixture.team.designs.read(fixture.workspaceId, backend.harness.designScope.working[0]);
   await fixture.team.designs.save(fixture.workspaceId, part.path, { content: 'Revised', implementation: ['new.ts'] }, part.revision, 'User revised mapping', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
-  const refused = await write.execute({ path: 'old.ts', content: 'old' }, scope as never, {} as never);
+  await write.execute({ path: 'old.ts', content: 'old' }, scope as never, {} as never);
+  const refused = await write.execute({ path: 'new.ts', content: 'new' }, scope as never, {} as never);
   assert.match(JSON.stringify(refused.content), /Error:/);
-  await write.execute({ path: 'new.ts', content: 'new' }, scope as never, {} as never);
-  assert.equal(await readFile(join((await fixture.team.harness.environment(backend.memberId)).root, 'new.ts'), 'utf8'), 'new');
+  assert.equal(await readFile(join((await fixture.team.harness.environment(backend.memberId)).root, 'old.ts'), 'utf8'), 'old');
 }));
 
 test('commands execute allowed vectors in isolated worktree cwd without shell string interpretation', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['src']);
-  await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Backend', { ...backend.harness, allowedCommands: [{ kind: 'executable', executable: process.execPath }] });
+  await configureHarness(fixture, 'Backend', { ...backend.harness, allowedCommands: [{ kind: 'executable', executable: process.execPath }] });
   const signal = new AbortController().signal;
   const result = await fixture.team.harness.command(backend.memberId, [process.execPath, '-e', 'process.stdout.write(process.cwd()+"\\n"+process.argv[1]);process.stderr.write("err");process.exitCode=3', 'literal; $(echo unwanted)'], signal);
   assert.deepEqual([result.exitCode, result.stderr, result.timedOut], [3, 'err', false]);
   assert.equal(result.stdout, (await fixture.team.harness.environment(backend.memberId)).root + '\nliteral; $(echo unwanted)');
   await assert.rejects(fixture.team.harness.command(backend.memberId, ['node-other'], signal), code('command_denied'));
-  await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Backend', backend.harness);
+  await configureHarness(fixture, 'Backend', backend.harness);
   await assert.rejects(fixture.team.harness.command(backend.memberId, [process.execPath, '-v'], signal), code('command_denied'));
 }));
 

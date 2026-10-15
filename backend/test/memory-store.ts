@@ -51,6 +51,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     this.stored(input.workspaceId);
     const active = [...this.chatRuns.values()].filter(item => item.run.status === 'running');
     for (const id of input.recipients) if (active.some(item => item.run.agentId === id)) throw new AppError('member_busy', 'Member is working', 409);
+    for (const id of input.recipients) if (input.memberRevisions && this.members.get(id)?.member.revision !== input.memberRevisions[id]) throw new AppError('config_conflict', 'Recipient configuration changed', 409);
     const exchangeId = input.exchangeId ?? randomUUID();
     const exchange = this.exchanges.get(exchangeId) ?? { used: 0, limit: this.limits.get(input.workspaceId) ?? 32, stopped: false };
     if (exchange.stopped) throw new AppError('exchange_stopped', 'Exchange stopped', 409);
@@ -162,8 +163,9 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     return structuredClone(member);
   }
 
-  async updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord): Promise<StoredMember> {
+  async updateMember(memberId: string, revision: number, nameKey: string | null, value: MemberRecord, requireIdle = false): Promise<StoredMember> {
     const item = this.members.get(memberId);
+    if (requireIdle && [...this.chatRuns.values()].some(({run}) => run.agentId === memberId && run.status === 'running')) throw new AppError('member_busy', 'Wait for the member before submitting configuration', 409);
     if (!item) throw new AppError('not_found', 'Member not found', 404);
     if (item.member.revision !== revision) throw new AppError('config_conflict', 'Member revision changed', 409);
     if (nameKey !== null && [...this.members.values()].some(other => other !== item && other.member.workspaceId === item.member.workspaceId && other.nameKey === nameKey)) throw new AppError('member_exists', 'Another member of this team has that name', 409);
