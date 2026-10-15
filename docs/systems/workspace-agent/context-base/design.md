@@ -4,8 +4,8 @@
 
 The context base is a workspace's memory. It keeps everything that must outlast a conversation as files in the workspace. In this prototype it holds two categories of context, divided by who owns them:
 
-- **User context** holds the user's information: what the user wants the project to be and do, the choices the user has made, and how the user wants agents to work. Only the user changes it.
-- **Agent context** holds what agents own while working on the project, such as design, plans, progress, evidence, team records, and what they have learned. The user can read it but never needs to.
+- **User context** holds the user's information: what the user wants the project to be and do, the choices the user has made, and how the user wants agents to work. The frontend changes it on behalf of the user. Member agents edit separate pending worktree copies through their harness; those edits do not directly change this original-workspace surface.
+- **Agent context** holds what agents own while working on the project, such as private plans, progress, evidence, team records, and what they have learned. The user can read it but never needs to.
 
 Each category is a tree of text files. The context base does not prescribe folders, file names, or formats. It:
 
@@ -15,7 +15,7 @@ Each category is a tree of text files. The context base does not prescribe folde
 
 It does not interpret file contents or decide what work to do. It does not hold the project's own files, credentials, or conversation transcripts.
 
-This document defines the HTTP API that the frontend uses to view and edit context and the attributed design-save capability used by the lead. User design files carry content and corresponding implementation mappings. Agent harness-context maintenance and proposals remain deferred.
+This document defines the HTTP API that the frontend uses to view and edit context and the attributed backend design-import capability. User design files carry content and corresponding implementation mappings. Agent harness-context maintenance and proposals remain deferred.
 
 ## Inputs and preconditions
 
@@ -33,7 +33,7 @@ This document defines the HTTP API that the frontend uses to view and edit conte
 
 A design part is a file in user context containing JSON `{content: "Markdown text", implementation: [project paths]}`. The mapping lists at most 50 distinct files/directories, workspace-relative, allowing `.` for the project root and excluding `.git` and `.context`. Paths may name future implementation. Designs can be arranged as subdesign files independent of team membership. Malformed design metadata prevents using that record as a harness reference but remains readable as ordinary raw context for repair. Current design discovery returns valid user-design summaries independently of team assignments; current inspection exposes raw content and metadata issues through read-only workspace design operations. Discovery inherits context listing limits and reports truncation.
 
-The lead's in-process design save supplies the complete record, prior revision (null only to create), nonempty reason up to 1,000 characters, and lead/run author. It uses the same queue, revision protection, durability and sequence rules as user saves. It returns `{path, revision, seq, created, before, after, reason}` plus parsed design at the semantic boundary. A byte-identical save has null sequence and no new version. There is no HTTP operation that lets the user forge a lead author; existing user save/move/delete remain user-authored. Workers read designs through their scoped tools and do not edit them.
+The backend in-process attributed design save supplies the complete record, prior revision (null only to create), nonempty reason up to 1,000 characters, and lead/run author. It uses the same queue, revision protection, durability and sequence rules as user saves. It returns `{path, revision, seq, created, before, after, reason}` plus parsed design at the semantic boundary. A byte-identical save has null sequence and no new version. There is no HTTP operation that lets the user forge a lead author; existing user save/move/delete remain user-authored. Members use common tools to edit pending design copies in their harness worktrees. Those histories and user acceptance records belong to the harness; accepting them does not automatically publish them into this original context base.
 
 ## Outputs and observable effects
 
@@ -137,7 +137,7 @@ All paths below are under `/workspaces/:workspaceId/context`, written `…`:
 ## Guarantees and limits
 
 - **Durable.** Recorded versions and records survive the end of conversations and restarts of the application. Current files are the files on disk.
-- **User-governed.** Through the application, user context changes through the user's saves, moves and deletes or the lead's dedicated discussed design saves. Lead changes carry exact before/after content and a reason in the conversation tool result, and are attributed in history and the change feed. The frontend never changes agent context.
+- **User-governed.** Through the application, user context changes through the user's saves, moves and deletes or attributed backend design saves. Attributed backend saves return exact before/after content and a reason, and retain their author in history and the change feed. No agent runtime tool directly performs this save. The frontend never changes agent context.
 - **Complete history.** Every recorded version is kept, with its author, time, and reason. A deleted file's versions remain readable. Outside changes are kept as the application observes them, so several outside edits between two observations become one version.
 - **Ordered.** Operations on one workspace apply one at a time in the order of their sequence numbers. The change records have no gaps, so a follower after any `seq` receives every later change.
 - **Visible.** The user can read everything in both categories.
@@ -163,4 +163,4 @@ All paths below are under `/workspaces/:workspaceId/context`, written `…`:
 9. **Changes while closed.** With the backend stopped, the user runs `git checkout`, which changes two user-context files and removes one. After the next start, the first request to the workspace waits for the scan, which records all three changes in one record authored by `external`.
 10. **Problem file.** The user copies `photo.png` into `.context/user/`. It is not listed, and the overview's `problems` names it with `not_text`.
 
-11. **Lead design change.** A discussed design save records one lead-authored version and change. The user sees its exact previous/resulting content in the conversation and the version in history. A stale revision leaves the file unchanged.
+11. **Attributed backend design import.** A backend design save records one attributed version and change and returns its exact previous/resulting content. Agent pending edits and their approval instead use harness history. A stale revision leaves the file unchanged.

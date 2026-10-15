@@ -78,16 +78,28 @@ export class TeamSystem {
   policy(base: RuntimePolicy): RuntimePolicy {
     const { management } = teamTools(this.service, this.runner, this.config);
     const lead = leadTools(this.lead);
+    const checkpointed = new Set<string>();
     return {
       ...base,
+      afterRun: async run => {
+        try {
+          if (await this.service.find(run.agentId)) {
+            if (!checkpointed.has(run.runId)) await this.harness.checkpoint(run.agentId, run.runId);
+          }
+          await base.afterRun?.(run);
+        } finally { checkpointed.delete(run.runId); }
+      },
       shouldContinue: async (scope, response, results, record) => {
         const member = await this.service.find(scope.agentId);
         if (!member) return base.shouldContinue ? base.shouldContinue(scope, response, results, record) : response.content.some(part => part.type === 'toolCall');
         if (response.content.some(part => part.type === 'toolCall')) return true;
         const text = response.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+        scope.signal.throwIfAborted();
+        await this.harness.checkpoint(scope.agentId, scope.runId);
         try {
           scope.signal.throwIfAborted();
           await this.runner.publishFinal(scope.agentId, scope.runId, text, record.messageId);
+          checkpointed.add(scope.runId);
           return false;
         } catch (error) {
           if (!(error instanceof AppError) || error.status >= 500 || error.code === 'exchange_stopped') throw error;

@@ -3,10 +3,11 @@ import { request as httpRequest, type IncomingMessage, type Server } from 'node:
 import { duplexPair } from 'node:stream';
 import { text } from 'node:stream/consumers';
 import { test } from 'node:test';
+import { join } from 'node:path';
 import { createAgentServer } from '../src/http.js';
 import type { AgentRuntime } from '../src/runtime.js';
 import { emptyHarness } from '../src/harness-config.js';
-import { stubConfig, withTeam, type Fixture } from './team-fixture.js';
+import { stubConfig, withTeam, worker, type Fixture } from './team-fixture.js';
 
 type Body = Record<string, any>;
 
@@ -87,4 +88,35 @@ test('group timeline endpoints expose persisted reservations and paged changes',
   assert.equal(page.changes.length, 1); assert.equal(page.more, true);
   const next = await call(`${base}/timeline?after=1`);
   assert.equal(next.changes[0].entry.position, 2);
+}));
+
+test('harness review and user commit endpoints pin the reviewed revision and enforce member boundaries', () => withServer(async (call, fixture) => {
+  const member = await worker(fixture, 'Backend', ['src']);
+  const endpoint = `/workspaces/${fixture.workspaceId}/team/members/${member.memberId}/harness`;
+  const files = await fixture.team.harness.files(member.memberId);
+  const path = join(files.root, '.context', member.harness.designScope.working[0]!);
+  await files.write.writeFile(path, JSON.stringify({ content: 'Pending', implementation: ['src'] }));
+  const review = await call(endpoint);
+  const design = review.parts.find((p: Body) => p.state.part.id === 'design');
+  const implementation = review.parts.find((p: Body) => p.state.part.id === 'implementation');
+  assert.match(design.diff, /Pending/);
+  assert.equal(design.state.part.commit, 'user');
+  const input = { revision: design.revision, base: design.state.committed, message: 'Accept design' };
+  await call(endpoint + '/design/commit', { method: 'POST', data: { ...input, actor: 'user' }, status: 400 });
+  await files.write.writeFile(path, JSON.stringify({ content: 'Changed after review', implementation: ['src'] }));
+  const stale = await call(endpoint + '/design/commit', { method: 'POST', data: input, status: 409 });
+  assert.equal(stale.error.code, 'stale_revision');
+  const updated = (await call(endpoint)).parts.find((p: Body) => p.state.part.id === 'design');
+  const approval = { ...input, revision: updated.revision };
+  const run = await fixture.team.runner.postUser(fixture.workspaceId, '@Backend work');
+  assert.equal((await call(endpoint + '/design/commit', { method: 'POST', data: approval, status: 409 })).error.code, 'member_busy');
+  fixture.runtime.end(member.memberId);
+  await fixture.runtime.finished(member.memberId, run.runs[0]!.runId);
+  const accepted = await call(endpoint + '/design/commit', { method: 'POST', data: approval });
+  assert.equal(accepted.actor.type, 'user');
+  assert.equal(accepted.kind, 'commit');
+  const current = await call(endpoint);
+  assert.equal(current.parts.find((p: Body) => p.state.part.id === 'implementation').state.committed, implementation.state.committed);
+  assert.ok((await call(endpoint + '/design/history')).history.some((r: Body) => r.revision === accepted.revision));
+  await call(`/workspaces/missing/team/members/${member.memberId}/harness`, { status: 404 });
 }));

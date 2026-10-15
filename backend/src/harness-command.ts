@@ -13,14 +13,13 @@ export function executeCommand(directory: string, argv: string[], signal: AbortS
     const child = spawn(argv[0]!, argv.slice(1), { cwd: directory, shell: false, detached: grouped, stdio: ['ignore', 'pipe', 'pipe'] });
     const output = { stdout: [] as Buffer[], stderr: [] as Buffer[] };
     let used = 0, truncated = false, timedOut = false, finished = false;
-    let force: ReturnType<typeof setTimeout> | undefined;
+    let stopping: Promise<void> | undefined;
     const kill = (name: NodeJS.Signals) => {
       try { if (grouped && child.pid) process.kill(-child.pid, name); else child.kill(name); } catch { /* Already stopped. */ }
     };
     const stop = () => {
       kill('SIGTERM');
-      force ??= setTimeout(() => kill('SIGKILL'), 250);
-      force.unref();
+      stopping ??= new Promise<void>(resolve => { setTimeout(() => { kill('SIGKILL'); resolve(); }, 250); });
     };
     const abort = () => stop();
     signal.addEventListener('abort', abort, { once: true });
@@ -35,9 +34,11 @@ export function executeCommand(directory: string, argv: string[], signal: AbortS
       if (keep < chunk.length) truncated = true;
     });
     child.once('error', error => { if (!finished) { cleanup(); reject(new AppError('command_failed', error.message)); } });
-    child.once('close', (exitCode, exitSignal) => {
+    child.once('close', async (exitCode, exitSignal) => {
       if (finished) return;
       cleanup();
+      // The parent may close before its descendants. Finish group termination before checkpointing.
+      await stopping;
       if (signal.aborted) { reject(signal.reason); return; }
       resolve({ exitCode, signal: exitSignal, stdout: Buffer.concat(output.stdout).toString('utf8'), stderr: Buffer.concat(output.stderr).toString('utf8'), timedOut, truncated });
     });

@@ -11,6 +11,33 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     identity(workspaceId, 'workspaceId');
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
+    if (area === 'members' && memberId && extra[0] === 'harness') {
+      identity(memberId, 'memberId');
+      await team.member(workspaceId, memberId);
+      query(url, []);
+      if (extra.length === 1 && method === 'GET') {
+        json(response, 200, await team.harness.inspect(memberId));
+        return;
+      }
+      const [, partId, action] = extra;
+      identity(partId, 'part');
+      if (extra.length !== 3) throw notFound();
+      if (method === 'GET' && action === 'history') {
+        json(response, 200, { history: await team.harness.history(memberId, partId) });
+        return;
+      }
+      if (method !== 'POST' || (action !== 'commit' && action !== 'restore')) throw notFound();
+      if (team.runner.isRunning(memberId)) throw new AppError('member_busy', 'Wait for this member to finish before accepting or restoring its work', 409);
+      const input = await body(request, maxBodyBytes);
+      fields(input, action === 'commit' ? ['revision', 'base', 'message'] : ['revision']);
+      if (typeof input.revision !== 'string' || (action === 'commit' && (typeof input.base !== 'string' || typeof input.message !== 'string'))) throw new AppError('invalid_input', 'Name the exact reviewed revision, committed base and commit intent');
+      const actor = { type: 'user' as const, memberId };
+      const result = action === 'commit'
+        ? await team.harness.commit(memberId, partId, input.message as string, actor, input.revision, input.base as string)
+        : await team.harness.restore(memberId, partId, input.revision, actor);
+      json(response, 200, result);
+      return;
+    }
     if (area === 'chat') {
       if (extra.length) throw notFound();
       if (method === 'GET' && (memberId === undefined || memberId === 'follow' || memberId === 'timeline' || memberId === 'timeline-follow')) {

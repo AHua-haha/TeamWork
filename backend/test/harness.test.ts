@@ -34,16 +34,16 @@ test('mapped design changes take effect at the next file tool operation', () => 
   const refused = await write.execute({ path: 'old.ts', content: 'old' }, scope as never, {} as never);
   assert.match(JSON.stringify(refused.content), /Error:/);
   await write.execute({ path: 'new.ts', content: 'new' }, scope as never, {} as never);
-  assert.equal(await readFile(join(fixture.directory, 'new.ts'), 'utf8'), 'new');
+  assert.equal(await readFile(join((await fixture.team.harness.environment(backend.memberId)).root, 'new.ts'), 'utf8'), 'new');
 }));
 
-test('commands execute allowed vectors in workspace cwd without shell string interpretation', () => withTeam(async fixture => {
+test('commands execute allowed vectors in isolated worktree cwd without shell string interpretation', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['src']);
   await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Backend', { ...backend.harness, allowedCommands: [{ kind: 'executable', executable: process.execPath }] });
   const signal = new AbortController().signal;
   const result = await fixture.team.harness.command(backend.memberId, [process.execPath, '-e', 'process.stdout.write(process.cwd()+"\\n"+process.argv[1]);process.stderr.write("err");process.exitCode=3', 'literal; $(echo unwanted)'], signal);
   assert.deepEqual([result.exitCode, result.stderr, result.timedOut], [3, 'err', false]);
-  assert.equal(result.stdout, fixture.directory + '\nliteral; $(echo unwanted)');
+  assert.equal(result.stdout, (await fixture.team.harness.environment(backend.memberId)).root + '\nliteral; $(echo unwanted)');
   await assert.rejects(fixture.team.harness.command(backend.memberId, ['node-other'], signal), code('command_denied'));
   await fixture.team.lead.configureHarness(fixture.lead.memberId, 'Backend', backend.harness);
   await assert.rejects(fixture.team.harness.command(backend.memberId, [process.execPath, '-v'], signal), code('command_denied'));

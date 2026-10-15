@@ -36,6 +36,8 @@ export interface RuntimePolicy {
   executeTool?(tool: RuntimeTool, args: JsonObject, scope: StepScope, call: ToolCall): Promise<Pick<ToolResultMessage, 'content' | 'isError' | 'details'>>;
   shouldContinue?(scope: StepScope, response: AssistantMessage, results: ToolResultMessage[], record: CompletedMessage): Promise<boolean> | boolean;
   messageMetadata?(scope: StepScope, message: Message): JsonObject;
+  /** Filesystem/history finalization after pending policy/tool effects settle, before terminal persistence. */
+  afterRun?(run: { agentId: string; runId: string; status: 'completed' | 'failed' | 'cancelled' | 'interrupted' }): Promise<void>;
 }
 
 export type ModelStream = (request: ModelRequest, signal: AbortSignal) => AsyncIterable<AssistantMessageEvent>;
@@ -94,7 +96,7 @@ export class AgentRuntime {
       this.changes.publish();
     });
     try {
-      await this.store.recoverInterruptedRuns();
+      await this.store.recoverInterruptedRuns(async run => this.policy.afterRun?.({ ...run, status: 'interrupted' }));
       this.finalizationFailures.clear();
       this.accepting = true;
     } catch (error) {
@@ -206,6 +208,12 @@ export class AgentRuntime {
   private async runLoop(run: RunState, config: ResolvedRunConfig, signal: AbortSignal): Promise<void> {
     let status: 'completed' | 'failed' | 'cancelled' = 'completed';
     let failure: RunState['error'] = null;
+    const pendingEffects = new Set<Promise<unknown>>();
+    const track = <T>(operation: Promise<T>): Promise<T> => {
+      pendingEffects.add(operation);
+      void operation.finally(() => pendingEffects.delete(operation)).catch(() => undefined);
+      return operation;
+    };
     try {
       for (let step = 1; ; step++) {
         signal.throwIfAborted();
@@ -219,9 +227,9 @@ export class AgentRuntime {
             return this.replaceContext(run.agentId, revision, entries);
           },
         };
-        if (this.policy.beforeStep) await abortable(this.policy.beforeStep(scope), signal);
+        if (this.policy.beforeStep) await abortable(track(this.policy.beforeStep(scope)), signal);
         const history = await this.store.getContext(run.agentId);
-        const request = await abortable(Promise.resolve(this.policy.buildRequest(scope, history)), signal);
+        const request = await abortable(track(Promise.resolve(this.policy.buildRequest(scope, history))), signal);
         const declared = getCurrentTools(normalizeContext(request.context).messages);
         const tools = new Map<string, RuntimeTool>();
         for (const tool of request.tools) {
@@ -272,7 +280,7 @@ export class AgentRuntime {
             const tool = tools.get(call.name);
             if (!definition || !tool) throw new AppError('unknown_tool', `Tool is unavailable: ${call.name}`);
             const args = validateToolArguments(definition, call) as JsonObject;
-            const output = await abortable(this.policy.executeTool ? this.policy.executeTool(tool, args, scope, call) : tool.execute(args, scope, call), signal);
+            const output = await abortable(track(this.policy.executeTool ? this.policy.executeTool(tool, args, scope, call) : tool.execute(args, scope, call)), signal);
             result = { ...output, role: 'toolResult', toolCallId: call.id, toolName: call.name, timestamp: Date.now() };
             if (result.isError) toolError = new AppError('tool_error', `Tool reported failure: ${call.name}`);
           } catch (error) {
@@ -286,13 +294,21 @@ export class AgentRuntime {
           results.push(result);
           if (toolError) throw toolError;
         }
-        const again = this.policy.shouldContinue ? await abortable(Promise.resolve(this.policy.shouldContinue(scope, response, results, record)), signal) : calls.length > 0;
+        const again = this.policy.shouldContinue ? await abortable(track(Promise.resolve(this.policy.shouldContinue(scope, response, results, record))), signal) : calls.length > 0;
         signal.throwIfAborted();
         if (!again) break;
       }
     } catch (error) {
       status = signal.aborted ? 'cancelled' : 'failed';
       failure = { code: signal.aborted ? 'cancelled' : error instanceof AppError ? error.code : 'runtime_error', message: signal.aborted ? 'Run cancelled' : error instanceof Error ? error.message : 'Runtime failed' };
+    }
+    // Cancellation stops observation promptly, but a checkpoint must wait for file effects to stop.
+    await Promise.allSettled([...pendingEffects]);
+    try {
+      await this.policy.afterRun?.({ agentId: run.agentId, runId: run.runId, status });
+    } catch (error) {
+      status = 'failed';
+      failure = { code: error instanceof AppError ? error.code : 'harness_finalization_failed', message: error instanceof Error ? error.message : 'Run finalization failed' };
     }
     try {
       this.store.assertRuntime();

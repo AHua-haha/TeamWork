@@ -101,7 +101,7 @@ A design part is an ordinary user-context JSON file:
 }
 ```
 
-A member harness has two configuration parts:
+Existing member assignment input remains unchanged while the harness configuration interface is deferred:
 
 ```json
 {
@@ -116,11 +116,24 @@ A member harness has two configuration parts:
 }
 ```
 
-The lead uses `save_design`, `create_member` and `configure_harness`, then mentions workers in its final response with objectives. The old `send_message` and `assign_member` tools are removed. Workers read and follow working designs, edit their mapped implementation through file tools, and only read dependency design/implementation. Dependency read-only access takes precedence on overlap. Generic file tools cannot edit context. Design records survive member retirement and replacement.
+Members, including the lead, use common `read`, `write` and `edit` tools in separate managed Git worktrees. The lead uses `create_member` and existing `configure_harness` for assignments, then mentions workers in its final group response. Dedicated `read_design`/`save_design` tools are removed. Workers can edit pending working designs and mapped implementation; dependency design and implementation remain read-only, with read-only overlap taking precedence.
 
-New or migrated workers need a configured design scope before running. The old agent-context `scope` field is replaced once at startup with an empty harness; identity, conversations and settings are preserved. Members use harness tools and require empty catalog tool selections. Existing text design notes can be read and converted by the lead after discussion.
+The harness assembles purpose/maintenance rule text into the model system prompt. It automatically checkpoints each finished run, including failure/cancellation and interruption recovery. `commit_scope {part, message}` records a semantic implementation commit without user approval. Design commits require user acceptance of exact reviewed bytes/base. `scope_history` and `restore_scope` inspect/restore one part independently; no agent checkpoint tool is provided.
 
-`run_command` accepts an executable/argument vector and checks exact whole commands or exact executable names/paths. It runs in the workspace directory without implicit shell parsing, retains up to 64 KiB of output, and times out after 60 seconds. Filesystem confinement of allowed command effects and automated harness-context maintenance remain deferred.
+Private bare Git storage is created next to the original workspace under `.rsi-harness/<workspace-path-hash>/`, with a retained worktree per member. Scoped snapshots use alternate indexes and shared objects; the original project's branch/index and files are not changed. Accepted snapshots are retained in harness Git; automatic integration into the original catalog or existing peer worktrees is deferred. A new work area initializes its assigned parts from their committed snapshots. Stale bases are refused; explicitly restoring the latest committed snapshot refreshes a work area's base.
+
+Backend review/acceptance is available without adding configuration UI. Under `/workspaces/:workspaceId/team/members/:memberId/harness`:
+
+- `GET` returns worktree directory and per-part state, review revision and diff.
+- `GET /:part/history` returns checkpoint/semantic-commit history.
+- `POST /:part/commit` with `{revision, base, message}` accepts the exact reviewed state as the user; idle member required.
+- `POST /:part/restore` with `{revision}` restores one part; idle member required.
+
+For example, review the member, take `revision` and `state.committed` from its `design` part, then submit them as `revision` and `base` to `/design/commit`. A changed working file or committed base causes `stale_revision`; inspect again. Actor/approval fields cannot be supplied through agent tool arguments.
+
+New or migrated workers still need a configured design scope and empty catalog tool selections. The existing legacy-scope startup migration is unchanged. Git must be installed; no Git author setup or credentials are needed for local harness snapshots.
+
+`run_command` uses the member's private worktree with exact executable/argument matching, no implicit shell parsing, 64 KiB retained output and a 60-second timeout. Group termination finishes before cancellation checkpointing. Filesystem confinement of permitted command effects and automatic context-maintenance machinery remain deferred.
 
 Contracts: [lead](../docs/systems/workspace-agent/team/lead/design.md), [harness](../docs/systems/workspace-agent/harness/design.md), [design parts](../docs/systems/workspace-agent/context-base/design-parts/design.md), and [team](../docs/systems/workspace-agent/team/design.md).
 
@@ -134,6 +147,7 @@ The exported `AgentRuntime` always owns the loop. `RuntimePolicy` supplies:
 | `buildRequest(scope, history)` | Choose model, exact Pi context/messages, declared tools, options and executable handlers for each call |
 | `executeTool(tool, args, scope, call)` | Optional centralized tool execution hook |
 | `shouldContinue(scope, response, results)` | Decide whether the loop makes another call |
+| `afterRun(run)` | Finalize harness/file effects after pending operations settle; also invoked before interrupted-run recovery |
 | `messageMetadata(scope, message)` | Attach JSON metadata to completed model/tool records |
 
 `configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the canonical context history for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. Solo agents have no built-in catalog tools; register them in a custom entry point. Workspace members receive their tools from the harness, including lead design and team operations.

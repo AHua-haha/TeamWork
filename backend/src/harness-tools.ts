@@ -18,7 +18,10 @@ export function harnessFileTools(harness: HarnessService, writable: boolean): Ru
     definition: { name: definition.name, description: definition.description, parameters: definition.parameters },
     async execute(args, scope, call) {
       try {
-        const result = await (await build(scope.agentId)).execute(call.id, args as never, scope.signal);
+        const result = await harness.operation(scope.agentId, async () => {
+          scope.signal.throwIfAborted();
+          return (await build(scope.agentId)).execute(call.id, args as never, scope.signal);
+        });
         return { content: result.content, isError: false };
       } catch (error) {
         scope.signal.throwIfAborted();
@@ -38,7 +41,35 @@ export function harnessFileTools(harness: HarnessService, writable: boolean): Ru
 }
 export function harnessCommandTool(harness: HarnessService): RuntimeTool {
   return {
-    definition: { name: 'run_command', description: 'Run an allowed executable and arguments from the workspace directory. Commands are matched against this harness; there is no implicit shell interpretation. Command effects are not confined by file-tool permissions in this prototype.', parameters: Type.Object({ argv: Type.Array(Type.String(), { minItems: 1, maxItems: 128, description: 'Executable followed by arguments, such as ["npm", "test"]' }) }) },
-    execute: (args, scope) => refusing(async () => JSON.stringify(await harness.command(scope.agentId, args.argv, scope.signal), null, 2)),
+    definition: { name: 'run_command', description: 'Run an allowed executable and arguments from your private worktree. Commands are matched against this harness; there is no implicit shell interpretation. Command effects are not confined by file-tool permissions in this prototype.', parameters: Type.Object({ argv: Type.Array(Type.String(), { minItems: 1, maxItems: 128, description: 'Executable followed by arguments, such as ["npm", "test"]' }) }) },
+    execute: (args, scope) => refusing(async () => JSON.stringify(await harness.operation(scope.agentId, () => harness.command(scope.agentId, args.argv, scope.signal)), null, 2)),
   };
+}
+
+/** Reusable scoped operations. Actor and authority come from the harness, never tool arguments. */
+export function harnessHistoryTools(harness: HarnessService): RuntimeTool[] {
+  return [
+    {
+      definition: {
+        name: 'commit_scope',
+        description: 'Commit one harness part with a meaningful intent. Implementation permits agent commits. Design requires user approval and remains pending until the user accepts its exact revision. This does not merge project branches.',
+        parameters: Type.Object({ part: Type.String(), message: Type.String({ minLength: 1, maxLength: 1000 }) }),
+      },
+      execute: (args, scope) => refusing(async () => {
+        scope.signal.throwIfAborted();
+        return JSON.stringify(await harness.commit(scope.agentId, String(args.part), String(args.message), { type: 'agent', memberId: scope.agentId, runId: scope.runId }), null, 2);
+      }),
+    },
+    {
+      definition: { name: 'scope_history', description: 'Read one part\'s immutable checkpoint history.', parameters: Type.Object({ part: Type.String() }) },
+      execute: (args, scope) => refusing(async () => JSON.stringify(await harness.history(scope.agentId, String(args.part)), null, 2)),
+    },
+    {
+      definition: { name: 'restore_scope', description: 'Restore one part from its history, preserving other parts and recording the restored state. This does not change the accepted revision.', parameters: Type.Object({ part: Type.String(), revision: Type.String() }) },
+      execute: (args, scope) => refusing(async () => {
+        scope.signal.throwIfAborted();
+        return JSON.stringify(await harness.restore(scope.agentId, String(args.part), String(args.revision), { type: 'agent', memberId: scope.agentId, runId: scope.runId }), null, 2);
+      }),
+    },
+  ];
 }

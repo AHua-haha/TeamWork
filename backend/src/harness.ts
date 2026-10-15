@@ -1,8 +1,11 @@
 import { lstat } from 'node:fs/promises';
-import { DesignService, type ResolvedDesign } from './design.js';
+import { join } from 'node:path';
+import { DesignService, designPart, type ResolvedDesign } from './design.js';
 import { commandAllowed, commandArgv, type HarnessConfig } from './harness-config.js';
 import { executeCommand, type CommandResult } from './harness-command.js';
-import { harnessCommandTool, harnessFileTools } from './harness-tools.js';
+import { harnessCommandTool, harnessFileTools, harnessHistoryTools } from './harness-tools.js';
+import { HarnessHistory, HarnessQueue, coversPath, harnessStorage, partOwns, validateParts, type HarnessDefinition, type HarnessPart, type HistoryActor } from './harness-history.js';
+import { ProjectFiles } from './project-files.js';
 import { MemberFiles, type FileAccess } from './member-files.js';
 import type { RuntimeTool } from './runtime.js';
 import type { StoredMember } from './team.js';
@@ -26,7 +29,10 @@ export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): 
   return { deny(path, mode) {
     const key = path.toLowerCase();
     if (key === '.context' || key.startsWith('.context/')) {
-      if (mode === 'write' || mode === 'mkdir') return 'Design and harness context are read-only through file tools';
+      if (mode === 'write' || mode === 'mkdir') {
+        const working = resolved.working.map(part => `.context/${part.path}`);
+        return member.value.lead && (key === '.context/user' || key.startsWith('.context/user/')) || working.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'Dependency design and agent context are read-only';
+      }
       if (member.value.lead || designFiles.some(file => key === file.toLowerCase() || (mode === 'see' && ancestor(path, file)))) return null;
       return 'This context is outside your design scope';
     }
@@ -40,63 +46,191 @@ export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): 
   } };
 }
 
-/** One tool supplier and context view for every workspace member. */
+export interface HarnessEnvironment {
+  root: string;
+  history: HarnessHistory;
+  definitions: HarnessDefinition[];
+  parts: HarnessPart[];
+}
+export interface HarnessOptions {
+  storage?: (workspaceDirectory: string) => string;
+  definitions?: (member: StoredMember, resolved: ResolvedHarness) => HarnessDefinition[];
+}
+
+/** Member integration: purpose bundles, scoped history and current authority, independent of the model loop. */
 export class HarnessService {
-  constructor(private readonly workspaces: WorkspaceService, readonly designs: DesignService, private readonly member: (id: string) => Promise<StoredMember | null>) {}
+  private readonly histories = new Map<string, Promise<HarnessHistory>>();
+  private readonly operations = new HarnessQueue();
+  constructor(private readonly workspaces: WorkspaceService, readonly designs: DesignService, private readonly member: (id: string) => Promise<StoredMember | null>, private readonly options: HarnessOptions = {}) {}
   private async active(id: string): Promise<StoredMember> {
     const member = await this.member(id);
     if (!member || member.value.retiredAt !== null) throw new AppError('not_found', 'This agent is not an active team member', 404);
     return member;
   }
+  private defaults(member: StoredMember, resolved: ResolvedHarness): HarnessDefinition[] {
+    const designPaths = member.value.lead ? ['.context/user'] : resolved.working.map(p => `.context/${p.path}`);
+    const design: HarnessDefinition = {
+      id: 'design', prompt: 'Use common file tools to edit pending design JSON (content and implementation). Discuss unresolved choices with the user. Design commits require explicit user approval; a checkpoint is not acceptance.',
+      tools: ['ls', 'read', 'write', 'edit', 'commit_scope', 'scope_history', 'restore_scope'],
+      parts: designPaths.length ? [{ id: 'design', paths: designPaths, exclude: [], commit: 'user', prompt: 'Keep design and subdesign knowledge continuous across team changes. Explain pending changes in your final reply; ask the user to review and accept the exact revision.' }] : [],
+    };
+    const implementation: HarnessDefinition = {
+      id: 'implementation', prompt: 'Implement the accepted design within the configured file boundary. Dependencies are read-only. Use commit_scope with a meaningful intent when a coherent implementation change is ready; implementation commits need no user approval.',
+      tools: ['ls', 'read', 'write', 'edit', 'commit_scope', 'scope_history', 'restore_scope', ...(member.value.harness.allowedCommands.length ? ['run_command'] : [])],
+      parts: resolved.writable.length ? [{ id: 'implementation', paths: [...new Set(resolved.writable)], exclude: ['.context', ...resolved.readonly], commit: 'agent', prompt: 'Maintain useful implementation notes in your final report. Automatic run-end checkpoints preserve state and do not replace semantic commits.' }] : [],
+    };
+    return [design, implementation];
+  }
+  async environment(id: string): Promise<HarnessEnvironment> {
+    const member = await this.active(id);
+    return this.openEnvironment(member);
+  }
+  private async openEnvironment(member: StoredMember): Promise<HarnessEnvironment> {
+    const id = member.id;
+    const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
+    const source = (await this.workspaces.record(member.workspaceId)).directory;
+    try { if (!(await lstat(source)).isDirectory()) throw new Error('not a directory'); }
+    catch { throw new AppError('workspace_unavailable', 'The original workspace directory is missing or unreadable', 503); }
+    let opening = this.histories.get(member.workspaceId);
+    if (!opening) {
+      const history = new HarnessHistory((this.options.storage ?? harnessStorage)(source), source);
+      opening = history.open().then(() => history);
+      this.histories.set(member.workspaceId, opening);
+      void opening.catch(() => { if (this.histories.get(member.workspaceId) === opening) this.histories.delete(member.workspaceId); });
+    }
+    const history = await opening;
+    const root = await history.worktree(id);
+    const definitions = (this.options.definitions ?? ((m, r) => this.defaults(m, r)))(member, resolved);
+    const parts = definitions.flatMap(d => d.parts);
+    validateParts(parts);
+    for (const part of parts) await history.ensure(id, part, root);
+    // A dependency is an independent read-only view. Hydrate it once when first assigned,
+    // without granting its paths to a writable part or refreshing another agent's edits.
+    const dependencies: HarnessPart[] = [
+      ...resolved.dependencies.map(p => ({ id: `dep-${p.revision.slice(0, 32)}`, paths: [`.context/${p.path}`], exclude: [], commit: 'user' as const, prompt: '' })),
+      ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.context'], commit: 'user' as const, prompt: '' }] : []),
+    ];
+    for (const part of dependencies) await history.ensure(id, part, root);
+    return { root, history, definitions, parts };
+  }
+  /** Serializes tools and user review/restore against the same member's working files. */
+  operation<T>(id: string, action: () => Promise<T>): Promise<T> { return this.operations.run(id, action); }
   async files(id: string): Promise<MemberFiles> {
     const member = await this.active(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
-    return new MemberFiles((await this.workspaces.record(member.workspaceId)).directory, harnessAccess(member, resolved));
+    const env = await this.environment(id);
+    const base = harnessAccess(member, resolved);
+    return new MemberFiles(env.root, { deny(path, mode) {
+      const denial = base.deny(path, mode);
+      if (denial !== null) return denial;
+      if (mode === 'write' || mode === 'mkdir') {
+        const isPart = env.parts.some(part => partOwns(part, path) || (mode === 'mkdir' && part.paths.some(p => ancestor(path, p))));
+        if (!isPart) return 'This path is outside your writable harness parts';
+      }
+      return null;
+    } });
   }
   async command(id: string, input: unknown, signal: AbortSignal): Promise<CommandResult> {
     const member = await this.active(id);
     const argv = commandArgv(input);
     if (!commandAllowed(member.value.harness.allowedCommands, argv)) throw new AppError('command_denied', 'This whole command or executable is not allowed by your harness', 403);
-    const directory = (await this.workspaces.record(member.workspaceId)).directory;
+    const directory = (await this.environment(id)).root;
     if (!(await lstat(directory)).isDirectory()) throw new AppError('workspace_unavailable', 'The workspace is not a real directory', 503);
     return executeCommand(directory, argv, signal);
+  }
+  private part(env: HarnessEnvironment, id: string): HarnessPart {
+    const part = env.parts.find(p => p.id === id);
+    if (!part) throw new AppError('not_found', 'No writable harness part with that ID', 404);
+    return part;
+  }
+  async inspect(id: string) {
+    return this.operation(id, async () => {
+      const env = await this.environment(id);
+      const parts = [];
+      for (const part of env.parts) parts.push(await env.history.diff(id, part, env.root));
+      return { memberId: id, directory: env.root, parts };
+    });
+  }
+  async commit(id: string, partId: string, message: string, actor: HistoryActor, revision?: string, base?: string) {
+    return this.operation(id, async () => {
+      const env = await this.environment(id);
+      const part = this.part(env, partId);
+      if (actor.memberId !== id || (actor.type !== 'agent' && actor.type !== 'user')) throw new AppError('access_denied', 'Invalid commit actor', 403);
+      if (part.commit === 'user' && actor.type !== 'user') throw new AppError('approval_required', 'Design commit requires user approval; leave it pending for review', 403);
+      if (actor.type === 'user' && (!revision || !base)) throw new AppError('invalid_input', 'User acceptance names the exact reviewed revision and committed base');
+      const checkpoint = revision ?? (await env.history.checkpoint(id, part, env.root, actor, 'Commit snapshot')).revision;
+      const state = await env.history.ensure(id, part, env.root);
+      if (partId === 'design') {
+        // Validate structured design files at acceptance, while allowing intermediate raw file edits.
+        const files = new MemberFiles(env.root, { deny: () => null });
+        const paths = await env.history.paths(checkpoint);
+        const assigned = new Set((await this.active(id)).value.harness.designScope.working.map(path => `.context/${path}`));
+        for (const path of paths.filter(path => path.endsWith('.json') || assigned.has(path))) {
+          const bytes = await files.read.readFile(join(env.root, path));
+          let value;
+          try { value = JSON.parse(Buffer.from(bytes).toString('utf8')); }
+          catch { throw new AppError('invalid_design', `${path} is not a design JSON record`); }
+          designPart(value);
+        }
+      }
+      return env.history.commit(id, part, env.root, checkpoint, base ?? state.committed, message, actor);
+    });
+  }
+  async checkpoint(id: string, runId: string) {
+    return this.operation(id, async () => {
+      const member = await this.member(id);
+      if (!member) return [];
+      // Retirement revokes further actions, but must not discard the ending run's edits.
+      const env = await this.openEnvironment(member);
+      const revisions = [];
+      for (const part of env.parts) revisions.push(await env.history.checkpoint(id, part, env.root, { type: 'harness', memberId: id, runId }, `End of run ${runId}`));
+      return revisions;
+    });
+  }
+  async restore(id: string, partId: string, revision: string, actor: HistoryActor) {
+    return this.operation(id, async () => {
+      const env = await this.environment(id);
+      return env.history.restore(id, this.part(env, partId), env.root, revision, actor);
+    });
+  }
+  async history(id: string, partId: string) {
+    return this.operation(id, async () => {
+      const env = await this.environment(id);
+      return env.history.history(id, this.part(env, partId), env.root);
+    });
   }
   async prepare(id: string, teamTools: RuntimeTool[]): Promise<{ tools: RuntimeTool[]; context: string }> {
     const member = await this.active(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
-    const tools = [
-      ...harnessFileTools(this, resolved.writable.length > 0),
-      ...(member.value.harness.allowedCommands.length ? [harnessCommandTool(this)] : []),
-      ...teamTools,
-    ];
+    const env = await this.operation(id, () => this.environment(id));
+    const available = [...harnessFileTools(this, env.parts.length > 0), ...harnessHistoryTools(this), ...(member.value.harness.allowedCommands.length ? [harnessCommandTool(this)] : [])];
+    const selected = new Set(env.definitions.flatMap(d => d.tools));
+    const tools = [...available.filter(tool => selected.has(tool.definition.name)), ...teamTools];
     const parts = [
       '## Your harness',
-      'Read and follow working designs; edit only their mapped implementation through file tools. Dependency designs and their implementation are read-only. Return proposed design changes to the lead.',
-      'File scope and allowed commands are separate. Command effects are not filesystem-confined by the file-tool scope in this prototype; keep your work within the assignment.',
-      '## Working designs',
-      await this.designView(resolved.working),
-      '## Dependency designs',
-      await this.designView(resolved.dependencies),
+      `Your private worktree is ${env.root}. Use paths relative to it. Other members have separate working files.`,
+      ...env.definitions.map(d => `## ${d.id} harness\n${d.prompt}\n${d.parts.map(p => `Part ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
+      'The harness automatically checkpoints each finished run. Use commit_scope for meaningful commits only. A design commit requires user approval of the exact revision. Checkpoints never imply approval. Accepted snapshots are retained in harness history; they are not automatically merged into the original workspace or other worktrees.',
+      'File scope and allowed commands are separate. Command effects are not filesystem-confined by file-tool scope in this prototype. Keep commands within the assignment.',
+      '## Accepted working designs', await this.acceptedDesignView(id, env, resolved.working),
+      '## Dependency designs', await this.designView(resolved.dependencies),
       `## Allowed commands\n${JSON.stringify(member.value.harness.allowedCommands)}`,
-      '## Implementation files',
-      await this.implementationView(member.workspaceId, resolved.readable),
+      '## Implementation files', await this.implementationView(env.root, resolved.readable),
     ];
-    if (member.value.lead) {
-      const base = await this.workspaces.context(member.workspaceId);
-      const listing = await base.tree('', 16);
-      let used = 0;
-      const files: string[] = [];
-      for (const entry of listing.entries) if (entry.type === 'file') {
-        if (used + entry.size > viewBudget) { files.push(`Not loaded: .context/${entry.path}`); continue; }
-        const file = await base.read({ path: entry.path });
-        used += file.size;
-        files.push(`### .context/${file.path} (revision ${file.revision})\n${file.content}`);
-      }
-      parts.push('## Workspace context for the lead', files.join('\n\n') || 'There are no context files yet.');
-      if (listing.truncated) parts.push('Context listing truncated at 2,000 entries; use ls and read to inspect further.');
-      parts.push('The lead may read the entire workspace to help the user design it. Generic file tools never change user design. Use dedicated design tools for discussed design changes.');
-    }
     return { tools, context: parts.join('\n\n') };
+  }
+  private async acceptedDesignView(id: string, env: HarnessEnvironment, designs: ResolvedDesign[]): Promise<string> {
+    const accepted: ResolvedDesign[] = [];
+    for (const design of designs) {
+      const path = `.context/${design.path}`;
+      const part = env.parts.find(part => partOwns(part, path));
+      if (!part) { accepted.push(design); continue; }
+      const state = await env.history.ensure(id, part, env.root);
+      const raw = await env.history.readSnapshot(state.committed, path);
+      if (raw === null) continue;
+      accepted.push({ ...design, ...designPart(JSON.parse(raw)), revision: state.committed });
+    }
+    return this.designView(accepted);
   }
   private async designView(parts: ResolvedDesign[]): Promise<string> {
     let used = 0;
@@ -108,8 +242,8 @@ export class HarnessService {
       return heading + '\n' + part.content;
     }).join('\n\n') || '(none configured)';
   }
-  private async implementationView(workspaceId: string, scopes: string[]): Promise<string> {
-    const files = await this.workspaces.files(workspaceId);
+  private async implementationView(root: string, scopes: string[]): Promise<string> {
+    const files = new ProjectFiles(root);
     const candidates = new Set<string>(), notes: string[] = [];
     for (const scope of new Set(scopes)) {
       const path = scope === '.' ? '' : scope;

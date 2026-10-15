@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { decode, encode, validateAuthor } from '../src/codec.js';
 import { emptyHarness } from '../src/harness-config.js';
 import { leadTools } from '../src/lead-tools.js';
 import type { StepScope } from '../src/runtime.js';
@@ -9,45 +8,26 @@ import { code, withTeam, worker } from './team-fixture.js';
 const scope = (agentId: string) => ({ agentId, runId: 'lead-run', signal: new AbortController().signal } as StepScope);
 const raw = (content: string, implementation = ['src']) => JSON.stringify({ content, implementation }, null, 2) + '\n';
 
-test('lead design tools expose exact changes, revisions, and persisted lead authorship', () => withTeam(async fixture => {
-  const tools = leadTools(fixture.team.lead);
+test('lead exposes assignment configuration while design edits use reusable harness tools', () => withTeam(async fixture => {
+  assert.deepEqual(leadTools(fixture.team.lead).map(tool => tool.definition.name), ['configure_harness']);
+  const backend = await worker(fixture, 'Backend', ['src']);
+  const prepared = await fixture.team.harness.prepare(backend.memberId, []);
+  const runScope = scope(backend.memberId);
   const call = async (name: string, args: Record<string, unknown>) => {
-    const result = await tools.find(tool => tool.definition.name === name)!.execute(args as never, scope(fixture.lead.memberId), {} as never);
-    return result.content.map(part => part.type === 'text' ? part.text : '').join('');
+    const output = await prepared.tools.find(t => t.definition.name === name)!.execute(args as never, runScope, {} as never);
+    return output.content.map(p => p.type === 'text' ? p.text : '').join('');
   };
-  const created = JSON.parse(await call('save_design', { path: '.context/user/design.json', content: '# Design\nShared scale.', implementation: ['src'], baseRevision: null, reason: 'The user chose a shared scale.' }));
-  assert.equal(created.status, 'created');
-  assert.deepEqual([created.before, created.after, created.seq], [null, raw('# Design\nShared scale.'), 1]);
-  const current = JSON.parse(await call('read_design', { path: 'user/design.json' }));
-  assert.equal(current.revision, created.revision);
-  assert.deepEqual(current.design, { content: '# Design\nShared scale.', implementation: ['src'] });
-  const author = { type: 'lead', memberId: fixture.lead.memberId, runId: 'lead-run' };
-  assert.deepEqual(current.author, author);
-  assert.deepEqual(decode(encode(author), validateAuthor), author);
-  assert.throws(() => validateAuthor({ type: 'lead', memberId: 'bad/path', runId: 'r' }));
-  const updated = JSON.parse(await call('save_design', { path: 'user/design.json', content: '# Design\nFive stops.', implementation: ['src', 'test'], baseRevision: created.revision, reason: 'The user chose five stops.' }));
-  assert.deepEqual([updated.status, updated.before, updated.after, updated.seq], ['updated', created.after, raw('# Design\nFive stops.', ['src', 'test']), 2]);
-  const base = await fixture.workspaces.context(fixture.workspaceId);
-  assert.deepEqual((await base.history('user/design.json', null, 50)).versions.map(version => version.author), [author, author]);
-  assert.deepEqual((await base.changes(0, 50)).records.map(record => record.author), [author, author]);
-  const same = JSON.parse(await call('save_design', { path: 'user/design.json', ...updated.design, baseRevision: updated.revision, reason: 'Confirm current design.' }));
-  assert.deepEqual([same.status, same.seq, (await base.overview()).seq], ['unchanged', null, 2]);
-}));
-
-test('stale design changes and worker changes refuse without modifying the design', () => withTeam(async fixture => {
-  const input = { path: 'user/design.json', content: 'first', implementation: ['src'], baseRevision: null, reason: 'Requested design.' };
-  const first = await fixture.team.lead.saveDesign(fixture.lead.memberId, 'r', input);
-  const base = await fixture.workspaces.context(fixture.workspaceId);
-  const userEdit = await base.save(input.path, raw('user edit'), first.revision, 'Edited by user');
-  await assert.rejects(fixture.team.lead.saveDesign(fixture.lead.memberId, 'r', { ...input, content: 'stale', baseRevision: first.revision }), code('stale_revision'));
-  const member = await worker(fixture, 'Backend');
-  await assert.rejects(fixture.team.lead.saveDesign(member.memberId, 'r', { ...input, baseRevision: userEdit.revision }), code('access_denied'));
-  await assert.rejects(fixture.team.lead.saveDesign(fixture.lead.memberId, 'r', { ...input, path: 'agent/design.json' }), code('read_only'));
-  await assert.rejects(fixture.team.lead.saveDesign(fixture.lead.memberId, 'r', { ...input, reason: '  ' }), code('invalid_input'));
-  const result = await leadTools(fixture.team.lead).find(tool => tool.definition.name === 'save_design')!.execute({ ...input, baseRevision: first.revision }, scope(fixture.lead.memberId), {} as never);
-  assert.equal(result.isError, false);
-  assert.match(result.content[0]!.type === 'text' ? result.content[0]!.text : '', /^Refused \(stale_revision\)/);
-  assert.equal((await base.read({ path: input.path })).content, raw('user edit'));
+  const path = '.context/' + backend.harness.designScope.working[0]!;
+  await call('write', { path, content: raw('Pending design') });
+  const pending = await fixture.team.harness.inspect(backend.memberId);
+  const design = pending.parts.find(p => p.state.part.id === 'design')!;
+  assert.match(design.diff, /Pending design/);
+  assert.match(await call('commit_scope', { part: 'design', message: 'Agent cannot approve' }), /approval_required/);
+  const accepted = await fixture.team.harness.commit(backend.memberId, 'design', 'User accepted', { type: 'user', memberId: backend.memberId }, design.revision, design.state.committed);
+  assert.equal(accepted.actor.type, 'user');
+  assert.match((await fixture.team.harness.prepare(backend.memberId, [])).context, /Pending design/);
+  const original = await fixture.team.designs.read(fixture.workspaceId, backend.harness.designScope.working[0]!);
+  assert.equal(original.content, 'Design for Backend', 'acceptance does not silently integrate into the original workspace');
 }));
 
 test('lead configures its own harness and member harness independently from model settings', () => withTeam(async fixture => {

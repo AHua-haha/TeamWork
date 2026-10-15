@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-The agent runtime is written in TypeScript. It runs agents and provides the frontend-facing run protocol. It owns one agent-loop implementation for all agents: choosing the model and available tools, constructing every model request, calling the model, executing tools, and managing the agent's stored context history. The frontend submits input and observes runs; it does not drive the loop.
+The agent runtime is written in TypeScript. It runs agents and provides the frontend-facing run protocol. It owns one agent-loop implementation for all agents: choosing the model and available tools, constructing every model request, calling the model, executing tools, and managing the agent's stored context history. The frontend submits input and observes runs; it does not drive the loop. For harness-equipped members, harnesses define capabilities, authority, context and operating rules; the runtime supplies execution mechanisms and assembles their environment.
 
 The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `Tool` formats, model-provider connections, and model-call API. It uses these Pi capabilities directly; Pi Agent Core does not run the loop.
 
@@ -25,6 +25,12 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 - A context update, including compaction, changes later model requests. It does not change the completed message history presented to the frontend.
 - When a frontend-facing message completes, the runtime persists its whole stable record before announcing that completion to followers.
 - The runtime keeps one resolved config snapshot through the run. The standard policy uses its model, catalog tools, standing instructions and call options; a team policy replaces tools and adds current harness/team instructions for each member model call. Member file authority and command allowances are rechecked at tool execution. It resolves current config again for the next run. This does not freeze canonical message context, which the runtime may reread between calls.
+
+### Harness lifecycle
+
+Team members run file/command tools in their separate harness worktrees. Purpose and maintenance rule prompts are assembled into the system prompt. Tools are reusable; current harness authority and per-part commit policy determine their permitted effects. Implementation commits can be agent-authorized; design commits require user acceptance. The runtime does not interpret approval from conversation text or run completion.
+
+The `afterRun` lifecycle callback executes after outstanding policy/tool effects settle, before terminal persistence. It receives agent/run identity and completed/failed/cancelled status; interrupted-run startup recovery invokes it before marking abandoned runs interrupted. Errors fail normal finalization or prevent startup recovery. The team checkpoints before final group publication because that publication durably completes its sender before recipient launch; finalization skips that already completed checkpoint. Failed/cancelled runs still checkpoint their pending file state.
 
 ### Frontend follow protocol
 

@@ -508,10 +508,13 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     });
   }
 
-  async recoverInterruptedRuns(): Promise<void> {
+  async recoverInterruptedRuns(beforeFinish?: (run: { agentId: string; runId: string }) => Promise<void>): Promise<void> {
     this.assertRuntime();
     const active = await rows(this.pool, 'SELECT id, active_run_id FROM agents WHERE active_run_id IS NOT NULL');
-    for (const agent of active) await this.finishRun(agent.id, agent.active_run_id, 'interrupted', { code: 'runtime_restarted', message: 'Runtime stopped before the run finished' });
+    for (const agent of active) {
+      await beforeFinish?.({ agentId: agent.id, runId: agent.active_run_id });
+      await this.finishRun(agent.id, agent.active_run_id, 'interrupted', { code: 'runtime_restarted', message: 'Runtime stopped before the run finished' });
+    }
   }
 
   async getState(agentId: string): Promise<CurrentState> {

@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-A design part is the user's design for a project or one of its parts. It holds design content and the corresponding implementation files or directories together. The lead helps the user maintain it; the harness uses it to derive file permissions.
+A design part is the user's design for a project or one of its parts. It holds design content and the corresponding implementation files or directories together. The lead helps the user maintain it through pending harness copies. The original-workspace record supplies assignment mappings; pending edits do not expand file permissions.
 
 ## Inputs and preconditions
 
@@ -16,11 +16,11 @@ A design part is a user-context text file whose JSON object is {content: "Markdo
 
 ## Outputs and observable effects
 
-Reads return the design part, its path, revision, and implementation mapping. A lead save replaces content and mapping as one versioned context save, with the reason and exact previous/resulting file content visible in its tool record. User edits through the context API retain their usual revision protection.
+Reads return the design part, its path, revision, and implementation mapping. A backend attributed save replaces content and mapping as one versioned original-context save. Members edit pending copies through common harness file tools, with explicit user acceptance required for their design commits; these are not directly written to this catalog. User edits through the context API retain their usual revision protection.
 
 ## Failure behavior
 
-Missing design files, invalid JSON/schema, or invalid implementation paths fail explicitly. A harness cannot resolve invalid design metadata. The lead's read tool also exposes raw file content and its revision so that it can repair an invalid record after discussion with the user.
+Missing design files, invalid JSON/schema, or invalid implementation paths fail explicitly. A harness cannot resolve invalid design metadata. Original-context inspection exposes malformed raw files and revisions; common harness file tools can repair pending copies for user review.
 
 ## Guarantees and limits
 
@@ -29,5 +29,7 @@ Design identity is its context file, independent of member identity. Implementat
 ## Acceptance examples
 
 1. user/design/backend.json holds the backend design and implementation ["backend/src", "backend/test"]. A working assignment can edit those paths.
-2. A dependency references user/design/api.json, whose implementation is ["shared/api.ts"]. The member can read the design and shared/api.ts and cannot edit either through file tools.
+2. A dependency references user/design/api.json, whose implementation is ["shared/api.ts"]. The member can read the dependency design and shared/api.ts and cannot edit either through file tools.
 3. A mapping changes after a user discussion. The next model call and file action use the resulting mapping.
+
+Committing a harness design snapshot does not automatically integrate it into this original-workspace catalog. The harness presents its scoped committed design content to that member separately. Current discovery endpoints continue to inspect original workspace files, independent of pending member worktrees.

@@ -103,3 +103,5 @@ Context base tests run each operation against a temporary folder and the in-memo
 - the watcher recording an outside change without a request. This test is skipped where the platform delivers no file events, as in some sandboxes.
 
 Lead tests additionally check attributed exact changes and unchanged/stale saves. The MySQL integration tests check the store against a real database: a save and a move reload with their history, and a change from this process is refused and undone on disk after another process stored a change. The [route tests](../../../../backend/test/workspace-routes.test.ts) cover the context endpoints over HTTP.
+
+Original-workspace files remain the scope of ContextBase and its watcher/history. Member pending edits use separate worktrees and harness Git; original context versions are not a second history of those pending edits. The attributed saveDesign primitive remains for backend imports/setup and historical author support, but is no longer exposed as a lead model tool. Accepted harness snapshots require explicit integration before this catalog changes.

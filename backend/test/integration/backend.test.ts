@@ -418,6 +418,37 @@ test('EOF without Pi done is a failed run, and cancel interrupts a running tool'
   } finally { await f.runtime.close(); }
 });
 
+test('run finalization waits for cancelled tool effects and exposes finalizer failures', { timeout: 15_000 }, async () => {
+  const entered = new Queue<boolean>();
+  const order: string[] = [];
+  const tool: RuntimeTool = {
+    definition: { name: 'delayed_stop', description: 'Stops a pending file effect after cancellation', parameters: Type.Object({}) },
+    execute: async (_args, scope) => {
+      entered.push(true);
+      await new Promise<void>(resolve => scope.signal.addEventListener('abort', () => setTimeout(() => { order.push('effect stopped'); resolve(); }, 30), { once: true }));
+      return { content: [], isError: false };
+    },
+  };
+  const policy = { ...fixedPolicy(model, [tool]), afterRun: async () => { order.push('checkpoint'); } };
+  const f = await fixture({ policy });
+  try {
+    const run = await f.runtime.start(f.agentId, 'work');
+    answer((await f.requests.next()).events, fauxAssistantMessage([{ type: 'toolCall', id: 'delayed', name: 'delayed_stop', arguments: {} }], { stopReason: 'toolUse' }));
+    await entered.next();
+    await f.runtime.cancel(f.agentId, run.runId);
+    assert.equal((await f.runtime.finished(f.agentId, run.runId)).status, 'cancelled');
+    assert.deepEqual(order, ['effect stopped', 'checkpoint']);
+  } finally { await f.runtime.close(); }
+  const bad = await fixture({ policy: { ...fixedPolicy(model), afterRun: async () => { throw new Error('checkpoint unavailable'); } } });
+  try {
+    const run = await bad.runtime.start(bad.agentId, 'work');
+    answer((await bad.requests.next()).events);
+    const result = await bad.runtime.finished(bad.agentId, run.runId);
+    assert.equal(result.status, 'failed');
+    assert.match(result.error!.message, /checkpoint unavailable/);
+  } finally { await bad.runtime.close(); }
+});
+
 test('failed terminal persistence surfaces as unavailable until restart recovery', { timeout: 15_000 }, async () => {
   const f = await fixture();
   const original = store.finishRun.bind(store);
@@ -987,11 +1018,10 @@ test('persisted context survives reopening the pool; corrupt stored schema fails
 
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 
-test('the lead saves a design and cooperates through shared final responses over real runtime and MySQL', { timeout: 15_000 }, async () => {
-  const folder = await realpath(await mkdtemp(join(tmpdir(), 'lead-prototype-')));
+test('member harnesses edit in isolated worktrees, checkpoint runs and separate agent commits from user design acceptance', { timeout: 30_000 }, async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'harness-prototype-')));
   const workspaceService = new WorkspaceService(store);
-  const models = builtinModels();
-  const service = new ConfigService(store, models);
+  const service = new ConfigService(store, builtinModels());
   const team = new TeamSystem(store, workspaceService, service);
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
   const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), request => {
@@ -1000,78 +1030,70 @@ test('the lead saves a design and cooperates through shared final responses over
     return events;
   });
   team.attach(runtime);
-  const call = (name: string, args: JsonObject) => fauxAssistantMessage([
-    { type: 'toolCall', id: randomUUID(), name, arguments: args },
-  ], { stopReason: 'toolUse' });
+  const call = (name: string, args: JsonObject) => fauxAssistantMessage([{ type: 'toolCall', id: randomUUID(), name, arguments: args }], { stopReason: 'toolUse' });
   try {
-    const connectionId = `lead-test-${randomUUID()}`;
+    const connectionId = `harness-test-${randomUUID()}`;
     await service.createConnection(connectionId, { label: 'Test model', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
-    const { workspaceId } = await workspaceService.create({ name: 'Lead prototype', directory: join(folder, 'project'), adopt: false });
+    const { workspaceId } = await workspaceService.create({ name: 'Harness prototype', directory: join(folder, 'project'), adopt: false });
+    const base = await workspaceService.context(workspaceId);
+    const design = { content: 'Create src/result.txt with Done.', implementation: ['src/result.txt'] };
+    await base.save('user/design.json', JSON.stringify(design), null, 'Initial accepted design');
     const first = (await team.team(workspaceId)).members[0]!;
     const lead = await team.update(workspaceId, first.memberId, first.revision, {
       name: first.name, role: first.role, responsibility: first.responsibility, harness: first.harness,
       settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' },
     });
     await runtime.open();
-    const accepted = await team.runner.postUser(workspaceId, 'Save the agreed design and ask Backend to implement it.');
+    const accepted = await team.runner.postUser(workspaceId, 'Propose a design refinement and ask Backend to implement the accepted design.');
     const run = accepted.runs[0]!;
     const firstStep = await requests.next();
-    assert.ok(firstStep.request.tools.some(tool => tool.definition.name === 'save_design'));
-    assert.match(firstStep.request.context.systemPrompt!, /wait for the user's answer/);
-    answer(firstStep.events, call('save_design', { path: 'user/design.json', content: '# Design\nCreate src/result.txt with Done.', implementation: ['src/result.txt'], baseRevision: null, reason: 'The user requested this prototype result.' }));
+    assert.ok(!firstStep.request.tools.some(tool => tool.definition.name === 'save_design'));
+    assert.match(firstStep.request.context.systemPrompt!, /user approval/);
+    answer(firstStep.events, call('write', { path: '.context/user/design.json', content: JSON.stringify({ ...design, content: 'Pending design refinement' }) }));
     const secondStep = await requests.next();
-    assert.match(secondStep.request.context.systemPrompt!, /Create src\/result.txt with Done/);
-    answer(secondStep.events, call('create_member', { name: 'Backend', role: 'developer', responsibility: 'Realize the backend subdesign' }));
+    answer(secondStep.events, call('commit_scope', { part: 'design', message: 'Cannot self-approve' }));
     const thirdStep = await requests.next();
-    assert.match(thirdStep.request.context.systemPrompt!, /Backend \(developer\)/);
+    assert.match(JSON.stringify(thirdStep.request.context.messages), /approval_required/);
     const command = [process.execPath, '-e', 'process.stdout.write(require("node:fs").readFileSync("src/result.txt","utf8"))'];
-    answer(thirdStep.events, call('configure_harness', { to: 'Backend', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'exact', argv: command }] } }));
+    answer(thirdStep.events, call('create_member', { name: 'Backend', role: 'developer', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'exact', argv: command }] } }));
     const fourthStep = await requests.next();
-    answer(fourthStep.events, message('@Backend Implement the agreed design and report the changed file.'));
+    answer(fourthStep.events, message('@Backend Implement the accepted design.'));
     const workerStep = await requests.next();
     assert.match(workerStep.request.context.systemPrompt!, /You are Backend/);
     assert.ok(!workerStep.request.tools.some(tool => ['read_design', 'save_design', 'assign_member', 'create_member'].includes(tool.definition.name)));
-    const workerInput = workerStep.request.context.messages.at(-1)!;
-    assert.ok(workerInput.role === 'user' && typeof workerInput.content === 'string' && workerInput.content.includes('[Group message 2 from Lead]'));
+    assert.match(workerStep.request.context.systemPrompt!, /Create src\/result.txt with Done/);
+    assert.doesNotMatch(workerStep.request.context.systemPrompt!, /Pending design refinement/);
     answer(workerStep.events, call('write', { path: 'src/result.txt', content: 'Done' }));
+    const workerCommit = await requests.next();
+    answer(workerCommit.events, call('commit_scope', { part: 'implementation', message: 'Implement the requested result file' }));
     const workerCommand = await requests.next();
-    assert.ok(workerCommand.request.tools.some(tool => tool.definition.name === 'run_command'));
     answer(workerCommand.events, call('run_command', { argv: command }));
     const workerFinish = await requests.next();
     const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'run_command');
     assert.ok(commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text');
-    if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.deepEqual([JSON.parse(commandResult.content[0].text).exitCode, JSON.parse(commandResult.content[0].text).stdout], [0, 'Done']);
-    answer(workerFinish.events, message('@Lead Implemented the design; src/result.txt contains Done.'));
+    if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.equal(JSON.parse(commandResult.content[0].text).stdout, 'Done');
+    answer(workerFinish.events, message('@Lead Implemented src/result.txt and committed implementation.'));
     const leadFinish = await requests.next();
-    const report = leadFinish.request.context.messages.at(-1);
-    assert.ok(report?.role === 'user' && typeof report.content === 'string' && report.content.includes('src/result.txt contains Done'));
-    assert.ok(!leadFinish.request.context.messages.some(item => item.role === 'toolResult' && item.toolName === 'run_command'));
     const secondLeadRun = (await runtime.getState(lead.memberId)).run!;
-    answer(leadFinish.events, message('Design created and explained; Backend delivered src/result.txt.'));
+    answer(leadFinish.events, message('Implementation is committed; design refinement awaits user approval.'));
     assert.equal((await runtime.finished(lead.memberId, secondLeadRun.runId)).status, 'completed');
-    assert.equal((await team.runner.snapshot(workspaceId)).messages.length, 4);
-    assert.equal(await readFile(join(folder, 'project', 'src', 'result.txt'), 'utf8'), 'Done');
-    const history = await store.runMessages(lead.memberId, run.runId);
-    const save = history.find(record => record.message.role === 'toolResult' && record.message.toolName === 'save_design')!.message;
-    assert.ok(save.role === 'toolResult' && save.content[0]?.type === 'text');
-    if (save.role === 'toolResult' && save.content[0]?.type === 'text') {
-      const change = JSON.parse(save.content[0].text);
-      assert.deepEqual([change.before, change.after, change.seq], [null, JSON.stringify({ content: '# Design\nCreate src/result.txt with Done.', implementation: ['src/result.txt'] }, null, 2) + '\n', 1]);
-    }
-    const expectedAuthor = { type: 'lead', memberId: lead.memberId, runId: run.runId };
-    const base = await workspaceService.context(workspaceId);
-    assert.deepEqual((await base.history('user/design.json', null, 50)).versions[0]!.author, expectedAuthor);
-    const reopened = new MySqlStore(databaseUrl!);
-    try {
-      assert.deepEqual((await reopened.loadContext(workspaceId)).files[0]!.author, expectedAuthor);
-      assert.deepEqual((await reopened.records(workspaceId, 0, 10))[0]!.author, expectedAuthor);
-    } finally { await reopened.close(); }
+    const backend = (await team.team(workspaceId)).members.find(m => m.name === 'Backend')!;
+    const env = await team.harness.environment(backend.memberId);
+    assert.equal(await readFile(join(env.root, 'src/result.txt'), 'utf8'), 'Done');
+    await assert.rejects(stat(join(folder, 'project/src/result.txt')), code('ENOENT'));
+    assert.ok((await team.harness.history(backend.memberId, 'implementation')).some(r => r.kind === 'commit' && r.actor.type === 'agent'));
+    const review = await team.harness.inspect(lead.memberId);
+    const pending = review.parts.find(p => p.state.part.id === 'design')!;
+    assert.match(pending.diff, /Pending design refinement/);
+    const committed = await team.harness.commit(lead.memberId, 'design', 'User accepted refinement', { type: 'user', memberId: lead.memberId }, pending.revision, pending.state.committed);
+    assert.equal(committed.actor.type, 'user');
+    assert.ok((await team.harness.history(lead.memberId, 'design')).some(r => r.actor.runId === run.runId && r.actor.type === 'harness'));
     const followed = await collect(runtime.follow(lead.memberId, { runId: run.runId }));
     assert.equal(followed.at(-1)?.type, 'end');
-    assert.ok(followed.some(event => event.type === 'message' && event.record.message.role === 'toolResult' && event.record.message.toolName === 'save_design'));
+    assert.equal((await team.runner.snapshot(workspaceId)).messages.length, 4);
   } finally {
     await runtime.close();
-    team.runner.close();
+    await team.runner.close();
     await workspaceService.close();
     await rm(folder, { recursive: true, force: true });
   }
@@ -1229,6 +1251,34 @@ test('group chat SQL/runtime: parallel work, private refusal feedback, deferred 
   } finally { await f.close(); }
 });
 
+test('group harness checkpoints failed and cancelled runs and refuses publication when checkpointing fails', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    for (const outcome of ['cancelled', 'failed'] as const) {
+      const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend write partial implementation');
+      const run = accepted.runs[0]!;
+      const write = await f.requests.next();
+      answer(write.events, fauxAssistantMessage([{ type: 'toolCall', id: randomUUID(), name: 'write', arguments: { path: 'partial.txt', content: outcome } }], { stopReason: 'toolUse' }));
+      const pending = await f.requests.next();
+      if (outcome === 'cancelled') await f.runtime.cancel(f.backend.memberId, run.runId);
+      else pending.events.push({ type: 'error', reason: 'error', error: { ...message(), stopReason: 'error', errorMessage: 'Provider failed after write' } });
+      assert.equal((await f.runtime.finished(f.backend.memberId, run.runId)).status, outcome);
+      const history = await f.team.harness.history(f.backend.memberId, 'implementation');
+      assert.ok(history.some(r => r.actor.type === 'harness' && r.actor.runId === run.runId));
+      assert.ok(!history.some(r => r.kind === 'commit'));
+    }
+    const checkpoint = f.team.harness.checkpoint.bind(f.team.harness);
+    f.team.harness.checkpoint = async () => { throw new Error('Git unavailable'); };
+    try {
+      const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend report');
+      const pending = await f.requests.next();
+      answer(pending.events, message('Must not be shared without checkpoint'));
+      assert.equal((await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId)).status, 'failed');
+      assert.ok(!(await f.team.runner.snapshot(f.workspaceId)).messages.some(m => m.text === 'Must not be shared without checkpoint'));
+    } finally { f.team.harness.checkpoint = checkpoint; }
+  } finally { await f.close(); }
+});
+
 test('group SQL publication is atomic under competing mentions and budgets; restart flushes pending delivery without replay', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
@@ -1252,10 +1302,18 @@ test('group SQL publication is atomic under competing mentions and budgets; rest
     const abandoned = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: '@Backend abandoned', recipients: [f.backend.memberId] });
     await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'Shared while Backend is working', recipients: [] });
     assert.equal((await store.getContext(f.backend.memberId)).entries.at(-1)!.metadata.groupPosition, 2);
-    const recovery = new AgentRuntime(store, staticConfig, fixedPolicy(model), () => { throw new Error('Restart must not replay a model call'); });
+    let recoveredCheckpoint = false;
+    const recoveryPolicy = f.team.policy(configuredPolicy());
+    const recovery = new AgentRuntime(store, f.team.runConfig, { ...recoveryPolicy, afterRun: async run => {
+      assert.equal(run.status, 'interrupted');
+      assert.equal((await store.getState(run.agentId)).run?.status, 'running');
+      await recoveryPolicy.afterRun!(run);
+      recoveredCheckpoint = true;
+    } }, () => { throw new Error('Restart must not replay a model call'); });
     await recovery.open();
     try {
       assert.equal((await recovery.getState(f.backend.memberId)).run?.status, 'interrupted');
+      assert.equal(recoveredCheckpoint, true);
       assert.equal((await store.getContext(f.backend.memberId)).entries.at(-1)!.metadata.groupPosition, 3);
       assert.equal((await store.runMessages(f.backend.memberId, abandoned.runs[0]!.runId)).length, 0);
       assert.equal((await store.chatSnapshot(f.workspaceId)).position, 3);
