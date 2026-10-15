@@ -54,6 +54,6 @@ Continuation policies receive the committed assistant record as their fourth arg
 
 Harness integration uses the generic `afterRun` lifecycle callback. The loop tracks in-flight policy/tool promises and waits for their effects before running finalization, including after cancellation. Callback failure becomes an explicit failed run. Startup passes the callback to database interruption recovery; a failed callback prevents marking that run recovered. TeamSystem checkpoints before successful group publication and remembers that run to avoid racing a successor activation's files during finalization. All file/history/approval policy stays in HarnessService rather than the loop.
 
-## Explicit output projection
+## Unified streaming and model completion
 
-Runtime.follow calls responseOutput on each database-read completed record and persisted chunk’s partial/final Pi message. It emits optional output.response {toolCallId,text}; response-output.ts recognizes only a sole final_response call, leaving surrounding assistant prose as working content. Runtime’s generic loop still records/execututes tools then calls shouldContinue; the team policy coordinates response publication there. No in-memory model callback is a frontend data source. The new SQL/runtime test streams a response argument, verifies retained chunks, then checks pinned final history after tool completion.
+The follow API returns stored Pi messages and chunks without a separate response-action annotation. Text, thinking, tool blocks and native signatures are preserved for callers. The team policy uses completed model output for continuation and publication; the generic loop does not classify partial text for the UI.

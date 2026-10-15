@@ -1,6 +1,6 @@
 import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi-ai';
 import { ProtocolError, readSse } from './sse.js';
-import type { ClientSnapshot, CompletedRecord, FollowEvent, LiveMessage, RunState, UserInput, MessageOutput } from './protocol.js';
+import type { ClientSnapshot, CompletedRecord, FollowEvent, LiveMessage, RunState, UserInput } from './protocol.js';
 
 const validId = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -55,10 +55,6 @@ function envelope(raw: string, eventName: string, agentId: string): FollowEvent 
     throw new ProtocolError('Unsupported follow event');
   }
   return event as FollowEvent;
-}
-
-function validateOutput(output: MessageOutput | undefined): void {
-  if (output !== undefined && (!output || !output.response || typeof output.response.toolCallId !== 'string' || !output.response.toolCallId || typeof output.response.text !== 'string')) throw new ProtocolError('Invalid response output annotation');
 }
 
 /** Holds backend-format conversation data. It has no React or assistant-ui dependency. */
@@ -163,7 +159,6 @@ export class AgentClient {
     switch (event.type) {
       case 'message': {
         const record = event.record;
-        validateOutput(record.output);
         if (!Number.isSafeInteger(record.position) || record.position < 1 || typeof record.messageId !== 'string') throw new ProtocolError('Invalid completed message position or identity');
         const existing = this.records.get(record.position);
         if (existing) {
@@ -186,7 +181,7 @@ export class AgentClient {
         this.publish({ run: event.run });
         return;
       case 'chunk':
-        this.applyChunk(event.messageId, event.runId, event.sequence, event.event, event.output);
+        this.applyChunk(event.messageId, event.runId, event.sequence, event.event);
         return;
       case 'gap':
         this.partials.delete(event.messageId);
@@ -201,8 +196,7 @@ export class AgentClient {
     }
   }
 
-  private applyChunk(messageId: string, runId: string | null, sequence: number, event: AssistantMessageEvent, output?: MessageOutput): void {
-    validateOutput(output);
+  private applyChunk(messageId: string, runId: string | null, sequence: number, event: AssistantMessageEvent): void {
     if (this.identities.has(messageId) || this.gaps.has(messageId)) return;
     const previous = this.partials.get(messageId);
     const expected = previous?.nextSequence ?? 0;
@@ -214,7 +208,7 @@ export class AgentClient {
       return;
     }
     const message: AssistantMessage = event.type === 'done' ? event.message : event.type === 'error' ? event.error : event.partial;
-    this.partials.set(messageId, { messageId, runId, message, nextSequence: sequence + 1, lastEvent: event, output });
+    this.partials.set(messageId, { messageId, runId, message, nextSequence: sequence + 1, lastEvent: event });
     this.publish();
   }
 

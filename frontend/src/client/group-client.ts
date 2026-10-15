@@ -2,7 +2,7 @@ import { BackendError, waitForRetry } from './agent-client.js';
 import { ProtocolError, readSse } from './sse.js';
 import type { RunState } from './protocol.js';
 
-export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; toolCallId?: string }
+export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; toolCallId?: string }
 interface EntryBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
 export type GroupEntry = EntryBase & (
   | { kind: 'user'; text: string; messageId: string }
@@ -29,6 +29,8 @@ export function validateEntry(value: unknown, workspaceId: string): asserts valu
       || (entry.working.through !== null && (!Number.isSafeInteger(entry.working.through) || entry.working.through < entry.working.after))
       || (entry.text !== null && typeof entry.text !== 'string')) throw new ProtocolError('Invalid member entry');
     if (entry.finalRef && (entry.finalRef.agentId !== entry.memberId || entry.finalRef.runId !== entry.run.runId || !id.test(entry.finalRef.messageId) || !positive(entry.finalRef.position) || entry.text === null)) throw new ProtocolError('Invalid final reference');
+    const indices = entry.finalRef?.contentIndices;
+    if (indices !== undefined && (!Array.isArray(indices) || !indices.length || indices.some((value, index) => !Number.isSafeInteger(value) || value < 0 || (index > 0 && value <= indices[index - 1]!)) || entry.finalRef?.toolCallId !== undefined)) throw new ProtocolError('Invalid final text selection');
   } else throw new ProtocolError('Unsupported group entry');
 }
 async function json(response: Response): Promise<unknown> {

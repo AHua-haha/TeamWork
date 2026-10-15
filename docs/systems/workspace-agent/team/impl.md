@@ -16,8 +16,6 @@ MySQL transactionally creates a member and its agent record, enforces unique lea
 
 Readiness combines model settings, empty catalog tool selections and a nonempty design or implementation assignment with all selected designs resolvable. Team run config uses these checks and resolves model snapshots. Group publication validates all selected recipients and resolves every snapshot before persistent admission. Tools remain harness-owned and check current scope.
 
-The runtime policy wraps the standard policy for members: buildRequest augments current role/roster/running information and selects tools through the fixed project/command harness definitions, including lead-only operations in the project definition. Tool responses continue private execution. A sole final_response tool call prepares the final report; after its result is stored, the team submits its text with the exact assistant record and tool-call identities. Ordinary tool-free text remains working output and receives private continuation feedback. Successful acceptance ends the sender and triggers independent runs. Expected refusals append a private feedback message to the same run and continue it; runtime failure/step limits still apply. Solo policy behavior is unchanged.
-
 ## Decisions and constraints
 
 Shared message delivery changes stored model context without manufacturing private run-history records. The private history, mutable context, and group transcript have separate purposes. Model settings remain run snapshots; file authority remains current per operation. MemberConfigService captures version 2 manifests with harnesses.project {designScope, implementationScope} and ordered Markdown prompts through harness file access, validates authority/schema/references/revision, then persists exact source bytes/digest and projected fields in one member write. Invalid bundles never reach persistence. Submission is serialized per workspace and with sender file actions; existing targets also serialize activation with their review/restore/file operations. updateMember checks idle state under the same workspace/agent locks as publication; publication rechecks prepared member revisions so a changed config cannot activate with a stale model snapshot. There are no `send_message` or `assign_member` tools or call-chain restrictions. Private histories are retained; automated maintenance is deferred.
@@ -28,6 +26,7 @@ Shared message delivery changes stored model context without manufacturing priva
 - [Role/cooperation instructions](../../../../backend/src/member-context.ts)
 - [File submission and stable bundle reads](../../../../backend/src/member-config.ts), [bundle representation](../../../../backend/src/member-config-format.ts)
 - [Management tools](../../../../backend/src/member-tools.ts)
+- [Final text/phase selection](../../../../backend/src/final-answer.ts) and [selection tests](../../../../backend/test/final-answer.test.ts)
 - [Composition/runtime policy](../../../../backend/src/team-system.ts)
 - [Inspection, review and chat HTTP routing](../../../../backend/src/team-routes.ts)
 - [Group chat implementation](group-chat/impl.md), [lead implementation](lead/impl.md), [harness implementation](../harness/impl.md), [database implementation](../../database/impl.md)
@@ -54,10 +53,6 @@ WorkspaceService owns model choices/default persistence and validation. TeamSyst
 
 TeamService.inspect reads one accepted StoredMember and derives its view; TeamSystem adds running status and inspectHarnesses. The pure harness projection shares purposeHarnesses with runtime assembly, includes fixed rules/tools and parts, and requires no Git initialization. HTTP tests prove inspection does not create harness storage and old member mutation/config aliases return 404. Model/submission tests verify defaults, allowed choices, removed-choice preservation and stable source bytes.
 
-## Explicit response output
+## Unified streaming and model completion
 
-The project base includes the reusable final_response tool from response-output.ts for all members. It validates response text and returns a preparation acknowledgement; TeamSystem.shouldContinue owns actual publication after the acknowledgement is durable. The action must be the only tool call. Plain assistant text never ends/publishes a member run. Busy/invalid recipient refusal retains the attempted response and feedback in private history; the next explicit action can retry.
-
-Runtime.follow projects responseOutput from stored completed messages and retained Pi chunks into optional output.response {toolCallId,text}. This is explicit action identity/arguments, not inference from prose, role alone or tool absence. No provider callback or mutable execution state is read by the frontend. SQL publication validates both the referenced assistant call and its immediately following successful tool result before committing group state. The original standalone policy still ends on tool-free output.
-
-[Response action/projection](../../../../backend/src/response-output.ts), [routing tests](../../../../backend/test/response-output.test.ts) and [SQL/runtime tests](../../../../backend/test/integration/backend.test.ts) cover private commentary continuation, progressive argument reads, exact final references, refusal and immutable history.
+Members finish using ordinary assistant text at natural model completion. Tool calls continue the run; metadata-marked commentary continues privately. Truncated responses fail without publication. Final selection prefers explicitly final text blocks and otherwise uses unphased text at natural completion. The team checkpoints and offers the selected text for atomic group acceptance; refusal appends private feedback and continues. Only accepted finals reach peer context.

@@ -122,6 +122,6 @@ The default buffer retains up to 256 events and 8 MiB of serialized event data f
 
 Team coordination resolves configurations using `prepareRun`, persists run creation atomically with group publication, and starts execution using `launch`. Expected publication refusals are recorded by `feedback` as private user messages and let the same loop continue. Successful publication can persist terminal sender state before recipient launch; subsequent runtime terminal finalization returns that stored state. Group-message delivery changes canonical context separately from private display history.
 
-## Stored output presentation
+## Unified streaming and model completion
 
-Completed follow records and chunk envelopes may include output.response {toolCallId,text}, designating text from an explicit final_response action. All other content remains ordinary working activity for the team UI. These annotations are computed from persisted message/chunk content read through the existing follow operation. They do not make a response accepted; the group final reference establishes that. The standalone policy and raw Pi payloads remain unchanged.
+The follow API returns stored Pi messages and chunks without a separate response-action annotation. Text, thinking, tool blocks and native signatures are preserved for callers. The team policy uses completed model output for continuation and publication; the generic loop does not classify partial text for the UI.

@@ -53,6 +53,6 @@ Startup migration projects existing accepted scope trees onto the added control-
 
 purposeHarnesses derives fixed project/command definitions and scope parts directly from accepted member configuration. inspectHarnesses exposes those definitions, tools and prompts without opening a worktree or recording snapshots. Runtime filters the reusable tool registry through the same definitions; lead management tools belong to the project base. Existing review/history/commit/restore endpoints still use the managed worktree path and preserve their previous contracts.
 
-## Explicit response tool
+## Unified streaming and model completion
 
-The reusable responseTool in response-output.ts is registered with file/history/team tools and selected by the fixed project definition, for lead and workers alike. Tool execution validates text and records a preparation acknowledgement; TeamSystem owns publication after that result is stored. inspectHarnesses exposes the same capability. Final response action arguments also provide explicit presentation identity for backend stored-stream reads.
+Harness tools provide file, scope-history, command and permitted member-management capabilities. Final-answer selection and group acceptance belong to team execution policy; a project harness does not require a completion tool or preparation acknowledgement.

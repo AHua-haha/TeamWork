@@ -1,4 +1,3 @@
-import { responseTool } from './response-output.js';
 import { purposeHarnesses } from './harness-bases.js';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -211,7 +210,7 @@ export class HarnessService {
     const member = await this.active(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const env = await this.operation(id, () => this.environment(id));
-    const available = [responseTool(), ...harnessFileTools(this, env.parts.length > 0), ...harnessHistoryTools(this), ...(member.value.harness.allowedCommands.length ? [harnessCommandTool(this)] : []), ...teamTools];
+    const available = [...harnessFileTools(this, env.parts.length > 0), ...harnessHistoryTools(this), ...(member.value.harness.allowedCommands.length ? [harnessCommandTool(this)] : []), ...teamTools];
     const selected = new Set(env.definitions.flatMap(d => d.tools));
     const tools = available.filter(tool => selected.has(tool.definition.name));
     const parts = [

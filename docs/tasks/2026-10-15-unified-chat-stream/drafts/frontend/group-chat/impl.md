@@ -1,9 +1,9 @@
 <!-- Task proposal; current contract is under docs/systems/ -->
-# Workspace group chat implementation proposal
+# Workspace group chat implementation
 
 ## Contract
 
-[Proposed group-chat design](design.md). This plan revises the [current implementation](../../../../../systems/frontend/group-chat/impl.md) for unified streaming, hidden thinking, late final identification, and collapsible tool sets. It is not implemented by this documentation change.
+[Group-chat design](../../../../../systems/frontend/group-chat/design.md). Preserve ordered visible text/tool streaming, hidden thinking, exact accepted final selection, stable reservations and independent disclosures.
 
 ## Responsibilities and decomposition
 
@@ -31,7 +31,7 @@ When successful final acceptance appears in the group entry, partition this same
 
 Active output remains one flow until acceptance. Early provider phase can help backend classification, but it does not itself publish text, send mentions to peers, or trigger the successful-final fold. A refused candidate and feedback remain private activity and the member can continue. Failed/cancelled/interrupted output retains its own status and inspectable activity; connection closure or token truncation is not treated as final acceptance.
 
-The preceding design discussion rejects requiring final_response as an agent tool. Follow-up implementation must replace that committed publication rule with ordinary model output plus backend completion decisions, preserving native phase when available and correctly interpreting terminal reasons when phase is absent. The current backend still requires final_response; this proposal does not claim it already implements the new behavior. Protocol/schema changes and the affected backend/parent drafts must be reconciled as part of that implementation task.
+TeamSystem continues after tool calls or metadata-marked commentary. Natural model completion selects final text, excluding commentary; token truncation fails. publishChat validates the latest immutable assistant record and stores ordered contentIndices with its reference. GroupClient validates and consumes that selection. No separate response-action annotation or agent completion tool is used.
 
 ### Tool-set presentation
 
@@ -54,17 +54,17 @@ Keep reservation order independent of completion order. Auto-follow streamed gro
 
 ## Code map
 
-Follow-up implementation is expected to revise these existing owners rather than add a parallel chat path:
+The single group-chat flow is implemented by:
 
 - [GroupChat](../../../../../../frontend/src/ui/GroupChat.tsx): active flow, accepted-final partition and disclosure components.
 - [Group work projection](../../../../../../frontend/src/ui/group-work.ts): block order, hidden thinking, tool/result matching, tool sets and final deduplication.
 - [Agent client](../../../../../../frontend/src/client/agent-client.ts) and [group client](../../../../../../frontend/src/client/group-client.ts): stored history, partial reconciliation and authoritative entry changes.
 - [Group styles](../../../../../../frontend/src/ui/styles.css): compact tool sets and active/completed spacing within the accepted layout.
-- [Team group-chat implementation](../../../../../systems/workspace-agent/team/group-chat/impl.md): current completion/publication owner requiring follow-up changes.
+- [Team group-chat implementation](../../../../../systems/workspace-agent/team/group-chat/impl.md): completion, publication and exact final selection.
 
 ## Verification
 
-Implementation acceptance should cover:
+Projection/client tests and browser checks cover:
 
 - Thinking-only output renders no thinking UI; text and tool deltas stream while their final role is unknown.
 - The same text prefix can be followed by tools or a successful turn end without premature final publication.
@@ -75,4 +75,4 @@ Implementation acceptance should cover:
 - Reconnect/reload reconstructs ordering and grouping from stored records; compaction of agent context does not rewrite these records.
 - Desktop/narrow browser review matches the supplied compact Codex-like flow, keyboard access, overflow, avatar alignment and scroll behavior.
 
-This request verifies documents only. Runtime and browser checks belong to implementation.
+[Projection/client tests](../../../../../../frontend/test/group.test.ts) cover block ordering, tools, phases, accepted-final exclusion and historical references. The controlled SSE [fixture](../../../browser-server.mjs) and [browser check](../../../browser-check.js) exercise real streaming, disclosures, reconnect/reload, failures, reservation ordering, scroll and desktop/mobile layout. Backend final selection and publication are covered by unit and disposable MySQL integration tests; all commands/results are recorded in the task tests.jsonl.

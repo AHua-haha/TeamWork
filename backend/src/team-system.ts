@@ -1,4 +1,4 @@
-import { responseOutput, finalResponseTool } from './response-output.js';
+import { finalAnswer, textPhase } from './final-answer.js';
 import type { ChatStore } from './group-chat.js';
 import { AppError } from './types.js';
 import type { ConfigService } from './config.js';
@@ -101,18 +101,19 @@ export class TeamSystem {
       shouldContinue: async (scope, response, results, record) => {
         const member = await this.service.find(scope.agentId);
         if (!member) return base.shouldContinue ? base.shouldContinue(scope, response, results, record) : response.content.some(part => part.type === 'toolCall');
-        const calls = response.content.filter(part => part.type === 'toolCall');
-        const output = responseOutput(response);
-        if (!output) {
-          if (!calls.length || calls.some(call => call.name === finalResponseTool)) await this.runtime!.feedback(scope.agentId, scope.runId, 'This message was recorded as private working output. Continue any promised work. To finish, call final_response with the complete response text as the only tool call.');
-          return true;
+        if (response.stopReason === 'length') throw new AppError('incomplete_response', 'The model response reached its token limit; no final answer was published');
+        if (response.content.some(part => part.type === 'toolCall')) return true;
+        if (response.stopReason !== 'stop') throw new AppError('invalid_response', 'Model response ended without a natural completion or executable tools');
+        const answer = finalAnswer(response);
+        if (!answer) {
+          if (response.content.some(part => part.type === 'text' && textPhase(part) === 'commentary')) return true;
+          throw new AppError('empty_response', 'The model finished without final answer text');
         }
-        const text = output.response.text;
         scope.signal.throwIfAborted();
         await this.harness.checkpoint(scope.agentId, scope.runId);
         try {
           scope.signal.throwIfAborted();
-          await this.runner.publishFinal(scope.agentId, scope.runId, text, record.messageId, output.response.toolCallId);
+          await this.runner.publishFinal(scope.agentId, scope.runId, answer.text, record.messageId);
           checkpointed.add(scope.runId);
           return false;
         } catch (error) {

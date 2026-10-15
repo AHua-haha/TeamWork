@@ -53,6 +53,6 @@ Tool implementations are role-independent. Fixed bases determine tool selection,
 4. The lead edits a member bundle, checkpoints it, and the active member remains unchanged until submit succeeds.
 5. Configuration asks to change fixed commit policy or tools: refuse submission and retain active state.
 
-## Response capability
+## Unified streaming and model completion
 
-The fixed project harness supplies final_response({text}) to every member. It is the explicit capability for composing the final group response, distinct from ordinary private working commentary. It must be called alone after other tools finish. Its text may stream for user observation, but the team admits publication only after validation and durable tool completion. The harness does not bypass busy recipients, mention budgets or group acceptance.
+Harness tools provide file, scope-history, command and permitted member-management capabilities. Final-answer selection and group acceptance belong to team execution policy; a project harness does not require a completion tool or preparation acknowledgement.

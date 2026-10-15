@@ -91,6 +91,6 @@ GET /workspaces/:workspaceId/team lists members. GET /workspaces/:workspaceId/te
 
 Agent model listing exposes workspace choices/default. Creation defaults to the workspace default, including configured per-model options. File submission can select workspace models; it may preserve an existing selection removed from that list. Actual provider/model validity is still checked before accepting a submission. Workspace default changes do not alter members already configured.
 
-## Explicit member response
+## Unified streaming and model completion
 
-A member finishes by invoking final_response({text}) as its only tool call, after completing work. Ordinary assistant prose, including a tool-free “let me check”, remains working output and continues the run privately. Only the action text is offered for shared publication; existing mention validation/refusal and checkpoint rules apply. An accepted reference identifies the exact assistant message and response tool call; the working range also includes its stored tool acknowledgement. Backend observation exposes the designated response text separately from ordinary work. Historical accepted records remain immutable.
+Members finish using ordinary assistant text at natural model completion. Tool calls continue the run; metadata-marked commentary continues privately. Truncated responses fail without publication. Final selection prefers explicitly final text blocks and otherwise uses unphased text at natural completion. The team checkpoints and offers the selected text for atomic group acceptance; refusal appends private feedback and continues. Only accepted finals reach peer context.

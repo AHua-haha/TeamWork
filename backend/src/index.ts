@@ -28,4 +28,4 @@ export * from './harness.js';
 export * from './harness-command.js';
 export * from './group-chat.js';
 export * from './harness-history.js';
-export * from './response-output.js';
+export * from './final-answer.js';

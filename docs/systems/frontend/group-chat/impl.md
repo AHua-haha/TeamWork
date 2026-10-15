@@ -2,64 +2,76 @@
 
 ## Contract
 
-[Workspace group chat design](design.md). The agreed UI defaults are included.
+[Group-chat design](design.md). Preserve ordered visible text/tool streaming, hidden thinking, exact accepted final selection, stable reservations and independent disclosures.
 
 ## Responsibilities and decomposition
 
-`GroupClient` in group-client.ts owns accepted group records, persisted response reservations, contiguous change-cursor tracking, synchronization, activity snapshots and submission/stop commands. Workspace chat presentation renders centered Markdown response sections with outside avatar gutters and author names, ordered by the backend's timeline positions. Existing design/team/file panel capabilities remain composed beside it. Solo AgentClient behavior stays separate.
-
-MemberResponse owns expansion state. ObservedResponse owns one AgentClient per observed activation: mounted while the run is active or Work is expanded, it follows the persisted private per-run protocol. Active runs keep streaming across fold toggles; completed collapsed entries render stored finals without loading private traces.
+- GroupClient continues owning stored group entries, response reservations, accepted final references, terminal state and the independent change cursor.
+- AgentClient continues reading persisted per-run history and incremental output through backend APIs, with existing reconnect and completed/live reconciliation.
+- The run projection produces one ordered presentation of text blocks and tool sets, excluding thinking. It applies an exact backend final selection when available and partitions earlier work from the accepted report.
+- MemberResponse owns whole-Work disclosure and the one-time final-acceptance transition. Tool-set and individual-tool disclosures own their independent visibility state.
+- Keep the existing reading column, avatar gutters, first-line alignment, run pills, user bubbles, composer, team/design panels and solo-agent presentation.
 
 ## Coordination and data flow
 
-Create member sections from accepted backend reservations keyed by run/slot identity. Group entries directly identify the member/run; finalized references identify the accepted assistant record. Render the accepted final in that existing section. Keep backend timeline order independent from the change cursor used for synchronization. Do not infer reservations from local send time, timestamps, response text, state-array order or member display name.
+### Stored output and visible block projection
 
-The backend admission transaction reserves recipient response sections and exposes them in history/follow and POST acknowledgement. Group history stores user input and member reply entries; final publication pins a reference to the exact immutable private assistant message in its existing entry and records working-range boundaries. Accepted final text is resolved for shared delivery and frontend reads. Rejecting admission creates no reservation. Persist order so reconnecting clients reconstruct the same layout, and notify completion with a change cursor independent of display order.
+1. Observe an active activation regardless of disclosure state. Filter its persisted records and retained partials by run identity and the reserved working-history boundaries. Reconcile partial/completed versions by stable message identity rather than append duplicate copies.
+2. Flatten its ordered assistant blocks into presentation items. Exclude thinking blocks entirely from rendered content, including any reasoning summaries/disclosures. Preserve these source records for storage and context replay.
+3. Render text progressively using the established Markdown renderer. Associate tool uses and results by call identity. Treat ordinary text as visible activity while its purpose is unknown; do not condition rendering on an early final designation.
+4. Derive tool sets from adjacency in the visible projection. Hidden thinking, tool results and empty text do not create boundaries. Every nonempty displayed text block does. Tool-only subsequent assistant messages may extend the prior set within this same activation. Preserve tool-call order while results arrive independently.
+5. Keep grouping as a projection of immutable records. Do not concatenate, delete or rewrite history to implement a display group. Use stable call/block identities so updates retain disclosure state; resolve a newly streamed text boundary according to its original position.
 
-Private follow synchronization includes the agent's history prefix through the selected run. Filter completed records by `record.runId`, not the event envelope's selected run ID, and include live records only for that activation. Private and group cursors remain independent. Keep earlier private records out of the expanded section.
+### Final identification and publication
 
-Use the pinned final-message reference supplied by the backend to identify the accepted candidate. Render its resolved final text in the main section and project working history using the entry's stable range; hide accepted final text in the working projection while retaining any separate inspectable working content. Do not infer the reference from the member's latest message, mutate source records or delete private history. Record the start boundary at activation and fix the end at successful completion or terminal failure.
+The backend owns completion policy, final-source selection and atomic group publication. The frontend consumes accepted final text and an exact source selection sufficient to exclude only that final content from the private projection. A provider can produce several text blocks or message items in one response, so selecting the whole latest assistant record must not hide distinct preceding commentary by accident.
 
-GroupChat wraps entries in a centered group-timeline. Each member entry uses two grid rows and three columns: outside avatar gutters around the message column. group-run-area occupies column two in row one, with 8px bottom padding and no bottom border or margin. The member identity and group-run-card occupy row two, preserving the avatar anchor beside the response body. group-run-card encloses only group-member-body, with a transparent background, a 1px solid #e9ede8 top divider and no other border or corner rounding. The divider lies exactly at the response and member avatar reference-slot top edge; both member and user avatars use the same center rule relative to their message top. It has 18px default top padding, 20px side/bottom padding (14px narrow), no shadow, and minimum height equal to the reference avatar slot for empty pending response containers. For a folded final beginning with a paragraph or heading, :has removes container top padding and the first block receives calc((var(--group-avatar-size) - 1lh) / 2 - 1px) top padding. The block’s own computed line height supplies the first-line size, so paragraph, heading and responsive font sizes align their first-line centers to the existing avatar center. The divider remains at the container top; other Markdown blocks and expanded work retain their established spacing.
+When successful final acceptance appears in the group entry, partition this same member section into earlier work and the final report. Reconcile the streamed text with authoritative accepted text without replay animation or duplicate rendering. Collapse earlier work once for this transition. Further group updates do not reset a user's subsequent expansion choice. Reloaded completed entries initialize collapsed and read final text directly from stored group history; completed work loads on demand.
 
-The outside pill row is a wrapping flex row with vertical center alignment and a 6px gap, beginning exactly at the response container's left edge. There is no negative horizontal inset. group-run-info is a passive status/duration/start-time tag; group-work-toggle is the only disclosure button. Shared pill styles keep 24px minimum height, 11px text, 16px line-height and fully rounded ends. Info text wraps left-aligned on narrow panes. The borderless info pill defaults to #f5f6f5 with #727a73 text. Completed data-status sets #f0f6f0 fill and #52765a status text; failed/interrupted sets #faf1f0 fill and #a3635c status text. Duration/start time retain muted gray. Work has transparent fill, a 1px #e7eae6 border and #727a73 text, with padding compensated for its border. Hover uses #f1f3f0 fill and #566258 text; expanded uses #eef1ed fill and #505a52 text. The existing visible focus ring and standard chevron remain. Member color identifies the outside avatar/name; working content stays neutral. The header has no tinted band. The response top divider stays below the pills and above expanded work, so expansion does not move it or cross into the avatar gutter.
+Active output remains one flow until acceptance. Early provider phase can help backend classification, but it does not itself publish text, send mentions to peers, or trigger the successful-final fold. A refused candidate and feedback remain private activity and the member can continue. Failed/cancelled/interrupted output retains its own status and inspectable activity; connection closure or token truncation is not treated as final acceptance.
 
-Response content has no leading report or work margin. When work is expanded it remains inside the response container, followed by 18px spacing before a final report or 14px before a terminal explanation. Pending response containers keep their reserved identity and position without invented final text.
+TeamSystem continues after tool calls or metadata-marked commentary. Natural model completion selects final text, excluding commentary; token truncation fails. publishChat validates the latest immutable assistant record and stores ordered contentIndices with its reference. GroupClient validates and consumes that selection. No separate response-action annotation or agent completion tool is used.
 
-The button retains aria-expanded and the controlled private-history ID; its accessible label identifies the member and show/hide action. CSS rotates its 12px standard chevron 90 degrees while expanded. Native click/keyboard activation controls the existing expansion state, keyed by run identity. Its focus outline remains visible; coarse pointers get a vertically enlarged transparent hit area. ResponseContent renders an untitled compact work list before the provisional or accepted Markdown response. The work list has transparent background, no padding, outer border or sender stripe. Empty work renders no element or placeholder, so it does not offset an otherwise first-child final. Stored status/timestamps and exact final references remain authoritative.
+### Tool-set presentation
 
-User bubbles contain only message text and align right within the middle column without an extra margin inset, so their right edge aligns with the member response edge. The shared grid uses align-items:start so each avatar layout slot aligns with its message top edge; the avatar diameter is derived from shared user-bubble typography/padding tokens (14px × 1.65 + 2 × 12px, about 47.1px), matching the height of a single-line bubble. Both member and user avatar slots keep that diameter for longer messages. The avatar element scales visually to 80% around transform-origin:center, producing a roughly 37.7px visible circle while preserving its center, slot, name and surrounding layout. Gutters derive from the reference slot diameter plus a shared slot gap of 12px desktop or 8px narrow. Visible circle-to-response gaps increase equally by half the scaled size reduction. Initial glyphs use 18px before the same visual transform. A right-gutter identity stack places the avatar above the existing You label. Identity stacks share group-identity and group-identity-name styling; the prototype has no account/profile name source. styles.css keeps the 800px maximum text width by adding response padding and avatar gutters to the timeline maximum. Composer side padding includes those same offsets and its maximum stays 800px. Responsive variables shrink response padding and the avatar gap. Narrow composer actions wrap, and the info capsule wraps text without losing its leading alignment. Markdown.tsx and markdown-parser.ts render reports fully; code and tables retain contained horizontal scrolling. Tool activity stays subdued.
+Each set renders one compact summary row, collapsed initially, with a standard chevron, a concise action summary and relevant pending/failure information. Expansion reveals compact unboxed tool rows. A tool row can independently disclose full arguments/results. Update calls and results in place without reopening or recollapsing a set on every chunk. Whole-Work collapse does not rewrite source data or stop an active observer.
 
+Reuse the existing neutral glyph and Markdown style vocabulary. Remove reasoning disclosures from this UI. Preserve keyboard controls, accessible expanded state, focus rings and contained overflow. No new visual box or tinted work background is introduced.
 
-## Verification
+### Scroll and reconstruction
 
-Check immediate reservation after accepted mention, parallel completions in reverse order, later user messages, final-response replacement in place, and identical ordering after reconnect/reload. Also check author identity through rename, run-specific filtering, final-text deduplication, private-history failure isolation, full Markdown rendering and overflow with the right panel open/closed. Browser review must compare collapsed and expanded working sections against the supplied visual references on desktop and narrow layouts.
-
-## Concrete backend composition
-
-MySqlStore owns chat timeline entries, immutable change records and a per-workspace clock. Publication locks workspace, then agents, then the timeline clock; terminal runtime writes lock agent then clock. Readers use repeatable-read snapshots. The final committed record identity is supplied to the team policy by RuntimePolicy.shouldContinue. TeamRunner handles admission and notifications, including terminal updates. Existing publication APIs remain for shared-context delivery; the new timeline APIs own display synchronization.
-
-## Code map
-
-- GroupClient: frontend/src/client/group-client.ts; group timeline reconciliation, commands and reconnect.
-- GroupChat, ObservedResponse and ResponseContent: frontend/src/ui/GroupChat.tsx; rendering, composer, active per-run follow, provisional replies and private disclosure.
-- Private projection: frontend/src/ui/group-work.ts; run/range filtering, tool-result pairing and accepted-text deduplication.
-- MemberInspector: frontend/src/ui/MemberInspector.tsx; read-only accepted member configuration and effective harnesses. WorkspaceModelsDialog edits workspace initialization choices/default independently of shared chat.
-- Integration: frontend/src/ui/WorkspacePage.tsx, useTeam.ts and TeamTab.tsx.
-- Tests: frontend/test/group.test.ts and backend/test/integration/backend.test.ts.
+Keep reservation order independent of completion order. Auto-follow streamed growth only while near the bottom; retain the user's reading position when scrolled up. The final fold anchors to the existing member section. Reconnecting clients rebuild visible grouping from stored blocks/results and reconstruct the accepted final from its authoritative reference. Local disclosure preferences need not be shared across clients.
 
 ## Decisions and constraints
 
-Group entries and change cursors come from storage; private work is inspected separately. Composer and model settings have distinct scope. Existing Markdown rendering and Pi history clients are reused where their contracts fit, without a new model/runtime dependency. Exact animations and styling are presentation details.
+- No early-finality guarantee is required from every model provider. Unknown-purpose text is visible while it streams.
+- Stable database-backed history/API reads remain the communication contract. Runtime memory and frontend text heuristics are not a source of final acceptance.
+- The group transcript still shares only user messages and accepted member finals. Showing private activity to the user never places that activity in other members' model contexts.
+- Grouping never crosses member or activation boundaries. Source message boundaries alone do not separate consecutive tool-only output.
+- Thinking remains hidden even when Work or tools are expanded. Preserving signatures/reasoning for provider replay is a backend concern.
+- Final acceptance, disclosure and tool-result completion are separate state changes; each updates its own presentation responsibility.
 
-## Streaming projection and compact work
+## Code map
 
-responsePreview uses only this activation's bounded private records/live messages and their backend output.response annotation. It never treats plain assistant text as response. The explicit response tool acknowledgement may follow its source assistant record before publication; a newer message or private feedback supersedes it. Failed/cancelled output is suppressed. The main group-final uses entry.text as soon as present; a private preview never becomes a finalRef. workingItems excludes the exact accepted/previewed response tool call and its acknowledgement, retaining ordinary assistant prose and reasoning. Legacy plain final references exclude only their exact stored final text. Terminal ranges ignore uncommitted live fragments. AgentClient retains its existing completed/live reconciliation, chunk-gap and reconnect behavior.
+The single group-chat flow is implemented by:
 
-WorkTool uses workToolSummary for a readable action and relevant command/path. Native details retain full arguments/results. Summary rows are unboxed, 25px minimum height, with muted line icons, ellipsis for long text and a standard chevron; successful rows omit redundant Complete labels. Failure/pending states remain readable. Text uses the shared Markdown renderer and reasoning uses a compact disclosure. CSS is scoped to group work; solo tool cards remain unchanged.
+- [GroupChat](../../../../frontend/src/ui/GroupChat.tsx): active flow, accepted-final partition and disclosure components.
+- [Group work projection](../../../../frontend/src/ui/group-work.ts): block order, hidden thinking, tool/result matching, tool sets and final deduplication.
+- [Agent client](../../../../frontend/src/client/agent-client.ts) and [group client](../../../../frontend/src/client/group-client.ts): stored history, partial reconciliation and authoritative entry changes.
+- [Group styles](../../../../frontend/src/ui/styles.css): compact tool sets and active/completed spacing within the accepted layout.
+- [Team group-chat implementation](../../workspace-agent/team/group-chat/impl.md): completion, publication and exact final selection.
 
-A ResizeObserver watches timeline height and follows growth only when the viewport's existing near-bottom flag is true. Entry updates and streamed body growth preserve stable reservation ordering; a scroll-up disables automatic movement. [Group tests](../../../../frontend/test/group.test.ts) cover progressive previews, tool/refusal/terminal classification, exact final deduplication, ranges and summaries. The task browser fixture uses actual incremental HTTP SSE for parallel running entries, fold toggles, reconnect, reverse completion, empty work, desktop/mobile layout and user scroll behavior. No backend or library API changes are needed.
+## Verification
 
-## Route streams before disclosure
+Projection/client tests and browser checks cover:
 
-AgentClient preserves optional output.response on completed records and live messages. ResponseContent computes both projections independently of expanded state while observing a run. Nonempty working content stays mounted under hidden when folded, so text/tool updates retain their assigned area and nested disclosure state. Only the working area’s visibility changes; accepted/pending response content remains outside. Completed collapsed responses do not mount a private observer. Hidden work does not add margins or break the established first-line/avatar alignment. Backend annotations come from database-read action identity, not frontend interpretation.
+- Thinking-only output renders no thinking UI; text and tool deltas stream while their final role is unknown.
+- The same text prefix can be followed by tools or a successful turn end without premature final publication.
+- Consecutive tools across tool-only responses merge; visible text separates sets; hidden thinking, empty text and results do not.
+- Parallel result arrival keeps call ordering and disclosure choices. Identical names/call summaries do not merge unrelated runs.
+- Late accepted final selection folds earlier work once, does not duplicate the answer and does not hide surrounding commentary from the reopened trace.
+- Final-only, rejected, truncated, cancelled, failed and interrupted runs preserve their distinct behavior.
+- Reconnect/reload reconstructs ordering and grouping from stored records; compaction of agent context does not rewrite these records.
+- Desktop/narrow browser review matches the supplied compact Codex-like flow, keyboard access, overflow, avatar alignment and scroll behavior.
+
+[Projection/client tests](../../../../frontend/test/group.test.ts) cover block ordering, tools, phases, accepted-final exclusion and historical references. The controlled SSE [fixture](../../../tasks/2026-10-15-unified-chat-stream/browser-server.mjs) and [browser check](../../../tasks/2026-10-15-unified-chat-stream/browser-check.js) exercise real streaming, disclosures, reconnect/reload, failures, reservation ordering, scroll and desktop/mobile layout. Backend final selection and publication are covered by unit and disposable MySQL integration tests; all commands/results are recorded in the task tests.jsonl.

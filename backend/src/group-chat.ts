@@ -9,7 +9,7 @@ export interface ChatMessage {
   workspaceId: string; messageId: string; position: number; exchangeId: string;
   author: ChatAuthor; text: string; recipients: string[]; time: number;
 }
-export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; toolCallId?: string }
+export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; /** Historical accepted response-tool records only. */ toolCallId?: string }
 export interface TimelineBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
 export type TimelineEntry = TimelineBase & (
   | { kind: 'user'; text: string; messageId: string }
@@ -35,6 +35,8 @@ export function validateTimelineEntry(value: unknown): asserts value is Timeline
   if (entry.working.through !== entry.run.endPosition || (entry.run.status === 'running' && entry.finalRef !== null)) throw new AppError('invalid_data', 'Invalid timeline lifecycle');
   if (entry.finalRef) {
     identity(entry.finalRef.messageId); position(entry.finalRef.position);
+    const indices = entry.finalRef.contentIndices;
+    if (indices !== undefined && (!Array.isArray(indices) || !indices.length || indices.some((value, index) => !Number.isSafeInteger(value) || value < 0 || (index > 0 && value <= indices[index - 1]!)) || entry.finalRef.toolCallId !== undefined)) throw new AppError('invalid_data', 'Invalid final text selection');
     if (entry.finalRef.toolCallId !== undefined && (typeof entry.finalRef.toolCallId !== 'string' || !entry.finalRef.toolCallId || entry.finalRef.toolCallId.length > 1024)) throw new AppError('invalid_data', 'Invalid final response action');
     if (entry.run.status !== 'completed' || entry.finalRef.agentId !== entry.memberId || entry.finalRef.runId !== entry.run.runId || entry.finalRef.position + (entry.finalRef.toolCallId ? 1 : 0) !== entry.working.through || entry.finalRef.position <= entry.working.after) throw new AppError('invalid_data', 'Invalid timeline final reference');
   }
@@ -46,7 +48,7 @@ export interface ChatSnapshot {
 }
 export interface ChatPublication {
   memberRevisions?: Record<string, number>;
-  workspaceId: string; author: ChatAuthor; text: string; recipients: string[]; exchangeId?: string; finalMessageId?: string; finalToolCallId?: string;
+  workspaceId: string; author: ChatAuthor; text: string; recipients: string[]; exchangeId?: string; finalMessageId?: string;
 }
 export interface ChatStore {
   publishChat(input: ChatPublication): Promise<ChatAcceptance>;

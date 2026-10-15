@@ -6,7 +6,7 @@ import type { ClientSnapshot } from '../client/protocol.js';
 import type { TeamState } from './useTeam.js';
 import { Glyph } from './Glyph.js';
 import { Markdown } from './Markdown.js';
-import { memberColor, mentionAt, mentionToken, workDuration, workingItems, responsePreview, workToolSummary, type WorkItem } from './group-work.js';
+import { memberColor, mentionAt, mentionToken, workDuration, runActivity, workToolSummary, toolSetSummary, type ActivityItem, type ToolActivity } from './group-work.js';
 
 export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion }: {
   workspaceId: string; title: string; team: TeamState; filesOpen: boolean; onFiles(open: boolean): void;
@@ -95,7 +95,18 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
 }
 
 function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member' }> }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(entry.finalRef === null);
+  const accepted = entry.finalRef !== null;
+  const seenFinal = useRef(accepted);
+  const client = useMemo(() => new AgentClient(entry.memberId, { historyAfter: entry.working.after }), [entry.memberId, entry.run.runId, entry.working.after]);
+  const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
+  const observe = entry.run.status === 'running' || expanded;
+  useEffect(() => { if (observe) client.follow(entry.run.runId); }, [client, observe, entry.run.runId]);
+  useEffect(() => () => client.dispose(), [client]);
+  useEffect(() => {
+    if (accepted && !seenFinal.current) setExpanded(false);
+    seenFinal.current = accepted;
+  }, [accepted]);
   const [now, setNow] = useState(Date.now());
   const running = entry.run.status === 'running';
   useEffect(() => { if (!running) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [running]);
@@ -121,43 +132,47 @@ function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
     </div>
     <div className="group-run-card">
       <div className="group-member-body">
-        {running || expanded ? <ObservedResponse entry={entry} expanded={expanded} /> : <ResponseContent entry={entry} /> }
+        <ResponseContent entry={entry} expanded={expanded} snapshot={snapshot} retry={() => client.follow(entry.run.runId)} />
       </div>
     </div>
   </article>;
 }
-/** Active output stays subscribed even while private work is folded. */
-function ObservedResponse({ entry, expanded }: { entry: Extract<GroupEntry, { kind: 'member' }>; expanded: boolean }) {
-  const client = useMemo(() => new AgentClient(entry.memberId, { historyAfter: entry.working.after }), [entry.memberId, entry.run.runId, entry.working.after]);
-  const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
-  useEffect(() => { client.follow(entry.run.runId); return () => client.dispose(); }, [client, entry.run.runId]);
-  return <ResponseContent entry={entry} expanded={expanded} snapshot={snapshot} retry={() => client.follow(entry.run.runId)} />;
-}
 function ResponseContent({ entry, expanded = false, snapshot, retry }: {
   entry: Extract<GroupEntry, { kind: 'member' }>; expanded?: boolean; snapshot?: ClientSnapshot; retry?(): void;
 }) {
-  const preview = snapshot ? responsePreview(snapshot, entry) : null;
-  const items = snapshot ? workingItems(snapshot, entry, preview ?? undefined) : [];
+  const items = snapshot ? runActivity(snapshot, entry) : [];
   const error = snapshot?.error && <div className="group-work-error" role="alert">{snapshot.error}<button type="button" onClick={retry}>Retry member output</button></div>;
   return <>
     {(items.length > 0 || (expanded && error)) && <div hidden={!expanded} className="group-work" id={`group-work-${entry.entryId}`} aria-label={`${entry.name} working history`}>
       {error}
-      {items.map(item => item.kind === 'tool' ? <WorkTool key={item.id} item={item} running={entry.run.status === 'running'} />
-        : item.kind === 'reasoning' ? <details key={item.id} className="work-reasoning"><summary><span className="work-icon"><Glyph name="thinking" /></span><span className="work-line-label">Reasoning</span><span className="work-disclosure"><Glyph name="chevron" /></span></summary><p>{item.text}</p></details>
-          : <div key={item.id} className="work-text"><Markdown source={item.text} onLink={href => window.open(href, '_blank', 'noopener,noreferrer')} /></div>)}
+      {items.map(item => item.kind === 'tools' ? <ToolSet key={item.id} item={item} running={entry.run.status === 'running'} />
+        : <div key={item.id} className="work-text"><Markdown source={item.text} onLink={href => window.open(href, '_blank', 'noopener,noreferrer')} /></div>)}
     </div>}
     {!expanded && error}
-    {(entry.text !== null || preview) && <div className="group-final" data-preview={entry.text === null ? 'true' : undefined} aria-label={entry.text === null ? 'Live response' : undefined}>
-      <Markdown source={entry.text ?? preview!.text} onLink={href => { window.open(href, '_blank', 'noopener,noreferrer'); }} />
+    {entry.text !== null && <div className="group-final">
+      <Markdown source={entry.text!} onLink={href => { window.open(href, '_blank', 'noopener,noreferrer'); }} />
     </div>}
     {entry.run.status !== 'running' && !entry.finalRef && <div className="group-terminal" role="status"><p>{entry.run.error?.message ?? (entry.run.status === 'completed' ? 'Finished without a published response.' : 'No final response was published.')}</p></div>}
   </>;
 }
-function WorkTool({ item, running }: { item: WorkItem; running: boolean }) {
+function WorkTool({ item, running }: { item: ToolActivity; running: boolean }) {
   const summary = workToolSummary(item);
   const status = item.failed ? 'Failed' : item.result === undefined ? running ? 'Running' : 'No result recorded' : '';
   return <details className={`work-tool ${item.failed ? 'failed' : ''}`}><summary>
     <span className="work-icon"><Glyph name={summary.icon} /></span><span className="work-line-label" title={summary.label}>{summary.label}</span>
     {status && <span className="work-line-status">{status}</span>}<span className="work-disclosure"><Glyph name="chevron" /></span>
   </summary>{item.args !== undefined && <pre aria-label="Arguments">{item.args}</pre>}{item.result !== undefined && <pre aria-label="Result">{item.result}</pre>}</details>;
+}
+
+function ToolSet({ item, running }: { item: Extract<ActivityItem, { kind: 'tools' }>; running: boolean }) {
+  const failed = item.tools.filter(tool => tool.failed).length;
+  const pending = item.tools.filter(tool => tool.result === undefined).length;
+  const status = failed ? `${failed} failed` : pending ? running ? `${pending} running` : `${pending} without result` : '';
+  const label = toolSetSummary(item.tools);
+  return <details className={`work-tool-set ${failed ? 'failed' : ''}`}><summary aria-label={`Tool group: ${label}`}>
+    <span className="work-icon"><Glyph name={workToolSummary(item.tools[0]!).icon} /></span>
+    <span className="work-line-label">{label}</span>
+    {status && <span className="work-line-status">{status}</span>}
+    <span className="work-disclosure"><Glyph name="chevron" /></span>
+  </summary><div className="work-tool-list">{item.tools.map(tool => <WorkTool key={tool.id} item={tool} running={running} />)}</div></details>;
 }

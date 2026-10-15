@@ -91,8 +91,6 @@ Member entries identify member/name/run, stable display position, run status/tim
 
 For harness-equipped members, final publication first persists scoped run-end checkpoints. Checkpoint failure prevents successful publication; expected mention/publication refusal may continue the run and later checkpoint additional edits. Scoped semantic commits and user design approval remain independent of shared-message publication.
 
-## Explicit output channels
+## Unified streaming and model completion
 
-All ordinary assistant text, reasoning and operational tools are working output. A member publishes its response through final_response({text}), used by itself after work is complete. Its text argument is the only new-run final-response stream; assistant prose without a response action remains in Work and does not end/publish the run. The backend persists and exposes the response tool-call identity for completed messages and live chunks. The frontend reads those APIs, streams working content in Work and the designated response text outside, and applies fold/expand as visibility only. It never guesses final intent from natural language or absence of tools.
-
-Response previews remain unaccepted until atomic group publication succeeds. Refused attempts remain private and a later explicit response can replace them. Exact accepted final references identify the recorded assistant message and response tool call; working range includes tool results through run end. Old immutable accepted history retains its original classification; this change does not rewrite previous group messages. Empty work stays empty.
+Ordinary assistant text and tools stream to the user as one private activity flow. Backend selects a final candidate after model completion, using native phase where available and normal terminal reasons where absent. Successful publication establishes acceptance. Accepted references pin exact text block indices; frontend disclosure cannot publish or trigger work. Busy/mention-budget refusal remains atomic. Historical accepted references remain immutable.

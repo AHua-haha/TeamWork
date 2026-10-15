@@ -1,65 +1,62 @@
 import type { Message } from '@earendil-works/pi-ai';
-import type { ClientSnapshot, MessageOutput } from '../client/protocol.js';
+import type { ClientSnapshot } from '../client/protocol.js';
 import type { GroupEntry } from '../client/group-client.js';
-export interface WorkItem { id: string; kind: 'text' | 'reasoning' | 'tool'; text: string; args?: string; result?: string; failed?: boolean }
-function runMessages(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): { id: string; message: Message; output?: MessageOutput }[] {
+
+export interface ToolActivity { id: string; kind: 'tool'; text: string; args?: string; result?: string; failed?: boolean }
+export type ActivityItem = { id: string; kind: 'text'; text: string } | { id: string; kind: 'tools'; tools: ToolActivity[] };
+
+/** One ordered visible flow; final acceptance partitions it, independently of disclosure. */
+export function runActivity(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): ActivityItem[] {
   const records = snapshot.completed.filter(record => record.runId === entry.run.runId && record.position > entry.working.after && (entry.working.through === null || record.position <= entry.working.through));
-  return [
-    ...records.map(record => ({ id: record.messageId, message: record.message, output: record.output })),
-    ...snapshot.live.filter(live => entry.run.status === 'running' && live.runId === entry.run.runId && !records.some(record => record.messageId === live.messageId)).map(live => ({ id: live.messageId, message: live.message, output: live.output })),
+  const messages: { id: string; message: Message }[] = [
+    ...records.map(record => ({ id: record.messageId, message: record.message })),
+    ...snapshot.live.filter(live => entry.run.status === 'running' && live.runId === entry.run.runId && !records.some(record => record.messageId === live.messageId)).map(live => ({ id: live.messageId, message: live.message })),
   ];
-}
-/** Response placement comes from the backend's explicit output annotation, never assistant prose. */
-export function responsePreview(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): { id: string; toolCallId: string; text: string } | null {
-  if (entry.run.status !== 'running' || entry.finalRef || entry.text !== null) return null;
-  if (snapshot.run && snapshot.run.status !== 'running' && snapshot.run.status !== 'completed') return null;
-  const messages = runMessages(snapshot, entry);
-  let latest = messages.at(-1);
-  // The response tool's persisted acknowledgement may follow its assistant record before publication.
-  if (latest?.message.role === 'toolResult' && !latest.message.isError) {
-    const callId = latest.message.toolCallId;
-    const previous = messages.at(-2);
-    latest = previous?.output?.response.toolCallId === callId ? previous : undefined;
-  }
-  const designated = latest?.output?.response;
-  if (!latest || !designated) return null;
-  if (snapshot.run?.activeMessageId && snapshot.run.activeMessageId !== latest.id) return null;
-  return { id: latest.id, toolCallId: designated.toolCallId, text: designated.text };
-}
-export function workingItems(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>, preview?: { id: string; toolCallId: string }): WorkItem[] {
-  const messages = runMessages(snapshot, entry);
-  const hiddenCall = preview?.toolCallId ?? entry.finalRef?.toolCallId;
-  const hiddenRecord = preview?.id ?? entry.finalRef?.messageId;
-  const hiddenIndex = messages.findIndex(record => record.id === hiddenRecord);
-  const items: WorkItem[] = [];
-  const pending = new Map<string, WorkItem>();
+  const final = entry.finalRef;
+  const finalIndex = messages.findIndex(record => record.id === final?.messageId);
+  const items: ActivityItem[] = [];
+  const pending = new Map<string, ToolActivity>();
+  const addTool = (tool: ToolActivity) => {
+    const last = items.at(-1);
+    if (last?.kind === 'tools') last.tools.push(tool);
+    else items.push({ id: tool.id, kind: 'tools', tools: [tool] });
+  };
   for (const [recordIndex, record] of messages.entries()) {
     const message = record.message;
     if (message.role === 'toolResult') {
-      if (hiddenIndex >= 0 && recordIndex === hiddenIndex + 1 && message.toolCallId === hiddenCall) continue;
+      // Historical accepted tool-based finals retain their immutable reference, never a new execution path.
+      if (final?.toolCallId && recordIndex === finalIndex + 1 && message.toolCallId === final.toolCallId) continue;
       const result = message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
       const owner = pending.get(message.toolCallId);
       if (owner) { owner.result = result; owner.failed = message.isError; pending.delete(message.toolCallId); }
-      else items.push({ id: record.id, kind: 'tool', text: message.toolName, result, failed: message.isError });
+      else addTool({ id: record.id, kind: 'tool', text: message.toolName, result, failed: message.isError });
       continue;
     }
     if (message.role !== 'assistant') {
       const text = typeof message.content === 'string' ? message.content : message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
-      if (text.trim()) items.push({ id: record.id, kind: 'text', text }); continue;
+      if (text.trim()) items.push({ id: record.id, kind: 'text', text });
+      continue;
     }
     for (const [index, part] of message.content.entries()) {
       const id = `${record.id}-${index}`;
-      if (part.type === 'text') {
-        if ((record.id !== entry.finalRef?.messageId || entry.finalRef.toolCallId) && part.text.trim()) items.push({ id, kind: 'text', text: part.text });
-      } else if (part.type === 'thinking' && part.thinking.trim()) items.push({ id, kind: 'reasoning', text: part.thinking });
-      else if (part.type === 'toolCall') {
-        if (record.id === hiddenRecord && part.id === hiddenCall) continue;
-        const item: WorkItem = { id, kind: 'tool', text: part.name, args: JSON.stringify(part.arguments, null, 2) };
-        items.push(item); pending.set(part.id, item);
+      if (part.type === 'text' && part.text.trim()) {
+        const accepted = record.id === final?.messageId && !final.toolCallId && (final.contentIndices === undefined || final.contentIndices.includes(index));
+        if (!accepted) items.push({ id, kind: 'text', text: part.text });
+      } else if (part.type === 'toolCall') {
+        if (record.id === final?.messageId && part.id === final.toolCallId) continue;
+        const item: ToolActivity = { id, kind: 'tool', text: part.name, args: JSON.stringify(part.arguments, null, 2) };
+        addTool(item); pending.set(part.id, item);
       }
     }
   }
   return items;
+}
+
+export function toolSetSummary(tools: ToolActivity[]): string {
+  const labels: Record<string, [string, string]> = { terminal: ['command', 'commands'], book: ['read', 'reads'], search: ['search', 'searches'], pencil: ['edit', 'edits'], code: ['tool', 'tools'] };
+  const counts = new Map<string, number>();
+  for (const tool of tools) { const key = workToolSummary(tool).icon; counts.set(key, (counts.get(key) ?? 0) + 1); }
+  return [...counts].map(([key, count]) => `${count} ${labels[key]![count === 1 ? 0 : 1]}`).join(' · ');
 }
 export const memberColor = (id: string) => {
   let hash = 0; for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
@@ -76,7 +73,7 @@ export function mentionAt(text: string, caret: number): { start: number; query: 
 export const mentionToken = (name: string) => /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name) ? `@${name}` : `@{${name}}`;
 
 /** Short action/argument descriptions; full JSON and results remain available in the disclosure. */
-export function workToolSummary(item: WorkItem): { icon: 'terminal' | 'book' | 'search' | 'pencil' | 'code'; label: string } {
+export function workToolSummary(item: ToolActivity): { icon: 'terminal' | 'book' | 'search' | 'pencil' | 'code'; label: string } {
   let args: Record<string, unknown> = {};
   try { const value: unknown = JSON.parse(item.args ?? '{}'); if (value && typeof value === 'object' && !Array.isArray(value)) args = value as Record<string, unknown>; } catch { /* A partial tool call may not have complete arguments yet. */ }
   const path = typeof args.path === 'string' ? args.path : typeof args.file_path === 'string' ? args.file_path : '';

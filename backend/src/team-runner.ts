@@ -25,15 +25,15 @@ export class TeamRunner {
     return this.publish(workspaceId, chatText(value));
   }
 
-  async publishFinal(memberId: string, runId: string, value: unknown, finalMessageId: string, finalToolCallId?: string): Promise<ChatMessage> {
+  async publishFinal(memberId: string, runId: string, value: unknown, finalMessageId: string): Promise<ChatMessage> {
     const member = await this.team.find(memberId);
     const active = this.active.get(memberId);
     if (!member || member.value.retiredAt !== null || active?.runId !== runId) throw new AppError('member_unavailable', 'The sending member is no longer working', 409);
-    const result = await this.publish(member.workspaceId, chatText(value), { memberId, name: member.value.name, runId, exchangeId: active.exchangeId, finalMessageId, finalToolCallId });
+    const result = await this.publish(member.workspaceId, chatText(value), { memberId, name: member.value.name, runId, exchangeId: active.exchangeId, finalMessageId });
     return result.message;
   }
 
-  private publish(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string; finalToolCallId?: string }) {
+  private publish(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string }) {
     if (this.closed) return Promise.reject(new AppError('runtime_unavailable', 'Team is shutting down', 503));
     const operation = this.acceptPublication(workspaceId, text, sender);
     this.publications.add(operation);
@@ -41,7 +41,7 @@ export class TeamRunner {
     return operation;
   }
 
-  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string; finalToolCallId?: string }) {
+  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string }) {
     if (this.closed) throw new AppError('runtime_unavailable', 'Team is shutting down', 503);
     const roster = await this.team.active(workspaceId);
     const names = mentions(text);
@@ -63,7 +63,7 @@ export class TeamRunner {
     }
     const configs = await Promise.all(recipients.map(member => this.runtime().prepareRun(member.id)));
     // The store rechecks busy state and budget with publication and all run records in one transaction.
-    const result = await this.store.publishChat({ workspaceId, text, memberRevisions: Object.fromEntries(recipients.map((member, index) => [member.id, configs[index]!.source?.agentRevision ?? member.revision])), recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId, finalMessageId: sender.finalMessageId, finalToolCallId: sender.finalToolCallId } : {}) });
+    const result = await this.store.publishChat({ workspaceId, text, memberRevisions: Object.fromEntries(recipients.map((member, index) => [member.id, configs[index]!.source?.agentRevision ?? member.revision])), recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId, finalMessageId: sender.finalMessageId } : {}) });
     if (sender) this.active.delete(sender.memberId);
     for (const [index, run] of result.runs.entries()) {
       this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });

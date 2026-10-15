@@ -10,7 +10,7 @@ export function purposeHarnesses(member: StoredMember): HarnessDefinition[] {
     {
       id: 'project',
       prompt: 'Manage design and implement the accepted design through this project harness. Use common file tools to edit pending design JSON (content and implementation). Discuss unresolved choices with the user. Design commits require explicit user approval; a checkpoint is not acceptance. Implement within explicitly assigned implementation paths. Use paths are read-only. Design mappings do not grant file access. Use commit_scope with a meaningful intent when a coherent implementation change is ready; implementation commits need no user approval.',
-      tools: [...fileTools, 'final_response', ...(member.value.lead ? ['submit_member_config', 'retire_member', 'list_models'] : [])],
+      tools: [...fileTools, ...(member.value.lead ? ['submit_member_config', 'retire_member', 'list_models'] : [])],
       parts: [
         ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: config.designScope.dependencies.map(path => `.context/${path}`), commit: 'user' as const, prompt: 'Keep design and subdesign knowledge continuous across team changes. Explain pending changes in your final reply; ask the user to review and accept the exact revision.' }] : []),
         ...(member.value.lead ? [{ id: 'member-config', paths: ['.team/members'], exclude: [], commit: 'agent' as const, prompt: 'Edit JSON manifests and Markdown prompt files, then submit_member_config with the manifest path. Checkpoints and commits of draft configuration do not activate it. Base policy and command allowances cannot be changed through these files.' }] : []),

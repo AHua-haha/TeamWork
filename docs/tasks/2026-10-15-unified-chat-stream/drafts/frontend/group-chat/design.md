@@ -5,8 +5,6 @@
 
 Let the user converse with the workspace team, follow each active member's text and tools as an ordered stream, read accepted final responses as long-form documents, and expand earlier work when needed. The backend owns shared publication, triggering, execution, stored context and history. The frontend presents those records and user actions.
 
-This task proposal includes the agreed unified streaming presentation and preserves the accepted layout defaults. It describes target behavior; implementation is pending.
-
 ## Inputs and preconditions
 
 - One workspace group transcript, author-attributed shared messages, member activation states and current team records.

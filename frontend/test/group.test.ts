@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GroupClient, type GroupEntry } from '../src/client/group-client.js';
-import { workingItems, mentionAt, mentionToken, responsePreview, workToolSummary } from '../src/ui/group-work.js';
+import { runActivity, mentionAt, mentionToken, toolSetSummary, workToolSummary, type ActivityItem } from '../src/ui/group-work.js';
 import { assistant, record, run, streamResponse, until, agentId, runId } from './fixtures.js';
 const workspaceId = 'w1';
 const user: GroupEntry = { workspaceId, entryId: 'u1', position: 1, revision: 1, exchangeId: 'e1', time: 1, kind: 'user', messageId: 'u1', text: 'work' };
@@ -64,88 +64,87 @@ test('refusal leaves no optimistic entry; malformed/gapped updates stop without 
   assert.equal(client.getSnapshot().cursor, 0); client.dispose();
 });
 
-test('working projection respects run/range, retains rejected candidates, and excludes only accepted final text', () => {
-  const old = { ...record(1, 'old', 'old'), runId: 'old_run' };
-  const candidate = record(2, 'candidate', 'private rejected candidate');
-  const final = record(3, 'final', 'accepted final');
-  final.message = { ...final.message, content: [{ type: 'thinking', thinking: 'last reasoning' }, { type: 'text', text: 'accepted final' }] } as typeof final.message;
-  const next = { ...record(4, 'next', 'next'), runId: 'next_run' };
-  const snapshot = { agentId, completed: [old, candidate, final, next], live: [], historyPosition: 4, synchronized: true, connection: 'idle' as const, run: run('completed'), sending: false, error: null };
-  const entry = { ...member, working: { after: 1, through: 3 }, finalRef: { agentId, runId, messageId: 'final', position: 3 }, text: 'accepted final' };
-  const before = structuredClone(snapshot);
-  assert.deepEqual(workingItems(snapshot, entry).map(item => item.text), ['private rejected candidate', 'last reasoning']);
-  assert.deepEqual(snapshot, before);
+const snapshot = (completed: ReturnType<typeof record>[] = [], live: import('../src/client/protocol.js').LiveMessage[] = []): import('../src/client/protocol.js').ClientSnapshot => ({ agentId, completed, live, historyPosition: completed.at(-1)?.position ?? 0, synchronized: true, connection: 'following', run: run(), sending: false, error: null });
+const call = (position: number, name = 'read', id = `call-${position}`) => ({ ...record(position, `m-${position}`, ''), message: { ...assistant(''), content: [{ type: 'toolCall' as const, id, name, arguments: { path: String(position) } }] } });
+const result = (position: number, id: string, text: string) => ({ ...record(position, `r-${position}`, ''), message: { role: 'toolResult' as const, toolCallId: id, toolName: 'read', content: [{ type: 'text' as const, text }], isError: false, timestamp: 1 } });
+const tools = (items: ActivityItem[]) => items.flatMap(item => item.kind === 'tools' ? item.tools : []);
+
+test('ordinary text streams immediately in one flow while thinking remains hidden', () => {
+  const partial = { ...assistant(''), content: [{type:'thinking' as const,thinking:'hidden'}, {type:'text' as const,text:'Let me check'}] };
+  const live = {messageId:'live',runId,message:partial,nextSequence:2,lastEvent:{type:'text_delta' as const,contentIndex:1,delta:'Let me check',partial}};
+  assert.deepEqual(runActivity(snapshot([], [live]), member), [{id:'live-1',kind:'text',text:'Let me check'}]);
+  const extended = {...partial,content:[...partial.content.slice(0,1),{type:'text' as const,text:'Let me check the files.'}]};
+  assert.equal(runActivity(snapshot([], [{...live,message:extended}]), member)[0]?.kind, 'text');
+  assert.equal((runActivity(snapshot([], [{...live,message:extended}]), member)[0] as {text:string}).text,'Let me check the files.');
 });
 
-test('mention insertion uses braces for spaces and does not suggest for email addresses', () => {
-  assert.equal(mentionToken('Frontend Worker'), '@{Frontend Worker}');
-  assert.equal(mentionToken('Backend'), '@Backend');
-  assert.equal(mentionAt('mail@example', 12), null);
-  assert.deepEqual(mentionAt('Hi @Back', 8), { start: 3, query: 'Back' });
+test('consecutive tools merge across assistant messages and hidden thinking or empty text', () => {
+  const thought = {...record(3,'thought',''),message:{...assistant(''),content:[{type:'thinking' as const,thinking:'hidden'},{type:'text' as const,text:'  '}]}};
+  const state = snapshot([call(1),result(2,'call-1','first'),thought,call(4,'run_command'),result(5,'call-4','second')]);
+  const before = structuredClone(state);
+  const items = runActivity(state,member);
+  assert.equal(items.length,1);
+  assert.deepEqual(tools(items).map(tool=>[tool.text,tool.result]),[['read','first'],['run_command','second']]);
+  assert.equal(toolSetSummary(tools(items)), '1 read · 1 command');
+  assert.deepEqual(state,before,'grouping leaves stored records intact');
 });
 
-test('private working tools pair reused IDs with their own chronological result', () => {
-  const call = (position: number) => ({ ...record(position, `call-${position}`, ''), message: { ...assistant(''), content: [{ type: 'toolCall' as const, id: 'reused', name: 'read', arguments: { path: String(position) } }] } });
-  const result = (position: number, text: string) => ({ ...record(position, `result-${position}`, ''), message: { role: 'toolResult' as const, toolCallId: 'reused', toolName: 'read', content: [{ type: 'text' as const, text }], isError: false, timestamp: 1 } });
-  const snapshot = { agentId, completed: [call(1), result(2, 'first result'), call(3), result(4, 'second result')], live: [], historyPosition: 4, synchronized: true, connection: 'idle' as const, run: run('completed'), sending: false, error: null };
-  assert.deepEqual(workingItems(snapshot, { ...member, working: { after: 0, through: 4 } }).map(item => item.result), ['first result', 'second result']);
+test('visible text separates tool sets in the original block order', () => {
+  const mixed={...record(2,'mixed',''),message:{...assistant(''),content:[{type:'text' as const,text:'Found the file'},{type:'toolCall' as const,id:'next',name:'edit',arguments:{}}]}};
+  const items=runActivity(snapshot([call(1),mixed]),member);
+  assert.deepEqual(items.map(item=>item.kind),['tools','text','tools']);
+  assert.equal(items[1]?.kind==='text'&&items[1].text,'Found the file');
 });
 
-
-test('only backend-designated response text streams outside Work, with ordinary prose kept inside', () => {
-  const partial = { ...assistant('Let me check'), content: [{ type: 'thinking' as const, thinking: 'Private thought' }, { type: 'text' as const, text: 'Let me check' }, { type: 'toolCall' as const, id: 'response-call', name: 'final_response', arguments: { text: 'Hello' } }] };
-  const output = {response:{toolCallId:'response-call',text:'Hello'}};
-  const snapshot = { agentId, completed: [], live: [{ messageId: 'm1', runId, message: partial, output, nextSequence: 2, lastEvent: { type: 'text_delta' as const, contentIndex: 1, delta: 'Let me check', partial } }], historyPosition: 0, synchronized: true, connection: 'following' as const, run: run(), sending: false, error: null };
-  const first = responsePreview(snapshot, member)!;
-  assert.deepEqual(first, { id: 'm1', toolCallId:'response-call', text: 'Hello' });
-  assert.deepEqual(workingItems(snapshot, member, first).map(item => item.text), ['Private thought','Let me check']);
-  const next = { ...snapshot, live: snapshot.live.map(live => ({ ...live, output:{response:{...output.response,text:'Hello world'}} })) };
-  assert.equal(responsePreview(next, member)?.text, 'Hello world');
-  assert.equal(responsePreview({...snapshot,live:snapshot.live.map(({output,...live})=>live)},member),null,'Frontend never guesses placement from Pi text/tool name');
-  const final = {...record(1,'m1',''),message:partial,output:{response:{...output.response,text:'Hello world'}}};
-  const ack = {...record(2,'ack',''),message:{role:'toolResult' as const,toolCallId:'response-call',toolName:'final_response',content:[{type:'text' as const,text:'Prepared'}],isError:false,timestamp:1}};
-  const committed = { ...snapshot, live: [], completed: [final,ack], run: { ...run('completed'), activeMessageId: null } };
-  assert.equal(responsePreview(committed, member)?.text, 'Hello world');
-  const feedback={...record(3,'feedback',''),message:{role:'user' as const,content:'Group publication refused',timestamp:1}};
-  assert.equal(responsePreview({...committed,completed:[...committed.completed,feedback]},member),null,'Refusal feedback retracts only the explicit response attempt');
-  const published = { ...member, run: run('completed'), working: { after: 0, through: 2 }, text: 'Hello world', finalRef: { agentId, runId, messageId: 'm1', position: 1,toolCallId:'response-call' } };
-  assert.equal(responsePreview(committed, published), null);
-  assert.deepEqual(workingItems(committed,published).map(item=>item.text),['Private thought','Let me check']);
-  const onlyFinal={...committed,completed:[{...final,message:{...partial,content:[partial.content[2]!]}} as typeof final,ack]};
-  assert.deepEqual(workingItems(onlyFinal,published),[],'A response action alone has no intermediate work');
+test('late tool calls extend the visible stream instead of creating a provisional final', () => {
+  const partial=assistant('I will inspect it');
+  const live={messageId:'live',runId,message:partial,nextSequence:2,lastEvent:{type:'text_delta' as const,contentIndex:0,delta:'I will inspect it',partial}};
+  const withTool={...partial,content:[...partial.content,{type:'toolCall' as const,id:'late',name:'read',arguments:{path:'src'}}]};
+  assert.deepEqual(runActivity(snapshot([], [{...live,message:withTool}]),member).map(item=>item.kind),['text','tools']);
 });
 
-test('tool-bearing, rejected, failed, foreign and out-of-range output never becomes a final preview', () => {
-  const snapshot = { agentId, completed: [record(1, 'm1', 'Candidate')], live: [], historyPosition: 1, synchronized: true, connection: 'following' as const, run: run(), sending: false, error: null };
-  const withTool = { ...snapshot, completed: [{ ...snapshot.completed[0]!, message: { ...assistant('Commentary'), content: [{ type: 'text' as const, text: 'Commentary' }, { type: 'toolCall' as const, id: 'tool', name: 'read', arguments: { path: 'src/a.ts' } }] } }] };
-  assert.equal(responsePreview(withTool, member), null);
-  assert.deepEqual(workingItems(withTool, member).map(item => item.text), ['Commentary', 'read']);
-  const feedback = { ...record(2, 'feedback', ''), message: { role: 'user' as const, content: 'Publication refused', timestamp: 1 } };
-  const refused = { ...snapshot, completed: [...snapshot.completed, feedback] };
-  assert.equal(responsePreview(refused, member), null);
-  assert.equal(workingItems(refused, member)[0]?.text, 'Candidate');
-  assert.equal(responsePreview({ ...snapshot, run: run('failed') }, member), null);
-  assert.equal(responsePreview(snapshot, { ...member, run: run('cancelled') }), null);
-  assert.equal(responsePreview(snapshot, { ...member, working: { after: 1, through: null } }), null);
-  assert.equal(responsePreview({ ...snapshot, completed: [{ ...snapshot.completed[0]!, runId: 'other' }] }, member), null);
-  assert.equal(responsePreview({ ...snapshot, run: { ...run(), activeMessageId: 'next' } }, member), null);
+test('only accepted exact final text blocks leave the activity flow', () => {
+  const final={...record(2,'final',''),message:{...assistant(''),content:[{type:'thinking' as const,thinking:'hidden'},{type:'text' as const,text:'Working commentary'},{type:'text' as const,text:'Answer'}]}};
+  const state=snapshot([record(1,'earlier','Earlier work'),final]);
+  assert.deepEqual(runActivity(state,member).map(item=>item.kind==='text'?item.text:''),['Earlier work','Working commentary','Answer']);
+  const accepted={...member,run:run('completed'),working:{after:0,through:2},finalRef:{agentId,runId,messageId:'final',position:2,contentIndices:[2]},text:'Answer'};
+  assert.deepEqual(runActivity(state,accepted).map(item=>item.kind==='text'?item.text:''),['Earlier work','Working commentary']);
 });
 
-test('tool summaries expose useful action arguments without replacing inspectable full details', () => {
-  assert.deepEqual(workToolSummary({id:'tool',kind:'tool',text:'run_command',args:'{"argv":["node","--version"]}',result:'v26'}), {icon:'terminal',label:'Ran node --version'});
-  assert.deepEqual(workToolSummary({id:'read',kind:'tool',text:'read',args:'{"path":"src/main.ts"}',result:'source'}), {icon:'book',label:'Read src/main.ts'});
+test('tool results retain call order across parallel completion and reused IDs', () => {
+  const state=snapshot([call(1,'read','same'),result(2,'same','first'),call(3,'read','same'),call(4,'read','other'),result(5,'other','other result'),result(6,'same','second')]);
+  assert.deepEqual(tools(runActivity(state,member)).map(tool=>tool.result),['first','second','other result']);
+});
+
+test('projection respects run and stable range boundaries and excludes terminal partials', () => {
+  const old={...record(1,'old','old'),runId:'old-run'}, next={...record(4,'next','next'),runId:'next-run'};
+  const partial=assistant('unfinished');
+  const live={messageId:'live',runId,message:partial,nextSequence:1,lastEvent:{type:'start' as const,partial}};
+  const state=snapshot([old,record(2,'candidate','private candidate'),record(3,'final','Answer'),next],[live]);
+  const entry={...member,run:run('failed'),working:{after:1,through:3}};
+  assert.deepEqual(runActivity(state,entry).map(item=>item.kind==='text'?item.text:''),['private candidate','Answer']);
+});
+
+test('refused attempts and feedback stay visible; empty work has no placeholder', () => {
+  const feedback={...record(2,'feedback',''),message:{role:'user' as const,content:'Publication refused',timestamp:1}};
+  assert.deepEqual(runActivity(snapshot([record(1,'candidate','Candidate'),feedback]),member).map(item=>item.kind==='text'?item.text:''),['Candidate','Publication refused']);
+  const accepted={...member,run:run('completed'),working:{after:0,through:1},finalRef:{agentId,runId,messageId:'final',position:1,contentIndices:[0]},text:'Answer'};
+  assert.deepEqual(runActivity(snapshot([record(1,'final','Answer')]),accepted),[]);
+});
+
+test('historical accepted references exclude only their original final content', () => {
+  const historical={...member,run:run('completed'),working:{after:0,through:2},finalRef:{agentId,runId,messageId:'final',position:2},text:'Answer'};
+  assert.deepEqual(runActivity(snapshot([record(1,'earlier','Earlier work'),record(2,'final','Answer')]),historical),[{id:'earlier-0',kind:'text',text:'Earlier work'}]);
+  const oldCall={...record(1,'old-action',''),message:{...assistant(''),content:[{type:'text' as const,text:'Earlier work'},{type:'toolCall' as const,id:'historical',name:'final_response',arguments:{text:'Answer'}}]}};
+  const oldAck={...result(2,'historical','Prepared'),message:{...result(2,'historical','Prepared').message,toolName:'final_response'}};
+  assert.deepEqual(runActivity(snapshot([oldCall,oldAck]),{...historical,finalRef:{agentId,runId,messageId:'old-action',position:1,toolCallId:'historical'}}),[{id:'old-action-0',kind:'text',text:'Earlier work'}]);
+});
+
+test('mention insertion and compact tool summaries retain their existing behavior', () => {
+  assert.equal(mentionToken('Frontend Worker'),'@{Frontend Worker}');
+  assert.equal(mentionToken('Backend'),'@Backend');
+  assert.equal(mentionAt('mail@example',12),null);
+  assert.deepEqual(mentionAt('Hi @Back',8),{start:3,query:'Back'});
+  assert.deepEqual(workToolSummary({id:'tool',kind:'tool',text:'run_command',args:'{"argv":["node","--version"]}',result:'v26'}),{icon:'terminal',label:'Ran node --version'});
   assert.equal(workToolSummary({id:'partial',kind:'tool',text:'edit',args:'null'}).label,'Updating file');
-});
-
-
-test('response routing hides only the exact designated action, even when calls reuse IDs', () => {
-  const action=(position:number,id:string)=>({...record(position,id,''),message:{...assistant(''),content:[{type:'toolCall' as const,id:'reused',name:'final_response',arguments:{text:id}}]},output:{response:{toolCallId:'reused',text:id}}});
-  const ack=(position:number)=>({...record(position,`ack-${position}`,''),message:{role:'toolResult' as const,toolCallId:'reused',toolName:'final_response',content:[{type:'text' as const,text:'Prepared'}],isError:false,timestamp:1}});
-  const snapshot={agentId,completed:[action(1,'rejected'),ack(2),action(3,'accepted'),ack(4)],live:[],historyPosition:4,synchronized:true,connection:'idle' as const,run:run('completed'),sending:false,error:null};
-  const published={...member,run:run('completed'),working:{after:0,through:4},text:'accepted',finalRef:{agentId,runId,messageId:'accepted',position:3,toolCallId:'reused'}};
-  assert.deepEqual(workingItems(snapshot,published).map(item=>[item.text,item.result]),[['final_response','Prepared']]);
-  const current={...snapshot,completed:[{...action(1,'m1'),output:{response:{toolCallId:'reused',text:''}}}]};
-  const pending=responsePreview(current,member)!;
-  assert.equal(pending.text,'');
-  assert.deepEqual(workingItems(current,member,pending),[],'Empty response argument already belongs outside Work');
 });
