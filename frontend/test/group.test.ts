@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GroupClient, type GroupEntry } from '../src/client/group-client.js';
-import { workingItems, mentionAt, mentionToken } from '../src/ui/group-work.js';
+import { workingItems, mentionAt, mentionToken, responsePreview, workToolSummary } from '../src/ui/group-work.js';
 import { assistant, record, run, streamResponse, until, agentId, runId } from './fixtures.js';
 const workspaceId = 'w1';
 const user: GroupEntry = { workspaceId, entryId: 'u1', position: 1, revision: 1, exchangeId: 'e1', time: 1, kind: 'user', messageId: 'u1', text: 'work' };
@@ -89,4 +89,42 @@ test('private working tools pair reused IDs with their own chronological result'
   const result = (position: number, text: string) => ({ ...record(position, `result-${position}`, ''), message: { role: 'toolResult' as const, toolCallId: 'reused', toolName: 'read', content: [{ type: 'text' as const, text }], isError: false, timestamp: 1 } });
   const snapshot = { agentId, completed: [call(1), result(2, 'first result'), call(3), result(4, 'second result')], live: [], historyPosition: 4, synchronized: true, connection: 'idle' as const, run: run('completed'), sending: false, error: null };
   assert.deepEqual(workingItems(snapshot, { ...member, working: { after: 0, through: 4 } }).map(item => item.result), ['first result', 'second result']);
+});
+
+
+test('live replies stream outside Work, preserve reasoning, and reconcile with the exact published final', () => {
+  const partial = { ...assistant('Hello'), content: [{ type: 'thinking' as const, thinking: 'Private thought' }, { type: 'text' as const, text: 'Hello' }] };
+  const snapshot = { agentId, completed: [], live: [{ messageId: 'm1', runId, message: partial, nextSequence: 2, lastEvent: { type: 'text_delta' as const, contentIndex: 1, delta: 'Hello', partial } }], historyPosition: 0, synchronized: true, connection: 'following' as const, run: run(), sending: false, error: null };
+  const first = responsePreview(snapshot, member)!;
+  assert.deepEqual(first, { id: 'm1', text: 'Hello' });
+  assert.deepEqual(workingItems(snapshot, member, first.id).map(item => item.text), ['Private thought']);
+  const next = { ...snapshot, live: snapshot.live.map(live => ({ ...live, message: assistant('Hello world') })) };
+  assert.equal(responsePreview(next, member)?.text, 'Hello world');
+  const committed = { ...snapshot, live: [], completed: [record(1, 'm1', 'Hello world')], run: { ...run('completed'), activeMessageId: null } };
+  assert.equal(responsePreview(committed, member)?.text, 'Hello world', 'committed candidate stays visible while group publication arrives');
+  const published = { ...member, run: run('completed'), working: { after: 0, through: 1 }, text: 'Hello world', finalRef: { agentId, runId, messageId: 'm1', position: 1 } };
+  assert.equal(responsePreview(committed, published), null);
+  assert.deepEqual(workingItems(committed, published), [], 'plain final has no intermediate work');
+});
+
+test('tool-bearing, rejected, failed, foreign and out-of-range output never becomes a final preview', () => {
+  const snapshot = { agentId, completed: [record(1, 'm1', 'Candidate')], live: [], historyPosition: 1, synchronized: true, connection: 'following' as const, run: run(), sending: false, error: null };
+  const withTool = { ...snapshot, completed: [{ ...snapshot.completed[0]!, message: { ...assistant('Commentary'), content: [{ type: 'text' as const, text: 'Commentary' }, { type: 'toolCall' as const, id: 'tool', name: 'read', arguments: { path: 'src/a.ts' } }] } }] };
+  assert.equal(responsePreview(withTool, member), null);
+  assert.deepEqual(workingItems(withTool, member).map(item => item.text), ['Commentary', 'read']);
+  const feedback = { ...record(2, 'feedback', ''), message: { role: 'user' as const, content: 'Publication refused', timestamp: 1 } };
+  const refused = { ...snapshot, completed: [...snapshot.completed, feedback] };
+  assert.equal(responsePreview(refused, member), null);
+  assert.equal(workingItems(refused, member)[0]?.text, 'Candidate');
+  assert.equal(responsePreview({ ...snapshot, run: run('failed') }, member), null);
+  assert.equal(responsePreview(snapshot, { ...member, run: run('cancelled') }), null);
+  assert.equal(responsePreview(snapshot, { ...member, working: { after: 1, through: null } }), null);
+  assert.equal(responsePreview({ ...snapshot, completed: [{ ...snapshot.completed[0]!, runId: 'other' }] }, member), null);
+  assert.equal(responsePreview({ ...snapshot, run: { ...run(), activeMessageId: 'next' } }, member), null);
+});
+
+test('tool summaries expose useful action arguments without replacing inspectable full details', () => {
+  assert.deepEqual(workToolSummary({id:'tool',kind:'tool',text:'run_command',args:'{"argv":["node","--version"]}',result:'v26'}), {icon:'terminal',label:'Ran node --version'});
+  assert.deepEqual(workToolSummary({id:'read',kind:'tool',text:'read',args:'{"path":"src/main.ts"}',result:'source'}), {icon:'book',label:'Read src/main.ts'});
+  assert.equal(workToolSummary({id:'partial',kind:'tool',text:'edit',args:'null'}).label,'Updating file');
 });

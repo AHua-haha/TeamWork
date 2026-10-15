@@ -1,4 +1,8 @@
 const paths = {
+  terminal: 'M4 4h16v16H4zM7 8l3 3-3 3M12 16h5',
+  book: 'M12 5C8 2 4 4 3 5v14c3-2 6-2 9 0 3-2 6-2 9 0V5c-3-2-6-2-9 0Zm0 0v14',
+  search: 'M16.5 16.5 21 21M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
+  thinking: 'M9 18h6M9 21h6M8 15c-5-5-1-12 4-12s9 7 4 12l-1 3H9l-1-3Z',
   plus: 'M12 5v14M5 12h14',
   pencil: 'M4 20h4L19 9l-4-4L4 16v4Z',
   trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13',

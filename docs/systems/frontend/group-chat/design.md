@@ -12,7 +12,7 @@ This contract includes the approved UI defaults.
 - Backend-persisted response reservations, identifying the activation and its stable timeline position. The backend persists and exposes this state to every client.
 - User entries store their input. Completed member entries reference immutable agent-history final messages and the corresponding working-history range. Backend reads resolve the accepted final text for display; expanded work reads that activation's private range.
 - A member's accepted final response identifies its author and run. Run states provide start/end timestamps for elapsed duration.
-- Private member history and live activity can be read for the corresponding run when the user expands its working section.
+- Private member history and live activity can be read for the corresponding run. Active response streaming continues while Work is folded; completed history is read on demand.
 - Current design, team and file views remain available in the existing right panel. Design-version UI stays deferred.
 
 ## Outputs and observable effects
@@ -42,7 +42,7 @@ This contract includes the approved UI defaults.
 
 - Above each response area, show two compact capsules grouped on the left: a read-only status/timing tag and a Work disclosure button. The tag contains textual status, elapsed duration and start time. The Work button contains its label followed by a standard chevron, right-facing folded and downward expanded. There is no status dot or tinted band; a thin light divider spans the response width at the response area’s top edge below the capsules. The capsules have matching compact heights and vertically centered content, sit directly beside one another when space permits, and wrap on narrower panes.
 - Completed status has a pale green background with muted green status text; failed/interrupted status has a pale red background with muted red status text. Working/cancelled status uses a light neutral background and muted gray text. Duration, start time and the folded Work button stay muted gray. The status pill has no border. Sender identity color remains on the outside avatar/name. Color supplements the textual status.
-- Only the Work button toggles inspection, by click or keyboard; the status/timing tag is passive. Work is collapsed by default. Expanding reveals that activation's private messages and tools in a distinct untitled shaded area within the response area, below the header divider and above the complete final report. Pending work uses the same layout. Collapse disconnects inspection without stopping the member run.
+- Only the Work button toggles inspection, by click or keyboard; the status/timing tag is passive. Work is collapsed by default. Expanding reveals that activation's private messages and tools in an untitled compact neutral list within the response area, below the header divider and above the complete final report. Pending work uses the same layout. Collapse hides working content while active output continues streaming. Completed collapsed sections do not keep a private follow connection.
 
 - Accepted final-response text is displayed once in the main response body. Its private-history copy is not repeated as a second final answer inside the fold. Relevant working content associated with that response may remain inspectable.
 - Working messages retain their private inspection identity. They are not appended to the shared transcript, converted into new shared messages, or included in another member's model context.
@@ -81,5 +81,13 @@ Private inspection failure does not remove or replace shared messages. Failed, c
 - Team shows accepted model settings per member read-only. Workspace models configures available choices/default for initialization; the lead manages member selections through file submission. There is no group model selector. Active runs retain their starting settings.
 - Chat-level Stop requests cancellation of current group work. Existing entries, completed effects and inspectable history remain.
 - Lost group connections reconnect from the last contiguous change cursor. Submission acknowledgements can show entries immediately but cannot advance that cursor or overwrite newer versions.
-- Follow only expanded private sections. Final responses remain visible if private inspection fails, with section-local retry.
+- Follow active member runs regardless of expansion and load completed private work on demand. Final responses remain visible if private inspection fails, with section-local retry.
 - Existing prototype messages import in their original publication order; newly admitted activations use persisted reservation order.
+
+## Live response and compact work
+
+Each running reservation shows current assistant reply text progressively as Markdown, including while Work is collapsed. This preview is private execution output for user observation, not an accepted shared report. Tool-bearing messages and superseded/rejected candidates belong to Work. The latest provisional reply is not repeated as text inside Work; associated reasoning/tools remain inspectable. Accepted entry text/reference replaces the preview in place. Failed/cancelled/interrupted entries retain their terminal status and no provisional text masquerades as final. Late private output never replaces an accepted final or changes timeline order.
+
+Private follow reconnects and chunk gaps use existing completed-history reconciliation; missing partials can disappear until reconstructed or committed. A failure offers local retry and preserves accepted reports. Streaming growth follows the bottom only while the user remains near it; scrolling up preserves the reading position.
+
+An empty expanded work section contains no placeholder, loading sentence or empty colored block. Working content has no background, enclosing border or colored stripe. Tool calls use compact one-line rows with a muted action icon, readable action/argument summary and subtle disclosure; long lines truncate, with full arguments/results available on expansion. Reasoning is a compact disclosure and text uses a neutral compact flow. Distinct failures remain readable without making every successful tool row a status card.
