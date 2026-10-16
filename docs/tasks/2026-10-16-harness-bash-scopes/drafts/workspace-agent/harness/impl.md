@@ -9,7 +9,7 @@
 
 HarnessService remains the owner of resolved member authority, effective scope, tool/prompt assembly and operation coordination. Replace the project/command split with management, implementation and execute base definitions. The bases contribute rules to reusable file and Bash capabilities rather than separate tool implementations per agent.
 
-Management defines design and member scopes, prompts and protected acceptance. Implementation derives file access from accepted design assignments and owns its independently staged/history part. Execute defines general command policy and the execution environment. HarnessHistory continues owning worktrees, objects, checkpoints and scoped history; it must support persistent scope staging and Git reference context for ordinary Git commands.
+Management defines design and member scopes, prompts and protected acceptance. Its lead bootstrap grants .context/user/ and .team/members/ maintenance immediately; derived implementation access starts empty until accepted designs are assigned. Implementation derives file access from accepted design assignments and owns its independently staged/history part. Execute defines general command policy and the execution environment. HarnessHistory continues owning worktrees, objects, checkpoints and scoped history; it must support persistent scope staging and Git reference context for ordinary Git commands.
 
 The [team](../team/design.md) owns member identity, accepted source/metadata, readiness and activation. The [runtime](../../../../../systems/agent-runtime/design.md) owns model/tool execution and cancellation. The [context base](../../../../../systems/workspace-agent/context-base/design.md) owns original design/catalog records. The parent integration must settle which accepted design snapshot feeds mapping resolution before implementation. No new child-system boundary or execution engine is selected by this proposal.
 
@@ -21,7 +21,7 @@ The [team](../team/design.md) owns member identity, accepted source/metadata, re
 4. For scoped Git, resolve the requested scope against current accepted authority and prepare its backend-managed index/HEAD/reference context. Check actual Git operations/paths and refuse repository retargeting or metadata that attempts to supply backend authority. General command execution must preserve management restrictions.
 5. Preserve separate mutable staging per member/scope. Status/diff/log/restore/commit use the selected scope; automatic checkpoints use separate temporary indexes and checkpoint refs. Git objects can remain shared; a separate index alone does not isolate HEAD/ref updates or filesystem effects.
 6. Enforce user approval on design/member commits and agent permission on implementation commits. Review pins exact scope bytes and accepted base. Use conditional ref updates and appropriate serialization so a stale actor cannot overwrite newer acceptance or another scope.
-7. Coordinate approved member bytes with team validation and activation through the eventual chosen contract. Do not retain immediate unapproved submit activation as a compatibility path. Preserve invalid/stale drafts and previous accepted configuration.
+7. Preserve the separation between management-file acceptance and active member settings. Configuration-change detection, validation/submission-to-activation integration, activation timing and busy/running-target application are deferred. No new automatic activation behavior is introduced by the harness plan.
 8. Keep run-end/failure/cancellation/restart checkpoints after outstanding effects settle and before terminal success claims. Group shared final publication remains separate from file/config acceptance.
 
 ## Decisions and constraints
@@ -32,7 +32,7 @@ The Bash metadata example {git: {scope: "implementation"}} is illustrative. One 
 
 Backend metadata must associate editable member paths with accepted member identity and editing bases without requiring agents to write version/revision fields. The exact bundle schema, activation operation, busy/self/retirement behavior and approval transport remain open.
 
-Migration must reconcile the accepted-design source and existing explicit assignments, worktree files, staging/history refs and accepted source bundles. Do not silently restore the former mapping-derived implementation logic without checking the new authority/acceptance model. Preserve original checkout/index and unrelated changes. The timing of accepted mapping changes for active agents is unresolved.
+Migration must reconcile the accepted-design source and existing explicit assignments, worktree files, staging/history refs and accepted source bundles. Do not silently restore the former mapping-derived implementation logic without checking the new authority/acceptance model. Preserve original checkout/index and unrelated changes. Applying changed configuration or scope to active agents is part of the explicitly deferred activation work.
 
 ## Code map
 

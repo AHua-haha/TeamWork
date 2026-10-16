@@ -13,9 +13,9 @@ The [team](../design.md) owns accepted member identity/content and eventual vali
 
 Materialize editable accepted content without overwriting drafts and without requiring agent version/revision bookkeeping. Backend retains bundle-to-member association and editing base. Lead common file operations create pending design/member edits. Bash scoped metadata selects an authorized Git context; the harness enforces path and commit rules.
 
-User review must pin exact proposed member JSON and referenced prompt bytes plus their accepted base. Team validation and activation compose with that approval under the eventual chosen contract. Pending edits, automatic checkpoints, stale reviews and validation failures preserve previous accepted state. Lead assignments refer to accepted members and designs through existing final group mentions.
+User review must pin exact proposed member JSON and referenced prompt bytes plus their accepted base. Member-configuration change/activation integration, including validation-to-activation timing, is deferred to a later design step. Pending edits, automatic checkpoints, stale reviews and validation failures preserve previous accepted state. Lead assignments refer to accepted members and designs through existing final group mentions.
 
-Runtime assembly includes management/implementation/execute prompts and tools. Implementation access comes from accepted design mappings. Lead identity/self changes, busy targets, retirement, bootstrap and mapping refresh remain unresolved implementation prerequisites.
+Runtime assembly includes management/implementation/execute prompts and tools. Implementation access comes from accepted design mappings. Lead bootstrap grants .context/user/ and .team/members/ maintenance immediately, with user-approved management commits and no implementation authority before accepted design assignment. Configuration-change/activation handling, including busy/running-target updates, is deferred. Protected identity/self changes, retirement and accepted mapping-source integration remain open details.
 
 ## Decisions and constraints
 

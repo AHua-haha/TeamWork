@@ -1,16 +1,21 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import argparse
 import json
 import re
+import shlex
 import subprocess
+import sys
 
 task = Path(__file__).resolve().parent
 root = task.parents[2]
-start = 'b489d67e6b8296f41c9654ff29bcbcab8489e2d6'
+parser = argparse.ArgumentParser()
+parser.add_argument('--start-commit', default='b489d67e6b8296f41c9654ff29bcbcab8489e2d6')
+start = parser.parse_args().start_commit
 record = {
     'time': datetime.now(timezone.utc).isoformat(),
     'start_commit': start,
-    'command': f'python3 {Path(__file__).resolve().relative_to(root)}',
+    'command': shlex.join(['python3', str(Path(__file__).resolve().relative_to(root)), *sys.argv[1:]]),
     'scope': 'Documentation-only proposal: sections, proposal markers, relative links, whitespace, and unchanged canonical/application files',
     'result': 'fail',
 }

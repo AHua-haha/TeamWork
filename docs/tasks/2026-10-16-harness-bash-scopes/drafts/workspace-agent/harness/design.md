@@ -13,6 +13,8 @@ The member's editable harness assignment contains designScope with working and d
 
 Design and member configuration files are editable pending state. Backend owns schema-version handling, member identity association, accepted revisions/bases and approval metadata; agents do not maintain version/revision fields in member manifests. Among agents only the lead may read or edit member configuration paths.
 
+The lead management base grants access to maintain .context/user/ design files and .team/members/ configuration directories from workspace initialization, even before any design exists. Design dependencies remain read-only and both management parts retain user-approved commits. Implementation access starts empty and derives only from accepted assigned designs.
+
 One reusable Bash tool accepts shell input and may carry metadata selecting a requested Git scope. For example, command "git status && git diff" with metadata {git: {scope: "design"}} illustrates the intent. Exact field names and supported command/options are not frozen. Metadata requests context; it does not confer permissions, approval or arbitrary repository/index/ref selection.
 
 Existing exact-command/executable allowances are evidence of the baseline. The execute harness's detailed Bash-rule schema and enforcement mechanism remain open. No broader agent-facing execution configuration is agreed by this draft.
@@ -33,7 +35,7 @@ Management can supply its restricted Git capability through the common Bash tool
 
 Working-design implementation mappings produce writable implementation paths. Dependency-design mappings produce read-only use paths. Deduplicate and validate the effective paths. Read-only dependencies take precedence on overlaps. Git metadata and .context/.team control files remain excluded from implementation ownership, including when a mapping names the project root. A working design's pending mapping edits do not grant additional access.
 
-For example, working user/backend.json mapping backend/ and dependency user/contracts.json mapping shared/contracts/ provide editable backend/ and read-only shared/contracts/. Accepted mapping changes can alter effective authority. The authoritative accepted-design source, integration into that source and application timing for active runs are explicitly unresolved.
+For example, working user/backend.json mapping backend/ and dependency user/contracts.json mapping shared/contracts/ provide editable backend/ and read-only shared/contracts/. Accepted mapping changes can alter effective authority. The authoritative accepted-design source and integration into that source remain unresolved. Application of changed configuration/scope to active members belongs to the deferred activation work.
 
 ### File maintenance and scoped Git through Bash
 
@@ -47,7 +49,7 @@ Independent scope indexes/reference context preserve staging and history. Restor
 
 The harness automatically checkpoints finished runs and before successful final group publication, after tool/policy effects settle. Interrupted-run recovery preserves pending work before terminal recovery. Automatic checkpoints use their own indexes/references, preserve agent staging, and never imply user acceptance.
 
-Configuration validation/acceptance/activation ordering remains open. Pending or invalid configuration cannot replace the prior accepted configuration, and a Git checkpoint/commit must not be silently treated as activation until that contract is settled. Exact user-facing review endpoints and UI are not selected here.
+Member-configuration change and activation handling, including validation-to-activation ordering and application to active members, is explicitly deferred. Pending or invalid configuration cannot replace the prior accepted configuration, and a Git checkpoint/commit must not be silently treated as activation until that contract is settled. Exact user-facing review endpoints and UI are not selected here.
 
 Each member retains its own worktree, pending files and scoped histories. Shared objects and accepted references remain backend-owned. No new automatic merge into the original checkout or peer worktrees is promised.
 
@@ -67,12 +69,13 @@ Automatic context-maintenance algorithms, richer execution-rule configuration, a
 
 ## Acceptance examples
 
-1. The lead edits a member JSON file and its prompt with common file tools. The changes are pending and checkpointed. An agent-originated Git commit cannot accept them; the user reviews exact bytes before acceptance.
-2. A worker requests the member-config Git scope in Bash metadata. The harness refuses it; choosing a scope does not grant lead authority.
-3. A member assigned working backend design and dependency contract design edits backend implementation but cannot change contract implementation. A dependency overlap remains read-only.
-4. An agent edits an implementation mapping in pending design JSON to include another directory. Its implementation authority remains based on accepted design until the change is accepted and applied under the eventual refresh policy.
-5. Bash with implementation Git metadata runs ordinary status/add/commit commands within that scope. It cannot stage design or member configuration, nor choose arbitrary internal refs/indexes through metadata or command options.
-6. An implementation commit advances only implementation history. Pending design/member edits and staging remain independent.
-7. Automatic run-end checkpointing preserves pending and staged changes without accepting protected scopes or resetting the agent's index.
-8. A nested script attempts a forbidden Git operation. Harness enforcement must still apply; accepting its outer Bash invocation is insufficient.
-9. Configuration validation fails or the accepted editing base has changed. Previous active configuration remains available and the pending edits are retained.
+1. A fresh workspace has no design. The lead can create pending design and member files through management access; implementation authority remains empty until accepted designs are assigned. Both management commit policies still require user approval.
+2. The lead edits a member JSON file and its prompt with common file tools. The changes are pending and checkpointed. An agent-originated Git commit cannot accept them; the user reviews exact bytes before acceptance.
+3. A worker requests the member-config Git scope in Bash metadata. The harness refuses it; choosing a scope does not grant lead authority.
+4. A member assigned working backend design and dependency contract design edits backend implementation but cannot change contract implementation. A dependency overlap remains read-only.
+5. An agent edits an implementation mapping in pending design JSON to include another directory. Its implementation authority remains based on accepted design until the change is accepted and applied under the eventual refresh policy.
+6. Bash with implementation Git metadata runs ordinary status/add/commit commands within that scope. It cannot stage design or member configuration, nor choose arbitrary internal refs/indexes through metadata or command options.
+7. An implementation commit advances only implementation history. Pending design/member edits and staging remain independent.
+8. Automatic run-end checkpointing preserves pending and staged changes without accepting protected scopes or resetting the agent's index.
+9. A nested script attempts a forbidden Git operation. Harness enforcement must still apply; accepting its outer Bash invocation is insufficient.
+10. Configuration validation fails or the accepted editing base has changed. Previous active configuration remains available and the pending edits are retained.

@@ -25,7 +25,7 @@ The implementation harness derives writable paths from accepted working-design m
 
 The execute harness controls general commands through the same Bash capability while preserving management restrictions. Detailed rule configuration remains deferred. New workers continue to obtain omitted model selection/options from the workspace default; chosen models must satisfy workspace/provider validation.
 
-Bootstrap behavior for a lead with no initial design, migration from explicit implementation assignments and application timing for changed accepted mappings remain to be settled. Existing missing-lead recovery, identity/history preservation and one-active-run admission guarantees must be retained.
+The lead management base grants access to maintain .context/user/ design files and .team/members/ configuration directories from workspace initialization, even before any design exists. Design dependencies remain read-only and both management parts retain user-approved commits. Implementation access starts empty and derives only from accepted assigned designs. Migration from explicit implementation assignments remains to be designed. Configuration-change/activation handling, including applying changes to active members, is deferred. Existing missing-lead recovery, identity/history preservation and one-active-run admission guarantees must be retained.
 
 ### Work and cooperation
 
@@ -45,9 +45,9 @@ Reusable file capabilities and one Bash capability are assembled from management
 
 ## Outputs and observable effects
 
-The lead edits member configuration files as pending harness content. Checkpoints preserve those edits without accepting or activating them. User approval is required to commit member configuration and design. Backend retains exact accepted source bytes, metadata and stable configuration independently of mutable drafts. The exact validation/approval/activation operation and busy-target handling remain open; no immediate unapproved submission path is part of the target.
+The lead edits member configuration files as pending harness content. Checkpoints preserve those edits without accepting or activating them. User approval is required to commit member configuration and design. Backend retains exact accepted source bytes, metadata and stable configuration independently of mutable drafts. Configuration-change/activation operations and busy-target handling are explicitly deferred; no immediate unapproved submission path is part of the target.
 
-Accepted configuration controls subsequent member use according to the eventual activation contract. Workspace model-default changes preserve already assigned settings. Accepted design mappings determine implementation authority; when a changed mapping affects an already-running member remains unresolved. Member/context/history inspection remains read-only, and retired/history records must survive migration.
+Accepted configuration controls subsequent member use according to the eventual activation contract. Workspace model-default changes preserve already assigned settings. Accepted design mappings determine implementation authority; application of changed configuration/scope to already-running members is deferred. Member/context/history inspection remains read-only, and retired/history records must survive migration.
 
 Publication and creation of all selected recipient run records remain atomic. Model execution begins after admission; execution failure becomes run status without fabricating shared output. Group stop/restart behavior and retained private history remain unchanged. Configuration user acceptance, scoped semantic commits and final group-message publication are distinct effects.
 
@@ -81,7 +81,7 @@ Each member uses a separate managed worktree. The harness automatically checkpoi
 
 The proposed file workflow retains JSON member content and bundle-relative Markdown instructions, lead-only editing and exact accepted source preservation. It removes agent-maintained version/revision bookkeeping and independent implementation scope fields. Backend maintains member/path association, schema handling and editing-base conflict checks.
 
-User approval is required to commit member configuration. How validation and reviewed-file acceptance activate a member is not yet settled. In particular, do not assume the existing submit_member_config remains an immediate activator or that any ordinary Git commit automatically activates settings. These alternatives require further discussion at the team boundary.
+User approval is required to commit member configuration. Handling member configuration changes and activation is explicitly deferred, including the validation-to-activation flow and timing for active members. In particular, do not assume the existing submit_member_config remains an immediate activator or that any ordinary Git commit automatically activates settings. These alternatives are reserved for the later team activation design and do not block continuing the harness discussion.
 
 Migration must preserve existing member identities, conversations, prompt bytes, accepted source and pending drafts. Existing command allowances must be reconciled with execute-harness policy without introducing an undocumented agent configuration surface. New manifests cannot override base policy.
 

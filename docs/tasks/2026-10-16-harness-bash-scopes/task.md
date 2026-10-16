@@ -27,15 +27,19 @@ Review boundaries: [Harness](drafts/workspace-agent/harness/design.md), [Member 
 8. Member JSON and referenced Markdown remain the editable configuration source. Backend retains exact accepted bytes and metadata separately from pending edits. Agents do not maintain format version or optimistic configuration revision in those files. Identity/model/responsibility/prompt content remains meaningful member configuration; only the harness assignment is reduced to design scope.
 9. Working-design mappings yield writable implementation paths; dependency-design mappings yield read-only implementation paths. Read-only paths win overlaps; control paths remain protected. Pending design edits grant no authority. Invalid or unresolved references do not activate configuration.
 10. Base tools, maintenance rules and commit policy remain fixed. Configurable execution rules beyond the agreed direction remain for later discussion. No new frontend configuration or approval UI is settled here.
+11. The lead management base grants access to maintain .context/user/ design files and .team/members/ configuration directories from workspace initialization, even before any design exists. Design dependencies remain read-only and both management parts retain user-approved commits. Implementation access starts empty and derives only from accepted assigned designs.
 
-### Still open before implementation
+### Explicitly deferred
 
-- Validation, user acceptance and activation ordering for member bundles: whether submit_member_config remains a validation/review operation or is replaced, when acceptance activates settings, and which failures preserve the previous accepted state. A Git checkpoint/commit alone must not be assumed to activate a member until this is designed.
-- Backend association of an editable bundle with member identity and its editing base, including creation, stale drafts, protected lead/self changes, busy targets and retirement. The agent should not reproduce version/revision bookkeeping.
-- Which accepted design store/snapshot supplies mappings, how accepted harness design commits become visible to that resolver, and when changed mappings apply to already-running members or existing worktrees. The current implementation defers catalog/peer integration; deriving from accepted mappings must resolve that gap explicitly.
+Member-configuration change and activation handling is deferred to a later design/development step. This includes change detection, validation/submission-to-activation flow, the future role of submit_member_config, activation timing, busy-target handling and application to already-running members. The next-activation recommendation has not been selected. Committing management files must not silently introduce automatic configuration activation. This deferred integration is not a prerequisite for continuing the harness design.
+
+### Other open details
+
+- Backend association of an editable bundle with member identity and its editing base, including creation and stale drafts. The agent should not reproduce version/revision bookkeeping. Busy-target application belongs to deferred activation handling; protected lead/self changes and retirement still need lifecycle clarification.
+- Which accepted design store/snapshot supplies mappings, how accepted harness design commits become visible to that resolver, and how existing worktrees receive accepted mapping changes. Applying changed configuration/scope to running members is part of the deferred activation work. The current implementation defers catalog/peer integration; deriving from accepted mappings must resolve that gap explicitly.
 - Exact new member manifest and Bash metadata schemas, scope selection defaults, and which Git commands/options are supported. Examples in the drafts illustrate the direction, not a frozen schema.
 - How Bash and descendant Git operations are mediated and how management writes and accepted Git state remain protected. A metadata label, shell alias, PATH wrapper or command-string check alone does not establish that boundary. The concrete enforcement mechanism is not selected.
-- Initialization/bootstrap and migration: the lead must be able to help create the first design; existing explicit implementation assignments, indexes, refs, approvals, accepted source bundles and drafts require deliberate conversion without silently widening authority or losing pending work.
+- Migration: preserve the settled lead bootstrap authority while converting existing explicit implementation assignments, indexes, refs, approvals, accepted source bundles and drafts without silently widening authority or losing pending work.
 
 ## Checkpoints and remaining work
 
@@ -48,11 +52,13 @@ The baseline has fixed project/command bases, explicit implementationScope assig
 | Design resolution | Derive implementation paths from accepted working/dependency mappings; preserve read-only precedence and safe-path validation |
 | Bash and Git execution | One Bash tool with optional scoped Git metadata; trusted context resolution and operation checks; controlled general execution |
 | Scoped history | Persistent independent staging/reference context for ordinary Git; separate automatic checkpoint indexes; preserve exact-byte approval and restore behavior |
-| Member lifecycle | Capture/validate reviewed source bundles and activate only through the agreed approval flow; preserve previous configuration on rejection |
+| Member lifecycle | Configuration-change/activation handling is deferred; preserve the separation between file acceptance and active settings |
 | Runtime and prompts | Assemble harness-provided tools/instructions; remove obsolete tool guidance and agent version/revision requirements |
 | Storage, routes and frontend callers | Reconcile stable metadata, review/acceptance and effective-scope inspection after schemas/activation are settled; preserve read-only member inspection and existing group-chat behavior |
 | Migration and tests | Convert existing accepted/pending state deliberately and replace tests asserting the superseded contract |
 
 Drafts retain the unchanged cooperation and final-response behavior. Implementation is not requested by this persistence step, and no canonical system document or application source is changed. No application test result is claimed. Documentation checks and their starting commit are recorded in [tests.jsonl](tests.jsonl). The unrelated untracked .claude/ directory is preserved.
 
-The documentation-only checkpoint saves six draft contracts/plans and this change checklist. Verification passed for all seven Markdown documents: required sections, proposal markers, local links and whitespace. Canonical/application files match the task's starting commit. Implementation remains pending the open decisions above.
+The documentation-only checkpoint saves six draft contracts/plans and this change checklist. Verification passed for all seven Markdown documents: required sections, proposal markers, local links and whitespace. Canonical/application files match the task's starting commit. Implementation has not started. The lead bootstrap recommendation is selected; configuration-change/activation handling is explicitly deferred. Other unresolved details remain recorded above.
+
+This follow-up starts at 8787c7931f04acaa7f797691e6ea88424962fa7a and changes proposal documents only.
