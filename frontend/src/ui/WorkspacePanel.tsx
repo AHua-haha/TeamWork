@@ -230,7 +230,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
             onMember={openMember} onImplementation={openImplementation} onDiscuss={path => onDiscuss({ kind: 'design', path })} onContextFile={path => show({ source: 'context', path })} />
         </div>
         <div className="file-tab-panel" hidden={!showTeam}>
-          <TeamTab team={team} workspace={workspace} designs={designs.designs} selected={selectedMember} onSelect={setSelectedMember}
+          <TeamTab team={team} workspace={workspace} designs={designs.designs} designsError={designs.error} designsTruncated={designs.truncated} selected={selectedMember} onSelect={setSelectedMember}
             onDesign={openDesign} onImplementation={openImplementation} onDiscuss={member => onDiscuss({ kind: 'member', memberId: member.memberId, name: member.name })} onBrowse={browse} />
         </div>
         <div className="file-tab-panel" hidden={activeKey !== 'files'}><div className="files-overview"><span className="eyebrow">FILES</span><h2>Workspace files</h2><p>Open an implementation or context file from the tree.</p>

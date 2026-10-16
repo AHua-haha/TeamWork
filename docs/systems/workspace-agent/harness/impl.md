@@ -48,3 +48,7 @@ Prompt-file verification runs existing runtime/context and inspection tests agai
 Member file initialization uses private storage markers per lead/bundle. A marker is created only after initial materialization; paths included in activation are also registered before database changes. Once registered, missing files remain intentional pending deletions across requests/restart. Git rm validates scope/arguments and existing files, preserves a pre-removal checkpoint/index and rolls back files/index on failure. MemberConfigService reads immutable snapshots through readSnapshotBytes and strict UTF-8/text checks. Referenced prompt/manifest files alone determine active member content; unrelated files remain Git history.
 
 The [team implementation](../team/impl.md) owns semantic validation and workspace-idle atomic activation. Harness file commit never activates settings. Management rule Markdown owns the allowed-update list, validation/commit/activation instructions and JSON example; MemberContext adds role/roster/file-location data without duplicating that schema/rule text.
+
+## Member configuration file review support
+
+HarnessHistory supplies bounded immutable file previews, trusted import of database source text into a temporary Git tree, per-file unified patches and committed-chain history since an activation boundary. These operations share private objects and do not modify a member's working files or staged index. Team owns source interpretation, activation baseline persistence and endpoint responses.

@@ -34,8 +34,12 @@ export interface MemberActivation {
   modelsRevision: number;
   create: NewMember[];
   update: StoredMember[];
+  expectedActivation: MemberActivationState | null;
+  activation: MemberActivationState;
 }
+export interface MemberActivationState { revision: string; time: number }
 export interface TeamStore {
+  getMemberActivation(workspaceId: string): Promise<MemberActivationState | null>;
   /** Atomic, workspace-idle, revision-checked member changes; creates import shared history. */
   activateMembers(workspaceId: string, input: MemberActivation): Promise<void>;
   /** All members of a workspace, retired ones too, in the order they were created. */
@@ -146,6 +150,7 @@ export class TeamService {
   }
   async all(workspaceId: string) { await this.workspaces.record(workspaceId); return (await this.store.listMembers(workspaceId)).map(stored); }
   async activate(workspaceId: string, input: MemberActivation) { await this.store.activateMembers(workspaceId, input); }
+  activation(workspaceId: string) { return this.store.getMemberActivation(workspaceId); }
   async settingsIssues(settings: readonly RunSettings[]) { return this.config.issuesFor(settings); }
   models(workspaceId: string) { return this.workspaces.models(workspaceId); }
   defaultSettings(workspaceId: string) { return this.workspaces.defaultSettings(workspaceId); }

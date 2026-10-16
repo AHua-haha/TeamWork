@@ -85,6 +85,17 @@ export class TeamSystem {
   activateConfiguration(workspaceId: string, revision: string, digest: string) {
     return this.runner.idleWorkspace(workspaceId, () => this.configuration.activate(workspaceId, revision, digest));
   }
+  currentConfiguration(workspaceId: string) {
+    return this.runner.workspaceOperation(workspaceId, () => this.configuration.current(workspaceId));
+  }
+  commitConfiguration(workspaceId: string, revision: string, base: string, message: string) {
+    return this.runner.workspaceOperation(workspaceId, async () => {
+      const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);
+      if (!lead) throw new AppError('lead_required', 'Workspace lead is unavailable', 409);
+      if (this.runner.isRunning(lead.id)) throw new AppError('member_busy', 'Wait for the lead before accepting its member files', 409);
+      return this.configuration.commit(workspaceId, revision, base, message);
+    });
+  }
 
   private status(member: MemberView): MemberStatus {
     return { ...member, running: this.runner.isRunning(member.memberId) };

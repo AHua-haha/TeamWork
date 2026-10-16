@@ -91,12 +91,68 @@ No automatic configuration activation, automatic stop/retry, new trigger queue, 
 
 Members finish using ordinary assistant text at natural model completion. Tool calls continue the run; metadata-marked commentary continues privately. Truncated responses fail without publication. Final selection prefers explicitly final text blocks and otherwise uses unphased text at natural completion. The team checkpoints and offers the selected text for atomic group acceptance; refusal appends private feedback and continues. Only accepted finals reach peer context.
 
-## User review and activation API
+## Backend API guidance for member display and configuration review
 
-- GET /workspaces/:workspaceId/team/configuration?source=pending validates/captures pending files; source=committed (the default) reviews the current user-committed member-config snapshot. This operational review can initialize harness storage, unlike ordinary read-only member inspection.
-- Review returns {origin, revision, digest, valid, changes, issues}. Changes are create/update/delete with paths, current member identity where applicable, proposed fields and exact before/after source bundles. Issues identify path, code and reason. A baseline without a user commit cannot activate.
-- The existing harness member-config review/commit endpoint remains the separate user file-acceptance operation. File commit alone may retain invalid file content; activation always revalidates it and refuses invalid configuration.
-- POST /workspaces/:workspaceId/team/configuration/activate with {revision, digest} activates exactly that reviewed committed change set. No actor/approval fields are accepted. Success returns {revision, changes, memberIds}; changes are summaries and memberIds is the resulting active roster. No model run starts.
-- Changed review/active/model/design state returns stale_revision (409); workspace work/admission/finalization returns workspace_busy (409); invalid configuration returns invalid_config (400). Active state remains unchanged on refusal. Old request bodies become stale after changes activate; obtain a fresh review. A valid fresh no-change activation does not advance member revisions.
+The member frontend consumes three API responsibilities: read active member information; inspect current member configuration and its status relative to the last activation; perform separate user commit and activation operations. The following endpoints provide this contract. Existing low-level pending/committed semantic review and generic harness file-review endpoints remain available.
 
-The user must commit before activation. Later pending file edits neither change the committed review nor get consumed by activation. No automatic watcher or agent activation endpoint/tool exists. Frontend activation controls are not added in this backend prototype.
+### Read active member information
+
+Expose the complete currently active member information: identity, role, responsibility, selected model and run settings, supplementary instructions/source files, harness rules and effective capabilities, readiness/issues and activity status. Active configuration comes from the stable activated database snapshot, including exact source bytes and their validated projection. It does not require resolving a Git reference to load the configuration. Git/source references are traceability metadata; later file edits and commits do not modify this active snapshot. Backend-owned IDs, revisions and format metadata remain outside agent-editable member manifests.
+
+### Inspect current configuration and status since activation
+
+Current configuration means the latest editable member files in the lead's member-config scope, including uncommitted edits. It is distinct from the active database snapshot and may contain invalid or incomplete proposals. Inspection provides:
+
+- The current member configuration and referenced supplementary prompt contents, with raw file content and validation issues when a parsed configuration is unavailable.
+- The active baseline needed to show one comparison: active configuration to current configuration.
+- Create/update/delete differences, including referenced prompt-content changes. A missing current member is represented as a proposed deletion; a new bundle is represented as a proposed creation.
+- Member-config commit history since the last activation.
+- Whether uncommitted edits exist relative to the latest member-config commit.
+- Validation results and state/revision identifiers needed to review and operate on exact states safely.
+
+Committed changes awaiting activation and additional pending edits may coexist. Consequently, status is not a mutually exclusive pending/committed label. Commit history describes accepted changes after the activation baseline, while the pending indicator describes additional uncommitted file changes. Pending edits may exist even when no new commit has been made since activation. Commit history and file status can remain meaningful even if current content happens to match active content.
+
+The frontend displays the current configuration, its commit history/pending status and a single active-to-current diff. It does not need separate active-to-committed and committed-to-pending diffs. The backend supplies the comparison and status interpretation; the frontend does not infer these by reading runtime internals or traversing Git history itself.
+
+### User operations
+
+Commit accepts the exact reviewed pending member files into harness Git. It leaves active member configuration unchanged. Activation applies the exact reviewed committed member configuration atomically to the database only while the entire workspace team is idle, including admission and finalization. Uncommitted edits remain pending and are excluded from activation. The single active-to-current inspection diff must not imply that pending content is already committed or will be activated. Operation review identifiers distinguish the reviewed current files from the committed state eligible for activation without requiring a second displayed diff.
+
+Existing lifecycle constraints continue: update changes only execution rules, supplementary prompts and responsibility; delete retires a worker and preserves history/files; the lead cannot be deleted. Validation, commit and activation do not trigger work. Changed reviewed state is refused and requires refreshed review; invalid configuration, stale reviews and busy activation preserve the previous active team.
+
+### Inspection acceptance examples
+
+1. Current files equal the activated configuration and no later commits exist: inspection reports no configuration diff and no pending edits.
+2. One user commit exists after activation and no later edits exist: inspection shows that commit, no pending edits and the active-to-current diff. Active state is unchanged until activation.
+3. Commits A and B exist after activation, followed by additional edits: inspection shows both commits, pending edits and one diff comparing active configuration with the latest files.
+4. A supplementary prompt changes without a manifest change: current inspection includes its content diff and pending status.
+5. Current JSON is malformed: inspection retains readable file content and validation issues; the active configuration remains available and unchanged.
+6. User activates the reviewed committed configuration while pending edits exist: only the committed configuration becomes active. The pending files remain current; subsequent inspection compares them with the new active baseline and reports the remaining pending edits.
+
+The [frontend design](../../frontend/design.md#member-tree-active-details-and-configuration-changes) defines a design-folder member tree, active hover/details and a separate Configuration changes view. Generic file review remains unchanged.
+
+### HTTP inspection and operation contract
+
+- `GET /workspaces/:workspaceId/team` returns the active roster with readiness/activity and derived harness scope.
+- `GET /workspaces/:workspaceId/team/members/:memberId` returns `{member, configuration, harnesses}` with complete active source and effective rules. This read does not materialize worktrees.
+- `GET /workspaces/:workspaceId/team/configuration/current` takes no query parameters and returns the fields below. It may initialize the lead worktree and capture a checkpoint; it does not commit files, change active settings or trigger work.
+- `POST /workspaces/:workspaceId/team/configuration/commit` accepts only `{revision, base, message}` from the returned `commit` object plus user intent. It returns the harness commit result. The lead must be idle. Invalid pending configuration can be accepted as files, but cannot activate until a valid configuration is committed.
+- `POST /workspaces/:workspaceId/team/configuration/activate` accepts only `{revision, digest}` from the returned `activation` object. It returns `{revision, changes, memberIds}` and requires the entire workspace idle.
+
+Current inspection returns:
+
+| Field | Meaning |
+| --- | --- |
+| `workspaceId`, `leadId` | Workspace and editing lead identity |
+| `active: {revision, time}` | Last workspace member-config activation, nullable before tracking exists |
+| `current: {revision, members, files}` | Immutable current file snapshot; parsed valid members contain path, optional existing member ID and validated fields; files contain path, raw content, byte size and optional preview problem |
+| `changes` | Flat active-to-current file differences: path, add/modify/delete action, unified patch and truncation flag |
+| `status: {hasPending, pendingPaths, valid, issues, commits, more, historyKnown}` | Pending relative to latest user commit; current validation; latest commit records after activation and history-boundary availability |
+| `commit: {revision, base}` | Exact current snapshot and latest committed base for file acceptance |
+| `activation: {revision, digest, valid, issues, hasChanges}` | Exact committed snapshot/review, independent committed validation and whether its activation boundary differs |
+
+A validation issue contains path, code and message. Raw previews remain available even when a member cannot be parsed. Text previews are bounded to 1 MiB per file and 4 MiB total; binary/invalid UTF-8/over-limit files have null content and an explicit problem. Each file patch is bounded to 262,144 characters with an explicit truncation flag. Renames appear as deletion/addition. Commit records include revision, tree, kind, actor, message and epoch-millisecond time, newest first; at most 100 are returned and `more` marks additional history. The prototype does not page older inspection history. Generic file history remains separate.
+
+The activation boundary is persisted atomically even when no member fields change. Replaying a successful activation review is stale; refreshing can review the same files against the new boundary. Before the first tracked activation, active source bytes supply the comparison baseline. A legacy team with earlier accepted sources or retirements and no workspace activation marker reports `historyKnown: false`; available history is not claimed to begin at an exact known activation. The next successful activation establishes that boundary. Active runtime loading continues using database source snapshots independently of the Git marker.
+
+A changed pending snapshot or committed base refuses commit with `stale_revision`. Changed activation, active team, models or referenced designs refuse activation with `stale_revision`. Busy commit reports `member_busy`; busy activation reports `workspace_busy`; invalid activation reports `invalid_config`. Errors preserve active state and require refreshed review rather than silently selecting different bytes. Unknown request fields and query parameters are refused.

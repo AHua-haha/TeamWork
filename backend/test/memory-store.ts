@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/context-base.js';
-import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation } from '../src/team.js';
+import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../src/team.js';
 import { randomUUID } from 'node:crypto';
 import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/group-chat.js';
 import type { ContextEntry, RunState } from '../src/types.js';
@@ -21,6 +21,8 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   readonly workspaces = new Map<string, Stored>();
   readonly members = new Map<string, { member: StoredMember; lead: boolean; nameKey: string | null; ordinal: number }>();
   readonly workspaceModels = new Map<string, StoredWorkspaceModels>();
+  readonly memberActivations = new Map<string, MemberActivationState>();
+  async getMemberActivation(workspaceId: string) { return structuredClone(this.memberActivations.get(workspaceId) ?? null); }
   private ordinal = 0;
   failNextCommit = false;
 
@@ -180,6 +182,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   }
 
   async activateMembers(workspaceId: string, input: MemberActivation): Promise<void> {
+    if (JSON.stringify(this.memberActivations.get(workspaceId) ?? null) !== JSON.stringify(input.expectedActivation)) throw new AppError('stale_revision', 'Configuration activation changed', 409);
     const active = (await this.listMembers(workspaceId)).filter(m => m.value.retiredAt === null);
     const expected = new Map(input.expected.map(m => [m.id,m.revision]));
     if (active.length !== expected.size || active.some(m => expected.get(m.id) !== m.revision)) throw new AppError('config_conflict','Team changed',409);
@@ -193,6 +196,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
         await this.updateMember(next.id,old.revision,next.value.retiredAt === null ? next.value.name.toLowerCase() : null,next.value);
       }
       for (const next of input.create) await this.createMember(next);
+      this.memberActivations.set(workspaceId, structuredClone(input.activation));
     } catch (error) {
       this.members.clear(); for (const [k,v] of members) this.members.set(k,v);
       this.agentContexts.clear(); for (const [k,v] of contexts) this.agentContexts.set(k,v);

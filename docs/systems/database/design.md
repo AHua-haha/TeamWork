@@ -126,3 +126,7 @@ New member final publications reference the latest committed assistant message o
 ## Atomic member configuration activation
 
 activateMembers(workspaceId, {expected, modelsRevision, create, update}) applies a validated complete member change set in one transaction. The active ID/revision set and workspace-model revision must match, and no workspace member may have an active run. It inserts new member conversations/shared history, updates stable exact source/settings together and retires deleted members without erasing prior history. Retirements release names for reviewed replacement creation in that transaction. A busy/stale/conflicting/failed batch persists no partial changes. This trusted backend operation does not infer user approval; team coordination supplies user authority, exact committed review and local finalization gating.
+
+## Configuration activation tracking
+
+The store retains the workspace's latest activated member-config revision/time independently of individual member source metadata. It changes atomically with member activation under the workspace lock and participates in stale-review checks, including no-member-change activations. A failed activation preserves both roster and activation marker. Existing member source snapshots remain durable and independently usable for agent execution.

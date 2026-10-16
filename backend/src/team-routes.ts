@@ -13,7 +13,15 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
     if (area === 'configuration') {
       if (extra.length) throw notFound();
-      if (method === 'GET' && memberId === undefined) {
+      if (method === 'GET' && memberId === 'current') {
+        query(url, []);
+        json(response, 200, await team.currentConfiguration(workspaceId));
+      } else if (method === 'POST' && memberId === 'commit') {
+        query(url, []);
+        const input = await body(request, maxBodyBytes); fields(input, ['revision', 'base', 'message']);
+        if (typeof input.revision !== 'string' || typeof input.base !== 'string' || typeof input.message !== 'string') throw new AppError('invalid_input', 'Commit names reviewed revision, committed base and message');
+        json(response, 200, await team.commitConfiguration(workspaceId, input.revision, input.base, input.message));
+      } else if (method === 'GET' && memberId === undefined) {
         query(url, ['source']);
         const origin = url.searchParams.get('source') ?? 'committed';
         if (origin !== 'committed' && origin !== 'pending') throw new AppError('invalid_input', 'source must be pending or committed');

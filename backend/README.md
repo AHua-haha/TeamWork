@@ -79,7 +79,7 @@ curl -s http://127.0.0.1:3000/workspaces -H 'Content-Type: application/json' -d 
 
 Workspace, models and initialized lead persist atomically; invalid model settings create no directory. `GET /workspaces/:id/models` returns `{revision,value,issues}`; `PUT` takes `{revision,value}` and rejects stale writes. **Team → Workspace models** edits this record. Changing the default preserves existing member selections. New members use the workspace default rather than copying the lead, and `list_models` exposes workspace choices to the lead. A file submission can select these models or retain an existing selection removed from the list. Provider validation still applies.
 
-Startup initializes legacy workspace choices once from existing member selections. Saving a default initializes a legacy lead only when it has no assigned provider/model. Member configuration remains read-only through HTTP and in the frontend; inspect the accepted source/prompts and harness policies through **Inspect harness**. Existing file review/history/acceptance APIs retain their behavior.
+Startup initializes legacy workspace choices once from existing member selections. Saving a default initializes a legacy lead only when it has no assigned provider/model. Member inspection remains read-only; inspect accepted source/prompts and harness policies through **Team → Active members**. Separate user commit and activation controls are available in **Configuration changes**. Existing file review/history/acceptance APIs retain their behavior.
 
 ## Workspace group chat, lead and harness prototype
 
@@ -163,7 +163,7 @@ Use scope design or member-config for protected files; agent git commit is refus
 
 Each member has a linked worktree under private .rsi-harness/<workspace-path-hash> storage. Each scope has its own persistent Git index/HEAD while sharing objects. Automatic run-end checkpoints use temporary indexes and preserve staging. Implementation commits accept staged content only. Original checkout/branch/index are untouched. User-accepted design snapshots feed semantic design reads/discovery and permission resolution without copying files into original context or existing peer worktrees. Raw context file/history review remains unchanged.
 
-Backend review/acceptance is available without adding configuration UI. Under `/workspaces/:workspaceId/team/members/:memberId/harness`:
+Generic harness review/acceptance remains available alongside the Team configuration UI. Under `/workspaces/:workspaceId/team/members/:memberId/harness`:
 
 - `GET` returns worktree directory and per-part state, review revision and diff.
 - `GET /:part/history` returns checkpoint/semantic-commit history.
@@ -177,12 +177,15 @@ Workers need a nonempty valid design assignment and empty catalog tool selection
 ### Member configuration activation
 
 1. The lead edits JSON/Markdown and calls `validate_member_config({"path":".team/members"})`.
-2. Review pending semantic changes with `GET /workspaces/:workspaceId/team/configuration?source=pending`; it returns `origin`, `revision`, `digest`, `valid`, `changes` and `issues`.
-3. Use the existing member-config harness review/commit endpoint above as the user. Commit is file acceptance only.
-4. `GET /workspaces/:workspaceId/team/configuration` reviews the **committed** snapshot. Its digest pins the active team, model revision and referenced design state as well as the committed bytes.
-5. `POST /workspaces/:workspaceId/team/configuration/activate` with `{"revision":"<review.revision>","digest":"<review.digest>"}` activates that whole reviewed change set. Response is `{revision, changes, memberIds}`. No agent run starts and uncommitted files remain pending.
+2. `GET /workspaces/:workspaceId/team/configuration/current` inspects the latest files and one active-to-current diff. It returns `active`, `current` (revision, parsed valid members and raw files), flat `changes`, `status` (pending paths, current validation and commit history), and separate `commit` / `activation` review tokens. Reading may seed/checkpoint the lead worktree, without accepting files or changing active members.
+3. `POST /workspaces/:workspaceId/team/configuration/commit` with `{"revision":"<commit.revision>","base":"<commit.base>","message":"Accept member changes"}` accepts exact reviewed files as the user. The lead must be idle; active settings remain unchanged. Refresh inspection after success.
+4. `POST /workspaces/:workspaceId/team/configuration/activate` with `{"revision":"<activation.revision>","digest":"<activation.digest>"}` activates that exact committed configuration. Response is `{revision, changes, memberIds}`. No agent run starts and pending files remain pending.
 
-All workspace members must be idle, including admission and finalization. Busy activation returns `workspace_busy`; changed review/active/model/design state returns `stale_revision`; invalid configuration returns `invalid_config`. Nothing partially activates. Reusing a prior successful request body becomes stale; fetch a fresh review. A fresh no-change activation does not advance member revisions. There is no agent activation tool, auto watcher or automatic retry. Member inspection stays read-only; frontend activation controls are not added in this backend prototype.
+The whole workspace must be idle for activation, including admission and finalization. Busy activation returns `workspace_busy`; changed review/active/model/design state returns `stale_revision`; invalid configuration returns `invalid_config`. Nothing partially activates. Reusing a successful activation body becomes stale; fetch fresh inspection. A fresh no-change activation updates the history boundary without advancing member revisions. There is no agent activation tool, auto watcher or automatic retry. **Team → Configuration changes** provides these separate user actions; avatar details stay active-only.
+
+Inspection's active revision/time is recorded atomically with activation. Earlier backend versions did not record a workspace-wide activation boundary; those teams compare active database source bytes with current files and label available history with `historyKnown:false` until the next activation. Runtime configuration still loads from exact database snapshots independently of Git references. Commit history is newest first, up to 100 records (`more` marks older history). Raw text preview limits are 1 MiB/file and 4 MiB total; unreadable/over-limit files return an explicit problem. Patches are capped at 262,144 characters/file with `truncated:true` when needed. Renames appear as add/delete.
+
+The low-level `GET /workspaces/:workspaceId/team/configuration?source=pending|committed` semantic review and generic member-config harness commit endpoint remain available. The current inspection endpoint supplies both operation tokens so the frontend needs one displayed diff and separate pending/committed validation states.
 
 Creation selects workspace models/defaults and valid accepted designs. Update is limited to responsibility, referenced supplementary prompts and execute rules. Reassignment/name/role/model changes require an explicit replacement proposal in a fresh bundle. Retired bundle paths cannot be reused. JSON version/identity/revision fields are invalid; backend source envelopes own formatVersion and acceptedRevision. Relevant files must be UTF-8 text; missing referenced prompts invalidate the batch. Startup migrates old accepted sources with their previous exact bytes retained; existing drafts need explicit schema reconciliation, including execute assignment.
 

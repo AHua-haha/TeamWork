@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { AppError, identity } from './types.js';
-import { missing, sha256 } from './text.js';
+import { decodeText, missing, sha256 } from './text.js';
 
 export interface HarnessPart {
   id: string;
@@ -23,6 +23,8 @@ export interface ScopeRevision {
   time: number;
 }
 export interface PartState { part: HarnessPart; checkpoint: string; committed: string; base: string }
+export interface SnapshotFile { path: string; content: string | null; problem: string | null; size: number }
+export interface SnapshotDiff { path: string; action: 'add' | 'modify' | 'delete'; patch: string; truncated: boolean }
 interface Entry { path: string; mode: string; object: string }
 export const coversPath = (scope: string, path: string): boolean => scope === '.' || path.toLowerCase() === scope.toLowerCase() || path.toLowerCase().startsWith(scope.toLowerCase() + '/');
 const objectId = (value: string) => /^[a-f0-9]{40,64}$/.test(value);
@@ -521,6 +523,40 @@ export class HarnessHistory {
   }
 
   async paths(revision: string): Promise<string[]> { return (await this.entries(revision)).map(entry => entry.path); }
+  /** Trusted source snapshots can be compared without touching worktrees or staged indexes. */
+  async textSnapshot(files: Record<string, string>): Promise<string> {
+    const entries: Entry[] = [];
+    for (const [path, content] of Object.entries(files)) {
+      safePath(path);
+      entries.push({ path, mode: '100644', object: await this.text(['hash-object', '-w', '--stdin'], content) });
+    }
+    return this.tree(entries);
+  }
+  async snapshotFiles(revision: string): Promise<SnapshotFile[]> {
+    const result: SnapshotFile[] = []; let budget = 4 * 1024 * 1024;
+    for (const entry of await this.entries(revision)) {
+      const bytes = await this.git(['cat-file', 'blob', entry.object]);
+      const text = bytes.length <= 1024 * 1024 && bytes.length <= budget ? decodeText(bytes) : null;
+      if (text !== null) budget -= bytes.length;
+      result.push({ path: entry.path, content: text, size: bytes.length, problem: text !== null ? null : bytes.length > 1024 * 1024 || bytes.length > budget ? 'Text preview size limit exceeded' : 'Binary or invalid UTF-8 file' });
+    }
+    return result;
+  }
+  async compareSnapshots(before: string, after: string): Promise<SnapshotDiff[]> {
+    const fields = (await this.git(['diff', '--no-renames', '--name-status', '-z', before, after, '--'])).toString('utf8').split('\0');
+    const result: SnapshotDiff[] = [];
+    for (let i = 0; i + 1 < fields.length; i += 2) {
+      const path = fields[i + 1]!; safePath(path);
+      const patch = (await this.git(['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=3', before, after, '--', `:(literal)${path}`])).toString('utf8');
+      result.push({ path, action: fields[i] === 'A' ? 'add' : fields[i] === 'D' ? 'delete' : 'modify', patch: patch.slice(0, 256 * 1024), truncated: patch.length > 256 * 1024 });
+    }
+    return result;
+  }
+  async committedSince(committed: string, baseline: string | null) {
+    const ids = (await this.text(['rev-list', '--first-parent', '--max-count=101', committed, ...(baseline ? [`^${baseline}`] : [])])).split('\n').filter(Boolean);
+    const records = await Promise.all(ids.slice(0, 100).map(id => this.revision(id)));
+    return { commits: records.filter(record => record.kind === 'commit'), more: ids.length > 100 };
+  }
   async readSnapshotBytes(revision: string, path: string): Promise<Buffer | null> {
     safePath(path);
     const entry = (await this.entries(revision)).find(entry => entry.path === path);

@@ -18,6 +18,9 @@ const paths = {
   tree: 'M5 4v13.5h5M5 9.5h5M13 7h7M13 12.5h7M13 18h7',
   eye: 'M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12ZM12 9.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Z',
   code: 'M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5',
+  folder: 'M3 6h6l2 2h10v12H3V6Z',
+  file: 'M5 3h9l5 5v13H5V3Zm9 0v6h5',
+  commit: 'M3 12h5m8 0h5M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
 } as const;
 
 export type GlyphName = keyof typeof paths;

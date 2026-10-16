@@ -146,3 +146,16 @@ test('configuration review and separate user activation enforce exact input and 
   assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,'Validated update');
   assert.equal((await call(base+'/activate',{method:'POST',data:input,status:409})).error.code,'stale_revision');
 }));
+
+test('current configuration endpoint supplies file diff and separate commit/activation operations', () => withServer(async (call, f) => {
+  const base = `/workspaces/${f.workspaceId}/team/configuration`;
+  const current = await call(base + '/current');
+  assert.ok(current.current.files.length); assert.equal(current.status.hasPending, true);
+  assert.equal(current.activation.valid, false, 'baseline is not user acceptance');
+  await call(base+'/commit',{method:'POST',data:{...current.commit,message:'User accepts initial files',actor:'user'},status:400});
+  await call(base+'/commit',{method:'POST',data:{...current.commit,message:'User accepts initial files'}});
+  const accepted = await call(base+'/current'); assert.equal(accepted.status.hasPending,false); assert.equal(accepted.activation.valid,true);
+  await call(base+'/activate',{method:'POST',data:{revision:accepted.activation.revision,digest:accepted.activation.digest}});
+  const active = await call(base+'/current'); assert.equal(active.status.commits.length,0); assert.deepEqual(active.changes,[]);
+  await call(base+'/current?source=pending',{status:400});
+}));

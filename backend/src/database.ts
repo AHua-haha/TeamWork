@@ -4,7 +4,7 @@ import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDa
 import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, validateEvent, validateRun } from './codec.js';
 import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from './context-base.js';
-import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation } from './team.js';
+import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from './team.js';
 import { defaultRunSettings, workspaceModels, type WorkspaceModels, type StoredWorkspaceModels } from './workspace-models.js';
 import { generatedSource } from './member-config-format.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
@@ -160,6 +160,12 @@ const schema = [
     UNIQUE KEY members_lead (workspace_id, is_lead),
     UNIQUE KEY members_name (workspace_id, name_key),
     FOREIGN KEY (id) REFERENCES agents(id),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS member_activation (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    revision VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    time BIGINT UNSIGNED NOT NULL,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS chat_settings (
@@ -818,9 +824,15 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     return { id: member.id, workspaceId: member.workspaceId, revision: 0, value: decode<MemberRecord>(data, () => undefined) };
   }
 
+  async getMemberActivation(workspaceId: string): Promise<MemberActivationState | null> {
+    const [row] = await rows(this.pool, 'SELECT revision, time FROM member_activation WHERE workspace_id = ?', [workspaceId]);
+    return row ? { revision: String(row.revision), time: Number(row.time) } : null;
+  }
   async activateMembers(workspaceId: string, input: MemberActivation): Promise<void> {
     await this.transaction(async db => {
       if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      const [activation] = await rows(db, 'SELECT revision, time FROM member_activation WHERE workspace_id = ? FOR UPDATE', [workspaceId]);
+      if ((activation?.revision ?? null) !== (input.expectedActivation?.revision ?? null) || (activation ? Number(activation.time) : null) !== (input.expectedActivation?.time ?? null)) throw new AppError('stale_revision', 'Configuration activation changed after review', 409);
       const current = (await rows(db, 'SELECT id, workspace_id, revision, data FROM members WHERE workspace_id = ? ORDER BY ordinal FOR UPDATE', [workspaceId])).map(memberRow);
       const active = current.filter(m => m.value.retiredAt === null);
       const expected = new Map(input.expected.map(m => [m.id, m.revision]));
@@ -843,6 +855,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
         if (member.workspaceId !== workspaceId || member.value.workspaceId !== workspaceId || member.lead || member.value.lead || member.value.retiredAt !== null) throw new AppError('invalid_config', 'Invalid member creation');
         await this.insertMember(db, member);
       }
+      await db.execute('INSERT INTO member_activation (workspace_id, revision, time) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE revision = VALUES(revision), time = VALUES(time)', [workspaceId, input.activation.revision, input.activation.time]);
     });
   }
 

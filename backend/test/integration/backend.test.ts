@@ -1601,6 +1601,11 @@ test('member file activation atomically replaces/updates the team, retains histo
     await files.write.writeFile(pathJoin(files.root, '.team/members/replacement/prompts/member.md'), 'Pending after commit');
     await f.team.activateConfiguration(f.workspaceId, review.revision, review.digest);
     const replacement = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
+    const marker = await store.getMemberActivation(f.workspaceId);
+    assert.equal(marker!.revision, review.revision);
+    const reopenedStore = new MySqlStore(databaseUrl!);
+    try { assert.deepEqual(await reopenedStore.getMemberActivation(f.workspaceId), marker); }
+    finally { await reopenedStore.close(); }
     assert.notEqual(replacement.id, f.backend.memberId); assert.equal(replacement.value.settings.prompt, 'Accepted prompt');
     assert.equal((await f.team.member(f.workspaceId, f.frontend.memberId)).responsibility, 'Updated atomically');
     assert.ok((await store.getMember(f.backend.memberId))!.value.retiredAt !== null);
@@ -1621,12 +1626,13 @@ test('member activation store rejects busy/stale state and rolls back earlier me
     const expected = active.map(m => ({id:m.id,revision:m.revision}));
     const update = { ...before!,revision:before!.revision+1,value:{...before!.value,responsibility:'Must roll back'} };
     const duplicate = { id:randomUUID(),workspaceId:f.workspaceId,lead:false,nameKey:'frontend',value:{...before!.value,lead:false} };
-    await assert.rejects(store.activateMembers(f.workspaceId,{expected,modelsRevision,create:[duplicate],update:[update]}),code('member_exists'));
+    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:null,activation:{revision:'test',time:0},expected,modelsRevision,create:[duplicate],update:[update]}),code('member_exists'));
+    assert.equal(await store.getMemberActivation(f.workspaceId), null, 'activation marker rolls back with roster changes');
     assert.deepEqual(await store.getMember(f.frontend.memberId),before);
-    await assert.rejects(store.activateMembers(f.workspaceId,{expected:[],modelsRevision,create:[],update:[]}),code('config_conflict'));
+    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:null,activation:{revision:'test',time:0},expected:[],modelsRevision,create:[],update:[]}),code('config_conflict'));
     const accepted = await f.team.runner.postUser(f.workspaceId,'@Backend work');
     const response = await f.requests.next();
-    await assert.rejects(store.activateMembers(f.workspaceId,{expected,modelsRevision,create:[],update:[update]}),code('workspace_busy'));
+    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:null,activation:{revision:'test',time:0},expected,modelsRevision,create:[],update:[update]}),code('workspace_busy'));
     assert.deepEqual(await store.getMember(f.frontend.memberId),before);
     answer(response.events,message('Done.')); await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
   } finally { await f.close(); }
