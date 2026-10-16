@@ -11,6 +11,21 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     identity(workspaceId, 'workspaceId');
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
+    if (area === 'configuration') {
+      if (extra.length) throw notFound();
+      if (method === 'GET' && memberId === undefined) {
+        query(url, ['source']);
+        const origin = url.searchParams.get('source') ?? 'committed';
+        if (origin !== 'committed' && origin !== 'pending') throw new AppError('invalid_input', 'source must be pending or committed');
+        json(response, 200, await team.reviewConfiguration(workspaceId, origin));
+      } else if (method === 'POST' && memberId === 'activate') {
+        query(url, []);
+        const input = await body(request, maxBodyBytes); fields(input, ['revision', 'digest']);
+        if (typeof input.revision !== 'string' || typeof input.digest !== 'string') throw new AppError('invalid_input', 'Name the exact reviewed committed revision and digest');
+        json(response, 200, await team.activateConfiguration(workspaceId, input.revision, input.digest));
+      } else throw notFound();
+      return;
+    }
     if (area === 'members' && memberId && extra[0] === 'harness') {
       identity(memberId, 'memberId');
       await team.member(workspaceId, memberId);
@@ -32,9 +47,12 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
       fields(input, action === 'commit' ? ['revision', 'base', 'message'] : ['revision']);
       if (typeof input.revision !== 'string' || (action === 'commit' && (typeof input.base !== 'string' || typeof input.message !== 'string'))) throw new AppError('invalid_input', 'Name the exact reviewed revision, committed base and commit intent');
       const actor = { type: 'user' as const, memberId };
-      const result = action === 'commit'
-        ? await team.harness.commit(memberId, partId, input.message as string, actor, input.revision, input.base as string)
-        : await team.harness.restore(memberId, partId, input.revision, actor);
+      const result = await team.runner.workspaceOperation(workspaceId, () => {
+        if (team.runner.isRunning(memberId)) throw new AppError('member_busy', 'Wait for this member to finish before accepting or restoring its work', 409);
+        return action === 'commit'
+          ? team.harness.commit(memberId, partId, input.message as string, actor, input.revision as string, input.base as string)
+          : team.harness.restore(memberId, partId, input.revision as string, actor);
+      });
       json(response, 200, result);
       return;
     }

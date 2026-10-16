@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/context-base.js';
-import type { MemberRecord, NewMember, StoredMember, TeamStore } from '../src/team.js';
+import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation } from '../src/team.js';
 import { randomUUID } from 'node:crypto';
 import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/group-chat.js';
 import type { ContextEntry, RunState } from '../src/types.js';
@@ -177,6 +177,28 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   async getMember(memberId: string): Promise<StoredMember | null> {
     const item = this.members.get(memberId);
     return item ? structuredClone(item.member) : null;
+  }
+
+  async activateMembers(workspaceId: string, input: MemberActivation): Promise<void> {
+    const active = (await this.listMembers(workspaceId)).filter(m => m.value.retiredAt === null);
+    const expected = new Map(input.expected.map(m => [m.id,m.revision]));
+    if (active.length !== expected.size || active.some(m => expected.get(m.id) !== m.revision)) throw new AppError('config_conflict','Team changed',409);
+    if (this.workspaceModels.get(workspaceId)?.revision !== input.modelsRevision) throw new AppError('config_conflict','Workspace models changed',409);
+    if ([...this.chatRuns.values()].some(({run}) => run.status === 'running' && active.some(m => m.id === run.agentId))) throw new AppError('workspace_busy','Workspace busy',409);
+    const members = structuredClone(this.members), contexts = structuredClone(this.agentContexts), delivery = structuredClone(this.delivery), ordinal = this.ordinal;
+    try {
+      for (const next of input.update.slice().sort((a,b) => Number(b.value.retiredAt !== null)-Number(a.value.retiredAt !== null))) {
+        const old = active.find(m => m.id === next.id);
+        if (!old || next.revision !== old.revision+1 || old.value.lead !== next.value.lead || (old.value.lead && next.value.retiredAt !== null)) throw new AppError('config_conflict','Invalid member activation',409);
+        await this.updateMember(next.id,old.revision,next.value.retiredAt === null ? next.value.name.toLowerCase() : null,next.value);
+      }
+      for (const next of input.create) await this.createMember(next);
+    } catch (error) {
+      this.members.clear(); for (const [k,v] of members) this.members.set(k,v);
+      this.agentContexts.clear(); for (const [k,v] of contexts) this.agentContexts.set(k,v);
+      this.delivery.clear(); for (const [k,v] of delivery) this.delivery.set(k,v);
+      this.ordinal=ordinal; throw error;
+    }
   }
 
   async createMember(input: NewMember): Promise<StoredMember> {

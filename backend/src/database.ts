@@ -4,7 +4,7 @@ import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDa
 import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, validateEvent, validateRun } from './codec.js';
 import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from './context-base.js';
-import type { MemberRecord, NewMember, StoredMember, TeamStore } from './team.js';
+import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation } from './team.js';
 import { defaultRunSettings, workspaceModels, type WorkspaceModels, type StoredWorkspaceModels } from './workspace-models.js';
 import { generatedSource } from './member-config-format.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
@@ -816,6 +816,34 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     }
     await this.drainChat(db, await this.agent(db, member.id, true));
     return { id: member.id, workspaceId: member.workspaceId, revision: 0, value: decode<MemberRecord>(data, () => undefined) };
+  }
+
+  async activateMembers(workspaceId: string, input: MemberActivation): Promise<void> {
+    await this.transaction(async db => {
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      const current = (await rows(db, 'SELECT id, workspace_id, revision, data FROM members WHERE workspace_id = ? ORDER BY ordinal FOR UPDATE', [workspaceId])).map(memberRow);
+      const active = current.filter(m => m.value.retiredAt === null);
+      const expected = new Map(input.expected.map(m => [m.id, m.revision]));
+      if (active.length !== expected.size || active.some(m => expected.get(m.id) !== m.revision)) throw new AppError('config_conflict', 'Team changed after review; review again', 409);
+      const [models] = await rows(db, 'SELECT revision FROM workspace_models WHERE workspace_id = ?', [workspaceId]);
+      if (!models || Number(models.revision) !== input.modelsRevision) throw new AppError('config_conflict', 'Workspace models changed after review', 409);
+      for (const member of active.slice().sort((a,b) => a.id.localeCompare(b.id))) if ((await this.agent(db, member.id, true)).active_run_id) throw new AppError('workspace_busy', 'All workspace members must be idle', 409);
+      // Retire first so a replacement may reuse its name within the same transaction.
+      for (const next of input.update.slice().sort((a,b) => Number(b.value.retiredAt !== null)-Number(a.value.retiredAt !== null))) {
+        const old = active.find(m => m.id === next.id);
+        if (!old || next.workspaceId !== workspaceId || next.value.workspaceId !== workspaceId || next.revision !== old.revision + 1 || old.value.lead !== next.value.lead || (old.value.lead && next.value.retiredAt !== null)) throw new AppError('config_conflict', 'Invalid member activation', 409);
+        try { await db.execute('UPDATE members SET data = ?, name_key = ?, revision = ? WHERE id = ?', [encode(next.value), next.value.retiredAt === null ? next.value.name.toLowerCase() : null, next.revision, next.id]); }
+        catch (error) { throw memberConflict(error); }
+        if (next.value.retiredAt !== null) {
+          const [chat] = await rows(db, 'SELECT position FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+          await db.execute('INSERT INTO chat_delivery (member_id, position, end_position) VALUES (?, 0, ?) ON DUPLICATE KEY UPDATE end_position = VALUES(end_position)', [next.id, chat?.position ?? 0]);
+        }
+      }
+      for (const member of input.create) {
+        if (member.workspaceId !== workspaceId || member.value.workspaceId !== workspaceId || member.lead || member.value.lead || member.value.retiredAt !== null) throw new AppError('invalid_config', 'Invalid member creation');
+        await this.insertMember(db, member);
+      }
+    });
   }
 
   async createMember(member: NewMember): Promise<StoredMember> {

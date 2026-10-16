@@ -1573,3 +1573,61 @@ test('old prototype group history imports once in publication order using the ol
     assert.deepEqual((await store.chatSnapshot(f.workspaceId)).messages.map(message => message.text), history.messages.map(message => message.text));
   } finally { await f.close(); }
 });
+
+test('member file activation atomically replaces/updates the team, retains history and leaves pending bytes inactive', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend establish history');
+    answer((await f.requests.next()).events, message('Established shared history.'));
+    await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId);
+    for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve));
+    const oldContext = await store.getContext(f.backend.memberId);
+    await f.team.configuration.materialize(f.lead.memberId);
+    const files = await f.team.harness.files(f.lead.memberId);
+    const backendSource = await f.team.configuration.accepted(f.workspaceId, f.backend.memberId);
+    const frontendSource = await f.team.configuration.accepted(f.workspaceId, f.frontend.memberId);
+    const { dirname, join: pathJoin } = await import('node:path');
+    await rm(pathJoin(files.root, backendSource.path));
+    await files.write.writeFile(pathJoin(files.root, frontendSource.path), JSON.stringify({ ...JSON.parse(frontendSource.files['member.json']!), responsibility: 'Updated atomically' }));
+    await files.write.mkdir(pathJoin(files.root, '.team/members/replacement/prompts'));
+    const manifest = { name:'Backend',role:'developer',responsibility:'Replacement',settings:{},promptFiles:['prompts/member.md'],designScope:{working:['user/design.json'],dependencies:[]},execute:{allowedCommands:[]} };
+    await files.write.writeFile(pathJoin(files.root, '.team/members/replacement/member.json'), JSON.stringify(manifest));
+    await files.write.writeFile(pathJoin(files.root, '.team/members/replacement/prompts/member.md'), 'Accepted prompt');
+    const pending = await f.team.configuration.validate(f.lead.memberId, '.team/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
+    const part = (await f.team.harness.inspect(f.lead.memberId)).parts.find(p => p.state.part.id === 'member-config')!;
+    await f.team.harness.commit(f.lead.memberId, 'member-config', 'User accepts team replacement', {type:'user',memberId:f.lead.memberId}, part.revision, part.state.committed);
+    const review = await f.team.reviewConfiguration(f.workspaceId);
+    assert.deepEqual(review.changes.map(c => c.type).sort(), ['create','delete','update']);
+    await files.write.writeFile(pathJoin(files.root, '.team/members/replacement/prompts/member.md'), 'Pending after commit');
+    await f.team.activateConfiguration(f.workspaceId, review.revision, review.digest);
+    const replacement = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
+    assert.notEqual(replacement.id, f.backend.memberId); assert.equal(replacement.value.settings.prompt, 'Accepted prompt');
+    assert.equal((await f.team.member(f.workspaceId, f.frontend.memberId)).responsibility, 'Updated atomically');
+    assert.ok((await store.getMember(f.backend.memberId))!.value.retiredAt !== null);
+    assert.deepEqual(await store.getContext(f.backend.memberId), oldContext);
+    assert.equal((await store.getContext(replacement.id)).entries.length, (await f.team.runner.snapshot(f.workspaceId)).messages.length);
+    assert.equal((await f.team.runner.snapshot(f.workspaceId)).runs.length, 1, 'activation starts no runs');
+    const reopened = new TeamSystem(store, workspaces, config); reopened.attach(f.runtime);
+    try { assert.equal((await reopened.configuration.accepted(f.workspaceId, replacement.id)).acceptedRevision, review.revision); }
+    finally { await reopened.runner.close(); }
+  } finally { await f.close(); }
+});
+
+test('member activation store rejects busy/stale state and rolls back earlier member updates on insertion failure', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    const active = await f.team.service.active(f.workspaceId), before = await store.getMember(f.frontend.memberId);
+    const modelsRevision = (await f.team.service.models(f.workspaceId)).revision;
+    const expected = active.map(m => ({id:m.id,revision:m.revision}));
+    const update = { ...before!,revision:before!.revision+1,value:{...before!.value,responsibility:'Must roll back'} };
+    const duplicate = { id:randomUUID(),workspaceId:f.workspaceId,lead:false,nameKey:'frontend',value:{...before!.value,lead:false} };
+    await assert.rejects(store.activateMembers(f.workspaceId,{expected,modelsRevision,create:[duplicate],update:[update]}),code('member_exists'));
+    assert.deepEqual(await store.getMember(f.frontend.memberId),before);
+    await assert.rejects(store.activateMembers(f.workspaceId,{expected:[],modelsRevision,create:[],update:[]}),code('config_conflict'));
+    const accepted = await f.team.runner.postUser(f.workspaceId,'@Backend work');
+    const response = await f.requests.next();
+    await assert.rejects(store.activateMembers(f.workspaceId,{expected,modelsRevision,create:[],update:[update]}),code('workspace_busy'));
+    assert.deepEqual(await store.getMember(f.frontend.memberId),before);
+    answer(response.events,message('Done.')); await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
+  } finally { await f.close(); }
+});

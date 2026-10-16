@@ -12,9 +12,9 @@ test('accepted bundle contains meaningful JSON and Markdown; identity, revisions
   const member = await worker(f, 'Backend', ['src']);
   const source = await f.team.configuration.accepted(f.workspaceId, member.memberId);
   const manifest = JSON.parse(source.files['member.json']!);
-  assert.deepEqual(Object.keys(manifest).sort(), ['designScope', 'name', 'promptFiles', 'responsibility', 'role', 'settings']);
+  assert.deepEqual(Object.keys(manifest).sort(), ['designScope', 'execute', 'name', 'promptFiles', 'responsibility', 'role', 'settings']);
   assert.deepEqual(manifest.designScope, member.harness.designScope);
-  assert.equal(source.formatVersion, 3);
+  assert.equal(source.formatVersion, 4);
   assert.equal(manifest.settings.prompt, undefined);
   assert.equal(manifest.implementationScope, undefined);
   await f.team.configuration.materialize(f.lead.memberId);
@@ -41,15 +41,16 @@ test('invalid pending JSON and prompts never replace stable configuration, inclu
   finally { await reopened.runner.close(); }
 }));
 
-test('materialization restores missing accepted content without rewriting an existing draft or inventing metadata', () => withTeam(async f => {
+test('materialization preserves intentional deletions after seeding rather than inventing metadata', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']);
   const source = await f.team.configuration.accepted(f.workspaceId, member.memberId);
   await f.team.configuration.materialize(f.lead.memberId);
   const files = await f.team.harness.files(f.lead.memberId);
   await rm(join(files.root, dirname(source.path)), { recursive: true });
   await f.team.configuration.materialize(f.lead.memberId);
-  assert.equal(await readFile(join(files.root, source.path), 'utf8'), source.files['member.json']);
-  assert.equal(JSON.parse(await readFile(join(files.root, source.path), 'utf8')).revision, undefined);
+  await assert.rejects(readFile(join(files.root, source.path), 'utf8'), code('ENOENT'));
+  const plan = await f.team.configuration.validate(f.lead.memberId, '.team/members');
+  assert.ok(plan.changes.some(change => change.type === 'delete' && change.memberId === member.memberId));
 }));
 
 test('legacy accepted bundles migrate once, preserve exact old bytes, prompts, pending drafts and historical records', () => withTeam(async f => {
@@ -72,7 +73,7 @@ test('legacy accepted bundles migrate once, preserve exact old bytes, prompts, p
   const source = await f.team.configuration.accepted(f.workspaceId, member.memberId);
   assert.equal(migrated.revision, before.revision + 1);
   assert.deepEqual(migrated.value.settings, before.value.settings);
-  assert.equal(source.formatVersion, 3); assert.deepEqual(source.previous, oldSource);
+  assert.equal(source.formatVersion, 4); assert.deepEqual(source.previous, oldSource);
   const manifest = JSON.parse(source.files['member.json']!);
   assert.equal(manifest.version, undefined); assert.equal(manifest.memberId, undefined); assert.equal(manifest.revision, undefined);
   assert.deepEqual(manifest.designScope, member.harness.designScope);
@@ -94,4 +95,20 @@ test('runtime admission still rejects an actual concurrent backend configuration
   await assert.rejects(f.team.runner.postUser(f.workspaceId, '@Backend start'), code('config_conflict'));
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).messages.length, 0);
   assert.equal(f.runtime.runs.length, 0);
+}));
+
+test('version-three sources gain execute assignment from backend policy once without rewriting existing drafts', () => withTeam(async f => {
+  const member = await worker(f, 'Backend', ['src']);
+  const stored = f.store.members.get(member.memberId)!.member;
+  const { execute: _execute, ...manifest } = JSON.parse(stored.value.configuration!.files['member.json']!);
+  stored.value.harness.allowedCommands = [{kind:'executable',executable:'bash'}];
+  const old = { ...sourceBundle(stored.value.configuration!.path,{...stored.value.configuration!.files,'member.json':JSON.stringify(manifest)},'user'),formatVersion:3 };
+  stored.value.configuration = old;
+  await f.team.configuration.materialize(f.lead.memberId);
+  const files = await f.team.harness.files(f.lead.memberId);
+  await f.team.initialize();
+  const migrated = await f.team.configuration.accepted(f.workspaceId,member.memberId);
+  assert.deepEqual(JSON.parse(migrated.files['member.json']!).execute,{allowedCommands:[{kind:'executable',executable:'bash'}]});
+  assert.deepEqual(migrated.previous,old);
+  assert.equal(await readFile(join(files.root,old.path),'utf8'),old.files['member.json']);
 }));

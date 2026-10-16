@@ -29,7 +29,7 @@ test('member requests get team rules and only their harness design and implement
 }));
 test('the lead receives design maintenance, choices and management tools with shared assignment instructions', () => withTeam(async fixture => {
   const request = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
-  assert.deepEqual(names(request).sort(), ['bash', 'edit', 'list_models', 'ls', 'read', 'write']);
+  assert.deepEqual(names(request).sort(), ['bash', 'edit', 'list_models', 'ls', 'read', 'validate_member_config', 'write']);
   assert.match(request.context.systemPrompt!, /offer concrete choices with their tradeoffs and your recommendation/);
   assert.match(request.context.systemPrompt!, /wait for the user's answer/);
   assert.match(request.context.systemPrompt!, /Assign work in your final group response/);

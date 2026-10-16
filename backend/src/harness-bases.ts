@@ -12,7 +12,7 @@ export function purposeHarnesses(member: StoredMember, implementation: Implement
     {
       id: 'management',
       prompt: harnessPrompt('management'),
-      tools: [...files, 'bash', ...(member.value.lead ? ['list_models'] : [])],
+      tools: [...files, 'bash', ...(member.value.lead ? ['list_models', 'validate_member_config'] : [])],
       parts: [
         ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: config.designScope.dependencies.map(path => `.context/${path}`), commit: 'user' as const, prompt: harnessPrompt('management-design') }] : []),
         ...(member.value.lead ? [{ id: 'member-config', paths: ['.team/members'], exclude: [], commit: 'user' as const, prompt: harnessPrompt('management-members') }] : []),

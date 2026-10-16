@@ -123,3 +123,26 @@ test('harness review and user commit endpoints pin the reviewed revision and enf
   assert.ok((await call(endpoint + '/design/history')).history.some((r: Body) => r.revision === accepted.revision));
   await call(`/workspaces/missing/team/members/${member.memberId}/harness`, { status: 404 });
 }));
+
+test('configuration review and separate user activation enforce exact input and whole-workspace idle state', () => withServer(async (call, f) => {
+  const member = await worker(f, 'Backend', ['src']);
+  await f.team.configuration.materialize(f.lead.memberId);
+  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId), files = await f.team.harness.files(f.lead.memberId);
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(join(files.root, source.path), JSON.stringify({ ...JSON.parse(source.files['member.json']!), responsibility: 'Validated update' }));
+  const base = `/workspaces/${f.workspaceId}/team/configuration`;
+  const pending = await call(base + '?source=pending'); assert.equal(pending.valid, true); assert.equal(pending.changes[0].type, 'update');
+  await call(base + '?source=bad', {status:400});
+  const review = (await call(`/workspaces/${f.workspaceId}/team/members/${f.lead.memberId}/harness`)).parts.find((p:Body) => p.state.part.id === 'member-config');
+  await call(`/workspaces/${f.workspaceId}/team/members/${f.lead.memberId}/harness/member-config/commit`, {method:'POST',data:{revision:review.revision,base:review.state.committed,message:'Accept config'}});
+  assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,member.responsibility);
+  const accepted = await call(base), input = { revision:accepted.revision,digest:accepted.digest };
+  await call(base+'/activate',{method:'POST',data:{...input,actor:'user'},status:400});
+  await f.team.runner.postUser(f.workspaceId,'@Backend work');
+  assert.equal((await call(base+'/activate',{method:'POST',data:input,status:409})).error.code,'workspace_busy');
+  f.runtime.end(member.memberId);
+  const { settle } = await import('./team-fixture.js'); await settle();
+  const activated = await call(base+'/activate',{method:'POST',data:input}); assert.ok(activated.memberIds.includes(member.memberId));
+  assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,'Validated update');
+  assert.equal((await call(base+'/activate',{method:'POST',data:input,status:409})).error.code,'stale_revision');
+}));

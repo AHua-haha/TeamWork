@@ -130,3 +130,5 @@ MemberInspector requests the accepted member/configuration/harnesses projection 
 ## Unified streaming and model completion
 
 Workspace group chat follows each active run from stored history/chunks and displays text plus collapsible tool sets in order, with thinking hidden. After accepted final identity arrives, it folds earlier work once and keeps the complete final report visible in the reserved section. Tool-only responses extend consecutive tool sets; visible text separates them. The child group-chat design owns presentation details.
+
+Member configuration activation now has a separate backend user-control API. This UI keeps read-only active inspection and existing file review; it does not call that activation API or add a button. Active source may include execute assignment and backend acceptedRevision metadata. Source-file display is generic; effective tools/commands continue to come from backend inspection. Generic working tool cards can display validate_member_config without a new frontend execution path.

@@ -1,3 +1,4 @@
+import { HarnessQueue } from './harness-history.js';
 import type { AgentRuntime } from './runtime.js';
 import type { TeamService } from './team.js';
 import { Changes } from './changes.js';
@@ -11,7 +12,9 @@ export class TeamRunner {
   private readonly changes = new Changes();
   private readonly active = new Map<string, { runId: string; exchangeId: string; workspaceId: string }>();
   private closed = false;
-  private readonly publications = new Set<Promise<ChatAcceptance>>();
+  private readonly publications = new Set<Promise<unknown>>();
+  private readonly gate = new HarnessQueue();
+  private readonly jobs = new Map<string, string>();
   constructor(private readonly team: TeamService, private readonly store: ChatStore, private readonly runtime: () => RunHost) {}
 
   isRunning(memberId: string): boolean { return this.active.has(memberId); }
@@ -34,15 +37,10 @@ export class TeamRunner {
   }
 
   private publish(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string }) {
-    if (this.closed) return Promise.reject(new AppError('runtime_unavailable', 'Team is shutting down', 503));
-    const operation = this.acceptPublication(workspaceId, text, sender);
-    this.publications.add(operation);
-    void operation.finally(() => this.publications.delete(operation)).catch(() => undefined);
-    return operation;
+    return this.workspaceOperation(workspaceId, () => this.acceptPublication(workspaceId, text, sender));
   }
 
   private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string }) {
-    if (this.closed) throw new AppError('runtime_unavailable', 'Team is shutting down', 503);
     const roster = await this.team.active(workspaceId);
     const names = mentions(text);
     const recipients = names.map(name => {
@@ -68,14 +66,33 @@ export class TeamRunner {
     for (const [index, run] of result.runs.entries()) {
       this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });
       this.runtime().launch(run, configs[index]!);
+      this.jobs.set(run.runId, workspaceId);
       void this.runtime().finished(run.agentId, run.runId).catch(() => undefined).finally(() => {
         // A successor run may already have started after atomic final publication.
         if (this.active.get(run.agentId)?.runId === run.runId) this.active.delete(run.agentId);
+        this.jobs.delete(run.runId);
         this.changes.publish();
       });
     }
     this.changes.publish();
     return result;
+  }
+
+  workspaceOperation<T>(workspaceId: string, action: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new AppError('runtime_unavailable', 'Team is shutting down', 503));
+    const operation = this.gate.run(workspaceId, () => {
+      if (this.closed) throw new AppError('runtime_unavailable', 'Team is shutting down', 503);
+      return action();
+    });
+    this.publications.add(operation);
+    void operation.finally(() => this.publications.delete(operation)).catch(() => undefined);
+    return operation;
+  }
+  idleWorkspace<T>(workspaceId: string, action: () => Promise<T>): Promise<T> {
+    return this.workspaceOperation(workspaceId, async () => {
+      if ([...this.jobs.values()].includes(workspaceId) || [...this.active.values()].some(run => run.workspaceId === workspaceId)) throw new AppError('workspace_busy', 'All workspace members must finish before activating configuration', 409);
+      const result = await action(); this.changes.publish(); return result;
+    });
   }
 
   async snapshot(workspaceId: string, after = 0, limit = 100) { return this.store.chatSnapshot(workspaceId, after, limit); }

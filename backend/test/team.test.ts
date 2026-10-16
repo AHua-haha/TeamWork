@@ -81,8 +81,8 @@ test('retiring frees the name, keeps the lead, and a team has a size limit', () 
 }));
 
 test('model discovery is lead-only; configuration changes use pending management files', () => withTeam(async fixture => {
-  const { management } = teamTools(fixture.team.service);
-  assert.deepEqual(management.map(t => t.definition.name), ['list_models']);
+  const { management } = teamTools(fixture.team.service, fixture.team.configuration);
+  assert.deepEqual(management.map(t => t.definition.name), ['list_models', 'validate_member_config']);
   const tool = management[0]!;
   const helper = await worker(fixture, 'Helper');
   const call = async (id: string) => JSON.stringify((await tool.execute({} as never, scope(id), {} as never)).content);

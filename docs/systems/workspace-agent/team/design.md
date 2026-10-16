@@ -10,13 +10,33 @@ Members exist only inside their team and are absent from the global agent list a
 
 ### Member identity, files and effective harnesses
 
-Each workspace has one unretirable lead and uniquely named active workers. Backend owns identities, revisions, source association and active settings. Editable member JSON contains name, role, responsibility, settings, promptFiles and designScope; referenced Markdown carries supplementary instructions. No version, memberId, revision, independent implementationScope or base-policy override belongs in the editable manifest.
+Each workspace has one unretirable lead and uniquely named active workers. The lead edits member JSON and referenced supplementary Markdown files through its management harness. Backend owns identities, source associations, revisions and format bookkeeping; these are not agent-maintained manifest fields. Fixed base prompts/policies are backend-owned.
 
-Only the lead can read/edit .team/members among agents. Design/member files are pending harness content; user acceptance is required for their semantic commits. An accepted member-file Git commit does not activate settings. Configuration-change detection, validation-to-activation, self changes, creation/retirement through files and timing for active targets are deferred. The former submit_member_config and retire_member agent shortcuts are removed. Backend lifecycle methods retain identity, revision, model readiness and one-active-run checks.
+Three semantic operations are derived from the proposed member files:
 
-Working/dependency references select accepted user designs. Writable implementation derives from working mappings and read-only use paths from dependencies; read-only wins overlaps. Control paths remain excluded. Pending mappings do not grant access. Base tools/prompts/policy are fixed. Three bases (management, implementation, execute) assemble common file tools, one Bash tool and lead list_models. General command allowances are backend-controlled and cannot override file/Git boundaries.
+| Operation | Validation and result |
+| --- | --- |
+| Create | A new member receives valid design assignments, model settings from workspace choices/defaults, responsibility, prompts and execution configuration. Backend assigns a new identity. |
+| Update | Only execution rules, supplementary prompts and responsibility may change. Name, role, model/run settings, identity and working/dependency design assignments remain fixed. |
+| Delete | Retire the member, preserving its conversation/history, files and Git history. The lead cannot be deleted. |
 
-The lead has management bootstrap access to .context/user and .team/members before any design exists; implementation starts empty. Omitted backend-created member models/options use the workspace default. Model/default edits preserve already selected member settings. Invalid/unresolved designs or provider settings appear as readiness issues and prevent admission. Existing active members are migrated to design-only assignments without inventing a configuration activation policy.
+Changing a working/dependency assignment is not an update; an explicit replacement can be proposed with create/delete and remains subject to user review. Implementation access is always derived from accepted assigned designs; it cannot be independently configured. A separately user-approved design-mapping change remains a design change, not a member reassignment.
+
+Working mappings grant writable implementation and dependency mappings grant read-only implementation, with read-only precedence and protected control paths. Base tools and enforced policy cannot be changed through member prompt or execution configuration. The lead keeps management bootstrap access to .context/user and .team/members; unassigned implementation access remains empty.
+
+### Member change workflow
+
+The workflow is edit -> validate -> user commit -> separate user activation. Pending files, user-committed files and active configuration are distinct states. Validation reports create/update/delete changes and issues; it neither accepts files nor activates settings. Invalid files preserve previous stable active configuration and pending work. Intentional deletions remain pending rather than being recreated by discovery/materialization; a missing referenced prompt is an error, not a member deletion.
+
+Only the user commits member configuration. The user reviews and commits exact file content under the existing member-config scope policy. Commit does not create, update or retire active members. Later, only the user can activate the reviewed committed change set. Uncommitted edits are excluded from activation and remain pending.
+
+Activation requires the entire workspace team to be idle, including admitted runs and outstanding model/tool/finalization work. It applies the complete reviewed change set atomically. It neither stops running work nor queues an automatic retry. New work admission cannot race through the idle check. Activation does not trigger any member.
+
+Activation revalidates the exact committed snapshot against current active configuration and relevant design/model state. Invalid, stale or busy activation changes nothing: no partial roster/source/settings updates, no member runs, and previous active state remains available. A changed accepted/configuration base requires fresh review. After activation, later group input uses the resulting team; new members receive shared history, updates retain private history and deleted members remain historical.
+
+The editable JSON fields are name, role, responsibility, settings, promptFiles, designScope and execute: {allowedCommands}. Prompt references are ordered safe bundle-relative prompts/*.md paths (at most 20); relevant files must be UTF-8 text within existing text limits. Unknown fields/base overrides are invalid. Backend envelope formatVersion 4 and acceptedRevision belong to metadata outside those files. Startup converts active older source envelopes once, preserving previous exact source/settings/commands and existing drafts. Legacy drafts are not rewritten; reconcile their schema before validation. Retired bundle paths cannot be reused for a new identity; use a fresh bundle.
+
+The lead calls validate_member_config({path: ".team/members"}) for the whole pending change set. It has no commit or activation authority. Member names must remain unique in the resulting team (at most 20); a create/delete replacement may reuse a retiring member name within the batch. No structured agent create/update/delete or activation tool bypasses the file/validation/user-acceptance flow. Member inspection remains read-only and distinguishes active source from pending or committed-but-inactive files.
 
 ### Work and cooperation
 
@@ -36,37 +56,47 @@ Every model call receives current role, roster/readiness/running information, st
 
 ## Outputs and observable effects
 
-Pending member/design files are checkpointed without acceptance. User review pins exact scope bytes and accepted base. Accepted member-file state, stable active settings and shared final publication are distinct. Prior active source remains stored independently of malformed/pending edits; there is no agent activation tool in this increment.
+Pending member/design files are checkpointed without acceptance. User commit pins exact scope bytes and accepted base. User activation separately changes the stable active member source/projection in one atomic batch. Member identity, revisions, content attribution and exact prompt bytes remain backend-managed and durable.
 
-GET /workspaces/:workspaceId/team returns active members with readiness/running state and effective derived implementationScope for inspection. GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}. Configuration includes exact stable active JSON/Markdown bytes, path, digest, submitter/time and backend formatVersion. Harnesses contains management, implementation and execute definitions with effective parts, tools, prompts and commit policy. Inspection never opens a worktree or creates Git storage. Pending files are not projected into active settings. Member POST/PUT/DELETE and the separate member /config route remain absent.
+Read-only team/member inspection continues returning active configuration, readiness/running state and the three effective harnesses with backend-derived implementation paths. GET /workspaces/:workspaceId/team returns active members; GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}. Configuration contains exact active JSON/Markdown source, path, digest, attribution/time and backend format metadata. Member POST/PUT/DELETE and member /config mutation routes remain absent. It does not activate drafts or create worktrees. User activation is a dedicated control operation; agent authority remains file editing and validation, not activation.
 
-Publication and creation of all selected run records remain atomic. Model execution starts after admission; failures become run status without fabricated shared output. Shared final messages and private histories remain database-backed and independent of context compaction.
+Group publication and selected run admission remain atomic and database-backed. Execution failure becomes status without fabricated shared output. Shared final messages and private histories remain independent of context compaction. File commit, member activation and shared final publication are separate effects.
 
 ## Failure behavior
 
-Unsafe/unresolved designs, invalid settings, out-of-scope file/Git access, unapproved management commits and stale review/base state fail explicitly. Active settings and pending edits remain separate. Agent metadata cannot claim user approval or lead authority. Inspection uses standard HTTP error envelopes; missing/foreign/retired members return not_found.
+Invalid schemas/paths/models/designs, forbidden updates, lead deletion, duplicate names, unsafe prompt references and base-policy overrides refuse the change set. Invalid references do not grant permissive scope. Metadata cannot claim lead/user authority.
 
-Group messages retain atomic mention/readiness/busy/budget refusal behavior. Storage/checkpoint errors cannot be reported as successful acceptance/publication.
+Busy, stale or failed activation leaves the entire active team unchanged and retains committed/pending files. Group mention/readiness/budget/busy refusals remain atomic. Storage/checkpoint errors cannot be claimed as successful file acceptance, activation or publication.
 
 ## Guarantees and limits
 
-One lead, unique active names, ordered shared messages, retained private histories, parallel independent activation and accepted final responses only remain guaranteed. Among agents member paths are lead-only; management acceptance is user-only. Tools are reusable; runtime assembles harness capabilities.
+One lead, unique active names, ordered shared messages, retained private histories, parallel independent activation and accepted shared final responses remain guaranteed. Configuration activation is user-only, workspace-idle and atomic. Its separate user commit prerequisite cannot be inferred from a run completion or an agent statement.
 
-Member JSON has backend-owned schema/revision bookkeeping outside the editable file. Migration preserves identities, settings, command rules, exact previous source, pending drafts and historical Git references. Existing drafts are not rewritten. Retired records stay historical. Effective implementation paths are derived and cannot be configured independently.
+Schema/version/identity bookkeeping stays outside editable manifests. Migration preserves identities/settings, exact prior source, pending drafts and historical Git references. An accepted update cannot change assignment/name/role/model settings. Execute changes cannot override protected filesystem/Git authority.
 
-Configuration-change/activation/retirement/self-update workflow, new approval UI, richer execution rules, automatic context maintenance, durable run resume, trigger queues and multiple chats remain deferred. No new running-member update policy is introduced. Accepted file snapshots are not automatically merged into the original checkout or peer worktrees.
+No automatic configuration activation, automatic stop/retry, new trigger queue, multiple-chat model, durable run resume, automatic context-maintenance algorithm or original/peer-worktree merge is introduced. Frontend activation presentation is separate from this backend contract. Accepted design-mapping refresh continues its existing authority semantics.
 
 ## Acceptance examples
 
-1. Unmentioned user input starts the lead; its accepted final mentions Backend and Frontend and both run concurrently.
-2. A busy mention refuses the entire publication, preserving private feedback without partial delivery.
-3. Shared messages arriving during private work append after that work; idle members receive them immediately.
-4. The lead edits member JSON/prompts, checkpoints, then asks for exact user review. An agent commit is refused; user file acceptance leaves active settings unchanged.
-5. A worker reads its dependency design/implementation and edits its working implementation; member files remain inaccessible.
-6. A pending mapping edit grants no new paths. User-approved design snapshots are used by semantic reads and harness scope resolution.
-7. Inspection exposes all three fixed harnesses and derived paths from stable backend state without creating worktrees.
-8. Stop/restart preserves private/public history and pending work; failed runs do not publish invented finals.
+1. The lead proposes a new Backend member in files. Validation reports create; user commit alone leaves the team unchanged. A later idle user activation creates it without starting a run.
+2. A member prompt, responsibility and execution rules change. Validation accepts those update fields; activation preserves its identity, assignment, model and private history.
+3. An update changes a working/dependency design, name, role or model settings. Validation refuses the entire change set. Explicit member replacement remains a separate create/delete proposal.
+4. A committed change set creates A, updates B and deletes C. While any workspace member is running, activation is refused. When idle, all reviewed changes apply together or none do.
+5. The lead manifest is removed. Validation refuses deletion of the lead. Removing a referenced prompt alone is a validation error.
+6. Another accepted/configuration change makes review stale. Activation refuses instead of applying different bytes or overwriting newer settings.
+7. Uncommitted edits exist after the user commit. Activating the reviewed committed snapshot excludes those edits; they remain pending.
+8. A successful activation does not trigger work. Later shared messages use the resulting roster and normal mention rules.
 
 ## Unified streaming and model completion
 
 Members finish using ordinary assistant text at natural model completion. Tool calls continue the run; metadata-marked commentary continues privately. Truncated responses fail without publication. Final selection prefers explicitly final text blocks and otherwise uses unphased text at natural completion. The team checkpoints and offers the selected text for atomic group acceptance; refusal appends private feedback and continues. Only accepted finals reach peer context.
+
+## User review and activation API
+
+- GET /workspaces/:workspaceId/team/configuration?source=pending validates/captures pending files; source=committed (the default) reviews the current user-committed member-config snapshot. This operational review can initialize harness storage, unlike ordinary read-only member inspection.
+- Review returns {origin, revision, digest, valid, changes, issues}. Changes are create/update/delete with paths, current member identity where applicable, proposed fields and exact before/after source bundles. Issues identify path, code and reason. A baseline without a user commit cannot activate.
+- The existing harness member-config review/commit endpoint remains the separate user file-acceptance operation. File commit alone may retain invalid file content; activation always revalidates it and refuses invalid configuration.
+- POST /workspaces/:workspaceId/team/configuration/activate with {revision, digest} activates exactly that reviewed committed change set. No actor/approval fields are accepted. Success returns {revision, changes, memberIds}; changes are summaries and memberIds is the resulting active roster. No model run starts.
+- Changed review/active/model/design state returns stale_revision (409); workspace work/admission/finalization returns workspace_busy (409); invalid configuration returns invalid_config (400). Active state remains unchanged on refusal. Old request bodies become stale after changes activate; obtain a fresh review. A valid fresh no-change activation does not advance member revisions.
+
+The user must commit before activation. Later pending file edits neither change the committed review nor get consumed by activation. No automatic watcher or agent activation endpoint/tool exists. Frontend activation controls are not added in this backend prototype.

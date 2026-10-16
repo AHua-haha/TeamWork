@@ -2,37 +2,43 @@
 
 ## Contract
 
-[Team](design.md) preserves durable cooperation/private history and read-only member inspection while using backend-owned metadata, user-approved member files and design-derived implementation authority. Configuration change/activation is deferred.
+[Team](design.md) requires file-derived create/update/delete plans, a restricted update allowlist and separate user commit/activation. Activation is atomic and requires the whole workspace to be idle. The member service coordinates scoped Git source with stable database state; group/runtime guarantees remain unchanged.
 
 ## Responsibilities and decomposition
 
-TeamService owns active identity, stable fields/source, model readiness and lifecycle revision checks. [Lead](lead/design.md) owns collaboration instructions, [harness](../harness/design.md) owns authority/worktrees/Git/Bash, and [group chat](group-chat/design.md) owns admission/publication/delivery. [Runtime](../../agent-runtime/design.md) owns model execution; [database](../../database/design.md) persists stable members/chat/history.
-
-MemberConfigService materializes missing accepted JSON/Markdown for the lead and returns stable active bundles. It has no submit/activate operation. Structured agent lifecycle tools are absent; list_models remains lead-only. Internal backend lifecycle methods support initialization and existing callers without adding HTTP member writes.
+Team owns active identity, stable exact source/projection, validation and lifecycle admission coordination. The [harness](../harness/design.md) supplies scoped pending files, checkpoints/Git and user file acceptance. [Lead](lead/design.md) supplies workflow instructions. Existing group publication and runtime remain responsible for shared messages, private execution and completed effects. Database owns atomic member persistence.
 
 ## Coordination and data flow
 
-1. Workspace creation inserts its default-configured lead transactionally. Startup initializes missing leads and migrates active legacy member sources once.
-2. Generated manifests contain name/role/responsibility/settings/promptFiles/designScope. Backend envelope formatVersion=3, path, digest, attribution/time and member record revision/ID remain outside editable bytes. Source conversion retains exact previous bundle and every prompt byte; retired records remain historical. Existing drafts are never overwritten.
-3. Lead policy materializes missing stable source files under its management worktree, using common file access. Edits and user-approved scope commits remain separate from stable active member settings. No configuration detection, approved-file validation-to-activation handler or automatic application to running members is implemented.
-4. TeamService inspection/readiness resolves accepted design mappings through the harness resolver. Stored assignment omits implementationScope; MemberView includes derived paths/usePaths for caller inspection. Invalid/missing designs create readiness issues and no permissive fallback.
-5. TeamSystem.inspect returns member, stable configuration and three inspectHarnesses definitions without opening harness Git. Existing member-write routes remain absent; review/acceptance/history/restore endpoints are retained.
-6. Policy buildRequest assembles unique harness tools plus lead list_models, current member/roster instructions, base maintenance prompts and accepted member Markdown. shouldContinue preserves natural completion selection and atomic final publication; afterRun checkpoints settled effects, including failure/cancellation/recovery.
-7. Existing internal updates retain revision/idle checks. Comparing assignment changes ignores the derived inspection-only implementationScope. Group admission verifies prepared revisions under database locking. No new configuration activation contract is inferred from these safeguards.
+Capture proposed bundles from pending files for validation. Classify create/update/delete against stable backend member/path associations. Validate schema, references, resulting unique names, workspace model choices and protected lead identity. Restrict existing-member changes to responsibility, supplementary prompts and execute rules. Preserve design assignments and derive implementation authority from accepted designs.
+
+User file commit and user activation are separate. Activation reads immutable reviewed committed files, revalidates current bases and applies all member changes in one durable transaction. Coordinate with workspace group admission and local runtime finalization so the idle check cannot race new work. Pending files, accepted Git state and active source/projection remain separate.
+
+Materialization must distinguish initial seeding from intentional pending deletion. A missing referenced prompt is invalid; it must not silently restore or retire the member. Scoped Git rm removes files within the selected part, with recoverable checkpoints. Backend seed markers preserve intentional deletions.
 
 ## Decisions and constraints
 
-The source bundle represents the last stable active configuration; accepted Git member files are independently retained for later activation design. Even user file acceptance cannot silently create, update or retire a member. Removing submit_member_config/retire_member agent shortcuts avoids an unapproved alternate lifecycle path. Backend create/update/retire methods remain available to trusted composition/tests; frontend remains inspection-only.
+Do not add automatic activation, implicit user approval or structured agent create/update/delete bypasses. Preserve exact source, IDs, revisions, prior private/shared history and historical Git records. Retire deleted members rather than erasing records. A new member receives shared chat history; updates retain identity/history. Fixed base prompts and scope/Git policies remain backend-owned.
 
-Legacy implementationScope is stripped during startup. Accepted settings/identity/commands are preserved; effective authority now derives from accepted design mappings. Historical source is retained in previous, and existing worktree/history behavior belongs to the harness. Model defaults/choices and provider validity retain their current boundaries. No SQL schema change is required: member JSON already stores opaque versioned configuration data.
+Member JSON adds execute.allowedCommands; backend source formatVersion 4 and optional acceptedRevision remain outside editable files. The startup converter retains previous source and current command policy while preserving drafts. Canonical normalized settings/assignment comparisons freeze existing identity/name/role/model settings and working/dependency reference sets; only responsibility, prompts and command rules may change. New models come from the workspace choices/default. Relevant bytes are read from immutable Git blobs with strict UTF-8 decoding and bounded text validation.
+
+MemberConfigService.validate captures a pending checkpoint and returns a change review; review reads the current user-committed member-config head. The review digest covers immutable revision, all active ID/revision pairs, workspace model revision and referenced accepted-design revisions. Capture and activation serialize through the lead file-operation queue. Source envelopes retain exact manifest/referenced prompt bytes. No agent-supplied control metadata or structured lifecycle mutation tool exists.
+
+TeamRunner.workspaceOperation serializes publication/admission and user control; idleWorkspace refuses any active/admitted/finalizing job. A run-ID job map outlives early sender mention-slot release until runtime.finished settles, so finalization is included in the idle condition. Pending operations are included in shutdown waits. User scope commit/restore routes use the same workspace gate. Activation never queues waiting for work completion: a busy workspace returns an explicit refusal after coordination checks.
+
+MySqlStore.activateMembers holds the workspace row, checks the complete active revision set and workspace model revision, then locks/checks all active agents. One transaction retires/updates rows and inserts members/conversations/shared context. Retirements precede inserts to allow reviewed replacements to reuse names. All writes/source projections roll back together. Existing retired records, worktrees and private history remain intact. Result assembly uses in-memory plan data after commit, avoiding a fallible provider/config reread after successful persistence.
+
+HarnessHistory initializes one private persistent bundle marker after seeding. Activation pre-registers paths already represented by accepted files before database writes. Missing files after that point are intentional pending deletions, even across restart. Marker preparation changes no active settings and is safe if persistence later fails. No materialization overwrites existing pending bytes or recreates intentionally deleted files. Scoped Git rm provides file removal under existing authority with pre-removal checkpoint/index rollback; there is no extra lifecycle deletion tool.
+
+HTTP GET team/configuration selects pending or committed review. POST configuration/activate accepts only revision/digest, enters idle coordination and revalidates before persistence. Member inspect/list stays read-only. Frontend UI design is separate.
 
 ## Code map
 
-- [Team records/readiness/migration](../../../../backend/src/team.ts), [composition](../../../../backend/src/team-system.ts).
-- [Member content format](../../../../backend/src/member-config-format.ts), [stable source/materialization](../../../../backend/src/member-config.ts), [instructions](../../../../backend/src/member-context.ts), [model tool](../../../../backend/src/member-tools.ts).
-- [Team routes](../../../../backend/src/team-routes.ts), [runner](../../../../backend/src/team-runner.ts), [harness implementation](../harness/impl.md).
-- Frontend MemberInspector/TeamTab consume three fixed bases and backend-derived paths; Bash working-history summaries display command text. No frontend scope recomputation/member-write API is added.
+- [Member source/validation service](../../../../backend/src/member-config.ts), [source format](../../../../backend/src/member-config-format.ts), [team fields and lifecycle](../../../../backend/src/team.ts).
+- [Composition](../../../../backend/src/team-system.ts), [admission coordinator](../../../../backend/src/team-runner.ts), [routes](../../../../backend/src/team-routes.ts).
+- [Harness history](../../../../backend/src/harness-history.ts), [database](../../../../backend/src/database.ts), [member instructions](../../../../backend/src/member-context.ts).
+- Base rule Markdown under backend/prompts/harness must describe validation and the separate user commit/activation sequence.
 
 ## Verification
 
-[Member configuration tests](../../../../backend/test/member-config.test.ts) verify clean manifests, exact stable bytes, invalid pending preservation, restart/materialization, legacy migration and admission revision conflicts. [Team tests](../../../../backend/test/team.test.ts), [context](../../../../backend/test/team-context.test.ts) and [HTTP](../../../../backend/test/team-routes.test.ts) cover identity/readiness, unique tools, fixed bases and read-only projection. [Harness](../../../../backend/test/harness.test.ts) covers real Git/sandbox authority and user approval. [SQL/runtime integration](../../../../backend/test/integration/backend.test.ts) verifies real tools, checkpoint ordering and group behavior. The independent existing frontend/client tests and build check caller compatibility.
+Tests cover valid create/update/delete; every forbidden update field; lead deletion; malformed/missing prompt/model/design references; committed versus pending bytes; exact stale review/base failures; whole-workspace busy/finalizing work; atomic persistence/rollback; concurrent admission; retained history/shared delivery; deliberate deletions surviving materialization; and unchanged harness enforcement. The disposable MySQL suite verifies real transaction rollback, busy/stale checks, replacement/shared-history inheritance and committed-versus-pending source isolation. Unit/HTTP tests verify both admission race orders and finalization blocking.

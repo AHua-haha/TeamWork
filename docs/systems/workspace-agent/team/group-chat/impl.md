@@ -41,3 +41,5 @@ TeamSystem checkpoints harness state before invoking final publication. Its runt
 ## Unified streaming and model completion
 
 Ordinary assistant text and tools stream to the user as one private activity flow. Backend selects a final candidate after model completion, using native phase where available and normal terminal reasons where absent. Successful publication establishes acceptance. Accepted references pin exact text block indices; frontend disclosure cannot publish or trigger work. Busy/mention-budget refusal remains atomic. Historical accepted references remain immutable.
+
+Publication/admission and user member-config control share TeamRunner's per-workspace operation gate. User activation refuses any active/admitted/finalizing job and rechecks durable active-run state during the database transaction. Concurrent publication runs before or after the complete activation, never within its idle-check/write window. This coordination does not queue a busy member trigger or automatically retry activation. Sender mention-slot release still permits normal handoffs; the separate run-job map remains until terminal finalization finishes.

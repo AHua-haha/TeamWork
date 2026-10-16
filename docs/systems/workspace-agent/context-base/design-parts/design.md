@@ -30,6 +30,6 @@ Design identity is its context file, independent of member identity. Implementat
 
 1. user/design/backend.json holds the backend design and implementation ["backend/src", "backend/test"]. A member can edit those implementation paths when that working design is assigned to it; no separate implementation path assignment is required.
 2. A dependency references user/design/api.json, whose implementation is ["shared/api.ts"]. The member can read the dependency design. Its dependency mapping grants read access to shared/api.ts and no write access.
-3. A mapping changes after a user discussion. The next design read shows the resulting mapping, and subsequent harness resolution uses the accepted mapping. Pending member-worktree edits do not affect it. Configuration-change/activation timing remains a separate deferred contract.
+3. A mapping changes after a user discussion. The next design read shows the resulting mapping, and subsequent harness resolution uses the accepted mapping. Pending member-worktree edits do not affect it. Member configuration activation is a separate user-controlled workspace-idle operation.
 
 A user-approved harness design snapshot is visible through semantic read/discovery, including newly created designs and accepted deletions. It is not copied into the original checkout or existing peer worktrees; original-context file/history review remains a separate existing surface. Semantic reads and mappings ignore pending worktree bytes.

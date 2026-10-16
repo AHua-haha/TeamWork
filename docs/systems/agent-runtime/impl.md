@@ -57,3 +57,5 @@ Harness integration uses the generic `afterRun` lifecycle callback. The loop tra
 ## Unified streaming and model completion
 
 The follow API returns stored Pi messages and chunks without a separate response-action annotation. Text, thinking, tool blocks and native signatures are preserved for callers. The team policy uses completed model output for continuation and publication; the generic loop does not classify partial text for the UI.
+
+TeamRunner retains separate per-run jobs until runtime.finished settles, in addition to mention-slot tracking. User configuration activation checks these jobs so publication's early sender release does not make finalizing file/policy work appear idle. Runtime itself does not implement member approval/activation or a second loop.

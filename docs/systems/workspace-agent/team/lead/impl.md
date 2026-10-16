@@ -2,28 +2,25 @@
 
 ## Contract
 
-[Lead](design.md) defines collaboration, pending management edits, user acceptance and shared assignment. Configuration-change/activation remains deferred.
+[Lead](design.md) provides file-based member maintenance with restricted updates and separate user commit/activation. File editing/validation are agent capabilities; user commit and activation remain separate.
 
 ## Responsibilities and decomposition
 
-The [team](../design.md) owns stable active member identity/content and model choices. The [harness](../../harness/design.md) owns three purpose bases, scoped file/Bash/Git authority and acceptance. [Group chat](../group-chat/design.md) owns final publication and mentions. Lead behavior is prompts and assembled reusable capabilities; there is no special lead execution loop or editor.
+[Team](../design.md) owns validation/change planning and atomic idle activation. [Harness](../../harness/design.md) owns scoped file/Git authority and maintenance prompts. Group chat/runtime retain publication and execution. No lead-specific execution loop or structured lifecycle mutation tool is introduced.
 
 ## Coordination and data flow
 
-TeamSystem materializes missing stable bundles for the lead without replacing pending files. MemberContext supplies role/roster/model guidance, meaningful JSON/Markdown examples and current group rules. Harness prompts explain management scope, derived implementation authority, Bash metadata, checkpoint/staging separation and user-only protected commits.
-
-The lead edits pending files with generic tools, inspects/stages/restores through ordinary scoped Git and requests user review of exact bytes/base. User acceptance persists member files without changing stable active settings. No submit/activate/retire adapter is exposed. Assignments mention active members in a naturally completed final response; atomic group admission and private refusal feedback remain unchanged.
+Backend-maintained management/member Markdown rules are updated to explain create/update/delete, the three allowed update categories, validation and the separate user commit/activation steps. The lead edits pending files with common capabilities and obtains validation feedback. Backend tracks identity/revision/source; agents do not maintain bookkeeping. User action commits exact files; another user action activates the reviewed committed state while the whole workspace is idle.
 
 ## Decisions and constraints
 
-Version/revision/identity bookkeeping belongs to the backend envelope. Editable config has designScope only for harness assignment. Management bootstrap is fixed; implementation remains empty until accepted designs are assigned. Backend model listing is read-only and lead-gated. The obsolete lead-tools module and immediate submission path are removed, rather than retained beside the approved-file model. Internal backend lifecycle methods remain for trusted composition.
+No agent activation or implicit acceptance from conversation/run completion. Existing model discovery stays read-only. Supplementary member prompts are editable; fixed base rules remain backend-owned. Deleted workers retain their prior history/files. validate_member_config accepts only a path naming .team/members, contributes no activation authority and is assembled only for the lead. Member JSON examples and maintenance rules live in management-members.md; MemberContext supplies current member locations. Frontend activation presentation remains separate.
 
 ## Code map
 
-- [Role/member examples](../../../../../backend/src/member-context.ts), [lead model discovery](../../../../../backend/src/member-tools.ts).
-- [Policy assembly](../../../../../backend/src/team-system.ts), [stable bundle materialization](../../../../../backend/src/member-config.ts).
-- [Team implementation](../impl.md) owns stable identity/source; [harness implementation](../../harness/impl.md) owns scopes, Bash and Git.
+- [Member instructions](../../../../../backend/src/member-context.ts), [management base](../../../../../backend/prompts/harness/management.md), [member maintenance rules](../../../../../backend/prompts/harness/management-members.md).
+- [Team composition](../../../../../backend/src/team-system.ts), [member service](../../../../../backend/src/member-config.ts), [harness assembly](../../../../../backend/src/harness.ts).
 
 ## Verification
 
-[Lead tests](../../../../../backend/test/lead.test.ts) prove bootstrap file editing, protected commits, semantic design acceptance and no implicit member activation. [Context tests](../../../../../backend/test/team-context.test.ts) verify prompts and unique common tools. [Member config tests](../../../../../backend/test/member-config.test.ts) cover metadata/stable drafts. [SQL integration](../../../../../backend/test/integration/backend.test.ts) verifies real model tool calls, independent implementation commits and user design acceptance through group execution.
+Prompt/tool assembly checks cover valid/forbidden update examples, protected lead deletion, user-only commit/activation and preservation of normal group behavior. The implementation must also satisfy the team/harness contract checks. Member activation unit/HTTP and MySQL integration tests verify this workflow.

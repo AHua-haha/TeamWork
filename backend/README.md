@@ -136,11 +136,12 @@ Example editable manifest (identity, format version and revisions are backend-ow
   "designScope": {
     "working": ["user/design/backend.json"],
     "dependencies": ["user/design/api.json"]
-  }
+  },
+  "execute": {"allowedCommands": []}
 }
 ```
 
-Use common write/edit tools for pending files. Only the lead may access member files. User acceptance is required for design and member-config semantic commits. Accepting member files does **not** create/update/retire active members: configuration-change and activation handling is deferred. The former submit_member_config and retire_member agent shortcuts are removed; list_models remains read-only. Stable active bundles are materialized when missing, without overwriting existing drafts.
+Use common write/edit tools for pending files. Only the lead may access member files. User acceptance is required for design and member-config semantic commits. Accepting member files does **not** create/update/retire active members. The user activates the reviewed committed change set separately, atomically, while the entire workspace is idle. The former submit_member_config and retire_member agent shortcuts are removed; list_models remains read-only and validate_member_config validates the complete .team/members file change set without committing/activating. Existing member updates may change only execution rules, supplementary prompts and responsibility; name, role, model/run settings and design assignments stay fixed. Delete retires a worker while preserving history/files; the lead cannot be deleted. Bundle files seed once; deliberate deletion is preserved across requests/restarts.
 
 Base rule text is maintained in [backend/prompts/harness](prompts/README.md), including common and per-scope instructions. Runtime and inspection load the same Markdown files. Restart development mode after edits; compiled use requires rebuilding and restarting. Build output includes the required assets. Prompt text does not change enforced scope/tool/approval policy.
 
@@ -150,7 +151,7 @@ Three fixed bases assemble common tools and maintenance prompts:
 - **implementation:** writable paths derived from accepted working designs, dependency mappings read-only with overlap precedence; implementation commits allowed for the agent;
 - **execute:** general Bash under backend command allowances and the same protected filesystem boundary.
 
-Only designScope is configurable in member JSON. No explicit implementationScope assignment or base-policy override is accepted. The inspection member view retains implementationScope as a backend-derived projection. GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}, including stable source metadata and all three effective definitions without opening worktrees. Member POST/PUT/DELETE and separate /config remain absent.
+designScope selects assignment; execute.allowedCommands configures commands under fixed policy. No other base policy is configurable in member JSON. No explicit implementationScope assignment or base-policy override is accepted. The inspection member view retains implementationScope as a backend-derived projection. GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}, including stable source metadata and all three effective definitions without opening worktrees. Member POST/PUT/DELETE and separate /config remain absent.
 
 One bash tool replaces run_command and the dedicated scope commit/history/restore tools:
 
@@ -158,7 +159,7 @@ One bash tool replaces run_command and the dedicated scope commit/history/restor
 {"command":"git add . && git commit -m \"Implement backend route\"","metadata":{"git":{"scope":"implementation"}}}
 ```
 
-Use scope design or member-config for protected files; agent git commit is refused with approval_required and leaves staging pending. Supported Git commands are status, diff, add, log, show, restore and commit with the finite options in the harness contract. One invocation selects one scope; metadata cannot supply identity/approval or retarget repositories. Actual Git invocations, including descendants, are checked by a backend bridge. Absolute native Git cannot access private metadata.
+Use scope design or member-config for protected files; agent git commit is refused with approval_required and leaves staging pending. Supported Git commands are status, diff, add, rm, log, show, restore and commit with the finite options in the harness contract. One invocation selects one scope; metadata cannot supply identity/approval or retarget repositories. Actual Git invocations, including descendants, are checked by a backend bridge. Absolute native Git cannot access private metadata.
 
 Each member has a linked worktree under private .rsi-harness/<workspace-path-hash> storage. Each scope has its own persistent Git index/HEAD while sharing objects. Automatic run-end checkpoints use temporary indexes and preserve staging. Implementation commits accept staged content only. Original checkout/branch/index are untouched. User-accepted design snapshots feed semantic design reads/discovery and permission resolution without copying files into original context or existing peer worktrees. Raw context file/history review remains unchanged.
 
@@ -171,7 +172,19 @@ Backend review/acceptance is available without adding configuration UI. Under `/
 
 For example, review the member, take `revision` and `state.committed` from its `design` part, then submit them as `revision` and `base` to `/design/commit`. A changed working file or committed base causes `stale_revision`; inspect again. Actor/approval fields cannot be supplied through agent tool arguments.
 
-Workers need a nonempty valid design assignment and empty catalog tool selections. Startup strips old explicit implementation paths, migrates active sources to backend formatVersion 3, retains exact previous bundles/settings/commands, and preserves existing pending drafts and historical refs. Existing draft files are never automatically rewritten. There is no automatic accepted-file activation.
+Workers need a nonempty valid design assignment and empty catalog tool selections. Startup strips old explicit implementation paths, migrates active sources to backend formatVersion 4, retains exact previous bundles/settings/commands, and preserves existing pending drafts and historical refs. Existing draft files are never automatically rewritten. There is no automatic accepted-file activation.
+
+### Member configuration activation
+
+1. The lead edits JSON/Markdown and calls `validate_member_config({"path":".team/members"})`.
+2. Review pending semantic changes with `GET /workspaces/:workspaceId/team/configuration?source=pending`; it returns `origin`, `revision`, `digest`, `valid`, `changes` and `issues`.
+3. Use the existing member-config harness review/commit endpoint above as the user. Commit is file acceptance only.
+4. `GET /workspaces/:workspaceId/team/configuration` reviews the **committed** snapshot. Its digest pins the active team, model revision and referenced design state as well as the committed bytes.
+5. `POST /workspaces/:workspaceId/team/configuration/activate` with `{"revision":"<review.revision>","digest":"<review.digest>"}` activates that whole reviewed change set. Response is `{revision, changes, memberIds}`. No agent run starts and uncommitted files remain pending.
+
+All workspace members must be idle, including admission and finalization. Busy activation returns `workspace_busy`; changed review/active/model/design state returns `stale_revision`; invalid configuration returns `invalid_config`. Nothing partially activates. Reusing a prior successful request body becomes stale; fetch a fresh review. A fresh no-change activation does not advance member revisions. There is no agent activation tool, auto watcher or automatic retry. Member inspection stays read-only; frontend activation controls are not added in this backend prototype.
+
+Creation selects workspace models/defaults and valid accepted designs. Update is limited to responsibility, referenced supplementary prompts and execute rules. Reassignment/name/role/model changes require an explicit replacement proposal in a fresh bundle. Retired bundle paths cannot be reused. JSON version/identity/revision fields are invalid; backend source envelopes own formatVersion and acceptedRevision. Relevant files must be UTF-8 text; missing referenced prompts invalidate the batch. Startup migrates old accepted sources with their previous exact bytes retained; existing drafts need explicit schema reconciliation, including execute assignment.
 
 General Bash requires an exact ["bash", "-c", command] allowance or executable "bash"; old non-Bash allowances remain stored but do not authorize shell scripts. Richer rule configuration is deferred. Bash uses @anthropic-ai/sandbox-runtime 0.0.79: macOS sandbox-exec or Linux bubblewrap/dependencies, with no unrestricted fallback. The child receives a minimal environment, authorized workspace read scope, implementation-only direct writes and no network allowance. Scoped Git Bash permits no direct workspace writes. Output is capped at 64 KiB; timeout is 60 seconds; cancellation settles descendant/broker effects before checkpointing. Scripts may need cd into an assigned directory because an unassigned root cannot be listed. Git must be installed; local snapshots require no author/credential setup. Linux support depends on the sandbox runtime dependencies; this change is verified on macOS.
 

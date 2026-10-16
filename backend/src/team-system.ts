@@ -75,6 +75,17 @@ export class TeamSystem {
     return this.harness.operation(memberId, async () => this.status(await this.service.update(workspaceId, memberId, revision, value)));
   }
 
+  async reviewConfiguration(workspaceId: string, origin: 'pending' | 'committed' = 'committed') {
+    return this.runner.workspaceOperation(workspaceId, async () => {
+      if (origin === 'committed') return this.configuration.review(workspaceId);
+      const lead = (await this.service.active(workspaceId)).find(m => m.value.lead)!;
+      return this.configuration.validate(lead.id, '.team/members');
+    });
+  }
+  activateConfiguration(workspaceId: string, revision: string, digest: string) {
+    return this.runner.idleWorkspace(workspaceId, () => this.configuration.activate(workspaceId, revision, digest));
+  }
+
   private status(member: MemberView): MemberStatus {
     return { ...member, running: this.runner.isRunning(member.memberId) };
   }
@@ -84,7 +95,7 @@ export class TeamSystem {
    * just before the call, and its tools. Every other agent is unchanged.
    */
   policy(base: RuntimePolicy): RuntimePolicy {
-    const { management } = teamTools(this.service);
+    const { management } = teamTools(this.service, this.configuration);
     const checkpointed = new Set<string>();
     return {
       ...base,

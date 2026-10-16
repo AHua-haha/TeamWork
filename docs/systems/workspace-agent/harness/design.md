@@ -4,17 +4,17 @@
 
 A harness defines permitted scope, capabilities and maintenance rules for one purpose. Tools are reusable across agents. Runtime runs an agent using the tools and prompts assembled from its harnesses. Each member has a separate worktree and independently staged scope history.
 
-Three fixed bases provide management, implementation and execute authority. The agent configures working/dependency designs; the backend derives implementation paths from accepted designs. Configuration-change and activation handling remains deferred.
+Three fixed bases provide management, implementation and execute authority. The agent configures working/dependency designs; the backend derives implementation paths from accepted designs. Member changes follow file validation, user commit and a separate idle user activation.
 
 ## Inputs and preconditions
 
-A member assignment contains designScope: {working: [user design paths], dependencies: [user design paths]}. The lists must be disjoint, valid and resolvable. It contains no independently configurable implementationScope. Existing allowedCommands are backend-controlled execute policy, outside editable member JSON.
+A member assignment contains designScope: {working: [user design paths], dependencies: [user design paths]}. The lists must be disjoint, valid and resolvable. It contains no independently configurable implementationScope. Member execution rules can be configured through member files and validated under the fixed execute base policy.
 
 The lead can maintain .context/user/ and .team/members/ immediately, before any design exists. Dependencies remain read-only. Other members can edit their working designs and read dependency designs; member files are lead-only among agents. Implementation authority starts empty until accepted designs are assigned.
 
 Common ls/read/write/edit tools operate on pending files. One bash tool takes {command, metadata?: {git: {scope}}}; scope is design, member-config or implementation when that member owns the part. No identity, revision, approval, repository, index or reference may be supplied through metadata.
 
-Scoped Git Bash is available independently of general execution allowances. General Bash requires an exact allowance for ["bash", "-c", command], or executable "bash". Previous non-Bash executable allowances remain stored but do not authorize a shell. Execution policy configuration is deferred.
+Scoped Git Bash is available independently of general execution allowances. General Bash requires an exact allowance for ["bash", "-c", command], or executable "bash". Previous non-Bash executable allowances remain stored but do not authorize a shell. Richer execution-rule capabilities remain outside this prototype.
 
 Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Linux bubblewrap with the sandbox runtime's dependencies. Unsupported/unavailable isolation fails closed. The prototype has no network allowance.
 
@@ -24,7 +24,7 @@ Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Li
 
 | Base | Scope and capabilities | Semantic commit policy |
 | --- | --- | --- |
-| management | Pending working design, read-only dependencies, lead-only member files, common file tools and scoped Git Bash; lead model discovery | User acceptance for design and member-config |
+| management | Pending working design, read-only dependencies, lead-only member files, common file tools and scoped Git Bash; lead model discovery and file validation | User acceptance for design and member-config |
 | implementation | Writable implementation from accepted working mappings; read-only implementation from dependencies; common file tools and scoped Git Bash | Agent may commit implementation |
 | execute | General Bash under existing allowances and applicable filesystem restrictions | Cannot override protected scopes or Git acceptance |
 
@@ -39,6 +39,7 @@ Agents use ordinary git status, diff, add, log, show, restore and commit syntax 
 - git status [--short|--porcelain|--branch]
 - git diff [--cached|--staged] [--stat|--name-only|--name-status]
 - git add [-A|--all] -- <paths> (an omitted path selects the scope)
+- git rm [-r] [-f|--force] -- <paths>
 - git log [--all] [--oneline] [--max-count=N|-N|-nN]
 - git show [HEAD|full-scope-revision]
 - git restore [--staged] [--worktree] [--source=full-scope-revision] -- <paths>
@@ -54,7 +55,7 @@ Automatic checkpoints occur at run end, including failure/cancellation and inter
 
 User-approved design snapshots feed semantic design reads/discovery and implementation permission resolution. Pending design bytes do not. Raw original-workspace context files/history remain their existing separate review surface; accepted Git snapshots are not automatically copied into the original checkout or existing peer worktrees.
 
-Member JSON contains name, role, responsibility, settings, ordered promptFiles and designScope. Backend retains identity/path association, format version, revisions and exact active source bytes separately. User acceptance commits member files as files only. It does not validate/activate a new member or change current settings. Configuration detection, submission/activation, self-change and retirement workflows remain deferred; submit_member_config and retire_member are absent from agent tools.
+Member JSON holds name, role, responsibility, settings, ordered prompt references, designScope and execute: {allowedCommands}. Backend retains identity/path association, format version, revisions and exact active source bytes separately. The lead edits and validates create/update/delete changes in files. Updates may change only responsibility, supplementary prompts and execution rules, preserving name, role, model/run settings and assignments. validate_member_config({path: ".team/members"}) reports pending create/update/delete and issues without acceptance or activation. Deliberately deleted seeded member files remain pending across materialization/restart. Delete retires and preserves history/files; lead deletion is refused. User commit accepts file bytes only. Separate user activation applies the reviewed committed change set atomically when the whole workspace team is idle. Busy/invalid/stale activation leaves all active settings unchanged; no automatic activation or activation by an agent is allowed. Uncommitted edits stay pending.
 
 ### Execution
 
@@ -70,9 +71,9 @@ Unapproved protected commits preserve pending files and staging. Stale reviews/b
 
 ## Guarantees and limits
 
-Each member retains its private worktree. Scope acceptance and checkpoint history are independent of group publication and active member configuration. The original checkout's Git branch/index remain untouched. No automatic merge, peer-worktree refresh, new configuration activation policy, approval UI, network allowance or automatic context-maintenance algorithm is provided.
+Each member retains its private worktree. Scope acceptance and checkpoint history are independent of group publication and active member configuration. The original checkout's Git branch/index remain untouched. No automatic merge, peer-worktree refresh, new approval UI, network allowance or automatic context-maintenance algorithm is provided.
 
-Startup converts active legacy member records to backend-owned metadata and design-only assignments, preserving identity/settings/commands, exact prior source and pending drafts. Old Git references remain reachable; matching scopes retain their history. When a scope shape changes, existing pending files are preserved and a new scope reference is initialized; old references are retained. Stale or legacy drafts are not rewritten automatically. Existing non-Bash allowances require a future policy update to authorize general Bash. Linux isolation requires its external dependencies; verification in this task uses macOS.
+Startup converts active legacy member records to backend-owned metadata and design-only assignments, preserving identity/settings/commands, exact prior source and pending drafts. Old Git references remain reachable; matching scopes retain their history. When a scope shape changes, existing pending files are preserved and a new scope reference is initialized; old references are retained. Stale or legacy drafts are not rewritten automatically. Member execution configuration may update allowances within the fixed command schema; non-Bash allowances do not independently authorize a shell. Linux isolation requires its external dependencies; verification in this task uses macOS.
 
 ## Acceptance examples
 
@@ -82,5 +83,5 @@ Startup converts active legacy member records to backend-owned metadata and desi
 4. A member stages implementation A, edits it to B, then finishes a run. The checkpoint records B, the index still contains A, and git commit accepts A only.
 5. Design and implementation are staged separately. An implementation commit preserves design staging and acceptance.
 6. A user reviews design, then files change: acceptance refuses the stale revision. Accepting a current design snapshot makes its mapping visible to semantic reads and scope resolution.
-7. A lead stages member JSON/prompt changes. Agent commit is refused; user file acceptance does not change active member settings.
+7. A lead stages member JSON/prompt changes. Agent commit is refused; user file acceptance alone does not change active member settings.
 8. A child process attempts to write a management/dependency path or open native Git metadata: the execution boundary refuses it.

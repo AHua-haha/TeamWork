@@ -29,7 +29,15 @@ export interface TeamView { workspaceId: string; members: MemberView[] }
 export interface NewMember { id: string; workspaceId: string; lead: boolean; nameKey: string; value: MemberRecord }
 
 /** Persistence for members. A member's creation also creates its conversation. */
+export interface MemberActivation {
+  expected: { id: string; revision: number }[];
+  modelsRevision: number;
+  create: NewMember[];
+  update: StoredMember[];
+}
 export interface TeamStore {
+  /** Atomic, workspace-idle, revision-checked member changes; creates import shared history. */
+  activateMembers(workspaceId: string, input: MemberActivation): Promise<void>;
   /** All members of a workspace, retired ones too, in the order they were created. */
   listMembers(workspaceId: string): Promise<StoredMember[]>;
   getMember(memberId: string): Promise<StoredMember | null>;
@@ -102,7 +110,7 @@ export class TeamService {
         const { implementationScope: legacyPaths, ...assignment } = data.harness ?? emptyHarness();
         const harness = harnessConfig({ ...emptyHarness(), ...assignment });
         const member = { ...data, harness } as MemberRecord;
-        const converted = data.configuration ? migrateMemberSource(data.configuration) : generatedSource(member, raw.id);
+        const converted = data.configuration ? migrateMemberSource(data.configuration, harness.allowedCommands) : generatedSource(member, raw.id);
         if (legacyPaths !== undefined || data.scope !== undefined || converted) {
           const { scope: _legacyScope, ...value } = member as MemberRecord & { scope?: unknown };
           await this.store.updateMember(raw.id, raw.revision, value.name.toLowerCase(), { ...value, configuration: converted ?? member.configuration });
@@ -136,6 +144,9 @@ export class TeamService {
     const stored = await this.member(workspaceId, memberId);
     return { stored, member: await this.view(stored) };
   }
+  async all(workspaceId: string) { await this.workspaces.record(workspaceId); return (await this.store.listMembers(workspaceId)).map(stored); }
+  async activate(workspaceId: string, input: MemberActivation) { await this.store.activateMembers(workspaceId, input); }
+  async settingsIssues(settings: readonly RunSettings[]) { return this.config.issuesFor(settings); }
   models(workspaceId: string) { return this.workspaces.models(workspaceId); }
   defaultSettings(workspaceId: string) { return this.workspaces.defaultSettings(workspaceId); }
   async initializeWorkspaceModels(): Promise<void> {

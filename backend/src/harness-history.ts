@@ -126,6 +126,16 @@ export class HarnessHistory {
     });
   }
 
+  /** Backend-owned seed markers distinguish intentional deletion from first materialization. */
+  async initializeMemberBundle(memberId: string, path: string, operation: () => Promise<void>): Promise<void> {
+    identity(memberId, 'memberId');
+    const marker = join(this.storage, 'materialized', memberId, sha256(path.toLowerCase()));
+    await this.queue.run(`materialize:${marker}`, async () => {
+      try { await lstat(marker); return; } catch (error) { if (!missing(error)) throw error; }
+      await operation(); await mkdir(dirname(marker), { recursive: true }); await writeFile(marker, path, { flag: 'wx' });
+    });
+  }
+
   /** Only scope-owned regular files are included; symlinks in managed state are refused. */
   private async files(root: string, part: HarnessPart, seed = false): Promise<{ path: string; mode: string; bytes: Buffer }[]> {
     const result = new Map<string, { path: string; mode: string; bytes: Buffer }>();
@@ -396,7 +406,7 @@ export class HarnessHistory {
       const { state, repository } = await this.staging(memberId, part, root);
       const run = async (args: string[]) => (await this.git(args, undefined, undefined, repository, root, cwd)).toString('utf8');
       const [command, ...args] = argv;
-      if (!command || !['status', 'diff', 'add', 'log', 'show', 'restore', 'commit'].includes(command)) throw new AppError('command_denied', 'Supported scoped Git commands: status, diff, add, log, show, restore, commit', 403);
+      if (!command || !['status', 'diff', 'add', 'rm', 'log', 'show', 'restore', 'commit'].includes(command)) throw new AppError('command_denied', 'Supported scoped Git commands: status, diff, add, rm, log, show, restore, commit', 403);
       if (argv.some(value => typeof value !== 'string' || /[\u0000-\u001f]/.test(value))) throw new AppError('invalid_input', 'Invalid Git arguments');
       const rootPaths = [...part.paths.map(path => path === '.' ? ':/' : `:(top,literal)${path}`), ...part.exclude.map(path => `:(top,exclude,icase)${path}`), ':(top,exclude,icase)**/.git/**'];
       const paths = (values: string[]) => {
@@ -468,6 +478,17 @@ export class HarnessHistory {
         try { const result = await run(['add', '-A', '--', ...paths(requested.length ? requested : ['.'])]); await verifyIndex(); return result; }
         catch (error) { await writeFile(index, before); throw error; }
       }
+      if (command === 'rm') {
+        const requested = args.filter(a => !['--', '-r', '-f', '--force'].includes(a));
+        if (requested.some(a => a.startsWith('-'))) throw new AppError('command_denied', 'Use git rm [-r] [-f] -- <paths>', 403);
+        await this.files(root, part);
+        const index = join(repository, 'index'), before = await readFile(index);
+        const saved = await this.checkpoint(memberId, part, root, actor, 'Before Git remove');
+        try {
+          const result = await run(['rm', ...(args.includes('-r') ? ['-r'] : []), ...(args.includes('-f') || args.includes('--force') ? ['-f'] : []), '--', ...paths(requested)]);
+          await verifyIndex(); await this.checkpoint(memberId, part, root, actor, 'Git remove'); return result;
+        } catch (error) { await writeFile(index, before); await this.materialize(root, part, saved.revision); throw error; }
+      }
       if (command === 'restore') {
         let source = 'HEAD', staged = false, worktree = false; const requested: string[] = [];
         for (let i = 0; i < args.length; i++) {
@@ -500,10 +521,13 @@ export class HarnessHistory {
   }
 
   async paths(revision: string): Promise<string[]> { return (await this.entries(revision)).map(entry => entry.path); }
-  async readSnapshot(revision: string, path: string): Promise<string | null> {
+  async readSnapshotBytes(revision: string, path: string): Promise<Buffer | null> {
     safePath(path);
     const entry = (await this.entries(revision)).find(entry => entry.path === path);
-    return entry ? (await this.git(['cat-file', 'blob', entry.object])).toString('utf8') : null;
+    return entry ? this.git(['cat-file', 'blob', entry.object]) : null;
+  }
+  async readSnapshot(revision: string, path: string): Promise<string | null> {
+    return (await this.readSnapshotBytes(revision, path))?.toString('utf8') ?? null;
   }
   async diff(memberId: string, part: HarnessPart, root: string): Promise<{ state: PartState; revision: string; diff: string }> {
     const checkpoint = await this.checkpoint(memberId, part, root, { type: 'harness', memberId }, 'Review snapshot');
