@@ -3,47 +3,31 @@ import type { RunSettings } from './config.js';
 import type { HarnessConfig } from './harness-config.js';
 import { AppError } from './types.js';
 
-export const memberManifestVersion = 2;
-export const projectAssignment = (harness: HarnessConfig) => ({ designScope: harness.designScope, implementationScope: harness.implementationScope });
-
-/** Exact accepted source bytes; member fields are a projection of this bundle. */
+/** Schema control belongs to the backend envelope, not the editable JSON. */
+export const memberManifestVersion = 3;
 export interface MemberConfigSource {
-  path: string;
-  files: Record<string, string>;
-  digest: string;
-  submittedBy: string;
-  submittedAt: number;
+  formatVersion?: number;
+  path: string; files: Record<string, string>; digest: string; submittedBy: string; submittedAt: number;
+  previous?: MemberConfigSource;
 }
-export interface ConfigFields {
-  name: string; role: string; responsibility: string; settings: RunSettings; harness: HarnessConfig;
-}
+export interface ConfigFields { name: string; role: string; responsibility: string; settings: RunSettings; harness: HarnessConfig }
 export function sourceBundle(path: string, files: Record<string, string>, submittedBy: string): MemberConfigSource {
   const digest = createHash('sha256').update(JSON.stringify(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)))).digest('hex');
-  return { path, files, digest, submittedBy, submittedAt: Date.now() };
+  return { formatVersion: memberManifestVersion, path, files, digest, submittedBy, submittedAt: Date.now() };
 }
-/** User/bootstrap changes use the same file format as an agent's submission. */
-export function generatedSource(fields: ConfigFields, memberId: string, revision: number | null): MemberConfigSource {
+export function generatedSource(fields: ConfigFields, memberId: string): MemberConfigSource {
   const { prompt, ...settings } = fields.settings;
-  const manifest = {
-    version: memberManifestVersion, memberId, revision, name: fields.name, role: fields.role, responsibility: fields.responsibility,
-    settings, promptFiles: ['prompts/member.md'],
-    harnesses: { project: projectAssignment(fields.harness) },
-  };
-  return sourceBundle(`.team/members/${memberId}/member.json`, {
-    'member.json': JSON.stringify(manifest, null, 2) + '\n', 'prompts/member.md': prompt,
-  }, 'user');
+  const manifest = { name: fields.name, role: fields.role, responsibility: fields.responsibility, settings, promptFiles: ['prompts/member.md'], designScope: fields.harness.designScope };
+  return sourceBundle(`.team/members/${memberId}/member.json`, { 'member.json': JSON.stringify(manifest, null, 2) + '\n', 'prompts/member.md': prompt }, 'user');
 }
-
-/** Startup-only format conversion; active submission accepts the current format exclusively. */
-export function migrateMemberSource(source: MemberConfigSource, memberId: string, revision: number): MemberConfigSource | null {
-  let manifest;
-  try { manifest = JSON.parse(source.files['member.json']!); }
+/** Startup-only conversion preserves the exact previous source and every prompt byte. */
+export function migrateMemberSource(source: MemberConfigSource): MemberConfigSource | null {
+  if (source.formatVersion === memberManifestVersion) return null;
+  let old: { name?: unknown; role?: unknown; responsibility?: unknown; settings?: unknown; promptFiles?: unknown; designScope?: unknown; harnesses?: { project?: { designScope?: unknown }; design?: unknown } };
+  try { old = JSON.parse(source.files['member.json']!); }
   catch { throw new AppError('corrupt_data', 'Accepted member manifest cannot be read', 500); }
-  if (manifest?.version === memberManifestVersion) return null;
-  if (manifest?.version !== 1 || !manifest.harnesses?.design || !manifest.harnesses?.implementation) throw new AppError('corrupt_data', 'Accepted member manifest has an unsupported format', 500);
-  const converted = {
-    ...manifest, version: memberManifestVersion, memberId, revision,
-    harnesses: { project: { designScope: manifest.harnesses.design, implementationScope: manifest.harnesses.implementation } },
-  };
-  return sourceBundle(source.path, { ...source.files, 'member.json': JSON.stringify(converted, null, 2) + '\n' }, 'harness');
+  const designScope = old.designScope ?? old.harnesses?.project?.designScope ?? old.harnesses?.design;
+  if (!designScope) throw new AppError('corrupt_data', 'Accepted member manifest has no design assignment', 500);
+  const manifest = { name: old.name, role: old.role, responsibility: old.responsibility, settings: old.settings, promptFiles: old.promptFiles, designScope };
+  return { ...sourceBundle(source.path, { ...source.files, 'member.json': JSON.stringify(manifest, null, 2) + '\n' }, 'harness'), previous: source };
 }

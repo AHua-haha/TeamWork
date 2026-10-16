@@ -146,5 +146,6 @@ test('mention insertion and compact tool summaries retain their existing behavio
   assert.equal(mentionAt('mail@example',12),null);
   assert.deepEqual(mentionAt('Hi @Back',8),{start:3,query:'Back'});
   assert.deepEqual(workToolSummary({id:'tool',kind:'tool',text:'run_command',args:'{"argv":["node","--version"]}',result:'v26'}),{icon:'terminal',label:'Ran node --version'});
+  assert.deepEqual(workToolSummary({id:'bash',kind:'tool',text:'bash',args:'{"command":"git status","metadata":{"git":{"scope":"design"}}}',result:'clean'}),{icon:'terminal',label:'Ran git status'});
   assert.equal(workToolSummary({id:'partial',kind:'tool',text:'edit',args:'null'}).label,'Updating file');
 });

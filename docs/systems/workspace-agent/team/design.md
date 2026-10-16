@@ -8,22 +8,15 @@ Members exist only inside their team and are absent from the global agent list a
 
 ## Inputs and preconditions
 
-### Management
+### Member identity, files and effective harnesses
 
-| Operation | Request | Response |
-| --- | --- | --- |
-| View team | `GET /workspaces/:workspaceId/team` | `{workspaceId, members}`, lead first, others in creation order |
-| Inspect member | `GET /workspaces/:workspaceId/team/members/:memberId` | `{member, configuration, harnesses}` |
+Each workspace has one unretirable lead and uniquely named active workers. Backend owns identities, revisions, source association and active settings. Editable member JSON contains name, role, responsibility, settings, promptFiles and designScope; referenced Markdown carries supplementary instructions. No version, memberId, revision, independent implementationScope or base-policy override belongs in the editable manifest.
 
-Member fields are `{memberId, workspaceId, revision, name, role, responsibility, harness, lead, settings, issues, ready, running}`. The member ID is its conversation ID. Accepted configuration contains name, role, responsibility, harness and settings; the lead flag cannot change. Member creation/updates use lead file submission and retirement uses its tool; there are no member write HTTP routes.
+Only the lead can read/edit .team/members among agents. Design/member files are pending harness content; user acceptance is required for their semantic commits. An accepted member-file Git commit does not activate settings. Configuration-change detection, validation-to-activation, self changes, creation/retirement through files and timing for active targets are deferred. The former submit_member_config and retire_member agent shortcuts are removed. Backend lifecycle methods retain identity, revision, model readiness and one-active-run checks.
 
-- Name: 1–40 letters, digits, spaces, `.`, `_`, `-`, starting and ending with a letter or digit, unique ignoring case among active members.
-- Role: 1–80 characters without controls, a free-text label without automatic behavior. Responsibility: up to 4,000 characters, possibly empty. At most 20 active members including the lead.
-- Settings: provider/model, prompts, instructions and per-model options follow the config contract. On creation omitted model settings use the workspace default and its options; direct instructions start empty. Catalog tool selections must be empty: workspace tools come from the harness.
-- Harness: `{designScope: {working: [paths], dependencies: [paths]}, implementationScope: {paths: [paths], usePaths: [paths]}, allowedCommands: [rules]}`. Each design list has at most 50 distinct user-design files and no design belongs to both. Commands have at most 50 exact argument-vector or executable rules. A design record holds Markdown `content` and corresponding `implementation` files/directories. Working designs are editable as pending files in the member worktree and require user approval to commit; explicit implementation paths permit agent commits; dependency designs and explicit implementation use paths are read-only. `.` maps the project root, excluding `.git`, `.context` and `.team`. Dependency read-only permissions take precedence on overlap.
-- New members start with an empty harness unless configured. A worker needs a nonempty design or implementation assignment with all selected designs resolvable to run; a lead may start with an empty harness to help create the design. Issues combine model readiness, design resolution, empty worker scope and unsupported catalog selections.
-- Creating/adopting a workspace creates its lead, named Lead, initialized with the workspace default model, in the same step. Startup supplies a missing lead for older workspaces. Startup converts legacy agent-context scopes to empty harnesses, and freezes existing design-mapped implementation assignments into explicit path lists once. It retains identity, conversations, settings and command allowances. Missing/invalid old design mappings grant no implementation paths.
-- Only the lead can submit member configuration or retire workers through tools. Submission updates require an idle target, including self; a lead cannot alter its own identity/settings through submission. The frontend inspects accepted configuration and manages workspace model choices; it does not write member configuration. Retired members leave the team view and free their names; their conversations remain readable.
+Working/dependency references select accepted user designs. Writable implementation derives from working mappings and read-only use paths from dependencies; read-only wins overlaps. Control paths remain excluded. Pending mappings do not grant access. Base tools/prompts/policy are fixed. Three bases (management, implementation, execute) assemble common file tools, one Bash tool and lead list_models. General command allowances are backend-controlled and cannot override file/Git boundaries.
+
+The lead has management bootstrap access to .context/user and .team/members before any design exists; implementation starts empty. Omitted backend-created member models/options use the workspace default. Model/default edits preserve already selected member settings. Invalid/unresolved designs or provider settings appear as readiness issues and prevent admission. Existing active members are migrated to design-only assignments without inventing a configuration activation policy.
 
 ### Work and cooperation
 
@@ -39,57 +32,40 @@ Each user-initiated exchange has a mention budget, initially 32 activations. Def
 
 `POST /workspaces/:workspaceId/team/chat/stop` stops existing exchanges and requests cancellation of active members. Later user messages may start new exchanges. Direct `POST /agents/:memberId/runs` refuses all team members; solo agents retain their own input API. Private member history/state/follow remains available for inspection. The [group chat contract](group-chat/design.md) provides the complete cooperation boundary.
 
-The harness supplies `ls`, `read`, scoped `write` and `edit`, `commit_scope`, `scope_history`, `restore_scope`, and `run_command` when command allowances exist. Common file tools can edit pending working-design context in the member worktree; dependency/agent context remains read-only. The lead has submit_member_config, retire_member and list_models; structured agent create/update/configure tools are removed. Assignments are shared final responses, with objectives and mentions; there is no private messaging or blocking assignment tool. Each model call receives current role/roster/readiness/running information, run-snapshot standing instructions and current harness design/file context. Design/file sections are bounded at 64 KiB with omissions named. The lead also receives workspace context.
+Every model call receives current role, roster/readiness/running information, stable active member instructions and assembled harness context. Shared design knowledge remains independent of member identity. Harness tool details and execution limits are defined by the [harness contract](../harness/design.md).
 
 ## Outputs and observable effects
 
-Member changes advance revisions. Model and standing-instruction changes apply next run. Accepted explicit harness assignments apply to subsequent tools/requests; harness scope changes require an idle target. Workspace model-list changes do not rewrite assigned members or active run settings. Pending configuration files are inactive. Group admission refuses a member revision changed after its model snapshot was prepared. New members inherit existing shared history. Retirement cancels active work, ends participation, preserves history and files, and allows name reuse. Historical group authors are preserved even after rename or retirement.
+Pending member/design files are checkpointed without acceptance. User review pins exact scope bytes and accepted base. Accepted member-file state, stable active settings and shared final publication are distinct. Prior active source remains stored independently of malformed/pending edits; there is no agent activation tool in this increment.
 
-Publication and creation of all selected recipient run records are atomic. Model execution begins after acceptance; its failure becomes run status. A failed, cancelled or interrupted activation produces no fabricated shared response; already-published messages and completed file effects remain. Stopping a group exchange cancels all its active branches. Backend restart marks abandoned runs interrupted and delivers buffered messages after their private history, without replaying triggers.
+GET /workspaces/:workspaceId/team returns active members with readiness/running state and effective derived implementationScope for inspection. GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}. Configuration includes exact stable active JSON/Markdown bytes, path, digest, submitter/time and backend formatVersion. Harnesses contains management, implementation and execute definitions with effective parts, tools, prompts and commit policy. Inspection never opens a worktree or creates Git storage. Pending files are not projected into active settings. Member POST/PUT/DELETE and the separate member /config route remain absent.
+
+Publication and creation of all selected run records remain atomic. Model execution starts after admission; failures become run status without fabricated shared output. Shared final messages and private histories remain database-backed and independent of context compaction.
 
 ## Failure behavior
 
-Malformed fields/configuration fail with 400; unknown workspace/member with 404; duplicate name, stale revision, size limit, retiring the lead, direct member input, busy recipient or exhausted exchange budget with 409. Invalid mention syntax fails with 400; unknown mentioned names with 404. Invalid/unavailable harness or model refuses publication before acceptance. Refused publication leaves shared history and recipient execution unchanged. Expected publication failures return private feedback to an agent; persistence failures may end its run. Publication is not idempotent: do not blindly retry uncertain acceptance.
+Unsafe/unresolved designs, invalid settings, out-of-scope file/Git access, unapproved management commits and stale review/base state fail explicitly. Active settings and pending edits remain separate. Agent metadata cannot claim user approval or lead authority. Inspection uses standard HTTP error envelopes; missing/foreign/retired members return not_found.
+
+Group messages retain atomic mention/readiness/busy/budget refusal behavior. Storage/checkpoint errors cannot be reported as successful acceptance/publication.
 
 ## Guarantees and limits
 
-Exactly one unretirable lead, unique active names, shared ordered messages, retained private histories, independently triggered parallel members, and only accepted final responses shared between members. Design files and implementation mappings remain independent of membership. File tools do not sandbox permitted command effects. Model choices and decomposition are guided by instructions rather than deterministic guarantees.
+One lead, unique active names, ordered shared messages, retained private histories, parallel independent activation and accepted final responses only remain guaranteed. Among agents member paths are lead-only; management acceptance is user-only. Tools are reusable; runtime assembles harness capabilities.
 
-No automated context maintenance, compaction policy, durable run resume, trigger queue, rich trigger rules or multiple chats per workspace. Mention tokens are routing syntax even inside code or quoted text; email addresses are ordinary text. The frontend uses the group-chat timeline and private history APIs. Harness configuration and approval UI are deferred; backend review/history/acceptance/restore operations are available under the member harness boundary.
+Member JSON has backend-owned schema/revision bookkeeping outside the editable file. Migration preserves identities, settings, command rules, exact previous source, pending drafts and historical Git references. Existing drafts are not rewritten. Retired records stay historical. Effective implementation paths are derived and cannot be configured independently.
+
+Configuration-change/activation/retirement/self-update workflow, new approval UI, richer execution rules, automatic context maintenance, durable run resume, trigger queues and multiple chats remain deferred. No new running-member update policy is introduced. Accepted file snapshots are not automatically merged into the original checkout or peer worktrees.
 
 ## Acceptance examples
 
-1. An unmentioned user message starts the lead. Its final response mentions Backend and Frontend; both work concurrently and receive the same shared messages.
-2. Backend reports with `@Lead`; Lead can work again after finishing its assignment response. Frontend sees the shared report without receiving Backend's private trace.
-3. While Backend works, an accepted message mentioning only Frontend is appended to idle members and buffered for Backend. Backend receives it after finishing, without another activation.
-4. A response mentions busy Backend and free Frontend: refuse the whole publication and let the sender revise privately.
-5. A member can see every accepted shared message and still edit only its harness-authorized implementation. Pending design edits require user approval to commit; implementation commits follow harness permission.
-6. Budget exhaustion refuses new activations. Existing branches can finish with unmentioned reports.
-7. A replacement member receives the shared transcript and configured design scope, not the retired member's private execution history.
-
-Each member uses a separate managed worktree. The harness automatically checkpoints finished runs and before successful final group publication. Scoped committed snapshots remain in harness Git; they are not automatically integrated into the original workspace or existing peer worktrees. User acceptance pins exact reviewed bytes/base and is scoped to one part; implementation commits never accept pending design. The [harness contract](../harness/design.md) specifies these operations and permissions.
-
-## File-based configuration submission
-
-The lead creates or updates a member by editing `.team/members/<bundle>/member.json` and Markdown files under that bundle's `prompts/` directory, using common file tools, then calling `submit_member_config({path})`. The manifest format is version 2, with memberId/revision (null/null for creation), name, role, responsibility, settings (without inline prompt), ordered promptFiles, and harnesses.project {designScope: {working, dependencies}, implementationScope: {paths, usePaths}}. References are relative to the bundle and stay inside prompts/. Existing member configuration is discoverable in the lead worktree; missing draft files are recreated from the last submitted bundle without overwriting existing edits. Editing a referenced prompt requires resubmission.
-
-Submission captures exact manifest/prompt contents, validates structure, model settings, design references, safe scopes, lead authority, revision and target availability, and atomically persists the complete accepted bundle with its derived member configuration. An invalid or stale submission activates nothing. Running targets refuse updates; the lead cannot submit a self-update during its own run. New members inherit the lead's current existing command allowances; updates preserve the target's allowances. The separate command harness uses existing allowances; richer boundary rules and agent configuration remain deferred. Configuration files cannot set fixed tools, harness maintenance prompts or approval policy. Member prompts supplement fixed base rules.
-
-Runtime reads accepted configuration and submitted prompt contents rather than mutable files. Durable storage retains the accepted source bundle, hash and author/time; its member fields are a validated projection. Bootstrap/internal lifecycle writes generate accepted JSON/Markdown bundles. The consolidated inspection endpoint includes stable bundle contents. Existing draft copies are never silently overwritten; stale revision submission requires reconciliation. Agent-facing structured create/update/configure tools are removed; retirement and model listing remain. Existing stored assignments migrate once to explicit implementation paths, after which design mappings no longer grant permissions.
-
-File submission validates model/provider/catalog references before the member write; invalid or incomplete run settings preserve the accepted bundle. Legacy incomplete selections remain visible for repair; a newly submitted configuration must be valid.
-
-Startup upgrades accepted version 1 active-member bundles to version 2 project grouping, retaining prompt files, assignments and command allowances while advancing member revisions. Existing draft files are preserved; old drafts must be regrouped under harnesses.project and reconciled with the current revision before submission. Scope Git parts and histories do not change merely because their harness is combined.
-
-The member view keeps flat harness assignment fields: designScope and implementationScope project into the combined project harness, while allowedCommands projects into the separate command harness. The version 2 editable manifest exposes only the project assignment.
-
-Retired members retain their historical accepted bundle format and revision; initialization does not replay retirement effects solely to upgrade their config representation.
-
-## Read-only member inspection
-
-GET /workspaces/:workspaceId/team lists members. GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}: member identity/configuration/status, the accepted source manifest and Markdown files (or null for an uninitialized legacy source), and effective project/command tools, rules and parts. Inspection does not open an agent worktree or create review snapshots. Pending files are not active configuration. The separate GET .../config and POST/PUT/DELETE member-management routes are removed, with no compatibility aliases. Agent file submission, retirement and internal lifecycle services remain. Existing harness review/history/commit/restore and group chat routes keep their contracts.
-
-Agent model listing exposes workspace choices/default. Creation defaults to the workspace default, including configured per-model options. File submission can select workspace models; it may preserve an existing selection removed from that list. Actual provider/model validity is still checked before accepting a submission. Workspace default changes do not alter members already configured.
+1. Unmentioned user input starts the lead; its accepted final mentions Backend and Frontend and both run concurrently.
+2. A busy mention refuses the entire publication, preserving private feedback without partial delivery.
+3. Shared messages arriving during private work append after that work; idle members receive them immediately.
+4. The lead edits member JSON/prompts, checkpoints, then asks for exact user review. An agent commit is refused; user file acceptance leaves active settings unchanged.
+5. A worker reads its dependency design/implementation and edits its working implementation; member files remain inaccessible.
+6. A pending mapping edit grants no new paths. User-approved design snapshots are used by semantic reads and harness scope resolution.
+7. Inspection exposes all three fixed harnesses and derived paths from stable backend state without creating worktrees.
+8. Stop/restart preserves private/public history and pending work; failed runs do not publish invented finals.
 
 ## Unified streaming and model completion
 

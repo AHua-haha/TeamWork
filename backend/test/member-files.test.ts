@@ -21,13 +21,13 @@ function tools(files: MemberFiles, root: string) {
 }
 async function writableLead(fixture: Fixture) {
   await fixture.team.designs.save(fixture.workspaceId, 'user/design.json', { content: 'Whole project', implementation: ['.'] }, null, 'Test design', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
-  await configureHarness(fixture, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: ['.'], usePaths: [] }, allowedCommands: [] });
+  await configureHarness(fixture, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] });
   return open(fixture, fixture.lead.memberId);
 }
 test('file tools edit pending working design and implementation while dependencies remain read-only', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['backend']);
   await fixture.team.designs.save(fixture.workspaceId, 'user/api.json', { content: 'API contract', implementation: ['backend/shared', 'shared/api.ts'] }, null, 'Test dependency', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
-  await configureHarness(fixture, 'Backend', { designScope: { working: backend.harness.designScope.working, dependencies: ['user/api.json'] }, implementationScope: { paths: ['backend'], usePaths: ['backend/shared', 'shared/api.ts'] }, allowedCommands: [] });
+  await configureHarness(fixture, 'Backend', { designScope: { working: backend.harness.designScope.working, dependencies: ['user/api.json'] }, allowedCommands: [] });
   await mkdir(join(fixture.directory, 'shared'), { recursive: true });
   await mkdir(join(fixture.directory, 'backend', 'shared'), { recursive: true });
   await writeFile(join(fixture.directory, 'shared', 'api.ts'), 'api');
@@ -62,7 +62,7 @@ test('scope hides unrelated implementation and context while exposing ancestors 
   await assert.rejects(file.read('.git/config'), fail(/not found/));
   await file.write('src/backend.ts', 'updated');
   const lead = await open(fixture, fixture.lead.memberId);
-  assert.match(await lead.read('README.md'), /readme/);
+  await assert.rejects(lead.read('README.md'), fail(/not found/));
   await assert.rejects(lead.write('README.md', 'x'), fail(/implementation scope/));
 }));
 test('exact-file implementation mapping permits creating its missing parent directories', () => withTeam(async fixture => {

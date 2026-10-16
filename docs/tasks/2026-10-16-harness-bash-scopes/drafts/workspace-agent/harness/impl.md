@@ -3,64 +3,42 @@
 
 ## Contract
 
-[Harness proposal](design.md). Implement three bases, design-derived implementation authority, backend-owned control metadata, user-approved management commits and scoped Git through one Bash capability. This is a design/implementation plan; current canonical behavior and application code remain unchanged.
+[Harness](design.md) defines the three purpose bases, common tools, protected acceptance, derived implementation authority and independent staged history. Configuration activation remains outside this increment.
 
 ## Responsibilities and decomposition
 
-HarnessService remains the owner of resolved member authority, effective scope, tool/prompt assembly and operation coordination. Replace the project/command split with management, implementation and execute base definitions. The bases contribute rules to reusable file and Bash capabilities rather than separate tool implementations per agent.
+HarnessService composes accepted designs, fixed bases, scoped files/history and Bash. HarnessHistory owns worktrees, Git objects, staging repositories, checkpoint indexes, accepted refs and design acceptance pointers. The [team](../team/design.md) owns stable active member identity/content; [runtime](../../../../../systems/agent-runtime/design.md) owns the model loop and tool cancellation. [Design parts](../../../../../systems/workspace-agent/context-base/design-parts/design.md) resolve accepted semantic designs.
 
-Management defines design and member scopes, prompts and protected acceptance. Its lead bootstrap grants .context/user/ and .team/members/ maintenance immediately; derived implementation access starts empty until accepted designs are assigned. Implementation derives file access from accepted design assignments and owns its independently staged/history part. Execute defines general command policy and the execution environment. HarnessHistory continues owning worktrees, objects, checkpoints and scoped history; it must support persistent scope staging and Git reference context for ordinary Git commands.
-
-The [team](../team/design.md) owns member identity, accepted source/metadata, readiness and activation. The [runtime](../../../../../systems/agent-runtime/design.md) owns model/tool execution and cancellation. The [context base](../../../../../systems/workspace-agent/context-base/design.md) owns original design/catalog records. The parent integration must settle which accepted design snapshot feeds mapping resolution before implementation. No new child-system boundary or execution engine is selected by this proposal.
+Reusable file adapters and one Bash adapter receive runtime identity; policy is resolved by harness services rather than tied to a lead-specific tool implementation. Management contributes protected design/member parts and lead model discovery. Implementation contributes the derived part. Execute contributes existing general command allowances. Base prompts and member Markdown are assembled into the system prompt.
 
 ## Coordination and data flow
 
-1. Read accepted member content and backend-owned identity/revision/base state. Resolve working/dependency designs from the agreed accepted-design source. Validate paths before composing authority; pending file bytes cannot widen scope.
-2. Derive implementation paths from working mappings and use paths from dependency mappings. Apply read-only precedence and control-file exclusions. Build management, implementation and execute definitions and their prompts.
-3. Expose each reusable tool once. File operations use resolved authority. The single Bash tool carries command input and optional requested Git-scope metadata; trusted member/run identity comes from runtime.
-4. For scoped Git, resolve the requested scope against current accepted authority and prepare its backend-managed index/HEAD/reference context. Check actual Git operations/paths and refuse repository retargeting or metadata that attempts to supply backend authority. General command execution must preserve management restrictions.
-5. Preserve separate mutable staging per member/scope. Status/diff/log/restore/commit use the selected scope; automatic checkpoints use separate temporary indexes and checkpoint refs. Git objects can remain shared; a separate index alone does not isolate HEAD/ref updates or filesystem effects.
-6. Enforce user approval on design/member commits and agent permission on implementation commits. Review pins exact scope bytes and accepted base. Use conditional ref updates and appropriate serialization so a stale actor cannot overwrite newer acceptance or another scope.
-7. Preserve the separation between management-file acceptance and active member settings. Configuration-change detection, validation/submission-to-activation integration, activation timing and busy/running-target application are deferred. No new automatic activation behavior is introduced by the harness plan.
-8. Keep run-end/failure/cancellation/restart checkpoints after outstanding effects settle and before terminal success claims. Group shared final publication remains separate from file/config acceptance.
+1. Resolve accepted working/dependency designs and derive writable/read-only paths. Validate/control exclusions and dependency precedence define file access. Materialize missing active member bundles for the lead without replacing drafts.
+2. Open private bare storage next to the source at .rsi-harness/<path-hash>/repository.git and one linked worktree per member. Initialize scope refs by normalized paths/exclusions, preserving existing pending work when the shape changes.
+3. Assemble unique ls/read/write/edit/bash plus lead list_models. File tools resolve through MemberFiles. Bash resolves requested scope against current parts; supplied metadata can select only that scope.
+4. For scoped Git, create one backend-only bare metadata directory under staging/<member>/<part>/<scope-hash>. It has its own HEAD/index and shares the main object directory through GIT_OBJECT_DIRECTORY. Private repositories, worktree .git and backend storage are unreadable/unwritable to shell children.
+5. A per-invocation Unix socket receives actual Git argv/cwd from the immutable PATH Git bridge. Backend validates cwd, command/options/path intersection, source revisions and actor policy. Native Git runs with explicit private git-dir/worktree, no global/system config, hooks, fsmonitor or external diff/textconv. Protected acceptance is serialized across design parts as well as per-scope implementation acceptance. Stage integrity is checked; failed add restores the index. Commit performs compare-and-swap accepted/base updates under a scope queue. Protected commits refuse before acceptance.
+6. @anthropic-ai/sandbox-runtime 0.0.79 wraps real Bash in sandbox-exec on macOS or bubblewrap on Linux. Read scope includes authorized design/implementation and required runtime/system files. General writes permit implementation minus control/dependency paths; Git Bash permits scratch only. Metadata selection never authorizes unrestricted execution. Profiles are generated under a queue because the SDK reads global Unix-socket configuration; running commands remain parallel across members. No unsandboxed fallback/network allowance is provided.
+7. Minimal child environment omits backend credentials/config. Processes run in a detached group with bounded output/timeout. End/abort kills descendants; broker operations settle before temp cleanup and lifecycle checkpointing. The bridge uses exported PWD for cwd (validated by backend), avoiding directory-content access required by Node getcwd in an otherwise unassigned root.
+8. Checkpoints build trees through fresh temporary indexes and update checkpoint/run refs, never the agent index. User acceptance validates exact working snapshot/review/base and updates accepted/base refs atomically. Git staging synchronizes HEAD after user acceptance, refreshing a clean index but retaining dirty staging. Explicit full index/worktree restore to current acceptance refreshes stale bases. Git log --all resolves to the selected checkpoint and acceptance heads, never arbitrary repository refs; working restores checkpoint pending files before replacement.
+9. A user design commit atomically updates per-design accepted pointers alongside scope refs. DesignService reads those accepted bytes first, with tombstones for deleted records, then original context for paths never accepted in harness Git. Pending bytes and member-file commits cannot grant design authority.
 
 ## Decisions and constraints
 
-The interface change removes commit_scope, scope_history, restore_scope and run_command from agent assembly when Bash/Git behavior is implemented. It must not expose old and new authority models in parallel merely to preserve obsolete behavior. Existing required history/failure guarantees stay intact.
+The actual Git bridge is the trusted operation boundary; OS isolation prevents native Git/repository access and arbitrary shell writes from bypassing it. Scope selection is one per Bash invocation. Supported Git syntax is intentionally finite and documented; arbitrary native Git flags, remote operations and shell repository selection are not forwarded.
 
-The Bash metadata example {git: {scope: "implementation"}} is illustrative. One scope per invocation is a proposed simple default, not a finalized schema. Exact shell behavior, allowed Git commands/options, scope-less Git handling and command policy composition need to be specified. A managed Git executable/backend service is a possible internal mechanism; PATH routing alone is insufficient. No claim that regex checking or environment variables confine arbitrary Bash is made.
+General execution still uses exact-vector/executable rules over [bash,-c,command]. Only a Bash allowance authorizes general scripts. Richer rules are deferred. Linux requires sandbox runtime dependencies and allows Unix socket transport; this task verifies the macOS profile. Temporary scratch/system runtime access is execution infrastructure, not workspace ownership.
 
-Backend metadata must associate editable member paths with accepted member identity and editing bases without requiring agents to write version/revision fields. The exact bundle schema, activation operation, busy/self/retirement behavior and approval transport remain open.
-
-Migration must reconcile the accepted-design source and existing explicit assignments, worktree files, staging/history refs and accepted source bundles. Do not silently restore the former mapping-derived implementation logic without checking the new authority/acceptance model. Preserve original checkout/index and unrelated changes. Applying changed configuration or scope to active agents is part of the explicitly deferred activation work.
+Accepted design pointers supply semantic reads without mutating original-context history or auto-refreshing peer worktrees. Member acceptance and activation stay separate. Startup removes legacy explicit paths from assignment records and migrates accepted sources, preserving exact previous bundles and pending work; archived scope refs and retired records remain historical.
 
 ## Code map
 
-Existing owners to revise:
-
-- [Bases](../../../../../../backend/src/harness-bases.ts): replace two purpose definitions with three and make member-config commits user-controlled.
-- [Harness config](../../../../../../backend/src/harness-config.ts), [resolution and integration](../../../../../../backend/src/harness.ts): accepted design assignment validation and derived implementation authority.
-- [Tool adapters](../../../../../../backend/src/harness-tools.ts), [command lifecycle](../../../../../../backend/src/harness-command.ts): replace argv-only command and dedicated history tools with reusable Bash execution plus scoped metadata/context checks. The concrete execution mechanism is still open.
-- [File access](../../../../../../backend/src/member-files.ts): preserve file boundaries and align them with execution authority.
-- [Scoped history](../../../../../../backend/src/harness-history.ts): independent staging/ref context, checkpoint indexes and protected acceptance.
-- [Team policy assembly](../../../../../../backend/src/team-system.ts), [member instructions](../../../../../../backend/src/member-context.ts): assemble new bases, common tools and ordinary Git instructions.
-- [Team implementation proposal](../team/impl.md): owns member bundle/control metadata and approval/activation coordination.
-- [Design service](../../../../../../backend/src/design.ts): resolve the agreed accepted-design view; canonical source integration remains an explicit design item.
-
-Follow-up changes to inspection, storage and review routes must use the same effective authority; frontend callers must not recompute scope independently.
+- [Fixed bases](../../../../../../backend/src/harness-bases.ts), [assignment validation](../../../../../../backend/src/harness-config.ts), [composition](../../../../../../backend/src/harness.ts).
+- [File adapters and Bash tool](../../../../../../backend/src/harness-tools.ts), [file boundary](../../../../../../backend/src/member-files.ts), [Bash lifecycle/isolation/bridge](../../../../../../backend/src/harness-command.ts).
+- [Scoped history, staging and acceptance](../../../../../../backend/src/harness-history.ts), [accepted design resolver](../../../../../../backend/src/design.ts).
+- [Team composition](../../../../../../backend/src/team-system.ts), [member instructions](../../../../../../backend/src/member-context.ts), [member content](../../../../../../backend/src/member-config-format.ts).
+- [Review routes](../../../../../../backend/src/team-routes.ts) retain exact-revision user acceptance/history/restore. No new member-write route exists.
 
 ## Verification
 
-This checkpoint verifies documentation only. Implementation acceptance must include:
-
-- Three-base tool/prompt assembly, common Bash registration and removal of superseded agent tools.
-- Real scoped Git status/diff/add/log/restore/commit and independent index/reference state across scopes and agents.
-- Protected design/member commits, exact reviewed bytes/base, approval failure and unaffected implementation history/staging.
-- Worker denial for member files through file tools, Bash and scoped Git metadata; attempts to redirect Git context or use nested scripts must obey the chosen execution contract.
-- Accepted mapping derivation, dependency overlap, root mappings/control exclusions, pending mapping edits and invalid/missing designs.
-- Stable accepted member configuration after invalid/stale/unapproved drafts; backend-owned metadata through creation and updates.
-- Run-end checkpoints that preserve staging, cancellation effect ordering, restart recovery and refusal of success after checkpoint failure.
-- Migration with existing accepted/pending source and scoped histories; no silent widening or loss of unrelated files.
-- Reconciled frontend inspection, runtime/SQL contracts and group-chat regression behavior.
-
-Existing harness-history, member-files, harness, member-config, team-context, lead, HTTP and MySQL integration suites are the starting locations. Tests asserting explicit independent implementation assignments or immediate unapproved submission require replacement when the new behavior is implemented.
+[Harness tests](../../../../../../backend/test/harness.test.ts) run real sandboxed Bash/native Git, staging versus checkpoints, protected member/design commits, descendant/native-Git bypass attempts, dependency denial, accepted mapping visibility, stale-base refresh, timeout and cancellation. [History tests](../../../../../../backend/test/harness-history.test.ts) cover independent scopes/worktrees, exact review/base conflicts, restore transitions and links. [Member files](../../../../../../backend/test/member-files.test.ts) cover mapped files, dependency overlaps and traversal. [Member configuration](../../../../../../backend/test/member-config.test.ts), [context assembly](../../../../../../backend/test/team-context.test.ts), [lead](../../../../../../backend/test/lead.test.ts) and HTTP tests verify new source/inspection/tool contracts. [SQL/runtime integration](../../../../../../backend/test/integration/backend.test.ts) exercises actual tool execution, approval, checkpoint/publication ordering, failure/cancellation and restart. No live provider calls are required.

@@ -1,33 +1,36 @@
 import type { HarnessDefinition } from './harness-history.js';
 import type { StoredMember } from './team.js';
 
-const fileTools = ['ls', 'read', 'write', 'edit', 'commit_scope', 'scope_history', 'restore_scope'];
-/** Fixed policies. Assignment files cannot replace these tools, prompts or commit permissions. */
-export function purposeHarnesses(member: StoredMember): HarnessDefinition[] {
+export interface ImplementationScope { paths: string[]; usePaths: string[] }
+const files = ['ls', 'read', 'write', 'edit'];
+/** Fixed purpose policy; an assignment supplies design references, never permissions or tool definitions. */
+export function purposeHarnesses(member: StoredMember, implementation: ImplementationScope = { paths: [], usePaths: [] }): HarnessDefinition[] {
   const config = member.value.harness;
   const designPaths = member.value.lead ? ['.context/user'] : config.designScope.working.map(path => `.context/${path}`);
   return [
     {
-      id: 'project',
-      prompt: 'Manage design and implement the accepted design through this project harness. Use common file tools to edit pending design JSON (content and implementation). Discuss unresolved choices with the user. Design commits require explicit user approval; a checkpoint is not acceptance. Implement within explicitly assigned implementation paths. Use paths are read-only. Design mappings do not grant file access. Use commit_scope with a meaningful intent when a coherent implementation change is ready; implementation commits need no user approval.',
-      tools: [...fileTools, ...(member.value.lead ? ['submit_member_config', 'retire_member', 'list_models'] : [])],
+      id: 'management',
+      prompt: 'Maintain the project design and member configuration using common file tools. Working design files are editable pending changes; dependency designs are read-only. Only the lead may access .team/members. Keep design decisions, scope mappings and member responsibilities clear. Member JSON contains name, role, responsibility, settings, promptFiles and designScope only; JSON format versions, member identity associations and optimistic revisions are backend-owned. Markdown prompts supplement fixed rules. Design and member-config semantic commits require user review of exact bytes/base. File acceptance does not activate member settings; configuration change/activation handling is deferred. Use bash with metadata.git.scope set to design or member-config for ordinary Git status, diff, add, log, show, restore and commit commands. Never retarget Git metadata or claim user approval.',
+      tools: [...files, 'bash', ...(member.value.lead ? ['list_models'] : [])],
       parts: [
-        ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: config.designScope.dependencies.map(path => `.context/${path}`), commit: 'user' as const, prompt: 'Keep design and subdesign knowledge continuous across team changes. Explain pending changes in your final reply; ask the user to review and accept the exact revision.' }] : []),
-        ...(member.value.lead ? [{ id: 'member-config', paths: ['.team/members'], exclude: [], commit: 'agent' as const, prompt: 'Edit JSON manifests and Markdown prompt files, then submit_member_config with the manifest path. Checkpoints and commits of draft configuration do not activate it. Base policy and command allowances cannot be changed through these files.' }] : []),
-        ...(config.implementationScope.paths.length ? [{ id: 'implementation', paths: [...new Set(config.implementationScope.paths)], exclude: ['.context', '.team', ...config.implementationScope.usePaths], commit: 'agent' as const, prompt: 'Maintain useful implementation notes in your final report. Automatic run-end checkpoints preserve state and do not replace semantic commits.' }] : []),
+        ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: config.designScope.dependencies.map(path => `.context/${path}`), commit: 'user' as const, prompt: 'Preserve design knowledge independently of member identity. Explain pending changes and request user review; checkpoints do not accept design.' }] : []),
+        ...(member.value.lead ? [{ id: 'member-config', paths: ['.team/members'], exclude: [], commit: 'user' as const, prompt: 'Maintain member JSON and referenced Markdown as pending files. User acceptance commits these files only. Member activation and retirement through file changes are deferred.' }] : []),
       ],
     },
     {
-      id: 'command',
-      prompt: `Run only commands allowed by this command harness, using exact argv or exact executable matching without implicit shell interpretation. File scope and allowed commands are separate. Command effects are not filesystem-confined by file-tool scope in this prototype. Keep commands within the assignment. Richer command-boundary rules and agent configuration are deferred.\nAllowed commands: ${JSON.stringify(member.value.harness.allowedCommands)}`,
-      tools: member.value.harness.allowedCommands.length ? ['run_command'] : [],
-      parts: [],
+      id: 'implementation',
+      prompt: 'Implement the accepted working designs. File authority is derived from their accepted implementation mappings. Dependency mappings are read-only and win overlaps. Pending design edits never expand authority. Use bash with metadata.git.scope=implementation for scoped Git commands; stage coherent changes and git commit with meaningful intent. Implementation commits are agent-authorized. Maintain useful implementation knowledge in files or final reports. Automatic checkpoints preserve work without changing your staging.',
+      tools: [...files, 'bash'],
+      parts: implementation.paths.length ? [{ id: 'implementation', paths: implementation.paths, exclude: ['.context', '.team', ...implementation.usePaths], commit: 'agent', prompt: 'Keep implementation history independent of protected management files.' }] : [],
+    },
+    {
+      id: 'execute',
+      prompt: `General Bash execution requires an existing command allowance. It runs with OS-enforced read/write scope, no network access, and protected management/Git metadata. Scoped Git always requires metadata.git.scope and is mediated by the harness, including calls inside scripts. No user approval can be supplied through metadata. Existing command allowances: ${JSON.stringify(config.allowedCommands)}. Richer execution configuration is deferred.`,
+      tools: config.allowedCommands.length ? ['bash'] : [], parts: [],
     },
   ];
 }
-
-/** Inspection uses accepted configuration only and never opens a working tree. */
-export function inspectHarnesses(member: StoredMember): HarnessDefinition[] {
-  const definitions = purposeHarnesses(member), writable = definitions.some(d => d.parts.length);
+export function inspectHarnesses(member: StoredMember, implementation: ImplementationScope): HarnessDefinition[] {
+  const definitions = purposeHarnesses(member, implementation), writable = definitions.some(d => d.parts.length);
   return definitions.map(d => ({ ...d, tools: d.tools.filter(name => writable || !['write', 'edit'].includes(name)) }));
 }

@@ -894,7 +894,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
             const defaults = defaultRunSettings(value);
             const settings = { ...lead.value.settings, connectionId: defaults.connectionId, modelId: defaults.modelId, modelOptions: defaults.modelOptions };
             const next = { ...lead.value, settings };
-            next.configuration = generatedSource(next, lead.id, lead.revision + 1);
+            next.configuration = generatedSource(next, lead.id);
             if (lead.value.configuration) next.configuration.path = lead.value.configuration.path;
             await db.execute('UPDATE members SET data = ?, revision = revision + 1 WHERE id = ?', [encode(next), lead.id]);
           }

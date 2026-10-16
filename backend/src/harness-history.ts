@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { AppError, identity } from './types.js';
 import { missing, sha256 } from './text.js';
 
@@ -65,11 +65,11 @@ export class HarnessHistory {
   private readonly queue = new HarnessQueue();
   constructor(readonly storage: string, readonly source: string) { this.repository = join(storage, 'repository.git'); }
 
-  private async git(args: string[], input?: Buffer | string, index?: string): Promise<Buffer> {
+  private async git(args: string[], input?: Buffer | string, index?: string, repository = this.repository, root?: string, cwd?: string): Promise<Buffer> {
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')));
-    Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_AUTHOR_NAME: 'Harness', GIT_AUTHOR_EMAIL: 'harness@localhost', GIT_COMMITTER_NAME: 'Harness', GIT_COMMITTER_EMAIL: 'harness@localhost', ...(index ? { GIT_INDEX_FILE: index } : {}) });
+    Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_AUTHOR_NAME: 'Harness', GIT_AUTHOR_EMAIL: 'harness@localhost', GIT_COMMITTER_NAME: 'Harness', GIT_COMMITTER_EMAIL: 'harness@localhost', ...(index ? { GIT_INDEX_FILE: index } : {}), ...(root ? { GIT_WORK_TREE: root, GIT_OBJECT_DIRECTORY: join(this.repository, 'objects') } : {}) });
     return new Promise((resolveResult, reject) => {
-      const child = execFile('git', ['--git-dir', this.repository, '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], { env, encoding: 'buffer', maxBuffer: 128 * 1024 * 1024, timeout: 60_000 }, (error, stdout, stderr) => {
+      const child = execFile('git', ['--git-dir', repository, '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null', ...args], { env, cwd, encoding: 'buffer', maxBuffer: 128 * 1024 * 1024, timeout: 60_000 }, (error, stdout, stderr) => {
         if (error) reject(new AppError('harness_git_error', `Harness Git failed: ${stderr.toString().trim() || error.message}`, 503));
         else resolveResult(stdout);
       });
@@ -192,13 +192,16 @@ export class HarnessHistory {
     } finally { await rm(index, { force: true }); }
   }
   private async record(tree: string, parent: string | null, kind: ScopeRevision['kind'], actor: HistoryActor, message: string): Promise<string> {
-    return this.text(['commit-tree', tree, ...(parent ? ['-p', parent] : [])], JSON.stringify({ kind, actor, message, time: Date.now() }) + '\n');
+    return this.text(['commit-tree', tree, ...(parent ? ['-p', parent] : [])], this.commitMessage(kind, actor, message));
+  }
+  private commitMessage(kind: ScopeRevision['kind'], actor: HistoryActor, message: string): string {
+    return `${message}\n\nHarness-Metadata: ${JSON.stringify({ kind, actor, message, time: Date.now() })}\n`;
   }
   async revision(revision: string): Promise<ScopeRevision> {
     if (!objectId(revision)) throw new AppError('invalid_input', 'A revision is a full Git object ID');
     const tree = await this.text(['rev-parse', `${revision}^{tree}`]);
     let metadata;
-    try { metadata = JSON.parse(await this.text(['show', '-s', '--format=%B', revision])); }
+    try { const body = await this.text(['show', '-s', '--format=%B', revision]); metadata = JSON.parse(body.includes('\nHarness-Metadata: ') ? body.split('\nHarness-Metadata: ').at(-1)! : body); }
     catch { throw new AppError('invalid_revision', 'Revision is not a harness checkpoint', 409); }
     return { revision, tree, ...metadata };
   }
@@ -274,36 +277,17 @@ export class HarnessHistory {
       }
       let checkpoint = await this.ref(refs.checkpoint);
       if (!checkpoint) {
-        await this.materialize(root, part, committed);
-        await this.text(['update-ref', '--stdin'], `start\ncreate ${refs.base} ${committed}\ncreate ${refs.checkpoint} ${committed}\nprepare\ncommit\n`);
-        checkpoint = committed;
+        // A scope definition can change during migration. Preserve pending work in
+        // an existing member area; immutable old scope references remain reachable.
+        const prior = await this.text(['for-each-ref', '--format=%(refname)', `refs/harness/areas/${memberId}/${part.id}/`]);
+        if (!prior) await this.materialize(root, part, committed);
+        const initial = prior ? await this.record(await this.snapshot(root, part), committed, 'checkpoint', { type: 'harness', memberId }, 'Preserve existing files under the derived scope') : committed;
+        await this.text(['update-ref', '--stdin'], `start\ncreate ${refs.base} ${committed}\ncreate ${refs.checkpoint} ${initial}\nprepare\ncommit\n`);
+        checkpoint = initial;
       }
       const base = await this.ref(refs.base);
       if (!base) throw new AppError('corrupt_data', 'Scope is missing its committed base', 500);
       return { part, checkpoint, committed, base };
-    });
-  }
-
-  /** One-time policy migration: narrow exclusions without resetting existing pending files. */
-  async migrateExclusions(memberId: string, previous: HarnessPart, next: HarnessPart, root: string): Promise<void> {
-    if (this.key(previous) === this.key(next)) return;
-    if (JSON.stringify([...previous.paths].sort()) !== JSON.stringify([...next.paths].sort()) || previous.exclude.some(path => !next.exclude.includes(path))) throw new AppError('invalid_config', 'Boundary migration can only add exclusions');
-    const old = this.refs(memberId, previous), refs = this.refs(memberId, next);
-    await this.queue.run(`scope:${this.key(next)}`, async () => {
-      if (!(await this.ref(old.checkpoint)) || await this.ref(refs.checkpoint)) return;
-      const actor: HistoryActor = { type: 'harness', memberId };
-      const project = async (revision: string) => this.tree((await this.entries(revision)).filter(entry => partOwns(next, entry.path)));
-      const oldCommitted = (await this.ref(old.committed))!;
-      let committed = await this.ref(refs.committed);
-      if (!committed) {
-        committed = await this.record(await project(oldCommitted), null, 'baseline', actor, `Boundary migration from accepted ${oldCommitted}`);
-        await this.update(refs.committed, committed, null);
-      }
-      const oldBase = (await this.ref(old.base))!;
-      const baseTree = await project(oldBase);
-      const base = baseTree === (await this.revision(committed)).tree ? committed : await this.record(baseTree, null, 'baseline', actor, `Boundary migration from stale base ${oldBase}`);
-      const checkpoint = await this.record(await this.snapshot(root, next), base, 'checkpoint', actor, 'Preserve pending files while narrowing control-file exclusions');
-      await this.text(['update-ref', '--stdin'], `start\ncreate ${refs.base} ${base}\ncreate ${refs.checkpoint} ${checkpoint}\nprepare\ncommit\n`);
     });
   }
 
@@ -329,7 +313,7 @@ export class HarnessHistory {
     if (actor.type !== 'user' && (part.commit !== 'agent' || actor.type !== 'agent')) throw new AppError('approval_required', 'This part requires user approval to commit', 403);
     if (!message.trim() || message.length > 1000) throw new AppError('invalid_input', 'A commit needs an intent of 1–1,000 characters');
     const state = await this.ensure(memberId, part, root);
-    return this.queue.run(`scope:${this.key(part)}`, async () => {
+    return this.queue.run(part.id === 'design' ? 'design-acceptance' : `scope:${this.key(part)}`, async () => {
       const refs = this.refs(memberId, part);
       const current = await this.ref(refs.checkpoint);
       const committed = await this.ref(refs.committed);
@@ -338,7 +322,7 @@ export class HarnessHistory {
       const selected = await this.revision(revision);
       if (await this.snapshot(root, part) !== selected.tree) throw new AppError('stale_revision', 'Working files changed after the selected checkpoint', 409);
       const next = await this.record(selected.tree, state.committed, 'commit', actor, message);
-      const commands = [`start`, `update ${refs.committed} ${next} ${committed}`, `update ${refs.base} ${next} ${base}`, `prepare`, `commit`, ''].join('\n');
+      const commands = [`start`, `update ${refs.committed} ${next} ${committed}`, `update ${refs.base} ${next} ${base}`, ...await this.designUpdates(part, state.base, selected.tree, next), `prepare`, `commit`, ''].join('\n');
       await this.text(['update-ref', '--stdin'], commands);
       return this.revision(next);
     });
@@ -365,6 +349,156 @@ export class HarnessHistory {
     const ids = await this.text(['rev-list', `--max-count=${limit}`, state.checkpoint, state.committed]);
     return Promise.all(ids.split('\n').filter(Boolean).map(id => this.revision(id)));
   }
+  private designRef(path: string) { return `refs/harness/designs/${sha256(path.toLowerCase())}`; }
+  private async designUpdates(part: HarnessPart, base: string, tree: string, next: string): Promise<string[]> {
+    if (part.id !== 'design') return [];
+    const changed = (await this.text(['diff-tree', '--no-commit-id', '--name-only', '-r', base, tree])).split('\n').filter(Boolean);
+    const updates: string[] = [];
+    for (const path of changed) {
+      const ref = this.designRef(path), previous = await this.ref(ref);
+      if (previous && await this.readSnapshot(previous, path) !== await this.readSnapshot(base, path)) throw new AppError('stale_revision', 'Accepted design changed in another scope; review its current accepted state', 409);
+      updates.push(`update ${ref} ${next} ${previous ?? '0'.repeat(40)}`);
+    }
+    return updates;
+  }
+  async acceptedDesign(path: string): Promise<{ content: string | null; state: ScopeRevision } | null> {
+    const revision = await this.ref(this.designRef(path));
+    return revision ? { content: await this.readSnapshot(revision, path), state: await this.revision(revision) } : null;
+  }
+  async acceptedDesignPaths(): Promise<string[]> {
+    const revisions = (await this.text(['for-each-ref', '--format=%(objectname)', 'refs/harness/designs/'])).split('\n').filter(Boolean);
+    const paths = new Set<string>();
+    for (const revision of new Set(revisions)) for (const path of await this.paths(revision)) if (path.startsWith('.context/user/')) paths.add(path.slice('.context/'.length));
+    return [...paths];
+  }
+  private scopeRepository(memberId: string, part: HarnessPart) { return join(this.storage, 'staging', memberId, part.id, this.key(part)); }
+  private async staging(memberId: string, part: HarnessPart, root: string) {
+    const state = await this.ensure(memberId, part, root), repository = this.scopeRepository(memberId, part);
+    try { await lstat(join(repository, 'HEAD')); }
+    catch (error) {
+      if (!missing(error)) throw error;
+      await mkdir(repository, { recursive: true });
+      await this.git(['init', '--bare', repository]);
+      await this.git(['update-ref', 'HEAD', state.base], undefined, undefined, repository, root);
+      await this.git(['read-tree', state.base], undefined, undefined, repository, root);
+    }
+    const head = (await this.git(['rev-parse', 'HEAD'], undefined, undefined, repository, root)).toString().trim();
+    if (head !== state.base) {
+      const staged = (await this.git(['write-tree'], undefined, undefined, repository, root)).toString().trim();
+      if (staged === (await this.revision(head)).tree) await this.git(['read-tree', state.base], undefined, undefined, repository, root);
+      await this.git(['update-ref', 'HEAD', state.base, head], undefined, undefined, repository, root);
+    }
+    return { state, repository };
+  }
+  /** Trusted backend Git boundary. Shell children have no direct access to these repositories. */
+  async scopedGit(memberId: string, part: HarnessPart, root: string, argv: string[], cwd: string, actor: HistoryActor): Promise<string> {
+    return this.queue.run(`git:${memberId}:${part.id}`, async () => {
+      const { state, repository } = await this.staging(memberId, part, root);
+      const run = async (args: string[]) => (await this.git(args, undefined, undefined, repository, root, cwd)).toString('utf8');
+      const [command, ...args] = argv;
+      if (!command || !['status', 'diff', 'add', 'log', 'show', 'restore', 'commit'].includes(command)) throw new AppError('command_denied', 'Supported scoped Git commands: status, diff, add, log, show, restore, commit', 403);
+      if (argv.some(value => typeof value !== 'string' || /[\u0000-\u001f]/.test(value))) throw new AppError('invalid_input', 'Invalid Git arguments');
+      const rootPaths = [...part.paths.map(path => path === '.' ? ':/' : `:(top,literal)${path}`), ...part.exclude.map(path => `:(top,exclude,icase)${path}`), ':(top,exclude,icase)**/.git/**'];
+      const paths = (values: string[]) => {
+        if (!values.length) throw new AppError('invalid_input', 'Name paths to stage or restore');
+        const selected = new Set<string>();
+        for (const value of values) {
+          const path = relative(root, resolve(cwd, value));
+          if (isAbsolute(path) || path === '..' || path.startsWith('../') || value.startsWith(':') || value.includes('\\')) throw new AppError('access_denied', 'Git paths must stay inside the selected scope', 403);
+          const candidate = path || '.';
+          if (partOwns(part, candidate)) selected.add(candidate);
+          else { const children = part.paths.filter(p => candidate === '.' || coversPath(candidate, p)); if (!children.length) throw new AppError('access_denied', 'Git path is outside the selected scope', 403); for (const child of children) selected.add(child); }
+        }
+        return [...selected].map(p => p === '.' ? ':/' : `:(top,literal)${p}`).concat(part.exclude.map(path => `:(top,exclude,icase)${path}`), [':(top,exclude,icase)**/.git/**']);
+      };
+      const verifyIndex = async () => {
+        const entries = await this.entries((await run(['write-tree'])).trim());
+        if (entries.some(entry => !partOwns(part, entry.path))) throw new AppError('access_denied', 'Index contains paths outside the selected scope', 403);
+      };
+      const safeRestore = async (revision: string, requested: string[], staged: boolean, worktree: boolean) => {
+        const known = (await this.text(['rev-list', state.checkpoint, state.committed])).split('\n');
+        if (revision === 'HEAD') revision = state.base;
+        if (!known.includes(revision)) throw new AppError('invalid_revision', 'Restore source must be a full revision from this scope history', 409);
+        paths(requested);
+        // Check all existing scope entries/ancestors for links before native Git can write.
+        await this.files(root, part);
+        if ((await this.entries(revision)).some(entry => !partOwns(part, entry.path))) throw new AppError('invalid_revision', 'Restore source belongs to another scope', 409);
+        if (worktree) await this.checkpoint(memberId, part, root, actor, 'Before Git restore');
+        const result = await run(['restore', `--source=${revision}`, ...(staged ? ['--staged'] : []), ...(worktree ? ['--worktree'] : []), '--', ...paths(requested)]);
+        if (staged) await verifyIndex();
+        if (worktree) await this.checkpoint(memberId, part, root, actor, 'Git restore', 'restore');
+        // Explicitly restoring both index and files to the latest accepted snapshot
+        // is the scope-local way to refresh a stale base. Other scopes are untouched.
+        if (staged && worktree && revision === state.committed && state.base !== state.committed) {
+          const accepted = await this.revision(revision);
+          if (await this.snapshot(root, part) === accepted.tree && (await run(['write-tree'])).trim() === accepted.tree) {
+            await this.queue.run(`scope:${this.key(part)}`, async () => {
+              const refs = this.refs(memberId, part);
+              if (await this.ref(refs.committed) !== revision) throw new AppError('stale_revision', 'Accepted scope changed during restore; review again', 409);
+              await this.update(refs.base, revision, state.base);
+              await run(['update-ref', 'HEAD', revision, state.base]);
+            });
+          }
+        }
+        return result;
+      };
+      if (command === 'status') {
+        if (args.some(a => !['--short', '-s', '--porcelain', '--porcelain=v1', '--branch', '-b'].includes(a))) throw new AppError('command_denied', 'Use git status with optional --short, --porcelain or --branch', 403);
+        return run(['status', ...args, '--', ...rootPaths]);
+      }
+      if (command === 'diff') {
+        if (args.some(a => !['--cached', '--staged', '--stat', '--name-only', '--name-status'].includes(a))) throw new AppError('command_denied', 'Use git diff with optional --cached, --stat or --name-only', 403);
+        return run(['diff', '--no-ext-diff', '--no-textconv', ...args, '--', ...rootPaths]);
+      }
+      if (command === 'log') {
+        if (args.some(a => a !== '--all' && a !== '--oneline' && !/^-(?:\d+|n\d+)$/.test(a) && !/^--max-count=\d+$/.test(a))) throw new AppError('command_denied', 'Use git log with optional --all, --oneline or --max-count=N', 403);
+        return run(['log', ...args.filter(a => a !== '--all'), ...(args.includes('--all') ? [state.checkpoint, state.committed] : []), '--', ...rootPaths]);
+      }
+      if (command === 'show') {
+        if (args.length > 1) throw new AppError('command_denied', 'Use git show with HEAD or one full scope revision', 403);
+        const revision = !args[0] || args[0] === 'HEAD' ? state.base : args[0];
+        if (!(await this.text(['rev-list', state.checkpoint, state.committed])).split('\n').includes(revision)) throw new AppError('invalid_revision', 'Revision is outside this scope');
+        return run(['show', '--no-ext-diff', '--no-textconv', revision, '--', ...rootPaths]);
+      }
+      if (command === 'add') {
+        const requested = args.filter(a => a !== '--' && a !== '-A' && a !== '--all');
+        if (requested.some(a => a.startsWith('-'))) throw new AppError('command_denied', 'Use git add [-A] -- <paths>', 403);
+        await this.files(root, part);
+        const index = join(repository, 'index'), before = await readFile(index);
+        try { const result = await run(['add', '-A', '--', ...paths(requested.length ? requested : ['.'])]); await verifyIndex(); return result; }
+        catch (error) { await writeFile(index, before); throw error; }
+      }
+      if (command === 'restore') {
+        let source = 'HEAD', staged = false, worktree = false; const requested: string[] = [];
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i]!;
+          if (a === '--') { requested.push(...args.slice(i + 1)); break; }
+          if (a === '--staged') staged = true;
+          else if (a === '--worktree') worktree = true;
+          else if (a.startsWith('--source=')) source = a.slice(9);
+          else if (a.startsWith('-')) throw new AppError('command_denied', 'Use git restore [--staged] [--worktree] [--source=REVISION] -- <paths>', 403);
+          else requested.push(a);
+        }
+        return safeRestore(source, requested, staged, worktree || !staged);
+      }
+      if (args.length !== 2 || args[0] !== '-m' || !args[1]?.trim() || args[1].length > 1000) throw new AppError('invalid_input', 'Use git commit -m "meaningful intent"');
+      if (part.commit !== 'agent') throw new AppError('approval_required', 'This scope requires user acceptance through the review API; staging remains pending', 403);
+      await verifyIndex();
+      return this.queue.run(`scope:${this.key(part)}`, async () => {
+        const refs = this.refs(memberId, part), committed = await this.ref(refs.committed), base = await this.ref(refs.base);
+        const head = (await run(['rev-parse', 'HEAD'])).trim();
+        if (committed !== base || head !== base) throw new AppError('stale_revision', 'Scope base changed; restore/review current accepted state', 409);
+        const tree = (await run(['write-tree'])).trim();
+        if (tree === (await this.revision(base!)).tree) throw new AppError('nothing_to_commit', 'No staged changes');
+        const output = await run(['commit', '-m', this.commitMessage('commit', actor, args[1]!)]);
+        const next = (await run(['rev-parse', 'HEAD'])).trim();
+        try { await this.text(['update-ref', '--stdin'], `start\nupdate ${refs.committed} ${next} ${committed}\nupdate ${refs.base} ${next} ${base}\nprepare\ncommit\n`); }
+        catch (error) { await run(['update-ref', 'HEAD', head, next]); throw error; }
+        return output;
+      });
+    });
+  }
+
   async paths(revision: string): Promise<string[]> { return (await this.entries(revision)).map(entry => entry.path); }
   async readSnapshot(revision: string, path: string): Promise<string | null> {
     safePath(path);

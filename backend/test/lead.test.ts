@@ -1,30 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { leadTools } from '../src/lead-tools.js';
 import type { StepScope } from '../src/runtime.js';
-import { withTeam, worker } from './team-fixture.js';
+import { withTeam } from './team-fixture.js';
 
 const scope = (agentId: string) => ({ agentId, runId: 'lead-run', signal: new AbortController().signal } as StepScope);
-const raw = (content: string, implementation = ['src']) => JSON.stringify({ content, implementation }, null, 2) + '\n';
 
-test('lead exposes file submission while design edits use reusable harness tools', () => withTeam(async fixture => {
-  assert.deepEqual(leadTools(fixture.team.configuration).map(tool => tool.definition.name), ['submit_member_config']);
-  const backend = await worker(fixture, 'Backend', ['src']);
-  const prepared = await fixture.team.harness.prepare(backend.memberId, []);
-  const runScope = scope(backend.memberId);
+test('lead bootstraps pending designs and member files through common tools; design acceptance requires the user', () => withTeam(async f => {
+  const prepared = await f.team.harness.prepare(f.lead.memberId, []);
   const call = async (name: string, args: Record<string, unknown>) => {
-    const output = await prepared.tools.find(t => t.definition.name === name)!.execute(args as never, runScope, {} as never);
+    const output = await prepared.tools.find(t => t.definition.name === name)!.execute(args as never, scope(f.lead.memberId), {} as never);
     return output.content.map(p => p.type === 'text' ? p.text : '').join('');
   };
-  const path = '.context/' + backend.harness.designScope.working[0]!;
-  await call('write', { path, content: raw('Pending design') });
-  const pending = await fixture.team.harness.inspect(backend.memberId);
-  const design = pending.parts.find(p => p.state.part.id === 'design')!;
-  assert.match(design.diff, /Pending design/);
-  assert.match(await call('commit_scope', { part: 'design', message: 'Agent cannot approve' }), /approval_required/);
-  const accepted = await fixture.team.harness.commit(backend.memberId, 'design', 'User accepted', { type: 'user', memberId: backend.memberId }, design.revision, design.state.committed);
+  assert.deepEqual(prepared.tools.map(t => t.definition.name).sort(), ['bash', 'edit', 'ls', 'read', 'write']);
+  await call('write', { path: '.context/user/new.json', content: JSON.stringify({ content: 'Pending project', implementation: ['src'] }) });
+  await call('write', { path: '.team/members/example/member.json', content: '{"name":"Example"}' });
+  assert.match(await call('bash', { command: 'git add . && git commit -m "Define project"', metadata: { git: { scope: 'design' } } }), /approval_required/);
+  const review = (await f.team.harness.inspect(f.lead.memberId)).parts.find(p => p.state.part.id === 'design')!;
+  const accepted = await f.team.harness.commit(f.lead.memberId, 'design', 'Accept project', { type: 'user', memberId: f.lead.memberId }, review.revision, review.state.committed);
   assert.equal(accepted.actor.type, 'user');
-  assert.match((await fixture.team.harness.prepare(backend.memberId, [])).context, /Pending design/);
-  const original = await fixture.team.designs.read(fixture.workspaceId, backend.harness.designScope.working[0]!);
-  assert.equal(original.content, 'Design for Backend', 'acceptance does not silently integrate into the original workspace');
+  assert.equal((await f.team.designs.read(f.workspaceId, 'user/new.json')).content, 'Pending project');
+  assert.deepEqual((await f.team.service.get(f.workspaceId, f.lead.memberId)).harness.implementationScope.paths, [], 'unassigned lead does not gain implementation access');
+  assert.equal((await f.team.service.team(f.workspaceId)).members.length, 1, 'member file edits do not activate settings');
 }));

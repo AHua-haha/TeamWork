@@ -39,7 +39,7 @@ function withServer(run: (call: (path: string, init?: { method?: string; data?: 
   });
 }
 
-test('member inspection is read-only, returns accepted configuration and both harnesses without opening a worktree', () => withServer(async (call, fixture) => {
+test('member inspection is read-only, returns accepted configuration and three harnesses without opening a worktree', () => withServer(async (call, fixture) => {
   const base = `/workspaces/${fixture.workspaceId}/team`;
   const created = await worker(fixture, 'Backend', ['backend']);
   const root = join(fixture.folder, '.rsi-harness');
@@ -47,7 +47,7 @@ test('member inspection is read-only, returns accepted configuration and both ha
   const view = await call(`${base}/members/${created.memberId}`);
   assert.equal(view.member.name, 'Backend');
   assert.equal(JSON.parse(view.configuration.files['member.json']).name, 'Backend');
-  assert.deepEqual(view.harnesses.map((h: Body) => h.id), ['project', 'command']);
+  assert.deepEqual(view.harnesses.map((h: Body) => h.id), ['management', 'implementation', 'execute']);
   assert.equal(view.harnesses[0].parts.find((p: Body) => p.id === 'design').commit, 'user');
   await assert.rejects(stat(root), 'inspection creates no harness Git storage');
   const before = await fixture.team.service.find(created.memberId);
@@ -60,7 +60,9 @@ test('member inspection is read-only, returns accepted configuration and both ha
   assert.deepEqual(await fixture.team.service.find(created.memberId), before);
   await call(`/workspaces/other/team/members/${created.memberId}`, { status: 404 });
   const lead = await call(`${base}/members/${fixture.lead.memberId}`);
-  assert.ok(lead.harnesses[0].tools.includes('submit_member_config'));
+  assert.ok(lead.harnesses[0].tools.includes('bash'));
+  assert.ok(!lead.harnesses[0].tools.includes('submit_member_config'));
+  assert.equal(lead.harnesses[0].parts.find((p: Body) => p.id === 'member-config').commit, 'user');
   assert.deepEqual((await call(base)).members.map((m: Body) => m.name), ['Lead', 'Backend']);
 }));
 

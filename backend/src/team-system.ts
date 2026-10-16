@@ -3,7 +3,6 @@ import type { ChatStore } from './group-chat.js';
 import { AppError } from './types.js';
 import type { ConfigService } from './config.js';
 import { MemberConfigService } from './member-config.js';
-import { leadTools } from './lead-tools.js';
 import { DesignService } from './design.js';
 import { HarnessService } from './harness.js';
 import { inspectHarnesses } from './harness-bases.js';
@@ -38,7 +37,7 @@ export class TeamSystem {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
     });
-    this.configuration = new MemberConfigService(this.service, this.harness, id => this.runner.isRunning(id));
+    this.configuration = new MemberConfigService(this.service, this.harness);
     this.runConfig = teamRunConfig(this.service, config);
   }
 
@@ -49,7 +48,7 @@ export class TeamSystem {
 
   /** Gives workspaces that have no lead one; the backend calls this once at startup. */
   async initialize(): Promise<void> {
-    await this.service.initialize((member, config) => this.harness.migrateLegacy(member, config));
+    await this.service.initialize();
     await this.service.initializeWorkspaceModels();
   }
 
@@ -63,7 +62,7 @@ export class TeamSystem {
   }
   async inspect(workspaceId: string, memberId: string) {
     const { stored, member } = await this.service.inspect(workspaceId, memberId);
-    return { member: this.status(member), configuration: stored.value.configuration ?? null, harnesses: inspectHarnesses(stored) };
+    return { member: this.status(member), configuration: stored.value.configuration ?? null, harnesses: inspectHarnesses(stored, member.harness.implementationScope) };
   }
 
   async create(workspaceId: string, input: unknown): Promise<MemberStatus> {
@@ -72,7 +71,7 @@ export class TeamSystem {
 
   async update(workspaceId: string, memberId: string, revision: number, value: unknown): Promise<MemberStatus> {
     const current = await this.service.get(workspaceId, memberId);
-    if (this.runner.isRunning(memberId) && JSON.stringify((value as { harness?: unknown })?.harness) !== JSON.stringify(current.harness)) throw new AppError('member_busy', 'Wait for the member before changing harness scope', 409);
+    if (this.runner.isRunning(memberId) && JSON.stringify((value as { harness?: unknown })?.harness) !== JSON.stringify({ designScope: current.harness.designScope, allowedCommands: current.harness.allowedCommands })) throw new AppError('member_busy', 'Wait for the member before changing harness scope', 409);
     return this.harness.operation(memberId, async () => this.status(await this.service.update(workspaceId, memberId, revision, value)));
   }
 
@@ -85,8 +84,7 @@ export class TeamSystem {
    * just before the call, and its tools. Every other agent is unchanged.
    */
   policy(base: RuntimePolicy): RuntimePolicy {
-    const { management } = teamTools(this.service, this.runner);
-    const lead = leadTools(this.configuration);
+    const { management } = teamTools(this.service);
     const checkpointed = new Set<string>();
     return {
       ...base,
@@ -128,7 +126,7 @@ export class TeamSystem {
         const member = await this.service.find(scope.agentId);
         if (!member) return request;
         if (member.value.lead) await this.configuration.materialize(scope.agentId);
-        const prepared = await this.harness.prepare(scope.agentId, member.value.lead ? [...management, ...lead] : []);
+        const prepared = await this.harness.prepare(scope.agentId, member.value.lead ? management : []);
         const systemPrompt = [await this.context.instructions(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
         return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };
       },

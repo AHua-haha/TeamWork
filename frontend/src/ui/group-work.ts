@@ -78,6 +78,7 @@ export function workToolSummary(item: ToolActivity): { icon: 'terminal' | 'book'
   try { const value: unknown = JSON.parse(item.args ?? '{}'); if (value && typeof value === 'object' && !Array.isArray(value)) args = value as Record<string, unknown>; } catch { /* A partial tool call may not have complete arguments yet. */ }
   const path = typeof args.path === 'string' ? args.path : typeof args.file_path === 'string' ? args.file_path : '';
   const done = item.result !== undefined;
+  if (item.text === 'bash') return { icon: 'terminal', label: `${done ? 'Ran' : 'Run'} ${typeof args.command === 'string' ? args.command : 'command'}` };
   if (item.text === 'run_command') return { icon: 'terminal', label: `${done ? 'Ran' : 'Run'} ${Array.isArray(args.argv) ? args.argv.join(' ') : 'command'}` };
   if (item.text === 'read') return { icon: 'book', label: `${done ? 'Read' : 'Reading'} ${path || 'file'}` };
   if (item.text === 'write' || item.text === 'edit') return { icon: 'pencil', label: `${done ? 'Updated' : 'Updating'} ${path || 'file'}` };

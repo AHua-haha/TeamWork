@@ -2,45 +2,37 @@
 
 ## Purpose and boundary
 
-The lead is the default recipient of unmentioned user group messages. It helps the user clarify and maintain the project design, forms the team, configures existing member assignments and assigns work through shared mentions. Design and durable knowledge remain independent of member identity. The harness owns file/edit/commit authority and storage; the runtime owns execution.
+The lead collaborates with the user on design and member configuration and assigns accepted members through shared group mentions. Common tools come from management, implementation and execute harnesses. User acceptance, file acceptance and active member configuration are separate. Member change/activation workflow remains deferred.
 
 ## Inputs and preconditions
 
-The user configures workspace model choices/default and posts group messages. The lead starts from that default; list_models exposes workspace choices rather than the global provider catalog. The lead can propose concrete choices and wait for answers. Design records remain JSON `{content: "Markdown", implementation: [paths]}` in user context, with up to 50 distinct workspace-relative mappings, `.` allowed and `.git`/`.context` excluded.
+User input is the workspace group chat and its workspace model choices/default. Member JSON contains name, role, responsibility, settings, promptFiles and designScope, with ordered Markdown instruction files. Backend owns schema version, identity association, revisions and accepted bases. Agents maintain no control bookkeeping in these files.
 
-The lead receives common file tools through its combined project harness and can edit pending user-design files in its separate worktree. It has no special direct-save tool that bypasses approval. All design commits, including the lead's, require user acceptance of the selected revision. Implementation tools follow its explicit editable paths and read-only use paths and permit implementation commits under harness rules.
-
-The lead edits member JSON manifests and Markdown prompt files and calls submit_member_config with only the manifest path. The fixed project harness owns design/implementation tools, mandatory rules and per-part commit permissions; a separate command harness owns existing execution allowances. Workers can receive a design assignment, an implementation assignment or both. Updates require an idle target and current revision.
+The management base grants lead-only access to .team/members and design maintenance under .context/user immediately, before initial design exists. Dependencies remain read-only. Implementation access starts empty and derives from accepted assigned design mappings. General commands use backend-controlled execute allowances. Base policies/tools/prompts cannot be overridden by member files.
 
 ## Outputs and observable effects
 
-- The lead discusses design choices, uses common read/write/edit tools for pending changes, and explains the changes to the user. User acceptance is an explicit backend operation against an exact reviewed revision/base; conversation text does not supply approval.
-- The harness automatically checkpoints the lead's run and records its work independently of semantic commits. Implementation commits can be made through `commit_scope`; design attempts remain pending with `approval_required`.
-- The lead creates, updates and retires members through file submission and retirement tools. It assigns work by publishing final shared responses with recipient mentions and objectives. All members receive accepted final reports; private execution stays private.
-- Design/implementation commits remain scoped in harness Git. They do not automatically alter the original catalog, assignment mappings or project Git branch. Publishing/integrating newly accepted designs into those surfaces is deferred.
+The lead offers concrete choices for unsettled decisions, waits for the user's choice before dependent work, and explains pending design/member changes. Common ls/read/write/edit tools operate in its management/implementation scope. One bash tool accepts command and optional metadata.git.scope for authorized Git operations. list_models reads workspace choices.
+
+Working design/member edits are pending. Automatic checkpoints retain them without acceptance or changing Git staging. Implementation semantic commits are agent-authorized; design/member-config commits require exact user review and acceptance through the existing harness review API. Git metadata cannot supply user approval.
+
+Final ordinary assistant text is offered for group acceptance; mentions assign currently active members. Private tools/commentary stay private. No special completion tool exists. Configuration creation/update/activation/retirement through files is deferred; submit_member_config, retire_member and dedicated Git tools are absent. Editing or committing a member draft does not change the roster or active settings.
 
 ## Failure behavior
 
-Unsettled choices require further discussion. Stale user review/base, malformed design JSON, missing/out-of-scope files and unapproved design commits fail explicitly. Expected tool refusals are recoverable private results. Team assignment/publication retains its atomic refusal rules. Checkpoint/storage failure can fail the run and prevents successful final publication.
+Out-of-scope file/Git requests, protected commits without user approval, unsafe designs/mappings, stale reviews/bases or unavailable execution isolation fail explicitly. Pending edits remain available and stable active member source remains unchanged. Group busy/readiness/mention-limit refusals preserve private feedback and trigger nobody. Storage/checkpoint failures cannot claim successful publication.
 
 ## Guarantees and limits
 
-The lead has broad bootstrap read and pending user-design edit access through its default harness. Implementation writes remain bounded by explicit implementation paths; dependencies are read-only. It cannot commit design through agent tools or a claimed user approval argument. Dedicated read_design/save_design tools are removed. Backend acceptance is available; configuration/approval UI, automatic integration across worktrees and automated context maintenance are deferred. Allowed commands remain outside file-tool confinement.
+Only the lead accesses member files among agents. Design/member acceptance remains user-only. Runtime owns the model loop; reusable tools and harness policies determine capabilities. Workspace model defaults/choices preserve current selections and initialize backend-created members independently of lead settings.
+
+No new member activation/self-update/retirement policy, approval UI, active-run update protocol, network allowance or automatic context-maintenance algorithm is introduced. Accepted design snapshots feed semantic reads/scope resolution but are not automatically copied to original checkout/peer worktrees. Lifecycle and peer refresh details remain future work.
 
 ## Acceptance examples
 
-1. The lead edits `.context/user/design.json` with common tools and explains the pending change. The user reviews its diff and accepts the exact revision through the backend; an automatic checkpoint alone does not accept it.
-2. The lead configures Backend with working/dependency designs and assigns work using `@Backend`. Backend edits implementation in its own worktree and commits it without accepting the lead's pending design edits.
-3. Another edit follows user review. Acceptance of the old revision is refused and preserves the committed design reference.
-
-## File configuration workflow
-
-Use common file tools to edit .team/members/<bundle>/member.json and referenced prompts/*.md, then submit_member_config({path}). The fixed project base permits design working/dependency references and implementation paths/usePaths together under version 2 harnesses.project as its customization. Base tools, mandatory prompts and design approval cannot change. Runtime uses the last valid submitted bundle; pending edits or failed validation do not affect active configuration. Create uses null memberId/revision; updates name a member and its current revision and refuse a running target. A lead cannot submit self-updates while running. Existing command permissions are inherited for new members and preserved for updates. Retirement and model listing remain separate team operations.
-
-## Workspace model selection
-
-New members start with the workspace default and its configured per-model options, independently of the lead's current selection. The lead may choose another workspace model in the submitted manifest. An existing member may keep a selection removed from workspace choices, but switching to an outside choice is refused. Provider/model validity is checked on submission. The frontend only inspects member configuration; workspace default edits preserve already assigned members.
-
-## Unified streaming and model completion
-
-The lead uses ordinary assistant text for its final report, question or assignment. Its tools cover project work and member management, without a special completion tool. Normal team completion/publication rules apply, and only accepted final mentions activate peers.
+1. An empty workspace lead creates pending design/member files but cannot edit implementation until accepted designs are assigned.
+2. The lead edits a member manifest and prompt without version/revision fields; user file acceptance does not activate it.
+3. A member assigned a working backend design/dependency contract gets writable backend and read-only contract implementation from accepted mappings.
+4. Lead implementation commits leave staged design/member changes pending. The agent cannot self-approve protected scopes.
+5. A worker requests member-config scope: refuse. A lead final mentioning that worker assigns work through group admission.
+6. User review becomes stale after another edit: acceptance refuses rather than authorizing different bytes.

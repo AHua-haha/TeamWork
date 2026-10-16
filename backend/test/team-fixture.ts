@@ -142,7 +142,7 @@ export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void
       const directory = join(root, 'project');
       const { workspaceId } = await workspaces.create({ workspaceId: 'w1', name: 'Project', directory, models: testModels(), adopt: false });
       const first = (await team.service.team(workspaceId)).members[0]!;
-      const lead = await team.service.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: first.harness, settings: { ...first.settings, ...ready } });
+      const lead = await team.service.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: { designScope: first.harness.designScope, allowedCommands: first.harness.allowedCommands }, settings: { ...first.settings, ...ready } });
       await run({ folder: root, store, workspaces, team, runtime, workspaceId, directory, lead });
     } finally {
       team.runner.close();
@@ -158,11 +158,13 @@ export async function worker(fixture: Fixture, name: string, implementation: str
   const existing = (await base.tree('user', 16)).entries.find(entry => entry.path === path && entry.type === 'file');
   const revision = existing ? (await base.read({ path })).revision : null;
   await fixture.team.designs.save(fixture.workspaceId, path, { content: `Design for ${name}`, implementation }, revision, 'Test design', { type: 'lead', memberId: fixture.lead.memberId, runId: 'fixture' });
-  return fixture.team.service.create(fixture.workspaceId, { name, role, responsibility: `Owns ${name}`, harness: { designScope: { working: [path], dependencies: [] }, implementationScope: { paths: implementation, usePaths: [] }, allowedCommands: [] } });
+  return fixture.team.service.create(fixture.workspaceId, { name, role, responsibility: `Owns ${name}`, harness: { designScope: { working: [path], dependencies: [] }, allowedCommands: [] } });
 }
 
-/** User-side assignment update for fixtures. Agent assignment goes through file submission. */
+/** User-side assignment update for fixtures. Agent edits remain pending until a future activation workflow. */
 export async function configureHarness(fixture: Fixture, name: string, harness: unknown) {
   const member = (await fixture.team.service.byName(fixture.workspaceId, name))!;
+  const { implementationScope: _effective, ...assignment } = harness as Record<string, unknown>;
+  harness = assignment;
   return fixture.team.service.update(fixture.workspaceId, member.id, member.revision, { name: member.value.name, role: member.value.role, responsibility: member.value.responsibility, settings: member.value.settings, harness });
 }

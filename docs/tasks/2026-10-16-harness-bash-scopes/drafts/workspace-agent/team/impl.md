@@ -3,46 +3,37 @@
 
 ## Contract
 
-[Team proposal](design.md). Preserve member identity, group cooperation, private history and read-only inspection while changing file configuration metadata, user acceptance and harness assignment. This plan is not implemented by the documentation checkpoint.
+[Team](design.md) preserves durable cooperation/private history and read-only member inspection while using backend-owned metadata, user-approved member files and design-derived implementation authority. Configuration change/activation is deferred.
 
 ## Responsibilities and decomposition
 
-TeamService retains lifecycle identity, readiness and accepted configuration ownership. The [lead](lead/design.md) edits proposed member content and forms assignments. The [harness](../harness/design.md) owns management/implementation/execute capabilities, lead-only member file scope and protected commits. The [group chat](../../../../../systems/workspace-agent/team/group-chat/design.md) retains admission/publication/delivery; the [runtime](../../../../../systems/agent-runtime/design.md) retains the model loop.
+TeamService owns active identity, stable fields/source, model readiness and lifecycle revision checks. [Lead](lead/design.md) owns collaboration instructions, [harness](../harness/design.md) owns authority/worktrees/Git/Bash, and [group chat](../../../../../systems/workspace-agent/team/group-chat/design.md) owns admission/publication/delivery. [Runtime](../../../../../systems/agent-runtime/design.md) owns model execution; [database](../../../../../systems/database/design.md) persists stable members/chat/history.
 
-Member configuration coordination must associate a bundle path and exact edited bytes with backend-owned schema, identity, revision/base, validation and approval state. Capture/validation and accepted projection must preserve the previous stable configuration on failure. Configuration-change/activation coordination is explicitly deferred. This harness proposal must not silently infer an activation policy from file acceptance or the existing submission tool.
+MemberConfigService materializes missing accepted JSON/Markdown for the lead and returns stable active bundles. It has no submit/activate operation. Structured agent lifecycle tools are absent; list_models remains lead-only. Internal backend lifecycle methods support initialization and existing callers without adding HTTP member writes.
 
 ## Coordination and data flow
 
-1. Materialize meaningful accepted member JSON/Markdown content for the lead without overwriting pending drafts or asking the lead to maintain format version/revision. Retain path/member/editing-base association in backend metadata.
-2. The lead management base has .context/user/ and .team/members/ bootstrap access before an initial design exists, with user-approved management commits. Implementation access starts empty until accepted design assignment. Common file tools or authorized Bash operations edit only allowed member/design paths. Automatic harness checkpoints retain pending bytes without accepting them.
-3. Capture and validate an exact bundle for user review, including prompts, model choices, names, design references and current member availability under the eventual activation rules. Approval pins those bytes/base. Invalid/stale/unapproved content retains the prior accepted configuration.
-4. Derive implementation authority from the agreed accepted working/dependency designs and construct the three effective harnesses. Apply read-only precedence and exclusions. Do not maintain a second independently configurable implementationScope.
-5. Defer configuration-change detection, validation-to-activation integration, activation timing and busy/running-target application to the later activation design. Keep pending edits, accepted file state and active settings conceptually distinct.
-6. Feed effective configuration into TeamSystem tool/prompt assembly, admission checks and read-only inspection. Group-chat triggering and natural final acceptance remain unchanged.
-7. Preserve member/workspace locking, revision conflict checks and accepted-source persistence even though agents no longer write control metadata. Coordinate those checks with Git accepted bases rather than removing stale-update protection.
+1. Workspace creation inserts its default-configured lead transactionally. Startup initializes missing leads and migrates active legacy member sources once.
+2. Generated manifests contain name/role/responsibility/settings/promptFiles/designScope. Backend envelope formatVersion=3, path, digest, attribution/time and member record revision/ID remain outside editable bytes. Source conversion retains exact previous bundle and every prompt byte; retired records remain historical. Existing drafts are never overwritten.
+3. Lead policy materializes missing stable source files under its management worktree, using common file access. Edits and user-approved scope commits remain separate from stable active member settings. No configuration detection, approved-file validation-to-activation handler or automatic application to running members is implemented.
+4. TeamService inspection/readiness resolves accepted design mappings through the harness resolver. Stored assignment omits implementationScope; MemberView includes derived paths/usePaths for caller inspection. Invalid/missing designs create readiness issues and no permissive fallback.
+5. TeamSystem.inspect returns member, stable configuration and three inspectHarnesses definitions without opening harness Git. Existing member-write routes remain absent; review/acceptance/history/restore endpoints are retained.
+6. Policy buildRequest assembles unique harness tools plus lead list_models, current member/roster instructions, base maintenance prompts and accepted member Markdown. shouldContinue preserves natural completion selection and atomic final publication; afterRun checkpoints settled effects, including failure/cancellation/recovery.
+7. Existing internal updates retain revision/idle checks. Comparing assignment changes ignores the derived inspection-only implementationScope. Group admission verifies prepared revisions under database locking. No new configuration activation contract is inferred from these safeguards.
 
 ## Decisions and constraints
 
-JSON plus ordered Markdown remains the member content format. Exact new manifest placement of designScope and member/path identity is open. Supersede version-2 manifests that require agents to provide version/member revision and explicit implementation paths; migration is separate from active parsing and must preserve accepted/pending state.
+The source bundle represents the last stable active configuration; accepted Git member files are independently retained for later activation design. Even user file acceptance cannot silently create, update or retire a member. Removing submit_member_config/retire_member agent shortcuts avoids an unapproved alternate lifecycle path. Backend create/update/retire methods remain available to trusted composition/tests; frontend remains inspection-only.
 
-The [harness plan](../harness/impl.md) replaces project/command bases, argv-only execution and dedicated scoped-history tools. Backend metadata remains a validated trusted source even when Bash metadata requests a scope. Member edit/commit authority is lead-only/user-approved, respectively.
-
-Do not silently retain immediate submit_member_config activation, generic member-config agent commits or obsolete path grants. Submission/validation-to-activation handling is deferred. Retirement/protected lead changes still need lifecycle clarification. Existing HTTP read-only member inspection and workspace model configuration boundaries stay in place. Approval UI and detailed execute configuration are deferred.
+Legacy implementationScope is stripped during startup. Accepted settings/identity/commands are preserved; effective authority now derives from accepted design mappings. Historical source is retained in previous, and existing worktree/history behavior belongs to the harness. Model defaults/choices and provider validity retain their current boundaries. No SQL schema change is required: member JSON already stores opaque versioned configuration data.
 
 ## Code map
 
-- [Member service](../../../../../../backend/src/team.ts): accepted content/effective config and backend identity/readiness bookkeeping.
-- [Bundle format](../../../../../../backend/src/member-config-format.ts), [file workflow](../../../../../../backend/src/member-config.ts): remove agent-required version/revision, preserve exact source, introduce approved-content coordination under the chosen activation contract.
-- [Lead tool adapter](../../../../../../backend/src/lead-tools.ts), [management tools](../../../../../../backend/src/member-tools.ts): reconcile validation, activation and retirement once settled.
-- [Member instructions](../../../../../../backend/src/member-context.ts): teach backend-owned metadata, three harnesses, derived scopes and Bash/Git use.
-- [Composition](../../../../../../backend/src/team-system.ts): reusable tools, harness prompts and unchanged group publication/lifecycle checkpoint composition.
-- [Routes](../../../../../../backend/src/team-routes.ts), [database](../../../../../systems/database/impl.md): reconcile inspection/review and durable accepted metadata after the approval/activation contract is fixed.
-- [Harness proposal](../harness/impl.md) owns file/command/Git authority and scope derivation.
-
-Frontend workspace-client, TeamTab, MemberInspector and design-state consumers require follow-up inspection/schema reconciliation; their display must use the backend's derived scopes. This proposal adds no frontend write API.
+- [Team records/readiness/migration](../../../../../../backend/src/team.ts), [composition](../../../../../../backend/src/team-system.ts).
+- [Member content format](../../../../../../backend/src/member-config-format.ts), [stable source/materialization](../../../../../../backend/src/member-config.ts), [instructions](../../../../../../backend/src/member-context.ts), [model tool](../../../../../../backend/src/member-tools.ts).
+- [Team routes](../../../../../../backend/src/team-routes.ts), [runner](../../../../../../backend/src/team-runner.ts), [harness implementation](../harness/impl.md).
+- Frontend MemberInspector/TeamTab consume three fixed bases and backend-derived paths; Bash working-history summaries display command text. No frontend scope recomputation/member-write API is added.
 
 ## Verification
 
-Documentation checks only are run for this proposal. Later verification must cover exact accepted source and backend-owned metadata, invalid/stale/unapproved edits, prompt capture, identity/path association, lead-only member access, user-approved acceptance, model validation, derived implementation paths, mapping changes and read-only inspection.
-
-Replace tests expecting agent-supplied version/revision, explicit implementationScope or immediate unapproved submission when their new contracts are implemented. Migration must preserve accepted source, pending files, lifecycle identity and scope histories. Retain real SQL/runtime group-chat tests for parallel admission/refusal, context delivery, checkpoints, restart and immutable final references.
+[Member configuration tests](../../../../../../backend/test/member-config.test.ts) verify clean manifests, exact stable bytes, invalid pending preservation, restart/materialization, legacy migration and admission revision conflicts. [Team tests](../../../../../../backend/test/team.test.ts), [context](../../../../../../backend/test/team-context.test.ts) and [HTTP](../../../../../../backend/test/team-routes.test.ts) cover identity/readiness, unique tools, fixed bases and read-only projection. [Harness](../../../../../../backend/test/harness.test.ts) covers real Git/sandbox authority and user approval. [SQL/runtime integration](../../../../../../backend/test/integration/backend.test.ts) verifies real tools, checkpoint ordering and group behavior. The independent existing frontend/client tests and build check caller compatibility.

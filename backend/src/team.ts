@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { emptyRunSettings, keys, obj, validateRunSettings, type ConfigService, type ResolvedRunConfig, type RunSettings } from './config.js';
 import type { DesignService } from './design.js';
-import { emptyHarness, harnessConfig, type HarnessConfig } from './harness-config.js';
+import { emptyHarness, harnessConfig, type HarnessConfig, type EffectiveHarnessConfig } from './harness-config.js';
 import { resolveHarness } from './harness.js';
 import { AppError } from './types.js';
 import { generatedSource, migrateMemberSource, type MemberConfigSource } from './member-config-format.js';
@@ -22,7 +22,7 @@ export interface MemberRecord {
 /** The fields a caller may set. */
 export interface MemberFields { name: string; role: string; responsibility: string; harness: HarnessConfig; settings: RunSettings }
 export interface StoredMember { id: string; workspaceId: string; revision: number; value: MemberRecord }
-export interface MemberView extends MemberFields { memberId: string; workspaceId: string; revision: number; lead: boolean; issues: string[]; ready: boolean }
+export interface MemberView extends Omit<MemberFields, 'harness'> { harness: EffectiveHarnessConfig; memberId: string; workspaceId: string; revision: number; lead: boolean; issues: string[]; ready: boolean }
 export interface TeamView { workspaceId: string; members: MemberView[] }
 
 /** A member to store, with its keys. `nameKey` is the lower-cased name. */
@@ -47,7 +47,7 @@ export function newLead(workspaceId: string, settings: RunSettings = emptyRunSet
   const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: emptyHarness(), settings };
   return {
     id, workspaceId, lead: true, nameKey: 'lead',
-    value: { workspaceId, ...fields, configuration: generatedSource(fields, id, 0), lead: true, createdAt: Date.now(), retiredAt: null },
+    value: { workspaceId, ...fields, configuration: generatedSource(fields, id), lead: true, createdAt: Date.now(), retiredAt: null },
   };
 }
 
@@ -74,7 +74,8 @@ function stored(member: StoredMember): StoredMember {
   const value = member.value as unknown;
   try {
     const data = obj(value, 'Member record');
-    const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, harness: data.harness, settings: data.settings });
+    const { implementationScope: _legacy, ...assignment } = data.harness as Record<string, unknown>;
+    const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, harness: assignment, settings: data.settings });
     if (typeof data.workspaceId !== 'string' || typeof data.lead !== 'boolean' || !Number.isSafeInteger(data.createdAt) || !(data.retiredAt === null || Number.isSafeInteger(data.retiredAt))) throw new Error('shape');
     return { ...member, value: { ...fields, configuration: data.configuration as MemberConfigSource | undefined, workspaceId: data.workspaceId, lead: data.lead, createdAt: data.createdAt as number, retiredAt: data.retiredAt as number | null } };
   } catch { throw new AppError('corrupt_data', `Stored member ${member.id} cannot be read`, 500); }
@@ -93,43 +94,25 @@ export class TeamService {
   ) {}
 
   /** Gives each workspace that has no lead one, so workspaces registered before teams existed get theirs. Safe to repeat. */
-  async initialize(beforeMigration?: (member: StoredMember, harness: HarnessConfig) => Promise<void>): Promise<void> {
+  async initialize(): Promise<void> {
     for (const workspace of await this.workspaces.list()) {
-      for (const member of await this.store.listMembers(workspace.workspaceId)) {
-        const data = member.value as unknown as Record<string, unknown>;
-        const oldHarness = data.harness as HarnessConfig | undefined;
-        if (oldHarness?.implementationScope && data.configuration) {
-          // Retired bundles are historical records; a format upgrade must not replay retirement effects.
-          if (member.value.retiredAt !== null) continue;
-          const configuration = migrateMemberSource(data.configuration as MemberConfigSource, member.id, member.revision + 1);
-          if (configuration) await this.store.updateMember(member.id, member.revision, member.value.retiredAt === null ? member.value.name.toLowerCase() : null, { ...member.value, configuration });
-          continue;
+      for (const raw of await this.store.listMembers(workspace.workspaceId)) {
+        if (raw.value.retiredAt !== null) continue;
+        const data = raw.value as MemberRecord & { scope?: unknown; harness: HarnessConfig & { implementationScope?: unknown } };
+        const { implementationScope: legacyPaths, ...assignment } = data.harness ?? emptyHarness();
+        const harness = harnessConfig({ ...emptyHarness(), ...assignment });
+        const member = { ...data, harness } as MemberRecord;
+        const converted = data.configuration ? migrateMemberSource(data.configuration) : generatedSource(member, raw.id);
+        if (legacyPaths !== undefined || data.scope !== undefined || converted) {
+          const { scope: _legacyScope, ...value } = member as MemberRecord & { scope?: unknown };
+          await this.store.updateMember(raw.id, raw.revision, value.name.toLowerCase(), { ...value, configuration: converted ?? member.configuration });
         }
-        const { scope: _oldScope, ...rest } = data;
-        let harness = oldHarness ? { ...emptyHarness(), ...oldHarness } : emptyHarness();
-        if (oldHarness && !oldHarness.implementationScope) {
-          const mapped = async (paths: string[]) => {
-            const result: string[] = [];
-            for (const path of paths) {
-              try { result.push(...(await this.designs.read(workspace.workspaceId, path)).implementation); }
-              catch (error) { if (!(error instanceof AppError) || error.status >= 500) throw error; }
-            }
-            return [...new Set(result)];
-          };
-          harness = { ...harness, implementationScope: { paths: await mapped(oldHarness.designScope.working), usePaths: await mapped(oldHarness.designScope.dependencies) } };
-        }
-        const value = { ...rest, harness } as unknown as MemberRecord;
-        value.harness = harnessConfig(harness);
-        if (oldHarness) await beforeMigration?.(member, harness);
-        value.configuration = generatedSource(value, member.id, member.revision + 1);
-        await this.store.updateMember(member.id, member.revision, value.retiredAt === null ? value.name.toLowerCase() : null, value);
       }
       if ((await this.store.listMembers(workspace.workspaceId)).some(member => member.value.lead)) continue;
       const models = await this.workspaces.models(workspace.workspaceId);
       try { await this.store.createMember(newLead(workspace.workspaceId, models.value.defaultModel ? defaultRunSettings(models.value) : emptyRunSettings)); }
       catch (error) {
-        // Another backend process created it first; either unique key may report it.
-        if (!(error instanceof AppError && (error.code === 'lead_exists' || error.code === 'member_exists'))) throw error;
+        if (!(error instanceof AppError && ['lead_exists', 'member_exists'].includes(error.code))) throw error;
       }
     }
   }
@@ -185,7 +168,7 @@ export class TeamService {
   async update(workspaceId: string, memberId: string, revision: number, value: unknown, source?: MemberConfigSource): Promise<MemberView> {
     const current = await this.member(workspaceId, memberId);
     const fields = memberFields(value);
-    const generated = generatedSource(fields, memberId, revision + 1);
+    const generated = generatedSource(fields, memberId);
     if (current.value.configuration) generated.path = current.value.configuration.path;
     const next: MemberRecord = { ...current.value, ...fields, configuration: source ?? generated };
     const changedScope = JSON.stringify(fields.harness) !== JSON.stringify(current.value.harness);
@@ -199,19 +182,13 @@ export class TeamService {
     return this.store.updateMember(memberId, revision, null, { ...current.value, retiredAt: Date.now() });
   }
 
-  /** Reject unresolved provider/model/catalog settings before activating a file submission. */
-  async validateSubmittedSettings(settings: RunSettings): Promise<void> {
-    const [issues] = await this.config.issuesFor([settings]);
-    if (issues!.length) throw new AppError('invalid_config', issues!.join('; '));
-  }
-
   /** What stops each of these members from running. */
   async issues(members: readonly StoredMember[]): Promise<string[][]> {
     const issues = await this.config.issuesFor(members.map(member => member.value.settings));
     for (const [index, member] of members.entries()) {
       if (member.value.settings.toolOptionIds.length) issues[index]!.push('Workspace member tools are supplied by the harness; clear catalog tool selections');
       const scope = member.value.harness.designScope;
-      if (!member.value.lead && !scope.working.length && !scope.dependencies.length && !member.value.harness.implementationScope.paths.length && !member.value.harness.implementationScope.usePaths.length) issues[index]!.push('Configure a design scope or implementation scope for this member');
+      if (!member.value.lead && !scope.working.length && !scope.dependencies.length) issues[index]!.push('Configure a design scope for this member');
       try { await resolveHarness(this.designs, member.workspaceId, member.value.harness); }
       catch (error) {
         if (!(error instanceof AppError) || error.status >= 500) throw error;
@@ -236,7 +213,7 @@ export class TeamService {
 
   private async insert(workspaceId: string, fields: MemberFields, source?: MemberConfigSource): Promise<StoredMember> {
     const id = randomUUID();
-    return this.store.createMember({ id, workspaceId, lead: false, nameKey: nameKey(fields.name), value: { ...fields, configuration: source ?? generatedSource(fields, id, 0), workspaceId, lead: false, createdAt: Date.now(), retiredAt: null } });
+    return this.store.createMember({ id, workspaceId, lead: false, nameKey: nameKey(fields.name), value: { ...fields, configuration: source ?? generatedSource(fields, id), workspaceId, lead: false, createdAt: Date.now(), retiredAt: null } });
   }
 
   private async view(member: StoredMember): Promise<MemberView> {
@@ -245,10 +222,13 @@ export class TeamService {
 
   private async views(members: StoredMember[]): Promise<MemberView[]> {
     const issues = await this.issues(members);
-    return members.map((member, index) => {
+    return Promise.all(members.map(async (member, index) => {
       const { name, role, responsibility, harness, settings, lead } = member.value;
-      return { memberId: member.id, workspaceId: member.workspaceId, revision: member.revision, name, role, responsibility, harness, lead, settings, issues: issues[index]!, ready: issues[index]!.length === 0 };
-    });
+      let implementationScope = { paths: [] as string[], usePaths: [] as string[] };
+      try { const resolved = await resolveHarness(this.designs, member.workspaceId, harness); implementationScope = { paths: resolved.writable, usePaths: resolved.readonly }; }
+      catch (error) { if (!(error instanceof AppError) || error.status >= 500) throw error; }
+      return { memberId: member.id, workspaceId: member.workspaceId, revision: member.revision, name, role, responsibility, harness: { ...harness, implementationScope }, lead, settings, issues: issues[index]!, ready: issues[index]!.length === 0 };
+    }));
   }
 }
 

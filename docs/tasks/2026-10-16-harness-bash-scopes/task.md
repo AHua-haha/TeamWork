@@ -1,64 +1,50 @@
 # Three harnesses and scoped Git through Bash
 
-Status: proposed
+Status: complete
 Task start commit: b489d67e6b8296f41c9654ff29bcbcab8489e2d6
+Implementation increment start: d08936cc05b08382b90069887f02937d801b1899
 Review boundaries: [Harness](drafts/workspace-agent/harness/design.md), [Member configuration](drafts/workspace-agent/team/design.md), [Lead workflow](drafts/workspace-agent/team/lead/design.md)
 
 ## Design outcomes
 
-- [delivered] Persist the design discussion and the implementation changes it requires. This checkpoint changes documentation only.
-- [planned] Replace the current project/command bases with management, implementation and execute harnesses.
-- [planned] Make version/revision and other control metadata backend-owned; the agent edits meaningful member configuration files.
-- [planned] Treat member configuration as a harness-controlled pending file scope, accessible among agents only to the lead, with user-approved semantic commits.
-- [planned] Replace run_command and the three dedicated scoped-history tools with one reusable Bash capability. Ordinary Git commands request a scope through Bash metadata; the harness resolves context and enforces its rules.
-- [planned] Configure only working/dependency designs in the member's harness assignment; derive implementation authority from accepted design mappings.
+- [delivered] Persisted the design discussion in two documentation checkpoints, then implemented the authorized harness increment.
+- [delivered] Management, implementation and execute bases replace project/command; common tools and maintenance prompts are assembled once.
+- [delivered] Backend-owned member metadata; editable JSON/Markdown contains meaningful configuration and designScope, without agent-maintained version/revision or independently configurable implementationScope.
+- [delivered] Lead-only member files and user-approved design/member semantic commits; file acceptance remains separate from stable active settings.
+- [delivered] Unified bash with metadata.git.scope and ordinary Git replaces run_command, commit_scope, scope_history and restore_scope agent tools.
+- [delivered] Independent scope staging/HEAD with shared objects and separate automatic checkpoint indexes; exact user acceptance, stale-base protection, history and restore are retained.
+- [delivered] Accepted working/dependency mappings determine implementation authority, with read-only precedence and protected control files. Accepted design snapshots feed semantic reads/discovery without copying original/peer files.
+- [delivered] Stable read-only member inspection and frontend labels reflect three bases and backend-derived paths; group chat/streaming remains unchanged.
 
-## Decisions and open questions
+Canonical contracts: [harness](../../systems/workspace-agent/harness/design.md), [team](../../systems/workspace-agent/team/design.md), [lead](../../systems/workspace-agent/team/lead/design.md). Accepted drafts and the corresponding canonical files agree.
 
-### Settled direction
+## Decisions and deferred work
 
-1. Tools are reusable capabilities for all agents. Harnesses own scope, authority and maintenance rules; runtime assembles the available tools and prompts and runs the agent.
-2. The management harness owns design and member maintenance. It supplies scoped file access and controlled Git capability through Bash, plus maintenance and Git-use instructions. Design and member configuration have independent histories; committing either requires user approval. Workers never gain member-path access from a role label or Bash metadata.
-3. The implementation harness owns implementation read/edit authority. It retains agent-authorized implementation commits and read-only dependency precedence.
-4. The execute harness controls general command execution. It cannot override protected management paths or Git acceptance policy. Management may supply its limited scoped Git capability without enabling general commands.
-5. Agent-facing Git operations use ordinary Git syntax through Bash. Agent-supplied metadata selects a requested scope; backend supplies identity, indexes, refs, accepted bases, revisions and approval. Metadata is not a grant of authority. Actual Git operations must be checked under that context.
-6. Remove the agent-facing commit_scope, scope_history, restore_scope and run_command paths when their replacement is implemented. Preserve the required history, restoration, cancellation and failure guarantees.
-7. Each member keeps its separate worktree. Scope staging/history remains independent. Automatic run-end checkpoints continue without accepting changes or consuming/resetting agent staging.
-8. Member JSON and referenced Markdown remain the editable configuration source. Backend retains exact accepted bytes and metadata separately from pending edits. Agents do not maintain format version or optimistic configuration revision in those files. Identity/model/responsibility/prompt content remains meaningful member configuration; only the harness assignment is reduced to design scope.
-9. Working-design mappings yield writable implementation paths; dependency-design mappings yield read-only implementation paths. Read-only paths win overlaps; control paths remain protected. Pending design edits grant no authority. Invalid or unresolved references do not activate configuration.
-10. Base tools, maintenance rules and commit policy remain fixed. Configurable execution rules beyond the agreed direction remain for later discussion. No new frontend configuration or approval UI is settled here.
-11. The lead management base grants access to maintain .context/user/ design files and .team/members/ configuration directories from workspace initialization, even before any design exists. Design dependencies remain read-only and both management parts retain user-approved commits. Implementation access starts empty and derives only from accepted assigned designs.
+The user selected lead bootstrap .context/user and .team/members management access, with no implementation access before an accepted design assignment. Design/member semantic commits require exact user approval. Implementation commits may be made by the agent. Pending mappings grant no access.
 
-### Explicitly deferred
+Member configuration change/activation handling remains explicitly deferred: detection, validation-to-activation, creation/update/retirement through files, protected self changes and application to running members. No accepted-file watcher or activation handler is added. The old submit_member_config and retire_member agent shortcuts are removed; trusted backend lifecycle primitives and existing admission/revision checks remain. A user-approved member-file commit does not change stable active settings.
 
-Member-configuration change and activation handling is deferred to a later design/development step. This includes change detection, validation/submission-to-activation flow, the future role of submit_member_config, activation timing, busy-target handling and application to already-running members. The next-activation recommendation has not been selected. Committing management files must not silently introduce automatic configuration activation. This deferred integration is not a prerequisite for continuing the harness design.
+Concrete implementation choices:
 
-### Other open details
+- Bash input is {command, metadata?: {git: {scope}}}; one scope per invocation. Scope selection cannot supply identity, approval, indexes, refs or arbitrary repositories.
+- Native Git operations are mediated by an invocation-bound backend Unix-socket bridge with an explicit finite syntax. OS isolation protects repositories and file scopes from shell/descendant bypasses. @anthropic-ai/sandbox-runtime 0.0.79 supplies sandbox-exec on macOS or bubblewrap on Linux; no unrestricted fallback or network allowance is provided. This increment was verified on macOS; Linux requires its sandbox dependencies.
+- General Bash allowances match [bash,-c,command] exactly or executable bash. Old non-Bash rules are preserved as data but do not authorize a shell. Richer execution configuration remains deferred.
+- Protected member/design commits use the existing exact-revision/base review endpoints; no new approval/configuration UI is introduced.
+- Per-design accepted Git pointers take precedence in semantic design reads/discovery and scope resolution. Raw context file/history APIs still show the original workspace. No peer-worktree refresh or automatic original-checkout merge is added.
+- Active legacy records lose explicit implementation assignments and migrate accepted sources once to backend formatVersion 3. Exact previous source, prompt bytes, identities/settings/commands, pending drafts and old Git references remain retained. Existing drafts are never automatically rewritten. Matching scopes retain history; changed scope shapes preserve pending work under a new reference while historical refs remain reachable.
 
-- Backend association of an editable bundle with member identity and its editing base, including creation and stale drafts. The agent should not reproduce version/revision bookkeeping. Busy-target application belongs to deferred activation handling; protected lead/self changes and retirement still need lifecycle clarification.
-- Which accepted design store/snapshot supplies mappings, how accepted harness design commits become visible to that resolver, and how existing worktrees receive accepted mapping changes. Applying changed configuration/scope to running members is part of the deferred activation work. The current implementation defers catalog/peer integration; deriving from accepted mappings must resolve that gap explicitly.
-- Exact new member manifest and Bash metadata schemas, scope selection defaults, and which Git commands/options are supported. Examples in the drafts illustrate the direction, not a frozen schema.
-- How Bash and descendant Git operations are mediated and how management writes and accepted Git state remain protected. A metadata label, shell alias, PATH wrapper or command-string check alone does not establish that boundary. The concrete enforcement mechanism is not selected.
-- Migration: preserve the settled lead bootstrap authority while converting existing explicit implementation assignments, indexes, refs, approvals, accepted source bundles and drafts without silently widening authority or losing pending work.
+## Checkpoints and verification
 
-## Checkpoints and remaining work
+- 8787c7931f04acaa7f797691e6ea88424962fa7a saved the initial proposal/checklist only.
+- d08936cc05b08382b90069887f02937d801b1899 recorded the selected bootstrap scope and deferred activation handling, still documentation-only.
+- The implementation checkpoint promotes fifteen reconciled documents with code/tests and this task record. It is identified in Git by Task-ID: 2026-10-16-harness-bash-scopes.
 
-The baseline has fixed project/command bases, explicit implementationScope assignments, immediate file submission activation, agent-maintained manifest version/revision, agent-authorized member-config commits and argv-only run_command. This proposal supersedes those choices for the next implementation; current canonical documents remain accurate for the baseline.
+Final candidate verification passed:
 
-| Area | Required adjustment |
-| --- | --- |
-| Harness bases and inspection | Assemble three bases and expose their effective scope, tools, prompts and commit policy |
-| Member files and metadata | Lead-only member scope; user-approved commits; backend-owned identity/base/schema bookkeeping |
-| Design resolution | Derive implementation paths from accepted working/dependency mappings; preserve read-only precedence and safe-path validation |
-| Bash and Git execution | One Bash tool with optional scoped Git metadata; trusted context resolution and operation checks; controlled general execution |
-| Scoped history | Persistent independent staging/reference context for ordinary Git; separate automatic checkpoint indexes; preserve exact-byte approval and restore behavior |
-| Member lifecycle | Configuration-change/activation handling is deferred; preserve the separation between file acceptance and active settings |
-| Runtime and prompts | Assemble harness-provided tools/instructions; remove obsolete tool guidance and agent version/revision requirements |
-| Storage, routes and frontend callers | Reconcile stable metadata, review/acceptance and effective-scope inspection after schemas/activation are settled; preserve read-only member inspection and existing group-chat behavior |
-| Migration and tests | Convert existing accepted/pending state deliberately and replace tests asserting the superseded contract |
+- 89 backend unit/HTTP tests, including real Bash isolation, native scoped Git, staging/checkpoint separation, protected approval, descendant/native-Git/hard-link attempts, dependency boundaries, accepted mappings, stale-base restore and cancellation/output bounds.
+- 42 disposable MySQL integration tests, including real runtime tools, stable source/history, group publication/checkpoint ordering, failures, cancellation and restart.
+- 56 frontend tests, including Bash command summaries; frontend production build.
+- Backend production TypeScript build.
+- Documentation verification: 45 Markdown files, fifteen draft/canonical pairs, required sections, local links, JSON examples, obsolete tool registration removal and whitespace.
 
-Drafts retain the unchanged cooperation and final-response behavior. Implementation is not requested by this persistence step, and no canonical system document or application source is changed. No application test result is claimed. Documentation checks and their starting commit are recorded in [tests.jsonl](tests.jsonl). The unrelated untracked .claude/ directory is preserved.
-
-The documentation-only checkpoint saves six draft contracts/plans and this change checklist. Verification passed for all seven Markdown documents: required sections, proposal markers, local links and whitespace. Canonical/application files match the task's starting commit. Implementation has not started. The lead bootstrap recommendation is selected; configuration-change/activation handling is explicitly deferred. Other unresolved details remain recorded above.
-
-This follow-up starts at 8787c7931f04acaa7f797691e6ea88424962fa7a and changes proposal documents only.
+Every run, including failed development checks, is appended in [tests.jsonl](tests.jsonl) with its increment's starting SHA. No paid provider calls or user database changes were made. The unrelated untracked .claude/ directory is preserved. Review remains on codex/lead-harness in the project base folder; no push or merge is performed.

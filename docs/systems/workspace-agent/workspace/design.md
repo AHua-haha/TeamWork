@@ -76,7 +76,7 @@ Agent file actions have no HTTP form; the harness's tools call them inside the b
 4. **Edit a project file.** The user reads `README.md`, edits it, and saves with its revision. The response has a new revision. Saving again with the old revision returns 409 `stale_revision`.
 5. **Binary file.** Reading `frontend/public/icon.png` returns 415 `unsupported_file`.
 6. **Find.** Finding `app.tsx` returns `frontend/src/ui/App.tsx`.
-7. **Agent writes.** A member explicitly assigned implementation path `src/backend` writes `src/backend/api.ts` in its managed worktree. Common tools can edit its working design as pending changes; design commits require user acceptance. Agent context remains read-only.
+7. **Agent writes.** A member assigned an accepted working design mapping `src/backend` writes `src/backend/api.ts` in its managed worktree. Common tools can edit its working design as pending changes; design commits require user acceptance. Agent context remains read-only.
 8. **Hidden from an agent.** A worker whose implementation scope does not include `frontend` cannot list or read its implementation; a dependency file can be read but not edited.
 9. **Edit.** Editing `src/a.ts` with text that is not in the file is reported to the agent and leaves the file unchanged. A path like `../outside/secret.txt`, or one through a link, is refused.
 

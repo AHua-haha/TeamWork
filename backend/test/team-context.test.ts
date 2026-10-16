@@ -22,22 +22,22 @@ test('member requests get team rules and only their harness design and implement
   assert.match(request.context.systemPrompt!, /Design for Backend/);
   assert.match(request.context.systemPrompt!, /BACKEND SOURCE/);
   assert.doesNotMatch(request.context.systemPrompt!, /FRONTEND SOURCE|Design for Frontend/);
-  assert.match(request.context.systemPrompt!, /committing them requires user approval/);
+  assert.match(request.context.systemPrompt!, /commits require user approval/);
   assert.match(request.context.systemPrompt!, /standing words/);
-  assert.deepEqual(names(request).sort(), ['commit_scope', 'edit', 'ls', 'read', 'restore_scope', 'scope_history', 'write']);
+  assert.deepEqual(names(request).sort(), ['bash', 'edit', 'ls', 'read', 'write']);
   assert.deepEqual(request.context.tools!.map(tool => tool.name), names(request));
 }));
 test('the lead receives design maintenance, choices and management tools with shared assignment instructions', () => withTeam(async fixture => {
   const request = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
-  assert.deepEqual(names(request).sort(), ['commit_scope', 'edit', 'list_models', 'ls', 'read', 'restore_scope', 'retire_member', 'scope_history', 'submit_member_config', 'write']);
+  assert.deepEqual(names(request).sort(), ['bash', 'edit', 'list_models', 'ls', 'read', 'write']);
   assert.match(request.context.systemPrompt!, /offer concrete choices with their tradeoffs and your recommendation/);
   assert.match(request.context.systemPrompt!, /wait for the user's answer/);
   assert.match(request.context.systemPrompt!, /Assign work in your final group response/);
-  assert.match(request.context.systemPrompt!, /Design commits require explicit user approval/);
+  assert.match(request.context.systemPrompt!, /Design and member-config semantic commits require user review/);
   await fixture.team.designs.save(fixture.workspaceId, 'user/design.json', { content: 'Project', implementation: ['.'] }, null, 'Test', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
-  await configureHarness(fixture, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: ['.'], usePaths: [] }, allowedCommands: [{ kind: 'executable', executable: 'node' }] });
+  await configureHarness(fixture, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'executable', executable: 'bash' }] });
   const configured = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
-  for (const name of ['write', 'edit', 'run_command']) assert.ok(names(configured).includes(name));
+  for (const name of ['write', 'edit', 'bash']) assert.ok(names(configured).includes(name));
 }));
 test('bounded file context names omitted files and unrelated catalog tools are not injected', () => withTeam(async fixture => {
   const member = await worker(fixture, 'Backend', ['backend']);

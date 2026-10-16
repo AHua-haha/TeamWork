@@ -54,7 +54,7 @@ export function TeamTab({ team, workspace, selected, onSelect, onDesign, onImple
             <h3>File-tool scope</h3>
             <p>Working designs can be edited as pending changes; only the user accepts design commits. Dependency designs are read-only.</p>
             {member.lead && <p>The lead can inspect the workspace and maintain user designs and member configuration drafts.</p>}
-            <h4>Editable implementation paths</h4>
+            <h4>Editable paths from accepted designs</h4>
             {member.harness.implementationScope.paths.length ? <ScopePaths paths={member.harness.implementationScope.paths} access={path => implementationAccess(path, readonly)} onOpen={onImplementation} /> : <p>No implementation edits assigned.</p>}
             <h4>Read-only use paths</h4>
             {readonly.length ? <ScopePaths paths={readonly} access={() => 'Read only'} onOpen={onImplementation} /> : <p>No use paths assigned.</p>}

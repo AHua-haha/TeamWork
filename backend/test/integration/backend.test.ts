@@ -1040,11 +1040,11 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     const design = { content: 'Create src/result.txt with Done.', implementation: ['src/result.txt'] };
     await base.save('user/design.json', JSON.stringify(design), null, 'Initial accepted design');
     const first = (await team.team(workspaceId)).members[0]!;
-    const command = [process.execPath, '-e', 'process.stdout.write(require("node:fs").readFileSync("src/result.txt","utf8"))'];
     const lead = await team.update(workspaceId, first.memberId, first.revision, {
-      name: first.name, role: first.role, responsibility: first.responsibility, harness: { ...first.harness, allowedCommands: [{ kind: 'exact', argv: command }] },
+      name: first.name, role: first.role, responsibility: first.responsibility, harness: { designScope: first.harness.designScope, allowedCommands: [] },
       settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' },
     });
+    await team.create(workspaceId, { name: 'Backend', role: 'developer', responsibility: 'Implement result', settings: { prompt: 'Keep the result concise.' }, harness: { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [{ kind: 'executable', executable: 'bash' }] } });
     await runtime.open();
     const accepted = await team.runner.postUser(workspaceId, 'Propose a design refinement and ask Backend to implement the accepted design.');
     const run = accepted.runs[0]!;
@@ -1053,22 +1053,16 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     assert.match(firstStep.request.context.systemPrompt!, /user approval/);
     answer(firstStep.events, call('write', { path: '.context/user/design.json', content: JSON.stringify({ ...design, content: 'Pending design refinement' }) }));
     const secondStep = await requests.next();
-    answer(secondStep.events, call('commit_scope', { part: 'design', message: 'Cannot self-approve' }));
+    answer(secondStep.events, call('bash', { command: 'git add . && git commit -m "Cannot self-approve"', metadata: { git: { scope: 'design' } } }));
     const thirdStep = await requests.next();
     assert.match(JSON.stringify(thirdStep.request.context.messages), /approval_required/);
-    const manifest = { version: 2, memberId: null, revision: null, name: 'Backend', role: 'developer', responsibility: 'Implement the result', settings: {}, promptFiles: ['prompts/member.md'], harnesses: { project: { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: ['src/result.txt'], usePaths: [] } } } };
-    answer(thirdStep.events, call('write', { path: '.team/members/backend/prompts/member.md', content: 'Keep the result concise.' }));
+    const manifest = { name: 'Pending new member', role: 'developer', responsibility: 'Future member', settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['user/design.json'], dependencies: [] } };
+    answer(thirdStep.events, call('write', { path: '.team/members/pending/prompts/member.md', content: 'Pending prompt.' }));
     const manifestStep = await requests.next();
-    answer(manifestStep.events, call('write', { path: '.team/members/backend/member.json', content: JSON.stringify(manifest) }));
-    const submitStep = await requests.next();
-    answer(submitStep.events, call('submit_member_config', { path: '.team/members/backend/member.json' }));
+    answer(manifestStep.events, call('write', { path: '.team/members/pending/member.json', content: JSON.stringify(manifest) }));
     const fourthStep = await requests.next();
-    const configuredWorker = (await team.service.byName(workspaceId, 'Backend'))!;
-    const configFiles = await team.harness.files(lead.memberId);
-    await writeFile(join(configFiles.root, '.team/members/backend/member.json'), JSON.stringify({ ...manifest, memberId: configuredWorker.id, revision: configuredWorker.revision, settings: { connectionId: 'missing-connection' } }));
-    await assert.rejects(team.configuration.submit(lead.memberId, '.team/members/backend/member.json'), code('invalid_config'));
-    assert.deepEqual(await store.getMember(configuredWorker.id), configuredWorker, 'invalid model references preserve the whole accepted record');
-    await writeFile(join(configFiles.root, '.team/members/backend/member.json'), JSON.stringify(manifest));
+    assert.equal((await team.team(workspaceId)).members.length, 2, 'file changes do not activate members');
+    assert.ok(!fourthStep.request.tools.some(t => t.definition.name === 'submit_member_config'));
     answer(fourthStep.events, message('@Backend Implement the accepted design.'));
     const workerStep = await requests.next();
     assert.match(workerStep.request.context.systemPrompt!, /You are Backend/);
@@ -1077,20 +1071,20 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     await assert.rejects(store.updateMember(activeWorker.id, activeWorker.revision, 'backend', activeWorker.value, true), code('member_busy'));
     const storedBundle = (await store.getMember(activeWorker.id))!.value.configuration!;
     assert.equal(storedBundle.files['prompts/member.md'], 'Keep the result concise.');
-    assert.equal(storedBundle.files['member.json'], JSON.stringify(manifest));
+    assert.deepEqual(JSON.parse(storedBundle.files['member.json']!).designScope, { working: ['user/design.json'], dependencies: [] });
     const leadFiles = await team.harness.files(lead.memberId);
-    await writeFile(join(leadFiles.root, '.team/members/backend/prompts/member.md'), 'UNSUBMITTED prompt');
+    await writeFile(join(leadFiles.root, '.team/members/pending/prompts/member.md'), 'UNSUBMITTED prompt');
     assert.equal((await team.configuration.accepted(workspaceId, activeWorker.id)).digest, storedBundle.digest);
     assert.ok(!workerStep.request.tools.some(tool => ['read_design', 'save_design', 'assign_member', 'create_member'].includes(tool.definition.name)));
     assert.match(workerStep.request.context.systemPrompt!, /Create src\/result.txt with Done/);
     assert.doesNotMatch(workerStep.request.context.systemPrompt!, /Pending design refinement/);
     answer(workerStep.events, call('write', { path: 'src/result.txt', content: 'Done' }));
     const workerCommit = await requests.next();
-    answer(workerCommit.events, call('commit_scope', { part: 'implementation', message: 'Implement the requested result file' }));
+    answer(workerCommit.events, call('bash', { command: 'git add . && git commit -m "Implement the requested result file"', metadata: { git: { scope: 'implementation' } } }));
     const workerCommand = await requests.next();
-    answer(workerCommand.events, call('run_command', { argv: command }));
+    answer(workerCommand.events, call('bash', { command: 'cat src/result.txt' }));
     const workerFinish = await requests.next();
-    const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'run_command');
+    const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'bash');
     assert.ok(commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text');
     if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.equal(JSON.parse(commandResult.content[0].text).stdout, 'Done');
     answer(workerFinish.events, message('@Lead Implemented src/result.txt and committed implementation.'));
@@ -1250,9 +1244,9 @@ async function groupFixture() {
   await service.createConnection(connectionId, { label: 'Group test', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
   const { workspaceId } = await workspaceService.create({ name: 'Group', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: false });
   const first = (await team.team(workspaceId)).members[0]!;
-  const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: first.harness, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
+  const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: { designScope: first.harness.designScope, allowedCommands: first.harness.allowedCommands }, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
   await team.designs.save(workspaceId, 'user/design.json', { content: 'Shared test design', implementation: ['.'] }, null, 'Test', { type: 'lead', memberId: lead.memberId, runId: 'fixture' });
-  const harness = { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: ['.'], usePaths: [] }, allowedCommands: [] };
+  const harness = { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] };
   const backend = await team.create(workspaceId, { name: 'Backend', role: 'developer', harness });
   const frontend = await team.create(workspaceId, { name: 'Frontend', role: 'developer', harness });
   await runtime.open();

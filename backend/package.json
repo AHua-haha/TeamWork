@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.19.0" },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
@@ -14,6 +16,7 @@
     "test:mysql": "node scripts/mysql-test.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.79",
     "@earendil-works/pi-ai": "0.87.1",
     "@earendil-works/pi-coding-agent": "0.87.1",
     "mysql2": "3.24.4"

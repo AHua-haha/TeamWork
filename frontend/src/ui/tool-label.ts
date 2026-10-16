@@ -12,7 +12,7 @@ export function callRecipient(argsText: string | undefined): string | null {
 export function toolHeading(toolName: string, argsText: string | undefined): string {
   if (toolName === 'save_design') return 'Update design';
   if (toolName === 'read_design') return 'Read design';
-  if (toolName === 'run_command') return 'Run command';
+  if (toolName === 'bash' || toolName === 'run_command') return 'Run command';
   if (toolName === 'submit_member_config') return 'Submit member configuration';
   if (toolName !== 'send_message' && toolName !== 'assign_member') return toolName;
   const to = callRecipient(argsText);
@@ -24,7 +24,7 @@ export function toolLabels(toolName: string): { input: string; output: string } 
   if (toolName === 'send_message') return { input: 'Message', output: 'Response' };
   if (toolName === 'assign_member') return { input: 'Assignment', output: 'Report' };
   if (toolName === 'submit_member_config') return { input: 'Configuration file', output: 'Validated member configuration' };
-  if (toolName === 'run_command') return { input: 'Command', output: 'Exit status and output' };
+  if (toolName === 'bash' || toolName === 'run_command') return { input: 'Command', output: 'Exit status and output' };
   if (toolName === 'save_design') return { input: 'Design change', output: 'Applied change' };
   if (toolName === 'read_design') return { input: 'Design file', output: 'Current design and revision' };
   return { input: 'Arguments', output: 'Result' };

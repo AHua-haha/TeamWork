@@ -21,7 +21,6 @@ export * from './member-tools.js';
 export * from './member-config.js';
 export * from './member-config-format.js';
 export * from './harness-bases.js';
-export * from './lead-tools.js';
 export * from './design.js';
 export * from './harness-config.js';
 export * from './harness.js';

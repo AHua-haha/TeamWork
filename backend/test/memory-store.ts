@@ -141,7 +141,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
       if (entry && entry.member.value.settings.connectionId === null && entry.member.value.settings.modelId === null) {
         const defaults = defaultRunSettings(value), member = entry.member;
         const updated = { ...member.value, settings: { ...member.value.settings, connectionId: defaults.connectionId, modelId: defaults.modelId, modelOptions: defaults.modelOptions } };
-        updated.configuration = generatedSource(updated, member.id, member.revision + 1);
+        updated.configuration = generatedSource(updated, member.id);
         if (member.value.configuration) updated.configuration.path = member.value.configuration.path;
         entry.member = { ...member, revision: member.revision + 1, value: updated };
       }
