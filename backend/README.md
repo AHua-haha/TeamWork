@@ -142,6 +142,8 @@ Example editable manifest (identity, format version and revisions are backend-ow
 
 Use common write/edit tools for pending files. Only the lead may access member files. User acceptance is required for design and member-config semantic commits. Accepting member files does **not** create/update/retire active members: configuration-change and activation handling is deferred. The former submit_member_config and retire_member agent shortcuts are removed; list_models remains read-only. Stable active bundles are materialized when missing, without overwriting existing drafts.
 
+Base rule text is maintained in [backend/prompts/harness](prompts/README.md), including common and per-scope instructions. Runtime and inspection load the same Markdown files. Restart development mode after edits; compiled use requires rebuilding and restarting. Build output includes the required assets. Prompt text does not change enforced scope/tool/approval policy.
+
 Three fixed bases assemble common tools and maintenance prompts:
 
 - **management:** working-design editing, read-only dependencies, lead bootstrap .context/user and .team/members, user-approved design/member commits;

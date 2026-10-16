@@ -7,7 +7,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-harness-prompts.mjs",
     "check": "tsc --noEmit -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/src/main.js",
     "dev": "node --env-file-if-exists=.env --import tsx src/main.ts",

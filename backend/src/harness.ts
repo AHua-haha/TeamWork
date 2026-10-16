@@ -1,3 +1,4 @@
+import { harnessPrompt } from './harness-prompts.js';
 import { purposeHarnesses } from './harness-bases.js';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -200,9 +201,8 @@ export class HarnessService {
     const tools = available.filter(tool => selected.has(tool.definition.name));
     const parts = [
       '## Your harness',
-      `Your private worktree is ${env.root}. Use paths relative to it. Other members have separate working files.`,
+      harnessPrompt('common', { worktree: env.root }),
       ...env.definitions.map(d => `## ${d.id} harness\n${d.prompt}\n${d.parts.map(p => `Part ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
-      'The harness automatically checkpoints each finished run. Use ordinary git commit through bash metadata for meaningful commits. Design and member-config commits require user approval of the exact revision. Checkpoints never imply approval. Accepted snapshots are retained in harness history; they are not automatically merged into the original workspace or other worktrees.',
       '## Accepted working designs', await this.designView(resolved.working),
       '## Dependency designs', await this.designView(resolved.dependencies),
       '## Implementation files', await this.implementationView(env.root, resolved.readable, member),

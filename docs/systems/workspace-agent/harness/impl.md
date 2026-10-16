@@ -8,7 +8,7 @@
 
 HarnessService composes accepted designs, fixed bases, scoped files/history and Bash. HarnessHistory owns worktrees, Git objects, staging repositories, checkpoint indexes, accepted refs and design acceptance pointers. The [team](../team/design.md) owns stable active member identity/content; [runtime](../../agent-runtime/design.md) owns the model loop and tool cancellation. [Design parts](../context-base/design-parts/design.md) resolve accepted semantic designs.
 
-Reusable file adapters and one Bash adapter receive runtime identity; policy is resolved by harness services rather than tied to a lead-specific tool implementation. Management contributes protected design/member parts and lead model discovery. Implementation contributes the derived part. Execute contributes existing general command allowances. Base prompts and member Markdown are assembled into the system prompt.
+Reusable file adapters and one Bash adapter receive runtime identity; policy is resolved by harness services rather than tied to a lead-specific tool implementation. Management contributes protected design/member parts and lead model discovery. Implementation contributes the derived part. Execute contributes existing general command allowances. Base rule text lives under backend/prompts/harness as Markdown, including management/design/member, implementation/scope, execute and shared prompts. harness-prompts loads required files once relative to its module URL and renders backend-owned template values. Runtime and inspection share the same renderer. Member Markdown remains separate; enforcement stays in the base definitions, file boundary and Git/Bash services. Missing/empty files fail startup; unresolved template variables fail assembly. There are no embedded fallback rules. Build copies the required assets to dist/prompts/harness so compiled modules load their own release files independently of cwd. Prompt edits take effect after restart (and rebuild for compiled use).
 
 ## Coordination and data flow
 
@@ -32,6 +32,7 @@ Accepted design pointers supply semantic reads without mutating original-context
 
 ## Code map
 
+- [Rule Markdown files](../../../../backend/prompts/harness/management.md), [prompt loader](../../../../backend/src/harness-prompts.ts) and [asset packaging](../../../../backend/scripts/copy-harness-prompts.mjs).
 - [Fixed bases](../../../../backend/src/harness-bases.ts), [assignment validation](../../../../backend/src/harness-config.ts), [composition](../../../../backend/src/harness.ts).
 - [File adapters and Bash tool](../../../../backend/src/harness-tools.ts), [file boundary](../../../../backend/src/member-files.ts), [Bash lifecycle/isolation/bridge](../../../../backend/src/harness-command.ts).
 - [Scoped history, staging and acceptance](../../../../backend/src/harness-history.ts), [accepted design resolver](../../../../backend/src/design.ts).
@@ -41,3 +42,5 @@ Accepted design pointers supply semantic reads without mutating original-context
 ## Verification
 
 [Harness tests](../../../../backend/test/harness.test.ts) run real sandboxed Bash/native Git, staging versus checkpoints, protected member/design commits, descendant/native-Git bypass attempts, dependency denial, accepted mapping visibility, stale-base refresh, timeout and cancellation. [History tests](../../../../backend/test/harness-history.test.ts) cover independent scopes/worktrees, exact review/base conflicts, restore transitions and links. [Member files](../../../../backend/test/member-files.test.ts) cover mapped files, dependency overlaps and traversal. [Member configuration](../../../../backend/test/member-config.test.ts), [context assembly](../../../../backend/test/team-context.test.ts), [lead](../../../../backend/test/lead.test.ts) and HTTP tests verify new source/inspection/tool contracts. [SQL/runtime integration](../../../../backend/test/integration/backend.test.ts) exercises actual tool execution, approval, checkpoint/publication ordering, failure/cancellation and restart. No live provider calls are required.
+
+Prompt-file verification runs existing runtime/context and inspection tests against the file-backed definitions, builds the backend, and imports the compiled prompt loader from a different working directory to verify packaged assets and value rendering.

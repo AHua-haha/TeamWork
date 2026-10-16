@@ -28,6 +28,8 @@ Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Li
 | implementation | Writable implementation from accepted working mappings; read-only implementation from dependencies; common file tools and scoped Git Bash | Agent may commit implementation |
 | execute | General Bash under existing allowances and applicable filesystem restrictions | Cannot override protected scopes or Git acceptance |
 
+Base harness rule prompts are maintained as backend-owned Markdown files, including shared rules and per-scope maintenance instructions. Runtime and inspection use those same file contents. Templates receive backend-owned worktree/command values; files cannot grant permissions or replace enforced policy. They load when the backend starts; changing source prompts requires restarting development mode or rebuilding/restarting the compiled backend. Missing or empty required prompt files fail startup rather than using hardcoded fallback rules.
+
 Tools are assembled once and all base/member prompts form the system prompt. Member files cannot override base policy. Working mappings yield writable implementation; dependency mappings yield read-only use paths. Read-only wins overlaps. Git metadata, .context and .team are excluded from implementation even for root mappings. Pending design edits grant no authority. Accepted designs are resolved at inspection, tool and request preparation; no new active-run update protocol is introduced.
 
 ### Scoped Git and stable history
