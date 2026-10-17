@@ -24,7 +24,7 @@ Missing design files, invalid JSON/schema, or invalid implementation paths fail 
 
 ## Guarantees and limits
 
-Design identity is its context file, independent of member identity. Implementation paths may name files that will be created later. Reading a design does not create a member or change the design. Content and mapping are saved together; changes to mapping are design changes made known to the user. No fixed semantic design schema or automatic knowledge consolidation is introduced.
+Design identity is its context file, independent of member identity. Implementation paths may name files that will be created later. Reading a design does not create a member or change the design. Content and mapping are saved together; changes to mapping are design changes made known to the user. Design Markdown is instructed to contain purpose/responsibilities/boundaries, Interface contract, and constraints/specifications/requirements. Exact signatures/routes/schemas can be settled in the implementation context’s Implemented contract. There is no new semantic-heading validator or automatic knowledge consolidation.
 
 ## Acceptance examples
 
@@ -33,3 +33,5 @@ Design identity is its context file, independent of member identity. Implementat
 3. A mapping changes after a user discussion. The next design read shows the resulting mapping, and subsequent harness resolution uses the accepted mapping. Pending member-worktree edits do not affect it. Member configuration activation is a separate user-controlled workspace-idle operation.
 
 A user-approved harness design snapshot is visible through semantic read/discovery, including newly created designs and accepted deletions. It is not copied into the original checkout or existing peer worktrees; original-context file/history review remains a separate existing surface. Semantic reads and mappings ignore pending worktree bytes.
+
+Each design file user/<path> pairs with implementation context agent/<lower-cased-path>.md, retaining its full extension. Pairing and scope authority are backend-derived; no JSON field is added. The implementation context’s Input, Output, Effect and Usage examples describe actual implemented interfaces. Existing JSON parsing and discovery remain unchanged.

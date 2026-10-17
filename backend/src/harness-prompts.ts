@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { AppError } from './types.js';
 
-const names = ['common', 'management', 'management-design', 'management-members', 'implementation', 'implementation-scope', 'execute'] as const;
+const names = ['common', 'management', 'management-design', 'management-members', 'implementation', 'implementation-scope', 'implementation-context', 'design-template', 'implementation-context-template', 'execute'] as const;
 type PromptName = typeof names[number];
 const templates = new Map<PromptName, string>(names.map(name => {
   const file = new URL(`../prompts/harness/${name}.md`, import.meta.url);

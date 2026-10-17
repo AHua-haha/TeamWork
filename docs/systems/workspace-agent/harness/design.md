@@ -10,9 +10,9 @@ Three fixed bases provide management, implementation and execute authority. The 
 
 A member assignment contains designScope: {working: [user design paths], dependencies: [user design paths]}. The lists must be disjoint, valid and resolvable. It contains no independently configurable implementationScope. Member execution rules can be configured through member files and validated under the fixed execute base policy.
 
-The lead can maintain .rsi/context/user/ and .rsi/members/ immediately; new workspace bootstrap already supplies the root design. Dependencies remain read-only. Other members can edit their working designs and read dependency designs; member files are lead-only among agents. Implementation authority starts empty until accepted design mappings grant implementation paths.
+The lead can maintain .rsi/context/user/ and .rsi/members/ immediately; new workspace bootstrap already supplies the root design. Dependencies remain read-only. Other members can edit their working designs and read dependency designs; member files are lead-only among agents. Implementation-code authority starts empty until accepted design mappings grant paths. Working-design implementation context is independently writable even with no code mappings.
 
-Common ls/read/write/edit tools operate on pending files. One bash tool takes {command, metadata?: {git: {scope}}}; scope is design, member-config or implementation when that member owns the part. No identity, revision, approval, repository, index or reference may be supplied through metadata.
+Common ls/read/write/edit tools operate on pending files. One bash tool takes {command, metadata?: {git: {scope}}}; scope is design, member-config, implementation or a listed impl-context-<hash> part when that member owns the part. No identity, revision, approval, repository, index or reference may be supplied through metadata.
 
 Scoped Git Bash is available independently of general execution allowances. General Bash requires an exact allowance for ["bash", "-c", command], or executable "bash". Previous non-Bash executable allowances remain stored but do not authorize a shell. Richer execution-rule capabilities remain outside this prototype.
 
@@ -25,12 +25,18 @@ Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Li
 | Base | Scope and capabilities | Semantic commit policy |
 | --- | --- | --- |
 | management | Pending working design, read-only dependencies, lead-only member files, common file tools and scoped Git Bash; lead model discovery and file validation | User acceptance for design and member-config |
-| implementation | Writable implementation from accepted working mappings; read-only implementation from dependencies; common file tools and scoped Git Bash | Agent may commit implementation |
+| implementation | Writable implementation from accepted working mappings and paired working-design context; read-only dependency implementation/context; common file tools and scoped Git Bash | Agent may commit code and implementation context independently |
 | execute | General Bash under existing allowances and applicable filesystem restrictions | Cannot override protected scopes or Git acceptance |
 
 Base harness rule prompts are maintained as backend-owned Markdown files, including shared rules and per-scope maintenance instructions. Runtime and inspection use those same file contents. Templates receive backend-owned worktree/command values; files cannot grant permissions or replace enforced policy. They load when the backend starts; changing source prompts requires restarting development mode or rebuilding/restarting the compiled backend. Missing or empty required prompt files fail startup rather than using hardcoded fallback rules.
 
 Tools are assembled once and all base/member prompts form the system prompt. Member files cannot override base policy. Working mappings yield writable implementation; dependency mappings yield read-only use paths. Read-only wins overlaps. Git metadata, .rsi/context and .rsi are excluded from implementation even for root mappings. Pending design edits grant no authority. Accepted designs are resolved at inspection, tool and request preparation; no new active-run update protocol is introduced.
+
+### Implementation-context authority and rules
+
+Each working design user/<path> grants the paired Markdown .rsi/context/agent/<lower-cased-path>.md (including the design extension); dependencies grant read/search only. Unrelated context and private/member state gain no permission. Each working pair is a one-file agent-committable scope with ID impl-context- plus the first 16 SHA-256 hex characters of its lower-case logical design path. Inspection and prompt assembly show the concrete ID/path. New members inherit committed context through shared scope history independently of other assignments; existing peers and original-workspace context are not overwritten. Pending work remains private. Derived paths must satisfy context limits; invalid paths refuse harness resolution.
+
+Design prompts prescribe purpose/responsibilities/boundaries, Interface contract, and constraints/specifications/requirements. Implementation prompts require reading relevant context and maintaining its Implemented contract with exact Input, Output, Effect and Usage examples, current implementation facts and continuation information. Reusable knowledge is outside context and deferred. Content completeness follows model instructions; no new semantic validator or automatic model-loop maintenance is added.
 
 ### Scoped Git and stable history
 
@@ -47,7 +53,7 @@ Agents use ordinary git status, diff, add, log, show, restore and commit syntax 
 
 Paths are literal relative paths, scoped to the selected part; "." narrows to that part rather than the whole workspace. HEAD represents that member's accepted base. git log --all includes that scope's checkpoints and accepted commits; default log follows its accepted base. Working-file restore first checkpoints pending bytes, then retains Git's tracked-file semantics. A full latest-accepted restore of both index and files refreshes a stale base when both exactly match that accepted tree. The backend review/restore API also provides complete snapshot restoration.
 
-Scopes have independent staging, accepted bases and references; objects are shared. Implementation commits accept staged bytes only. Unstaged changes and other scopes remain pending. Design/member-config Git commits return approval_required without accepting or resetting staged changes. User review names exact checkpoint revision and expected accepted base; changed bytes or stale bases refuse acceptance.
+Scopes have independent staging, accepted bases and references; objects are shared. Implementation-code and implementation-context commits accept staged bytes only. Unstaged changes and other scopes remain pending. Design/member-config Git commits return approval_required without accepting or resetting staged changes. User review names exact checkpoint revision and expected accepted base; changed bytes or stale bases refuse acceptance.
 
 Automatic checkpoints occur at run end, including failure/cancellation and interruption recovery, and before successful final group publication after tool effects settle. They use separate temporary indexes, preserve staging and do not imply approval. Checkpoint failure prevents a success claim. History and restored snapshots remain scoped.
 
@@ -59,7 +65,7 @@ Member JSON holds name, role, responsibility, settings, ordered prompt reference
 
 ### Execution
 
-Scoped Git Bash can read authorized context/implementation and use the trusted Git bridge; direct shell writes are disabled. General Bash can write authorized implementation only. Management files and Git metadata are protected from direct Bash and descendant processes. File tools provide pending management editing. Git without scope metadata cannot use the bridge; absolute native Git cannot access protected harness repositories. Read-only dependency restrictions apply to descendants as well.
+Scoped Git Bash can read authorized context/implementation and use the trusted Git bridge; direct shell writes are disabled. General Bash can write authorized implementation only. Management files and Git metadata are protected from direct Bash and descendant processes. File tools provide pending management editing and working implementation-context editing. Git without scope metadata cannot use the bridge; absolute native Git cannot access protected harness repositories. Read-only dependency restrictions apply to descendants as well.
 
 Commands start in the member worktree. A script may need cd to an assigned directory: directory contents outside read scope are unavailable even when scoped Git can operate from the root. Minimal runtime/system files and temporary scratch are available; provider credentials and the backend environment are not inherited. Network access is disabled. Output is capped at 64 KiB and execution at 60 seconds; cancellation/timeout terminates the process group before checkpointing and outstanding broker operations settle first.
 
@@ -87,3 +93,5 @@ Startup converts active legacy member records to backend-owned metadata and desi
 8. A child process attempts to write a management/dependency path or open native Git metadata: the execution boundary refuses it.
 
 Private harness storage is .rsi/harness inside the managed workspace root. It is excluded from snapshots and unavailable through agent file/Bash tools and project-file APIs. Bootstrap initializes the lead design/member scopes as accepted baselines; later commits retain their user-only policy.
+
+9. A root lead with empty implementation mappings edits its root implementation context and commits it through its listed context scope; it still cannot edit project code. A dependency context is readable/searchable but not writable or selectable as a commit scope.

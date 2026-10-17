@@ -55,3 +55,5 @@ GET team/configuration/current returns active baseline metadata, current configu
 ## Workspace-created lead baseline
 
 WorkspaceService supplies newLead with root working design references and stores the generated exact source together with the filesystem bootstrap baseline. MemberConfigService accepts the committed revision equal to the active bootstrap marker as an already active baseline; all other prospective activations require a user commit. Normal review digest/base/idle gates remain unchanged. member-config paths and validation now use .rsi/members. The initial worktree preserves the bootstrap design and source; later original-file edits do not overwrite member pending work.
+
+MemberContext keeps design as the shared agreement and delegates implementation-context maintenance instructions to the harness. Harness definitions derive one paired context scope per working design; dependencies remain read-only. No member JSON fields, active source snapshots, activation workflow or runtime loop change is needed. Context continuity uses committed scope state independently of member identity.

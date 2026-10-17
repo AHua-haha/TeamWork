@@ -31,7 +31,7 @@ export function MemberInspector({ workspaceId, member, onDesign, onImplementatio
     {harnesses.map(harness => <section className="inspected-harness" key={harness.id}>
       <h3>{harness.id === 'management' ? 'Management harness' : harness.id === 'implementation' ? 'Implementation harness' : 'Execute harness'}</h3>
       <p className="harness-tools">{harness.tools.length ? harness.tools.map(tool => <code key={tool}>{tool}</code>) : 'No command execution allowed.'}</p>
-      {harness.parts.map(part => <div className="inspected-part" key={part.id}><h4>{part.id === 'design' ? 'Design management' : part.id === 'implementation' ? 'Implementation' : 'Member configuration drafts'}</h4>
+      {harness.parts.map(part => <div className="inspected-part" key={part.id}><h4>{part.id === 'design' ? 'Design management' : part.id === 'implementation' ? 'Implementation' : part.id === 'member-config' ? 'Member configuration drafts' : part.id.startsWith('impl-context-') ? 'Implementation context' : part.id}</h4>
         <p>{part.commit === 'user' ? 'Commit requires user acceptance.' : 'Agent commits allowed.'}</p><ul>{part.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
         {part.exclude.length > 0 && <p>Excluded: {part.exclude.join(', ')}</p>}
       </div>)}

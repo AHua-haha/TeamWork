@@ -1,9 +1,16 @@
+import { sha256 } from './text.js';
+import { contextRoot, implementationContextPath } from './workspace-layout.js';
 import { harnessPrompt } from './harness-prompts.js';
-import type { HarnessDefinition } from './harness-history.js';
+import type { HarnessDefinition, HarnessPart } from './harness-history.js';
 import type { StoredMember } from './team.js';
 
 export interface ImplementationScope { paths: string[]; usePaths: string[] }
 const files = ['ls', 'read', 'write', 'edit'];
+/** One context file per shared scope keeps history stable across different assignment sets. */
+export function implementationContextPart(design: string): HarnessPart {
+  const path = `${contextRoot}/${implementationContextPath(design)}`;
+  return { id: `impl-context-${sha256(design.toLowerCase()).slice(0, 16)}`, paths: [path], exclude: [], commit: 'agent', prompt: harnessPrompt('implementation-context', { design, context: path }) };
+}
 /** Fixed purpose policy; an assignment supplies design references, never permissions or tool definitions. */
 export function purposeHarnesses(member: StoredMember, implementation: ImplementationScope = { paths: [], usePaths: [] }): HarnessDefinition[] {
   const config = member.value.harness;
@@ -22,7 +29,10 @@ export function purposeHarnesses(member: StoredMember, implementation: Implement
       id: 'implementation',
       prompt: harnessPrompt('implementation'),
       tools: [...files, 'bash'],
-      parts: implementation.paths.length ? [{ id: 'implementation', paths: implementation.paths, exclude: ['.rsi', ...implementation.usePaths], commit: 'agent', prompt: harnessPrompt('implementation-scope') }] : [],
+      parts: [
+        ...(implementation.paths.length ? [{ id: 'implementation', paths: implementation.paths, exclude: ['.rsi', ...implementation.usePaths], commit: 'agent' as const, prompt: harnessPrompt('implementation-scope') }] : []),
+        ...config.designScope.working.map(implementationContextPart),
+      ],
     },
     {
       id: 'execute',

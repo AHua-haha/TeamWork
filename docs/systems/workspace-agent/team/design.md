@@ -22,7 +22,7 @@ Three semantic operations are derived from the proposed member files:
 
 Changing a working/dependency assignment is not an update; an explicit replacement can be proposed with create/delete and remains subject to user review. Implementation access is always derived from accepted assigned designs; it cannot be independently configured. A separately user-approved design-mapping change remains a design change, not a member reassignment.
 
-Working mappings grant writable implementation and dependency mappings grant read-only implementation, with read-only precedence and protected control paths. Base tools and enforced policy cannot be changed through member prompt or execution configuration. The lead keeps management bootstrap access to .rsi/context/user and .rsi/members; unassigned implementation access remains empty.
+Working mappings grant writable implementation and paired working-design implementation context; dependency designs grant read-only implementation/context, with read-only precedence and protected control paths. Base tools and enforced policy cannot be changed through member prompt or execution configuration. The lead keeps management bootstrap access to .rsi/context/user and .rsi/members; unassigned implementation-code access remains empty. Context paths are derived per design independently of the member identity.
 
 ### Member change workflow
 

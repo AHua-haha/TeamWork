@@ -1,5 +1,5 @@
 import { harnessPrompt } from './harness-prompts.js';
-import { purposeHarnesses } from './harness-bases.js';
+import { implementationContextPart, purposeHarnesses } from './harness-bases.js';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DesignService, designPart, type ResolvedDesign } from './design.js';
@@ -13,6 +13,7 @@ import type { RuntimeTool } from './runtime.js';
 import type { StoredMember } from './team.js';
 import { AppError } from './types.js';
 import type { WorkspaceService } from './workspace.js';
+import { contextRoot, implementationContextPath } from './workspace-layout.js';
 import { missing } from './text.js';
 
 export const viewBudget = 64 * 1024;
@@ -23,6 +24,7 @@ const ancestor = (path: string, scope: string) => !path || scope === '.' || scop
 export async function resolveHarness(designs: DesignService, workspaceId: string, config: HarnessConfig): Promise<ResolvedHarness> {
   const working = await Promise.all(config.designScope.working.map(path => designs.read(workspaceId, path)));
   const dependencies = await Promise.all(config.designScope.dependencies.map(path => designs.read(workspaceId, path)));
+  for (const design of [...working, ...dependencies]) implementationContextPath(design.path);
   const writable = [...new Set(working.flatMap(d => d.implementation))], readonly = [...new Set(dependencies.flatMap(d => d.implementation))];
   return { working, dependencies, readable: [...new Set([...writable, ...readonly])], writable, readonly };
 }
@@ -30,15 +32,24 @@ export async function resolveHarness(designs: DesignService, workspaceId: string
 /** Purpose assignments define authority; read-only use paths take precedence over writes. */
 export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): FileAccess {
   const designFiles = [...resolved.working, ...resolved.dependencies].map(part => `.rsi/context/${part.path}`);
+  const workingContext = resolved.working.map(part => `${contextRoot}/${implementationContextPath(part.path)}`);
+  const dependencyContext = resolved.dependencies.map(part => `${contextRoot}/${implementationContextPath(part.path)}`);
   return { deny(path, mode) {
     const key = path.toLowerCase();
     if (key === '.rsi' && mode === 'see') return null;
     if (key === '.rsi/members' || key.startsWith('.rsi/members/')) return member.value.lead ? null : 'Member configuration is outside your scope';
+    if (key === `${contextRoot}/agent` || key.startsWith(`${contextRoot}/agent/`)) {
+      if (mode === 'write' || mode === 'mkdir') {
+        if (dependencyContext.some(file => key === file.toLowerCase())) return 'Dependency implementation context is read-only';
+        return workingContext.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'This implementation context is outside your working designs';
+      }
+      return [...workingContext, ...dependencyContext].some(file => key === file.toLowerCase() || (mode === 'see' && ancestor(path, file))) ? null : 'This implementation context is outside your design scope';
+    }
     if (key === '.rsi/context' || key.startsWith('.rsi/context/')) {
       if (mode === 'write' || mode === 'mkdir') {
         const working = resolved.working.map(part => `.rsi/context/${part.path}`);
         if (resolved.dependencies.some(p => key === `.rsi/context/${p.path}`.toLowerCase())) return 'Dependency design is read-only';
-        return member.value.lead && (key === '.rsi/context/user' || key.startsWith('.rsi/context/user/')) || working.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'Dependency design and agent context are read-only';
+        return member.value.lead && (key === '.rsi/context/user' || key.startsWith('.rsi/context/user/')) || working.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'This design is outside your working designs';
       }
       if ((member.value.lead && (key === '.rsi/context' || key === '.rsi/context/user' || key.startsWith('.rsi/context/user/'))) || designFiles.some(file => key === file.toLowerCase() || (mode === 'see' && ancestor(path, file)))) return null;
       return 'This context is outside your design scope';
@@ -99,6 +110,10 @@ export class HarnessService {
       ...resolved.dependencies.map(p => ({ id: `dep-${p.revision.slice(0, 32)}`, paths: [`.rsi/context/${p.path}`], exclude: [], commit: 'user' as const, prompt: '' })),
       ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.rsi'], commit: 'user' as const, prompt: '' }] : []),
     ];
+    for (const design of resolved.dependencies) {
+      const part = implementationContextPart(design.path);
+      dependencies.push({ ...part, id: `dep-${part.id}` });
+    }
     for (const part of dependencies) await history.ensure(id, part, root);
     return { root, history, definitions, parts };
   }
@@ -126,7 +141,7 @@ export class HarnessService {
     const part = request.metadata?.git ? this.part(env, request.metadata.git.scope) : null;
     if (!part && !commandAllowed(member.value.harness.allowedCommands, ['bash', '-c', request.command])) throw new AppError('command_denied', 'General Bash requires an allowed ["bash", "-c", command] rule; scoped Git uses metadata.git.scope', 403);
     const designRead = member.value.lead ? ['.rsi/context/user', '.rsi/members'] : [...resolved.working, ...resolved.dependencies].map(d => `.rsi/context/${d.path}`);
-    const readable = [...resolved.readable, ...designRead];
+    const readable = [...resolved.readable, ...designRead, ...[...resolved.working, ...resolved.dependencies].map(design => `${contextRoot}/${implementationContextPath(design.path)}`)];
     // Management Git Bash is read-only except for operations mediated by Git.
     // General execution may write implementation only; it cannot edit management files.
     const writable = part ? [] : resolved.writable;

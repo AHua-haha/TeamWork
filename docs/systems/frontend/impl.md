@@ -150,3 +150,5 @@ A dedicated configuration changes component reads the unified backend response a
 ## Workspace bootstrap path coordination
 
 Discussion reference formatting, physical-design-reference normalization and member configuration diff labels use .rsi/context and .rsi/members. Logical context requests and design hierarchy grouping retain user/... identities. No additional creation request fields or frontend initialization step is needed: workspace create/adopt succeeds only after the backend baseline is ready.
+
+MemberInspector labels each backend-derived impl-context-<hash> part as Implementation context and displays its concrete paths/agent commit policy alongside the existing parts. Unknown future scope IDs retain their ID label instead of being misrepresented as member configuration. No context editor or new API is introduced.

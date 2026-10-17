@@ -11,7 +11,7 @@
   - the workspace's latest `seq` and its problem list;
   - the operation queue, the file watcher, and the change notification;
   - the operations of the design: overview, list, read, save, attributed saveDesign, move, delete, history, find, search, changes, and follow.
-- The [design parts child](design-parts/design.md) interprets structured user-design records and implementation mappings; ordinary context remains free-form text. It also supplies current design discovery/inspection for the frontend, using the same design parser as lead and harness operations.
+- The [design parts child](design-parts/design.md) interprets structured user-design records and implementation mappings; ordinary context remains free-form text. Design content has three prompt-defined sections; paired implementation context documents the exact implemented contract. The storage layer does not validate those semantic headings. It also supplies current design discovery/inspection for the frontend, using the same design parser as lead and harness operations.
 - `Batch` builds one operation's stored change: new versions, content blobs, removed and added index rows, and the change record with its files ordered by path.
 - `DiskChange` performs one operation's disk steps and keeps the steps that undo them. After the change is stored, it deletes the replaced files and removes emptied folders.
 - `ContextStore` is the storage contract: the workspace registry, loading the index, committing a change, and reading blobs, versions, history, and records. The MySQL store implements it; tests use an in-memory store.
@@ -65,6 +65,18 @@ Because the version is read before the records, a commit that lands during the c
 
 **Closing.** `close` stops the watcher and timer, wakes followers so their streams end, and waits for the queue.
 
+### Content layout and maintenance coordination
+
+workspace-layout.implementationContextPath maps user/<path> to agent/<lower-cased-path>.md, retaining the full filename/extension and validating both paths with contextPath. Lower-case spelling follows context identity; including the original extension prevents foo.json/foo.md collisions. Derived paths must also fit the existing 16-segment/512-character and per-segment limits.
+
+Workspace bootstrap renders the file-backed design-template and implementation-context-template and writes both before constructing one sequence-1 ContextCommit with two blobs/versions/index rows/change entries. The existing workspace transaction stores that baseline atomically; rollback removes the managed root on failure. No schema or context HTTP changes are needed.
+
+The harness owns implementationContextPart: one agent-committable scope per working design context file, with ID impl-context- plus 16 SHA-256 hex characters of the lower-cased logical design path. It adds corresponding dependency scopes only for hydration, never writable tool selection. File authority allows working files and read-only dependency files plus listable ancestors; unrelated context remains inaccessible. Scoped Bash read/search includes these files, while general Bash still cannot write .rsi.
+
+Each paired file has a separate paths/exclusions scope key in existing shared history, so a new member can inherit its committed bytes independently of its other assignments. Checkpoints/staging remain private; stale commits refuse instead of overwriting a newer committed scope. No original-workspace copy, peer refresh or new publication/merge algorithm is introduced.
+
+management-design Markdown instructs maintaining purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. implementation Markdown requires reading context before work, documenting Input/Output/Effect/Usage examples for actual exposed interfaces, maintaining current facts and continuation information, and reporting mismatches. Templates identify planned or undocumented content explicitly. These are model instructions, not a deterministic guarantee of documentation completeness. Member configuration and model-loop behavior are unchanged. Existing workspaces can create missing paired context files through assigned common file tools.
+
 ## Decisions and constraints
 
 - **Disk holds current files.** Users and editors see and change ordinary files. The index caches path, revision, content hash, size, modification time, author, and reason, so reads and listings do not walk the disk.
@@ -84,6 +96,9 @@ Because the version is read before the records, a commit that lands during the c
 - [Workspace routes](../../../../backend/src/workspace-routes.ts) and [HTTP helpers](../../../../backend/src/http-helpers.ts): the context endpoints, request validation, error responses, and SSE.
 - [MySQL store](../../../../backend/src/database.ts) and [codec](../../../../backend/src/codec.ts): storage and record validation (see the [database implementation](../../database/impl.md)).
 - [Context base tests](../../../../backend/test/context-base.test.ts) and [in-memory store](../../../../backend/test/memory-store.ts): behavior on real temporary folders.
+
+- [Layout](../../../../backend/src/workspace-layout.ts), [bootstrap](../../../../backend/src/workspace-bootstrap.ts), [implementation-context scope definitions](../../../../backend/src/harness-bases.ts) and [harness](../harness/impl.md): template initialization, authority and shared history.
+- [Design rules](../../../../backend/prompts/harness/management-design.md), [implementation rules](../../../../backend/prompts/harness/implementation.md), [design template](../../../../backend/prompts/harness/design-template.md) and [context template](../../../../backend/prompts/harness/implementation-context-template.md): file-maintained content rules.
 
 ## Verification
 
@@ -105,3 +120,5 @@ Context base tests run each operation against a temporary folder and the in-memo
 Lead tests additionally check attributed exact changes and unchanged/stale saves. The MySQL integration tests check the store against a real database: a save and a move reload with their history, and a change from this process is refused and undone on disk after another process stored a change. The [route tests](../../../../backend/test/workspace-routes.test.ts) cover the context endpoints over HTTP.
 
 Original-workspace files remain the scope of ContextBase and its watcher/history. Member pending edits use separate worktrees and harness Git; original context versions are not a second history of those pending edits. The attributed saveDesign primitive remains for backend imports/setup and historical author support, but is no longer exposed as a lead model tool. Accepted harness snapshots are not written into original context. DesignService overlays user-approved Git snapshots for semantic design reads/discovery and permission resolution, while raw context/history remain original-workspace observations.
+
+[Implementation-context tests](../../../../backend/test/implementation-context.test.ts) verify path identity, bootstrap templates, root context edit authority without code rights, working/dependency boundaries, scoped search, protected Bash writes, independent semantic commits and replacement inheritance/stale-base refusal. MySQL integration additionally verifies both initial files and their single change record after reopening, plus bootstrap transaction rollback. Existing storage/API tests retain the original raw file/history semantics.
