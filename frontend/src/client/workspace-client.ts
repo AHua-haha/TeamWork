@@ -8,7 +8,7 @@ export interface WorkspaceModels { models: ModelOptions[]; defaultModel: ModelRe
 export interface WorkspaceModelsRecord { revision: number; value: WorkspaceModels; issues: string[] }
 export interface WorkspaceInput { name: string; directory: string; adopt: boolean; models: WorkspaceModels }
 export interface Problem { path: string; code: string; message: string }
-export interface ContextOverview { workspaceId: string; seq: number; user: { files: number; bytes: number }; agent: { files: number; bytes: number }; problems: Problem[] }
+export interface ContextOverview { workspaceId: string; seq: number; files: number; bytes: number; problems: Problem[] }
 export interface Workspace extends WorkspaceRecord { context: ContextOverview }
 export type Author = { type: 'user' } | { type: 'external' } | { type: 'lead'; memberId: string; runId: string };
 export type FileAction = 'create' | 'update' | 'move' | 'delete';
@@ -22,7 +22,7 @@ export interface ContextFile extends ProjectFile { current: boolean; author: Aut
 export interface ChangeFile { action: FileAction; path: string; fromPath: string | null; revision: string | null }
 export interface ChangeRecord { seq: number; time: number; author: Author; reason: string | null; files: ChangeFile[] }
 export interface ContextVersion { revision: string | null; seq: number; time: number; action: FileAction; path: string; fromPath: string | null; size: number | null; author: Author; reason: string | null }
-export interface DesignPart { content: string; implementation: string[] }
+export interface DesignPart { content: string; implementation: string[]; documents: {path: string; content: string}[] }
 export interface DesignSummary { path: string; revision: string; implementation: string[] }
 export interface DesignCatalog { designs: DesignSummary[]; truncated: boolean }
 export interface CurrentDesign extends ContextFile { design: DesignPart | null; designIssue: string | null }
@@ -36,7 +36,7 @@ export interface Member {
   lead: boolean; settings: RunSettings; issues: string[]; ready: boolean; running: boolean;
 }
 export interface Team { workspaceId: string; members: Member[] }
-export interface HarnessPart { id: string; paths: string[]; exclude: string[]; commit: 'agent' | 'user'; prompt: string }
+export interface HarnessPart { id: string; paths: string[]; exclude: string[]; commit: 'agent' | 'user'; prompt: string; context?: 'design' | 'impl' }
 export interface HarnessDefinition { id: string; tools: string[]; prompt: string; parts: HarnessPart[] }
 export interface MemberInspection {
   member: Member;

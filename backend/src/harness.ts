@@ -2,7 +2,7 @@ import { harnessPrompt } from './harness-prompts.js';
 import { implementationContextPart, purposeHarnesses } from './harness-bases.js';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DesignService, designPart, type ResolvedDesign } from './design.js';
+import { DesignService, resolveDesign, type ResolvedDesign } from './design.js';
 import { commandAllowed, type HarnessConfig } from './harness-config.js';
 import { executeBash, parseBashInput, type CommandResult } from './harness-command.js';
 import { harnessBashTool, harnessFileTools } from './harness-tools.js';
@@ -13,8 +13,8 @@ import type { RuntimeTool } from './runtime.js';
 import type { StoredMember } from './team.js';
 import { AppError } from './types.js';
 import type { WorkspaceService } from './workspace.js';
-import { contextRoot, implementationContextPath } from './workspace-layout.js';
-import { missing } from './text.js';
+import { contextRoot, implementationContextPath, contextPaths, contextLocation } from './workspace-layout.js';
+import { decodeText } from './text.js';
 
 export const viewBudget = 64 * 1024;
 export interface ResolvedHarness { working: ResolvedDesign[]; dependencies: ResolvedDesign[]; readable: string[]; writable: string[]; readonly: string[] }
@@ -31,28 +31,29 @@ export async function resolveHarness(designs: DesignService, workspaceId: string
 
 /** Purpose assignments define authority; read-only use paths take precedence over writes. */
 export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): FileAccess {
-  const designFiles = [...resolved.working, ...resolved.dependencies].map(part => `.rsi/context/${part.path}`);
-  const workingContext = resolved.working.map(part => `${contextRoot}/${implementationContextPath(part.path)}`);
-  const dependencyContext = resolved.dependencies.map(part => `${contextRoot}/${implementationContextPath(part.path)}`);
+  const designPaths = (designs: ResolvedDesign[]) => designs.flatMap(d => [d.path,...contextPaths(d.path,'design')].map(p=>`${contextRoot}/${p}`));
+  const workingDesign=designPaths(resolved.working), dependencyDesign=designPaths(resolved.dependencies);
+  const workingContext=resolved.working.flatMap(d=>contextPaths(d.path,'impl').map(p=>`${contextRoot}/${p}`));
+  const dependencyContext=resolved.dependencies.flatMap(d=>contextPaths(d.path,'impl').map(p=>`${contextRoot}/${p}`));
+  const readable=[...workingDesign,...dependencyDesign,...workingContext,...dependencyContext];
   return { deny(path, mode) {
-    const key = path.toLowerCase();
+    const key = path.toLowerCase(), write=mode==='write'||mode==='mkdir';
+    const allowed=(scopes:string[])=>scopes.some(p=>covers(p,path)||(mode==='mkdir'&&ancestor(path,p)));
     if (key === '.rsi' && mode === 'see') return null;
     if (key === '.rsi/members' || key.startsWith('.rsi/members/')) return member.value.lead ? null : 'Member configuration is outside your scope';
-    if (key === `${contextRoot}/agent` || key.startsWith(`${contextRoot}/agent/`)) {
-      if (mode === 'write' || mode === 'mkdir') {
-        if (dependencyContext.some(file => key === file.toLowerCase())) return 'Dependency implementation context is read-only';
-        return workingContext.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'This implementation context is outside your working designs';
+    if(key===contextRoot)return (mode==='see'||mode==='mkdir')&&(member.value.lead||resolved.working.length>0||(!write&&resolved.dependencies.length>0)) ? null : 'Context root is not a file';
+    if(key.startsWith(contextRoot+'/')){
+      const location=contextLocation(key.slice(contextRoot.length+1));
+      if(!location)return 'Not a system context path';
+      if(location.kind==='node'){
+        return (mode==='see'||mode==='mkdir')&&(member.value.lead||readable.some(p=>ancestor(path,p))) ? null : 'This system is outside your scope';
       }
-      return [...workingContext, ...dependencyContext].some(file => key === file.toLowerCase() || (mode === 'see' && ancestor(path, file))) ? null : 'This implementation context is outside your design scope';
-    }
-    if (key === '.rsi/context' || key.startsWith('.rsi/context/')) {
-      if (mode === 'write' || mode === 'mkdir') {
-        const working = resolved.working.map(part => `.rsi/context/${part.path}`);
-        if (resolved.dependencies.some(p => key === `.rsi/context/${p.path}`.toLowerCase())) return 'Dependency design is read-only';
-        return member.value.lead && (key === '.rsi/context/user' || key.startsWith('.rsi/context/user/')) || working.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'This design is outside your working designs';
+      if(location.kind==='impl'){
+        if(write&&dependencyContext.some(p=>covers(p,path)))return 'Dependency implementation context is read-only';
+        return allowed(write?workingContext:[...workingContext,...dependencyContext]) ? null : 'This implementation context is outside your working/dependency systems';
       }
-      if ((member.value.lead && (key === '.rsi/context' || key === '.rsi/context/user' || key.startsWith('.rsi/context/user/'))) || designFiles.some(file => key === file.toLowerCase() || (mode === 'see' && ancestor(path, file)))) return null;
-      return 'This context is outside your design scope';
+      if(write&&dependencyDesign.some(p=>covers(p,path)))return 'Dependency design is read-only';
+      return member.value.lead||allowed(write?workingDesign:[...workingDesign,...dependencyDesign]) ? null : 'This design is outside your working/dependency systems';
     }
     if (key === '.rsi' || key.startsWith('.rsi/')) return 'Private workspace state is outside your scope';
     if (!path && mode === 'see') return null;
@@ -100,14 +101,14 @@ export class HarnessService {
     }
     const history = await opening;
     const root = await history.worktree(id);
-    const definitions = purposeHarnesses(member, { paths: resolved.writable, usePaths: resolved.readonly });
+    const definitions = purposeHarnesses(member, { paths: resolved.writable, usePaths: resolved.readonly }, { working: resolved.working.map(d=>d.path), dependencies: resolved.dependencies.map(d=>d.path) });
     const parts = definitions.flatMap(d => d.parts);
     validateParts(parts);
     for (const part of parts) await history.ensure(id, part, root);
     // A dependency is an independent read-only view. Hydrate it once when first assigned,
     // without granting its paths to a writable part or refreshing another agent's edits.
     const dependencies: HarnessPart[] = [
-      ...resolved.dependencies.map(p => ({ id: `dep-${p.revision.slice(0, 32)}`, paths: [`.rsi/context/${p.path}`], exclude: [], commit: 'user' as const, prompt: '' })),
+      ...resolved.dependencies.map(p => ({ id: `dep-${p.revision.slice(0, 32)}`, paths: [p.path,...contextPaths(p.path,'design')].map(path=>`${contextRoot}/${path}`), exclude: [], context: 'design' as const, commit: 'user' as const, prompt: '' })),
       ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.rsi'], commit: 'user' as const, prompt: '' }] : []),
     ];
     for (const design of resolved.dependencies) {
@@ -128,7 +129,7 @@ export class HarnessService {
       const denial = base.deny(path, mode);
       if (denial !== null) return denial;
       if (mode === 'write' || mode === 'mkdir') {
-        const isPart = env.parts.some(part => partOwns(part, path) || (mode === 'mkdir' && part.paths.some(p => ancestor(path, p))));
+        const isPart = env.parts.some(part => partOwns(part, path) || (mode === 'mkdir' && part.paths.some(p => ancestor(path, p) || (part.context === 'design' && covers(p,path)))));
         if (!isPart) return 'This path is outside your writable harness parts';
       }
       return null;
@@ -140,8 +141,13 @@ export class HarnessService {
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const part = request.metadata?.git ? this.part(env, request.metadata.git.scope) : null;
     if (!part && !commandAllowed(member.value.harness.allowedCommands, ['bash', '-c', request.command])) throw new AppError('command_denied', 'General Bash requires an allowed ["bash", "-c", command] rule; scoped Git uses metadata.git.scope', 403);
-    const designRead = member.value.lead ? ['.rsi/context/user', '.rsi/members'] : [...resolved.working, ...resolved.dependencies].map(d => `.rsi/context/${d.path}`);
-    const readable = [...resolved.readable, ...designRead, ...[...resolved.working, ...resolved.dependencies].map(design => `${contextRoot}/${implementationContextPath(design.path)}`)];
+    let designRead=[...resolved.working,...resolved.dependencies].flatMap(d=>[d.path,...contextPaths(d.path,'design')].map(p=>`${contextRoot}/${p}`));
+    if(member.value.lead){
+      const listing=await new ProjectFiles(join(env.root,contextRoot)).tree('',16);
+      if(listing.truncated)throw new AppError('input_too_large','Context listing is too large for a safe Bash read scope',413);
+      designRead=[...designRead,'.rsi/members',...listing.entries.filter(e=>e.type==='file'&&['design','metadata'].includes(contextLocation(e.path)?.kind??'')).map(e=>`${contextRoot}/${e.path}`)];
+    }
+    const readable=[...resolved.readable,...designRead,...[...resolved.working,...resolved.dependencies].flatMap(d=>contextPaths(d.path,'impl').map(p=>`${contextRoot}/${p}`))];
     // Management Git Bash is read-only except for operations mediated by Git.
     // General execution may write implementation only; it cannot edit management files.
     const writable = part ? [] : resolved.writable;
@@ -171,17 +177,16 @@ export class HarnessService {
       const checkpoint = revision ?? (await env.history.checkpoint(id, part, env.root, actor, 'Commit snapshot')).revision;
       const state = await env.history.ensure(id, part, env.root);
       if (partId === 'design') {
-        // Validate structured design files at acceptance, while allowing intermediate raw file edits.
-        const files = new MemberFiles(env.root, { deny: () => null });
-        const paths = await env.history.paths(checkpoint);
-        const assigned = new Set((await this.active(id)).value.harness.designScope.working.map(path => `.rsi/context/${path}`));
-        for (const path of paths.filter(path => path.endsWith('.json') || assigned.has(path))) {
-          const bytes = await files.read.readFile(join(env.root, path));
-          let value;
-          try { value = JSON.parse(Buffer.from(bytes).toString('utf8')); }
-          catch { throw new AppError('invalid_design', `${path} is not a design JSON record`); }
-          designPart(value);
+        // Validate the immutable reviewed tree, never mutable worktree bytes.
+        const paths=(await env.history.paths(checkpoint)).filter(path=>path.startsWith(contextRoot+'/'));
+        const files=new Map<string,string>();
+        for(const path of paths){const bytes=await env.history.readSnapshotBytes(checkpoint,path),content=bytes&&decodeText(bytes);if(content===null||content===undefined)throw new AppError('invalid_design','Design documents must be UTF-8 text');if(content!==null)files.set(path.slice(contextRoot.length+1).toLowerCase(),content);}
+        const nodes=new Set<string>();
+        for(const path of files.keys()){
+          const location=contextLocation(path);
+          if(location&&location.kind!=='node')nodes.add(location.node);
         }
+        for(const node of nodes)resolveDesign(node,files);
       }
       return env.history.commit(id, part, env.root, checkpoint, base ?? state.committed, message, actor);
     });

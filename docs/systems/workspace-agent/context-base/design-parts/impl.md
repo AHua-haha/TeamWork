@@ -1,36 +1,30 @@
-# Design parts implementation
+# Design nodes implementation
 
 ## Contract
 
-[Design parts design](design.md). Preserve shared content/mapping identity, strict metadata validation and versioned attributed saves.
+[Design nodes](design.md) resolves metadata-only JSON plus complete Markdown contexts, accepted-state precedence, explicit issues and identity independent of document representation.
 
 ## Responsibilities and decomposition
 
-DesignService owns the interpretation of a user-context file as a design, mapping validation, encoding, and inspect/read/save and current summary discovery operations. The parent [context base](../design.md) owns files, revisions, attribution and durability. Harness and lead consume this semantic view. HarnessHistory owns user-accepted design Git references; DesignService resolves their bytes without copying them into original context. No separate design table exists.
+DesignService owns catalog/inspect/read and metadata interpretation. context-documents validates structural file/directory forms, entry order and budgets, shared with implementation-context commits. Workspace layout owns node references, reserved content roles and derived paths. ContextBase owns raw files/history; HarnessHistory owns accepted per-file pointers. No design table, specialized edit tool or semantic heading parser is added.
 
 ## Coordination and data flow
 
-Normalize optional .rsi/context prefix and require user category. Validate exactly content/implementation fields, text limits, no duplicate implementation paths ignoring case and project path rules. Read first checks a per-design accepted Git pointer, with deletion tombstones, and falls back to current original context only when no pointer exists; inspect also returns raw content/revision and a parsing issue so the lead can repair it. Save encodes one stable pretty JSON record and asks ContextBase.saveDesign to replace it with the supplied lead author, reason and revision. Content and mapping share history/conflict protection. Harness acceptance atomically records per-path pointers with scope acceptance; compare-and-swap and content checks refuse overlapping stale design acceptance. Read-only inspection probes existing Git storage without creating it.
+Validate node reference, read metadata through accepted Git pointers before raw ContextBase, and gather the node's own design.md/design/ files. Do not gather child systems or impl/ as design. Union raw document listings with accepted Git paths so unpublished accepted additions and tombstones work. Reject truncated listings and storage problems within design content. resolveDesign parses strict implementation metadata and calls contextDocuments; directory README is first, remaining paths sorted. Return aggregate content and separate actual-source-path documents. Revision hashes lower-case path/revision pairs for all participating files. Current reads span ordinary observations, with no cross-file snapshot transaction guarantee.
 
-Current discovery calls the context tree at user depth 16, unions original paths with accepted Git design paths and reads through the same precedence, and uses the same parse/validation function as read and inspect. Valid records return path/revision/implementation summaries without Markdown content. Non-design/invalid records and files that disappear during discovery are omitted; unavailable storage/folders propagate. The context listing's truncation flag is returned directly. Current selected reads use inspect and preserve invalid raw records with an explicit issue.
+Catalog scans metadata candidates from raw and accepted paths, validates each independently, omits unavailable designs and returns truncation. Reserved design/impl parent names prevent nested document metadata from becoming nodes. Missing/invalid source remains inspectable through raw APIs. The former DesignService.save of embedded JSON content is removed; setup/tests seed real metadata/Markdown files through ordinary ContextBase saves.
 
 ## Decisions and constraints
 
-Markdown content remains free-form; implementation metadata is structured because it defines authority. Hierarchy is represented by file paths and content references. Mappings can name future files. Case-insensitive comparisons follow workspace/context identity rules. No agent identities enter a design record.
+One metadata reference survives document representation changes and member replacement. JSON holds mapping only. Prose section correctness is supplied by harness prompts. No legacy JSON/ownership-category fallback is introduced. Accepted per-file tombstones hide removed original documents, enabling single-file/directory transitions without copying snapshots into the original checkout. Multi-file inspection is not a transaction over concurrent edits.
 
 ## Code map
 
-- [Design record validation and service](../../../../../backend/src/design.ts)
-- Parent [context base implementation](../impl.md) owns persistence and the attributed save.
-
-The neighboring [workspace implementation](../../workspace/impl.md) owns the HTTP adapter to these read-only operations.
+- [Semantic catalog](../../../../../backend/src/design.ts): DesignMetadata, resolveDesign, DesignService list/inspect/read.
+- [Document format](../../../../../backend/src/context-documents.ts): file/directory structural validation and limits.
+- [Layout](../../../../../backend/src/workspace-layout.ts): nodeReference, contextPaths and contextLocation.
+- [Harness history](../../../../../backend/src/harness-history.ts): accepted file pointers and immutable scope snapshots.
 
 ## Verification
 
-[Lead tests](../../../../../backend/test/lead.test.ts) exercise pending design records and user-only acceptance. [Harness tests](../../../../../backend/test/harness.test.ts) validate mappings and malformed-record repair. [MySQL integration](../../../../../backend/test/integration/backend.test.ts) checks design author/history persistence through the runtime.
-
-[Catalog tests](../../../../../backend/test/design-catalog.test.ts) cover schema discovery of unassigned designs, invalid/ordinary files, revision summaries and retirement/deletion. [HTTP tests](../../../../../backend/test/workspace-routes.test.ts) cover read-only catalog/inspect routes, missing/invalid references and query validation.
-
-DesignService read/inspect/list and original-context encoding remain backend catalog operations. The reusable pending design file tools and user-only semantic commits are owned by the harness. Accepted working/dependency mappings are the permission source; no direct lead read/save runtime tools remain.
-
-The JSON schema remains content/implementation. Content section requirements are Markdown maintenance rules in management-design.md, not parser validation. workspace-layout derives the corresponding implementation-context Markdown path independently of member identity; the harness owns its file/Git authority. Bootstrap renders both templates. DesignService still interprets only design records and never promotes pending implementation-context bytes into accepted design.
+[Catalog tests](../../../../../backend/test/design-catalog.test.ts) verify discovery independent of membership, metadata issues and retirement. [Context tree tests](../../../../../backend/test/context-tree.test.ts) verify multi-document identity, revision changes, explicit children, missing/ambiguous forms, exact-node permissions, acceptance, context transition history and case-sensitive disk spelling. HTTP and disposable MySQL tests cover current inspection, accepted mappings, durable bootstrap/history and rollback.

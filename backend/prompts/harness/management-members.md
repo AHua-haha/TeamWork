@@ -17,7 +17,7 @@ The user first reviews and commits the exact files. A separate user action activ
   "responsibility": "Implement the assigned design",
   "settings": {},
   "promptFiles": ["prompts/member.md"],
-  "designScope": {"working": ["user/design.json"], "dependencies": []},
+  "designScope": {"working": ["metadata.json"], "dependencies": []},
   "execute": {"allowedCommands": []}
 }
 ```

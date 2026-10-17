@@ -13,24 +13,24 @@ const design = (path: string): DesignSummary => ({ path, revision: 'r', implemen
 const patch = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -4,2 +4,3 @@\n same\n-old\n+<script>alert(1)</script>\n+new\n\\ No newline at end of file\n';
 
 test('member ownership follows folder paths, supports multiple owners/assignments and preserves missing/unassigned designs', () => {
-  const a = member('A', ['user/backend/api.json', 'user/frontend/ui.json']);
-  const b = member('B', ['user/backend/API.json']);
-  const dependent = member('Dependency', [], ['user/backend/api.json']);
-  const missing = member('Missing', ['user/legacy/missing.json']);
-  const tree = memberTree([design('user/backend/api.json'),design('user/frontend/ui.json'),design('user/frontend/a11y.json')], [a,b,dependent,missing]);
+  const a = member('A', ['backend/api/metadata.json', 'frontend/ui/metadata.json']);
+  const b = member('B', ['backend/API/metadata.json']);
+  const dependent = member('Dependency', [], ['backend/api/metadata.json']);
+  const missing = member('Missing', ['legacy/missing/metadata.json']);
+  const tree = memberTree([design('backend/api/metadata.json'),design('frontend/ui/metadata.json'),design('frontend/a11y/metadata.json')], [a,b,dependent,missing]);
   assert.deepEqual(tree.map(n => n.name), ['backend','frontend','legacy']);
   assert.deepEqual(tree[0]!.children[0]!.members.map(m => m.name), ['A','B']);
-  assert.deepEqual(tree[1]!.children.find(n => n.name === 'ui.json')!.members.map(m => m.name), ['A']);
-  assert.deepEqual(tree[1]!.children.find(n => n.name === 'a11y.json')!.members, []);
+  assert.deepEqual(tree[1]!.children.find(n => n.name === 'ui')!.members.map(m => m.name), ['A']);
+  assert.deepEqual(tree[1]!.children.find(n => n.name === 'a11y')!.members, []);
   assert.equal(tree[2]!.children[0]!.unavailable,true);
   assert.equal(tree[0]!.children[0]!.members.includes(dependent),false);
 });
 
 test('the member tree retains file labels with attached cards and includes lead/unassigned workspace members', () => {
-  const members = [member('Lead',[]),member('Backend',['user/backend/api.json']),member('Dependency',[],['user/backend/api.json'])];
-  const html = renderToStaticMarkup(createElement(MemberTree,{name:'Project',designs:[design('user/backend/api.json')],members,selected:null,onSelect(){},onDesign(){}}));
+  const members = [member('Lead',[]),member('Backend',['backend/api/metadata.json']),member('Dependency',[],['backend/api/metadata.json'])];
+  const html = renderToStaticMarkup(createElement(MemberTree,{name:'Project',designs:[design('backend/api/metadata.json')],members,selected:null,onSelect(){},onDesign(){}}));
   assert.match(html,/Open Lead active details/); assert.match(html,/Open Dependency active details/);
-  assert.match(html,/member-card-connector/); assert.match(html,/api.json/); assert.match(html,/member-attached-cards/);
+  assert.match(html,/member-card-connector/); assert.match(html,/api/); assert.match(html,/member-attached-cards/);
   assert.ok(!html.includes('Activate committed')); assert.ok(!html.includes('File changes'));
 });
 
@@ -56,8 +56,8 @@ test('current review, commit and activation clients send distinct exact-state pa
 
 // A removed design can become a directory while its active assignment still exists.
 test('unavailable file assignments remain visible when that path now contains designs', () => {
-  const members = [member('Previous',['user/backend']), member('Current',['user/backend/api.json'])];
-  const designs = [design('user/backend/api.json')];
+  const members = [member('Previous',['backend/metadata.json']), member('Current',['backend/api/metadata.json'])];
+  const designs = [design('backend/api/metadata.json')];
   const tree = memberTree(designs,members);
   assert.equal(tree[0]!.folder,true);
   assert.equal(tree[0]!.unavailable,true);

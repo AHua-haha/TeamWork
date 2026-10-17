@@ -7,9 +7,9 @@ import { code, stubConfig, withTeam } from './team-fixture.js';
 
 test('new workspace has a ready root-design lead, exact active files and clean bootstrap history before any agent runs', () => withTeam(async f => {
   const lead = await f.team.member(f.workspaceId, f.lead.memberId);
-  assert.equal(lead.ready,true); assert.deepEqual(lead.harness.designScope,{working:['user/design.json'],dependencies:[]});
+  assert.equal(lead.ready,true); assert.deepEqual(lead.harness.designScope,{working:['metadata.json'],dependencies:[]});
   assert.deepEqual(lead.harness.implementationScope,{paths:[],usePaths:[]}); assert.deepEqual(lead.harness.allowedCommands,[]);
-  assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.map(d=>d.path),['user/design.json']);
+  assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.map(d=>d.path),['metadata.json']);
   const source = await f.team.configuration.accepted(f.workspaceId,lead.memberId);
   for (const [path, content] of Object.entries(source.files)) assert.equal(await readFile(join(f.directory,'.rsi/members',lead.memberId,path),'utf8'),content);
   assert.deepEqual((await readdir(join(f.directory,'.rsi'))).sort(),['context','harness','members']);
@@ -18,7 +18,7 @@ test('new workspace has a ready root-design lead, exact active files and clean b
   assert.equal(view.activation.valid,true); assert.equal(view.activation.hasChanges,false); assert.deepEqual(view.changes,[]);
   assert.equal(view.active.revision,source.acceptedRevision); assert.equal(f.runtime.runs.length,0);
   const files = await f.team.harness.files(lead.memberId);
-  assert.match((await files.read.readFile(join(files.root,'.rsi/context/user/design.json'))).toString(),/implementation/);
+  assert.match((await files.read.readFile(join(files.root,'.rsi/context/metadata.json'))).toString(),/implementation/);
   await assert.rejects(files.read.readFile(join(files.root,'.rsi/harness/objects')),code('not_found'));
   assert.equal((await f.workspaces.files(f.workspaceId)).constructor.name,'ProjectFiles');
   assert.ok(!(await (await f.workspaces.files(f.workspaceId)).tree('',1)).entries.some(entry=>entry.path==='.rsi'));

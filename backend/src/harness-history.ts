@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { contextDocuments } from './context-documents.js';
+import { contextLocation, contextRoot } from './workspace-layout.js';
 import { AppError, identity } from './types.js';
 import { decodeText, missing, sha256 } from './text.js';
 
@@ -11,6 +13,7 @@ export interface HarnessPart {
   exclude: string[];
   commit: 'agent' | 'user';
   prompt: string;
+  context?: 'design' | 'impl';
 }
 export interface HarnessDefinition { id: string; parts: HarnessPart[]; prompt: string; tools: string[] }
 export interface HistoryActor { type: 'agent' | 'user' | 'harness'; memberId: string; runId?: string }
@@ -40,7 +43,7 @@ export function validateParts(parts: readonly HarnessPart[]): void {
     ids.add(part.id);
     for (const p of [...part.paths, ...part.exclude]) if (p !== '.') safePath(p);
     for (const other of parts) {
-      if (other === part) continue;
+      if (other === part || (part.context && other.context && part.context !== other.context)) continue;
       for (const a of part.paths) for (const b of other.paths) {
         const intersection = coversPath(a, b) ? b : coversPath(b, a) ? a : null;
         if (intersection !== null && !part.exclude.some(p => coversPath(p, intersection)) && !other.exclude.some(p => coversPath(p, intersection))) throw new AppError('invalid_config', `Parts ${part.id} and ${other.id} overlap`);
@@ -48,7 +51,7 @@ export function validateParts(parts: readonly HarnessPart[]): void {
     }
   }
 }
-export const partOwns = (part: HarnessPart, path: string) => part.paths.some(p => coversPath(p, path)) && !part.exclude.some(p => coversPath(p, path)) && !path.split('/').some(p => p.toLowerCase() === '.git');
+export const partOwns = (part: HarnessPart, path: string) => (!part.context || (path.startsWith(contextRoot+'/') && (part.context === 'design' ? ['metadata','design'].includes(contextLocation(path.slice(contextRoot.length+1))?.kind ?? '') : contextLocation(path.slice(contextRoot.length+1))?.kind === 'impl'))) && part.paths.some(p => coversPath(p, path)) && !part.exclude.some(p => coversPath(p, path)) && !path.split('/').some(p => p.toLowerCase() === '.git');
 
 /** One queue per key; failure never poisons the next operation. */
 export class HarnessQueue {
@@ -87,7 +90,7 @@ export class HarnessHistory {
     if (!objectId(value)) throw new AppError('corrupt_data', 'Invalid scoped reference', 500);
     return value;
   }
-  private key(part: HarnessPart) { return sha256(JSON.stringify({ paths: [...part.paths].sort(), exclude: [...part.exclude].sort() })); }
+  private key(part: HarnessPart) { return sha256(JSON.stringify({ paths: part.paths.map(p=>p.toLowerCase()).sort(), exclude: part.exclude.map(p=>p.toLowerCase()).sort(), context: part.context })); }
   private refs(memberId: string, part: HarnessPart) {
     identity(memberId, 'memberId');
     const key = this.key(part);
@@ -157,6 +160,7 @@ export class HarnessHistory {
     const visit = async (path: string): Promise<void> => {
       if (path && path !== '.') safePath(path);
       if (path === '.rsi/harness' || path.startsWith('.rsi/harness/') || part.exclude.some(p => coversPath(p, path)) || path.split('/').some(p => p.toLowerCase() === '.git')) return;
+      if (part.context && path.startsWith(contextRoot+'/')) { const kind=contextLocation(path.slice(contextRoot.length+1))?.kind; if (kind && kind!=='node' && (part.context==='design' ? !['design','metadata'].includes(kind) : kind!=='impl')) return; }
       const absolute = join(root, path === '.' ? '' : path);
       let info;
       try { info = await lstat(absolute); }
@@ -321,6 +325,19 @@ export class HarnessHistory {
     return this.revision(revision);
   }
 
+  private async validateContextTree(part:HarnessPart,revision:string):Promise<void>{
+    if(part.context!=='impl')return;
+    const location=contextLocation(part.paths[0]!.slice(contextRoot.length+1));
+    if(!location)throw new AppError('invalid_config','Invalid implementation-context scope');
+    const files=new Map<string,string>();
+    for(const entry of await this.entries(revision)){
+      if(!partOwns(part,entry.path))throw new AppError('access_denied','Context tree includes another scope',403);
+      const bytes=await this.readSnapshotBytes(revision,entry.path),content=bytes&&decodeText(bytes);
+      if(content===null||content===undefined)throw new AppError('invalid_design','Context must be UTF-8 Markdown');
+      files.set(entry.path.slice(contextRoot.length+1).toLowerCase(),content);
+    }
+    contextDocuments(location.node,'impl',files);
+  }
   async commit(memberId: string, part: HarnessPart, root: string, revision: string, expectedCommitted: string, message: string, actor: HistoryActor): Promise<ScopeRevision> {
     if (actor.type !== 'user' && (part.commit !== 'agent' || actor.type !== 'agent')) throw new AppError('approval_required', 'This part requires user approval to commit', 403);
     if (!message.trim() || message.length > 1000) throw new AppError('invalid_input', 'A commit needs an intent of 1–1,000 characters');
@@ -331,6 +348,7 @@ export class HarnessHistory {
       const committed = await this.ref(refs.committed);
       const base = await this.ref(refs.base);
       if (revision !== current || committed !== expectedCommitted || base !== committed) throw new AppError('stale_revision', 'The reviewed revision or committed base changed; review again', 409);
+      await this.validateContextTree(part,revision);
       const selected = await this.revision(revision);
       if (await this.snapshot(root, part) !== selected.tree) throw new AppError('stale_revision', 'Working files changed after the selected checkpoint', 409);
       const next = await this.record(selected.tree, state.committed, 'commit', actor, message);
@@ -380,7 +398,7 @@ export class HarnessHistory {
   async acceptedDesignPaths(): Promise<string[]> {
     const revisions = (await this.text(['for-each-ref', '--format=%(objectname)', 'refs/harness/designs/'])).split('\n').filter(Boolean);
     const paths = new Set<string>();
-    for (const revision of new Set(revisions)) for (const path of await this.paths(revision)) if (path.startsWith('.rsi/context/user/')) paths.add(path.slice('.rsi/context/'.length));
+    for (const revision of new Set(revisions)) for (const path of await this.paths(revision)) if (path.startsWith(contextRoot+'/')) paths.add(path.slice('.rsi/context/'.length));
     return [...paths];
   }
   private scopeRepository(memberId: string, part: HarnessPart) { return join(this.storage, 'staging', memberId, part.id, this.key(part)); }
@@ -457,6 +475,11 @@ export class HarnessHistory {
       };
       if (command === 'status') {
         if (args.some(a => !['--short', '-s', '--porcelain', '--porcelain=v1', '--branch', '-b'].includes(a))) throw new AppError('command_denied', 'Use git status with optional --short, --porcelain or --branch', 403);
+        if (part.context) {
+          const owned=[...new Set([...(await this.files(root,part)).map(file=>file.path),...(await this.entries(state.base)).map(entry=>entry.path)])];
+          if (!owned.length) return '';
+          return run(['status',...args,'--',...owned.map(path=>`:(top,literal)${path}`)]);
+        }
         return run(['status', ...args, '--', ...rootPaths]);
       }
       if (command === 'diff') {
@@ -521,6 +544,7 @@ export class HarnessHistory {
         const head = (await run(['rev-parse', 'HEAD'])).trim();
         if (committed !== base || head !== base) throw new AppError('stale_revision', 'Scope base changed; restore/review current accepted state', 409);
         const tree = (await run(['write-tree'])).trim();
+        await this.validateContextTree(part,tree);
         if (tree === (await this.revision(base!)).tree) throw new AppError('nothing_to_commit', 'No staged changes');
         const output = await run(['commit', '-m', this.commitMessage('commit', actor, args[1]!)]);
         const next = (await run(['rev-parse', 'HEAD'])).trim();

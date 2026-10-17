@@ -16,3 +16,5 @@ Restart development mode after editing prompts. For compiled use, run the backen
 These are backend-maintained base rules, separate from member Markdown prompts. Enforced tools, path boundaries, sandboxing and approval policies remain in backend code; editing a prompt does not change authority.
 
 Design uses purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. Implementation context documents exact Input, Output, Effect and Usage examples for actual interfaces. These content requirements are instructions to the agent; storage accepts ordinary text without a semantic heading validator. Reusable knowledge is outside context and deferred.
+
+Context templates now initialize separate metadata.json, design.md and impl.md. Rule Markdown describes complete system designs represented by one file or multiple documents, independently of real child-system decomposition. No Markdown content is embedded in JSON metadata.

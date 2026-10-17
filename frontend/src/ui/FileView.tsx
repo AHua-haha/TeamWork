@@ -1,3 +1,4 @@
+import { writableContextPath } from './context-path.js';
 import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { BackendError } from '../client/agent-client.js';
 import type { Author, ContextFeed, ContextFile, ContextVersion, ProjectFile, WorkspaceClient } from '../client/workspace-client.js';
@@ -10,7 +11,7 @@ export type FileSource = 'context' | 'project';
 export interface FileTarget { source: FileSource; path: string }
 type Loaded = ProjectFile | ContextFile;
 
-export const isWritable = (target: FileTarget) => target.source === 'project' || target.path.startsWith('user/');
+export const isWritable = (target: FileTarget) => target.source === 'project' || writableContextPath(target.path);
 const isContextFile = (file: Loaded): file is ContextFile => 'author' in file;
 const formatTime = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const formatSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;

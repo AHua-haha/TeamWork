@@ -1,7 +1,7 @@
 import type { DesignSummary, Member } from '../client/workspace-client.js';
 
 export const sameDesign = (a: string, b: string) => a.replace(/^\.rsi\/context\//, '').toLowerCase() === b.replace(/^\.rsi\/context\//, '').toLowerCase();
-export const designName = (path: string) => path.split('/').at(-1)?.replace(/\.[^.]+$/, '') || path;
+export const designName = (path: string) => path.toLowerCase() === 'metadata.json' ? 'Project' : path.replace(/\/metadata\.json$/i, '').split('/').at(-1) || path;
 export const designTitle = (content: string, path: string) => /^#{1,6}\s+(.+?)\s*#*\s*$/m.exec(content)?.[1] || designName(path);
 
 export function designMembers(path: string, members: readonly Member[]) {

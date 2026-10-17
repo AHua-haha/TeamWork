@@ -52,8 +52,8 @@ test('member names stay unique, and fields are checked', () => withTeam(async fi
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'backend', role: 'x' }), code('member_exists'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: ' Bad', role: 'x' }), code('invalid_input'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: '' }), code('invalid_input'));
-  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { ...emptyHarness(), designScope: { working: ['agent/spec'], dependencies: [] }, allowedCommands: [] } }), code('read_only'));
-  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { ...emptyHarness(), designScope: { working: ['user/a', 'user/A'], dependencies: [] }, allowedCommands: [] } }), code('invalid_config'));
+  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { ...emptyHarness(), designScope: { working: ['../escape'], dependencies: [] }, allowedCommands: [] } }), code('invalid_path'));
+  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { ...emptyHarness(), designScope: { working: ['a/metadata.json', 'A/metadata.json'], dependencies: [] }, allowedCommands: [] } }), code('invalid_config'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', extra: 1 }), code('invalid_config'));
   await assert.rejects(fixture.team.service.team('missing'), code('not_found'));
 }));

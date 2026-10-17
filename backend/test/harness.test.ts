@@ -1,8 +1,9 @@
+import { seedDesign } from './design-fixture.js';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { designPart } from '../src/design.js';
+import { designMetadata } from '../src/design.js';
 import { commandAllowed, commandArgv, emptyHarness, harnessConfig } from '../src/harness-config.js';
 import { executeCommand, parseBashInput } from '../src/harness-command.js';
 import { code, configureHarness, withTeam, worker } from './team-fixture.js';
@@ -11,10 +12,10 @@ const signal = () => new AbortController().signal;
 const git = (scope: string, command: string) => ({ command, metadata: { git: { scope } } });
 
 test('assignment accepts design references only and never agent-owned implementation paths or authority metadata', () => {
-  assert.deepEqual(designPart({content:'Design',implementation:['backend/']}),{content:'Design',implementation:['backend']});
-  for (const path of ['../outside','.rsi/context/user/design.json','.git/config','.rsi/members']) assert.throws(()=>designPart({content:'x',implementation:[path]}));
-  const value={...emptyHarness(),designScope:{working:['.rsi/context/user/api.json'],dependencies:['user/contracts.json']},allowedCommands:[{kind:'exact',argv:['bash','-c','npm test']}]};
-  assert.equal(harnessConfig(value).designScope.working[0],'user/api.json');
+  assert.deepEqual(designMetadata({implementation:['backend/']}),{implementation:['backend']});
+  for (const path of ['../outside','.rsi/context/metadata.json','.git/config','.rsi/members']) assert.throws(()=>designMetadata({implementation:[path]}));
+  const value={...emptyHarness(),designScope:{working:['.rsi/context/api/metadata.json'],dependencies:['contracts/metadata.json']},allowedCommands:[{kind:'exact',argv:['bash','-c','npm test']}]};
+  assert.equal(harnessConfig(value).designScope.working[0],'api/metadata.json');
   assert.throws(()=>harnessConfig({...value,implementationScope:{paths:['.'],usePaths:[]}}));
   assert.throws(()=>harnessConfig({...value,designScope:{working:['user/a'],dependencies:['user/A']}}));
   assert.throws(()=>commandArgv([]));
@@ -26,7 +27,7 @@ test('implementation access derives from accepted mappings; pending files do not
   const member=await worker(f,'Backend',['src']);
   const files=await f.team.harness.files(member.memberId);
   const path=join(files.root,'.rsi/context',member.harness.designScope.working[0]!);
-  await files.write.writeFile(path,JSON.stringify({content:'Pending',implementation:['outside']}));
+  await files.write.writeFile(path,JSON.stringify({implementation:['outside']}));
   await assert.rejects(files.write.writeFile(join(files.root,'outside/x'),'no'),code('not_found'));
   const prepared=await f.team.harness.prepare(member.memberId,[]);
   assert.deepEqual(prepared.tools.map(t=>t.definition.name).sort(),['bash','edit','ls','read','write']);
@@ -99,8 +100,9 @@ test('accepted design Git commits become authoritative for permission derivation
   const member=await worker(f,'Backend',['old']);
   const lead=await f.team.harness.files(f.lead.memberId);
   const designPath=member.harness.designScope.working[0]!;
-  await lead.write.mkdir(join(lead.root,'.rsi/context/user/design'));
-  await lead.write.writeFile(join(lead.root,'.rsi/context',designPath),JSON.stringify({content:'New accepted design',implementation:['new']}));
+  await lead.write.mkdir(join(lead.root,'.rsi/context/systems/backend'));
+  await lead.write.writeFile(join(lead.root,'.rsi/context/systems/backend/design.md'),'New accepted design');
+  await lead.write.writeFile(join(lead.root,'.rsi/context',designPath),JSON.stringify({implementation:['new']}));
   const review=(await f.team.harness.inspect(f.lead.memberId)).parts.find(p=>p.state.part.id==='design')!;
   await f.team.harness.commit(f.lead.memberId,'design','Accept new mapping',{type:'user',memberId:f.lead.memberId},review.revision,review.state.committed);
   assert.deepEqual((await f.team.service.get(f.workspaceId,member.memberId)).harness.implementationScope.paths,['new']);
@@ -123,18 +125,18 @@ test('output bounds, timeout and cancellation terminate process groups',()=>with
 
 test('independent scope staging survives implementation commits and dependency files stay read-only in Bash',()=>withTeam(async f=>{
   const member=await worker(f,'Backend',['src']);
-  await f.team.designs.save(f.workspaceId,'user/dependency.json',{content:'Read only',implementation:['src/shared']},null,'Dependency',{type:'lead',memberId:f.lead.memberId,runId:'fixture'});
-  await configureHarness(f,'Backend',{designScope:{working:member.harness.designScope.working,dependencies:['user/dependency.json']},allowedCommands:[{kind:'executable',executable:'bash'}]});
+  await seedDesign(f.workspaces, f.workspaceId, 'dependency/metadata.json', {content:'Read only',implementation:['src/shared']});
+  await configureHarness(f,'Backend',{designScope:{working:member.harness.designScope.working,dependencies:['dependency/metadata.json']},allowedCommands:[{kind:'executable',executable:'bash'}]});
   const files=await f.team.harness.files(member.memberId);
-  const design=join(files.root,'.rsi/context',member.harness.designScope.working[0]!);
-  await files.write.writeFile(design,JSON.stringify({content:'Pending',implementation:['src']}));
+  const design=join(files.root,'.rsi/context/systems/backend/design.md');
+  await files.write.writeFile(design,'Pending');
   await files.write.mkdir(join(files.root,'src'));await files.write.writeFile(join(files.root,'src/a.txt'),'Own implementation');
   assert.equal((await f.team.harness.bash(member.memberId,git('design','git add .'),signal())).exitCode,0);
   const committed=await f.team.harness.bash(member.memberId,git('implementation','git add . && git commit -m "Implement independently"'),signal());
   assert.equal(committed.exitCode,0,committed.stderr);
   const staged=await f.team.harness.bash(member.memberId,git('design','git diff --cached'),signal());
   assert.match(staged.stdout,/Pending/);assert.doesNotMatch(staged.stdout,/Own implementation/);
-  const read=await f.team.harness.bash(member.memberId,{command:'cat .rsi/context/user/dependency.json'},signal());
+  const read=await f.team.harness.bash(member.memberId,{command:'cat .rsi/context/dependency/design.md'},signal());
   assert.equal(read.exitCode,0,read.stderr);assert.match(read.stdout,/Read only/);
   const write=await f.team.harness.bash(member.memberId,{command:'mkdir -p src/shared && printf escape > src/shared/x.txt'},signal());
   assert.notEqual(write.exitCode,0);

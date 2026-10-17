@@ -18,11 +18,11 @@ The project-file API lists, reads, saves, and finds files. It does not move or d
 
 Four actions work on the workspace folder for an agent: list, read, write, and edit. The agent calls them as Pi's coding-agent tools `ls`, `read`, `write`, and `edit`, so their inputs, limits, and results are those tools'. The workspace adds the rules below, which the tools cannot be used to get around. The caller names the workspace and gives an **access rule**: for each path, whether the agent may see it, read it, and write it, with a reason for each refusal.
 
-- **Paths.** Relative to the workspace directory, or absolute inside it. A path outside the directory is refused. Unlike project paths, agent paths may include authorized `.rsi/context/user`, `.rsi/context/agent` and `.rsi/members` paths; `.git` is hidden, in any letter case. A path never passes through a symbolic link. Under `.rsi/context/` a segment follows the context base's name rules, so every file an action creates there is one the context base serves.
+- **Paths.** Relative to the workspace directory, or absolute inside it. A path outside the directory is refused. Unlike project paths, agent paths may include authorized `.rsi/context` and `.rsi/members` paths; `.git` is hidden, in any letter case. A path never passes through a symbolic link. Under `.rsi/context/` a segment follows the context base's name rules, so every file an action creates there is one the context base serves.
 - **Access.** A path the rule does not let the agent see is not listed and is reported as missing. A path it may see but not read or write is refused with the rule's reason.
 - **Content.** The same text rules as project files: UTF-8 without NUL characters, at most 1 MiB. Reading a larger or non-text file is refused.
 - **Write and edit.** A file is replaced in one step and keeps its permissions. A write creates missing folders the rule lets the agent write in.
-- **No search.** This version has no content search or glob for agents. Pi's `grep` and `find` read the disk themselves, so the access rule could not limit them. They come with a search the rule can scope.
+- **Search.** No dedicated grep/find tool is added. Authorized read-only Bash search uses the harness filesystem scope.
 
 ## Outputs and observable effects
 
@@ -36,7 +36,7 @@ Four actions work on the workspace folder for an agent: list, read, write, and e
 | Save a project file | `PUT /workspaces/:workspaceId/files/file?path=`, JSON `{content, baseRevision}` | 201 when created, 200 when updated, `{path, revision}` |
 | Find project files | `GET /workspaces/:workspaceId/files/find?q=` | 200, `{paths, truncated}` |
 
-- **Create.** Bootstrap creates the managed root, root design, paired implementation context and exact lead files/history before registering workspace, models, lead, activation marker and initial context versions in one transaction. The initial context sequence is 1 and contains both the root design and its paired implementation context. No messages or runs are created. A failed filesystem preparation or database transaction removes this attempt's managed root and leaves the registry unchanged. Project files in an adopted directory are preserved.
+- **Create.** Bootstrap creates the managed root, root metadata, design and implementation context and exact lead files/history before registering workspace, models, lead, activation marker and initial context versions in one transaction. The initial context sequence is 1 and contains root metadata and both Markdown contexts. No messages or runs are created. A failed filesystem preparation or database transaction removes this attempt's managed root and leaves the registry unchanged. Project files in an adopted directory are preserved.
 - **List.** `path` names a folder; empty is the workspace directory. `depth` is 1–16 and defaults to 1. A file entry is `{path, type: "file", size, updatedAt}`; a folder entry is `{path, type: "folder"}`. Symbolic links and hidden folders are omitted. At most 2,000 entries are returned, ordered by path.
 - **Read.** `revision` is the SHA-256 of the file's bytes, so any change on disk changes it.
 - **Save.** `baseRevision: null` creates the file and its missing folders, and fails if the file exists. A non-null `baseRevision` must equal the current revision. The file is replaced in one step and keeps its permissions. Saving identical content changes nothing.
@@ -44,7 +44,7 @@ Four actions work on the workspace folder for an agent: list, read, write, and e
 
 Requests follow the context base's rules for fields, bodies, and errors.
 
-Agent file actions have no HTTP form; the harness's tools call them inside the backend. Workspace members use these common actions through harness rules in their separate worktrees; design edits remain pending until user acceptance. A file an action changes under `.rsi/context/` is an outside change for the context base, recorded as an `external` version the next time the context base looks, and a file it changes elsewhere is like any other change made outside the application.
+Agent file actions have no HTTP form; the harness's tools call them inside the backend. Workspace members use these common actions through harness rules in their separate worktrees; design edits remain pending until user acceptance. Raw original-context external edits are recorded on observation. Member file actions operate private harness worktrees and do not automatically create original-context versions.
 
 ## Failure behavior
 
@@ -70,7 +70,7 @@ Agent file actions have no HTTP form; the harness's tools call them inside the b
 
 ## Acceptance examples
 
-1. **New project.** The user creates `reading-list` with a valid workspace model list/default at `/home/me/reading-list`, which does not exist. The response is 201, the directory exists with `.rsi/context/user/` and `.rsi/context/agent/`, the overview has `seq` 1 with the root design, and the workspace's team has its lead assigned to user/design.json with its bundle present.
+1. **New project.** The user creates `reading-list` with a valid workspace model list/default at `/home/me/reading-list`, which does not exist. The response is 201, the directory exists with `.rsi/context/`, the overview has `seq` 1 with the root design, and the workspace's team has its lead assigned to metadata.json with its bundle present.
 2. **Adopt.** The user adopts this repository. Listing the top shows `backend`, `docs`, and `frontend` as folders, and not `.git`.
 3. **Overlap.** Adopting `/home/me/reading-list/docs` while `reading-list` exists returns 409 `workspace_exists`.
 4. **Edit a project file.** The user reads `README.md`, edits it, and saves with its revision. The response has a new revision. Saving again with the old revision returns 409 `stale_revision`.
@@ -89,12 +89,12 @@ GET /workspaces/:workspaceId/models returns {revision, value, issues}; value is 
 
 ## Fresh workspace bootstrap
 
-Create and adopt initialize a reserved `.rsi/` root before returning success. It owns backend-maintained workspace filesystem state: `.rsi/context/user/` for shared design files, `.rsi/context/agent/` for agent context, `.rsi/members/` for member JSON/Markdown bundles, and `.rsi/harness/` for private scoped Git history and member worktrees. Durable chat/configuration records remain in the backend database. The project implementation and its own Git checkout remain separate.
+Create and adopt initialize a reserved `.rsi/` root before returning success. It owns backend-maintained workspace filesystem state: `.rsi/context/` for the unified system tree, `.rsi/members/` for member JSON/Markdown bundles, and `.rsi/harness/` for private scoped Git history and member worktrees. Durable chat/configuration records remain in the backend database. The project implementation and its own Git checkout remain separate.
 
-The backend creates `.rsi/context/user/design.json`, a valid root design template with purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements, and empty implementation mappings. The initial lead selects `user/design.json` as its working design, has no dependencies or execution allowances, and uses the workspace default model. Its exact JSON/prompt bundle is present under `.rsi/members/<lead-id>/` before success. Backend bootstrap establishes the initial active source and member-config history baseline; later design/member edits still require normal user commit and separate member activation. Root-design assignment does not grant whole-project implementation authority.
+The backend creates `.rsi/context/metadata.json` containing only an empty implementation mapping and `.rsi/context/design.md` with purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. The initial lead selects `metadata.json` as its working design, has no dependencies or execution allowances, and uses the workspace default model. Its exact JSON/prompt bundle is present under `.rsi/members/<lead-id>/` before success. Backend bootstrap establishes the initial active source and member-config history baseline; later design/member edits still require normal user commit and separate member activation. Root-design assignment does not grant whole-project implementation authority.
 
 Creating/adopting refuses an existing `.rsi` entry, including links or differently cased names, rather than overwriting unknown managed state. Adoption preserves project files and repository state. If bootstrap or registry persistence fails, remove only files/directories created by this attempt and leave no registered workspace/model/lead. Initial root design is visible through the design catalog and the lead is ready immediately when its chosen model is usable. Empty conversation history remains empty; bootstrap starts no run. Reopening does not recreate or accept later edits as a new baseline.
 
 This prototype initializes fresh state; it does not migrate the old `.context`, `.team` or sibling `.rsi-harness` layout. The authorized local reset removes previous runtime/workspace records and managed state while preserving provider connections/credentials and project implementation. No reset HTTP endpoint is introduced.
 
-Bootstrap also creates .rsi/context/agent/design.json.md with a design reference and an Implemented contract outline containing Input, Output, Effect and Usage examples, plus implementation notes and verification/continuation sections. It marks interfaces as undocumented rather than claiming adopted projects have no implementation. Both files share the first stored change at sequence 1. Root context authority is independent of project-code mappings.
+Bootstrap also creates .rsi/context/impl.md with a design reference and an Implemented contract outline containing Input, Output, Effect and Usage examples, plus implementation notes and verification/continuation sections. It marks interfaces as undocumented rather than claiming adopted projects have no implementation. All three files share the first stored change at sequence 1. Root context authority is independent of project-code mappings.

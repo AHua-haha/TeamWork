@@ -27,7 +27,7 @@ export function useDesigns(client: WorkspaceClient, workspaceId: string, feed: C
   useEffect(() => {
     let timer: number | undefined;
     const stop = feed?.onRecord(record => {
-      if (!record.files.some(file => file.path.startsWith('user/') || file.fromPath?.startsWith('user/'))) return;
+      if (!record.files.length) return;
       timer ??= window.setTimeout(() => { timer = undefined; void refresh(); }, 150);
     });
     return () => { stop?.(); window.clearTimeout(timer); };

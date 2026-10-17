@@ -25,7 +25,7 @@ The backend owns execution, durable group history and response ordering, private
 - A solo agent's config holds the selected model and a separate settings entry per model for that conversation: reasoning, maximum output tokens, temperature, and context budget. Each member’s run settings hold the same fields, as the [Config design](../config/design.md) defines, and come from stable active backend configuration. Member-file acceptance does not activate settings; the backend offers separate user-controlled idle activation. A separate Configuration changes view provides explicit user commit and activation controls; active-member details remain read-only. Omitted values use the model's defaults. Existing configs may also contain prompts and tools; this UI revision does not expose editors for them and preserves their saved values.
 - For solo conversations, sending a message supplies user input only. The backend resolves a copy of the agent's saved config at run start and constructs the model request from its own context history. Edits made during a run take effect from the next run.
 - The backend supplies a current design catalog with valid user-design summaries, independent of membership and explicitly marked when truncated, plus current selected design content or an invalid-record issue.
-- The backend supplies registered workspaces and their project files as the [Workspace design](../workspace-agent/workspace/design.md) defines, and each workspace's context base as the [Context base design](../workspace-agent/context-base/design.md) defines. Both include listings, reads, saves guarded by revisions, and find. The context base also supplies moves, deletes, history, and an ordered change feed. User context is writable through the frontend; agent context is read-only.
+- The backend supplies registered workspaces and their project files as the [Workspace design](../workspace-agent/workspace/design.md) defines, and each workspace's context base as the [Context base design](../workspace-agent/context-base/design.md) defines. Both include listings, reads, saves guarded by revisions, and find. The context base also supplies moves, deletes, history, and an ordered change feed. Design and metadata files are writable through the frontend; implementation context is read-only.
 
 ## Outputs and observable effects
 
@@ -107,7 +107,7 @@ The Design view exposes current designs; Team displays active members. Design-hi
 
   The user edits workspace model choices/default through Workspace models and discusses member proposals with the lead. Team reads refresh on group updates and focus, every three seconds during team work, and when work ends. Failed reads show Retry and retain the last team shown with an error indication. Opening or navigating the tree, preview or details never starts a member run.
 - **Trees.** The tree shows two sections:
-  - **Context base**: the **User context** tree with its file count, and the read-only **Agent context** tree. A status shows whether changes arrive live: Connecting, Live, Reconnecting, or Updates stopped. Files the backend cannot serve are listed, folded, with the reason for each.
+  - **Context base**: the single **Project context** tree with its aggregate file count; implementation-context files are read-only. A status shows whether changes arrive live: Connecting, Live, Reconnecting, or Updates stopped. Files the backend cannot serve are listed, folded, with the reason for each.
   - **Project**: the workspace folder's files, as the backend lists them, with a refresh action.
 
   Folders open and close in place and load their entries when first opened. Folders come before files. A truncated listing says how many entries it shows. User-context entries offer new file (folders only), rename or move, and delete. Project folders offer new file. Agent-context entries offer no changes.
@@ -119,7 +119,7 @@ The Design view exposes current designs; Team displays active members. Design-hi
   - whether it is read-only.
 
   Markdown files (`.md`, `.markdown`) open in **Preview** and can switch to **Text**. Other files show only Text. **Copy** copies the shown content.
-- **Preview** renders headings, paragraphs, emphasis, strikethrough, inline and fenced code, quotes, nested and numbered lists, tables, rules, and links. Raw HTML is shown as text, and an image shows its alt text. A relative link opens the file it names in the same tree. It never leaves the user or agent category for a context file, or the workspace for a project file. Web and mail links open in a new tab. Other links do nothing.
+- **Preview** renders headings, paragraphs, emphasis, strikethrough, inline and fenced code, quotes, nested and numbered lists, tables, rules, and links. Raw HTML is shown as text, and an image shows its alt text. A relative link opens the file it names in the same tree. It never leaves the context root for a context file, or the workspace for a project file. Web and mail links open in a new tab. Other links do nothing.
 - **Text** is a plain-text editor for user-context and project files. It is read-only for agent context and for earlier versions.
   - **Save** (or Ctrl/Cmd+S) stores the content based on the revision the viewer loaded. **Discard** returns to that content.
   - A marker shows unsaved changes in the header and on the tab. Opening another file keeps them in their tab. Closing that tab, or leaving the workspace page, first asks to discard them, and leaving the page asks the browser to warn.
@@ -172,15 +172,15 @@ The Design view exposes current designs; Team displays active members. Design-hi
 9. **Separate conversations:** two conversations use model A. Changing A's reasoning in one leaves the other's A settings unchanged.
 10. **Fold rarely changed settings:** opening the popover shows the model and reasoning slider with More settings folded. Expanding it shows Default for maximum output, temperature, and context budget; setting a temperature saves it for this conversation's model, and the folded row then indicates one customized value.
 11. **Open the panel during a run:** the user selects Show design, team and files at the right of the workspace page's header. The panel slides in on the right while the run continues, with Design active. Hide closes it, and reopening it shows the same open tabs.
-12. **Write user context:** the user adds a file in User context, keeps the path `user/goals.md`, and types a heading in Text. Save stores it. Preview shows the heading, and the User context count rises by one. The status stays Live.
-13. **Outside edit:** the user changes the open, unedited `user/goals.md` in an editor. Within about a second the viewer shows the new content as changed on disk.
-14. **Concurrent edits:** the user edits `user/goals.md` in two browser tabs and saves in the first. The second browser tab offers Load latest or Save mine over it. If the second tries to save first, it is told the file was not saved.
-15. **Read agent context:** `agent/design/overview.md` opens in Preview. Its Text is read-only, and it offers no Save, Rename, or Delete.
-16. **Restore:** from the history of `user/goals.md`, the user selects an earlier version and restores it. It becomes the current version with a reason naming its time, and the history still lists every version.
+12. **Write design context:** the user adds a file in Project context, keeps the path `design/notes.md`, and types a heading in Text. Save stores it. Preview shows the heading, and the Project context count rises by one. The status stays Live.
+13. **Outside edit:** the user changes the open, unedited `design/notes.md` in an editor. Within about a second the viewer shows the new content as changed on disk.
+14. **Concurrent edits:** the user edits `design/notes.md` in two browser tabs and saves in the first. The second browser tab offers Load latest or Save mine over it. If the second tries to save first, it is told the file was not saved.
+15. **Read agent context:** `backend/impl/README.md` opens in Preview. Its Text is read-only, and it offers no Save, Rename, or Delete.
+16. **Restore:** from the history of `design/notes.md`, the user selects an earlier version and restores it. It becomes the current version with a reason naming its time, and the history still lists every version.
 17. **Edit a project file:** the user finds `readme`, opens `README.md` from the Project matches, edits it, and saves. A binary file shows the backend's reason that it cannot be shown.
-18. **Follow a link:** in the preview of `user/notes/plan.md`, the link `../goals.md` opens `user/goals.md`. A link to `https://example.com` opens a new tab.
+18. **Follow a link:** in the preview of `design/topics/plan.md`, the link `../notes.md` opens `design/notes.md`. A link to `https://example.com` opens a new tab.
 19. **Two workspaces:** the user adds a second workspace and opens it. Its page has its own shared group chat, and its panel shows its own team and files. Going back to the first shows the first group history, and its open tabs are not shared with the second.
-20. **Work in tabs:** the user opens `user/goals.md` and `README.md`. Both have tabs; the viewer shows the active one with the breadcrumb `Project › Context base › user › goals.md` for a workspace named Project. Editing `goals.md`, switching to `README.md`, and switching back keeps the draft. Closing the `goals.md` tab asks to discard it.
+20. **Work in tabs:** the user opens `design/notes.md` and `README.md`. Both have tabs; the viewer shows the active one with the breadcrumb `Project › Context base › design › notes.md` for a workspace named Project. Editing `notes.md`, switching to `README.md`, and switching back keeps the draft. Closing the `notes.md` tab asks to discard it.
 21. **Leave with unsaved edits:** with a draft in an open tab, the user picks another workspace or a solo conversation. A dialog asks to discard the changes; staying keeps the draft, and Discard and leave opens the other page.
 22. **Expand and hide the tree:** Expand widens the panel over the conversation, and Restore returns it. The tree toggle hides the tree column so the viewer takes the panel's width; Open a file shows the tree again with the cursor in the filter.
 
@@ -234,7 +234,7 @@ Team provides Active members and Configuration changes views. Configuration stat
 
 ### Member display acceptance examples
 
-1. Designs at user/backend/api.json and user/backend/storage.json appear under the backend folder; their working members appear at the respective designs, regardless of lead role or dependency references.
+1. Designs at backend/api/metadata.json and backend/storage/metadata.json appear under the backend folder; their working members appear at the respective designs, regardless of lead role or dependency references.
 2. One member owns both designs: its avatar appears in both places and both open the same active member information. Two owners of one design appear together; an unassigned design remains visible.
 3. Hover an avatar: preview active design scope and harness information. Click the avatar: open complete active details with no changes section or change operations.
 4. The lead edits a member prompt and commits files: active details remain unchanged; Configuration changes shows current content, commit status and the active-to-current diff.
@@ -247,4 +247,10 @@ Narrow panels display selected full active details in place of the tree, with Cl
 
 ## Initialized workspace
 
-After successful create/adopt, Design already shows user/design.json and Team shows the lead assigned there (also represented at the workspace root). Initial configuration review is clean and active; bootstrap does not require the user to commit or activate it. Empty group chat remains empty. Paths in discussion references and configuration file review use the managed .rsi/context and .rsi/members layout; logical context paths remain user/... and agent/....
+After successful create/adopt, Design already shows metadata.json and Team shows the lead assigned there (also represented at the workspace root). Initial configuration review is clean and active; bootstrap does not require the user to commit or activate it. Empty group chat remains empty. Paths in discussion references and configuration file review use the managed .rsi/context and .rsi/members layout; logical context paths are relative to the single context root.
+
+## Unified system context tree
+
+Files presents one project-context tree with aggregate file count, alongside project files. It has no ownership-category groups. Existing file preview/edit/history/search and conflict behavior remain. Implementation context is read-only based on the first design/impl path boundary; design documents may contain nested topic folders without changing that ownership. Backend refusal is authoritative for mixed folder operations.
+
+Design catalog and member assignments identify systems by metadata.json paths; labels use the system folder (Project for root). design/ and impl/ document folders do not become systems or extra member rows. Active member cards follow system folder hierarchy, with root assignments on the workspace row. Current Design view displays each returned Markdown document, entry first, with source labels when there are several. Relative links resolve against each actual document path and can open other context files. Document-only changes refresh the catalog/view through the existing context feed. JSON metadata contains mappings only; Markdown holds all document content. Single-file and multi-document systems remain the same node.

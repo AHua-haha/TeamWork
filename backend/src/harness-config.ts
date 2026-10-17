@@ -1,4 +1,4 @@
-import { designPath } from './design.js';
+import { contextPath } from './context-path.js';
 import { AppError } from './types.js';
 
 export type CommandRule = { kind: 'exact'; argv: string[] } | { kind: 'executable'; executable: string };
@@ -15,7 +15,10 @@ function object(value: unknown, allowed: string[], label: string): Record<string
 }
 function paths(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > 50) throw new AppError('invalid_config', 'A design scope lists at most 50 design files');
-  const result = value.map(designPath);
+  const result = value.map(path => {
+    if(typeof path !== 'string')throw new AppError('invalid_config','A design reference must be a context-relative path');
+    return contextPath(path.replace(/^\.rsi\/context\//,''));
+  });
   if (new Set(result.map(path => path.toLowerCase())).size !== result.length) throw new AppError('invalid_config', 'Duplicate design scope paths');
   return result;
 }

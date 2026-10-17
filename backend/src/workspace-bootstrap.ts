@@ -18,9 +18,9 @@ export async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMe
   await mkdir(root);
   try {
     await mkdir(join(workspace.directory, designRoot), { recursive: true });
-    await mkdir(join(workspace.directory, contextRoot, 'agent'));
     const initial = [
-      { path: rootDesignPath, content: JSON.stringify({ content: harnessPrompt('design-template', { project: workspace.name }), implementation: [] }, null, 2) + '\n' },
+      { path: rootDesignPath, content: JSON.stringify({ implementation: [] }, null, 2) + '\n' },
+      { path: 'design.md', content: harnessPrompt('design-template', { project: workspace.name }) + '\n' },
       { path: implementationContextPath(rootDesignPath), content: harnessPrompt('implementation-context-template', { design: rootDesignPath }) + '\n' },
     ];
     for (const file of initial) await writeFile(join(workspace.directory, contextRoot, file.path), file.content, { flag: 'wx' });

@@ -26,9 +26,9 @@ export function DesignTab({ client, workspaceId, catalog, members, selected, onS
   const file = current?.path === selected ? current.file : null;
   const error = current?.path === selected ? current.error : null;
   const related = selected ? designMembers(selected, members) : { working: [], dependencies: [] };
-  const openLink = (href: string) => {
+  const openLink = (from: string, href: string) => {
     if (!selected) return;
-    const path = resolveLink(selected, href);
+    const path = resolveLink(from, href);
     if (!path) return;
     const design = catalog.designs.find(item => sameDesign(item.path, path));
     if (design) onSelect(design.path); else onContextFile(path);
@@ -57,7 +57,7 @@ export function DesignTab({ client, workspaceId, catalog, members, selected, onS
             <button type="button" className="text-button" onClick={() => onContextFile(selected)}>Open source file</button>
           </div>}
           {file?.design && <>
-            <div className="design-content"><Markdown source={file.design.content} onLink={openLink} /></div>
+            <div className="design-content">{file.design.documents.map(document => <section key={document.path} aria-label={document.path}>{file.design!.documents.length > 1 && <h4>{document.path}</h4>}<Markdown source={document.content} onLink={href => openLink(document.path,href)} /></section>)}</div>
             <section className="design-section"><h4>Implementation</h4>
               {file.design.implementation.length ? <ul className="scope-paths">{file.design.implementation.map(path => <li key={path}>
                 <button type="button" className="text-button" onClick={() => onImplementation(path)}>{path}</button>

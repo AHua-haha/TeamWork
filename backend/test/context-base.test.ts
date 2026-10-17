@@ -28,19 +28,19 @@ function withBase(run: (base: ContextBase, store: MemoryStore, record: Workspace
 
 const onDisk = (record: WorkspaceRecord, path: string) => join(record.directory, '.rsi/context', ...path.split('/'));
 
-test('paths name a category and valid segments', () => {
+test('paths are relative to one tree and have valid segments', () => {
   for (const name of ['a', 'Notes.md', 'my file.txt', '_x-1', 'a.b.c']) assert.ok(validSegment(name), name);
   for (const name of ['', '.hidden', ' lead', 'trail ', 'end.', 'a/b', 'é', 'x'.repeat(129)]) assert.ok(!validSegment(name), name);
   assert.equal(contextPath('user/a.md'), 'user/a.md');
-  assert.equal(contextPath('agent', 1), 'agent');
-  for (const path of ['user', 'other/a.md', 'user/../a.md', 'user//a.md', `user/${'a/'.repeat(16)}x`]) assert.throws(() => contextPath(path), code('invalid_path'), path);
+  assert.equal(contextPath('agent'), 'agent');
+  for (const path of ['', '/a.md', 'user/../a.md', 'user//a.md', `user/${'a/'.repeat(16)}x`]) assert.throws(() => contextPath(path), code('invalid_path'), path);
 });
 
-test('opening creates both categories and an empty overview', () => withBase(async (base, _store, record) => {
-  assert.deepEqual((await readdir(join(record.directory, '.rsi/context'))).sort(), ['agent', 'user']);
+test('opening creates a single empty context root', () => withBase(async (base, _store, record) => {
+  assert.deepEqual((await readdir(join(record.directory, '.rsi/context'))).sort(), []);
   const overview = await base.overview();
-  assert.deepEqual(overview, { workspaceId: 'w1', seq: 0, user: { files: 0, bytes: 0 }, agent: { files: 0, bytes: 0 }, problems: [] });
-  assert.deepEqual((await base.tree('', 1)).entries, [{ path: 'agent', type: 'folder' }, { path: 'user', type: 'folder' }]);
+  assert.deepEqual(overview, { workspaceId: 'w1', seq: 0, files: 0, bytes: 0, problems: [] });
+  assert.deepEqual((await base.tree('', 1)).entries, []);
 }));
 
 test('saves create, update, and refuse stale or conflicting writes', () => withBase(async (base, store, record) => {
@@ -51,7 +51,7 @@ test('saves create, update, and refuse stale or conflicting writes', () => withB
   await assert.rejects(base.save('user/goals/PLAN.md', 'x', null, null), code('file_exists'));
   await assert.rejects(base.save('user/goals/plan.md', 'x', 'not-the-revision', null), code('stale_revision'));
   await assert.rejects(base.save('user/missing.md', 'x', created.revision, null), code('stale_revision'));
-  await assert.rejects(base.save('agent/notes.md', 'x', null, null), code('read_only'));
+  await assert.rejects(base.save('impl/notes.md', 'x', null, null), code('read_only'));
   await assert.rejects(base.save('user/a.md', 'x', null, 'r'.repeat(1001)), code('invalid_input'));
 
   const same = await base.save('user/goals/plan.md', '# Plan\n', created.revision, null);
@@ -85,7 +85,7 @@ test('a folder move keeps file identity and history and prunes the old folder', 
   await assert.rejects(base.move('user/a', 'user/a/inner', undefined, null), code('invalid_input'));
   await assert.rejects(base.move('user/a/x.md', 'user/b/z.md', undefined, null), code('file_exists'));
   await assert.rejects(base.move('user/a', 'user/c', x.revision, null), code('invalid_input'));
-  await assert.rejects(base.move('user/a/x.md', 'agent/x.md', undefined, null), code('read_only'));
+  await assert.rejects(base.move('user/a/x.md', 'impl/x.md', undefined, null), code('read_only'));
 
   const moved = await base.move('user/a', 'user/c', undefined, 'reorganize');
   assert.deepEqual(moved.moved.map(({ from, to }) => [from, to]), [['user/a/deep/y.md', 'user/c/deep/y.md'], ['user/a/x.md', 'user/c/x.md']]);
@@ -113,7 +113,7 @@ test('a delete removes a file or folder; its history stays readable', () => with
   await assert.rejects(base.delete('user/old/a.md', 'other', null), code('stale_revision'));
   assert.deepEqual((await base.delete('user/old/a.md', a.revision, null)).deleted, ['user/old/a.md']);
   assert.deepEqual((await base.delete('user/old', undefined, 'cleanup')).deleted, ['user/old/b.md']);
-  assert.deepEqual(await readdir(onDisk(record, 'user')), []);
+  assert.deepEqual(await readdir(onDisk(record, '')), []);
   await assert.rejects(base.read({ path: 'user/old/a.md' }), code('not_found'));
   const history = await base.history('user/old/a.md', null, 10);
   assert.deepEqual(history.versions.map(version => [version.action, version.revision]), [['delete', null], ['create', a.revision]]);
@@ -127,7 +127,7 @@ test('changes made outside the application are recorded before the next operatio
   await writeFile(onDisk(record, 'agent/memory/facts.md'), 'fact');
   const overview = await base.overview();
   assert.equal(overview.seq, 2);
-  assert.deepEqual(overview.agent, { files: 1, bytes: 4 });
+  assert.equal(overview.files, 2);
   const change = store.workspaces.get('w1')!.records[1]!;
   assert.deepEqual(change.author, { type: 'external' });
   assert.deepEqual(change.files.map(file => [file.action, file.path]), [['create', 'agent/memory/facts.md'], ['update', 'user/a.md']]);
@@ -141,13 +141,14 @@ test('changes made outside the application are recorded before the next operatio
 }));
 
 test('files that cannot be served are problems, and dot entries are ignored', () => withBase(async (base, _store, record) => {
+  await mkdir(onDisk(record,'user'),{recursive:true});
   await writeFile(onDisk(record, 'user/image.bin'), Buffer.from([0, 1, 2, 255]));
   await writeFile(onDisk(record, 'user/bad name.'), 'x');
   await writeFile(onDisk(record, 'user/.hidden'), 'x');
   await writeFile(onDisk(record, 'user/ok.md'), 'ok');
   const overview = await base.overview();
   assert.deepEqual(overview.problems.map(problem => [problem.path, problem.code]), [['user/bad name.', 'invalid_path'], ['user/image.bin', 'not_text']]);
-  assert.deepEqual(overview.user, { files: 1, bytes: 2 });
+  assert.equal(overview.files, 1); assert.equal(overview.bytes, 2);
   assert.equal((await base.overview()).seq, 1);
   await rm(onDisk(record, 'user/image.bin'));
   assert.deepEqual((await base.overview()).problems.map(problem => problem.path), ['user/bad name.']);
@@ -266,9 +267,9 @@ test('the watcher records an outside change without a request', { skip: !fileEve
   const events = base.follow(0, controller.signal);
   try {
     assert.equal((await nextWithin(events, 1000)).type, 'sync');
-    await writeFile(onDisk(record, 'user/outside.md'), 'from an editor');
+    await writeFile(onDisk(record, 'outside.md'), 'from an editor');
     const event = await nextWithin(events, 3000);
-    assert.ok(event.type === 'record' && event.record.author.type === 'external' && event.record.files[0]!.path === 'user/outside.md');
+    assert.ok(event.type === 'record' && event.record.author.type === 'external' && event.record.files[0]!.path === 'outside.md');
   } finally {
     controller.abort();
     await events.return(undefined);

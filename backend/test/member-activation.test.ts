@@ -1,3 +1,4 @@
+import { seedDesign } from './design-fixture.js';
 import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -7,9 +8,9 @@ import { code, settle, stubConfig, withTeam, worker, type Fixture } from './team
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 const signal = () => new AbortController().signal;
-const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['user/work.json'], dependencies: [] }, execute: { allowedCommands: [] as unknown[] } });
+const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['work/metadata.json'], dependencies: [] }, execute: { allowedCommands: [] as unknown[] } });
 async function setup(f: Fixture) {
-  await f.team.designs.save(f.workspaceId, 'user/work.json', { content: 'Work', implementation: ['src'] }, null, 'Test design', { type: 'lead', memberId: f.lead.memberId, runId: 'fixture' });
+  await seedDesign(f.workspaces, f.workspaceId, 'work/metadata.json', { content: 'Work', implementation: ['src'] });
   await f.team.configuration.materialize(f.lead.memberId);
 }
 async function draft(f: Fixture, path: string, value: unknown, prompt = 'Member prompt') {
@@ -57,7 +58,7 @@ test('updates allow responsibility, prompt and execute rules while preserving id
   assert.equal(after.value.responsibility, 'New responsibility'); assert.equal(after.value.settings.prompt, 'New prompt');
   assert.deepEqual(after.value.harness.allowedCommands, [{ kind: 'executable', executable: 'bash' }]); assert.deepEqual(after.value.harness.designScope, before.value.harness.designScope);
   const current = JSON.parse(after.value.configuration!.files['member.json']!);
-  for (const changed of [{ name: 'Renamed' }, { role: 'other' }, { settings: { modelOptions: [{ connectionId: 'conn', modelId: 'model', temperature: 0.2 }] } }, { settings: { modelId: 'other' } }, { designScope: { working: [], dependencies: ['user/work.json'] } }]) {
+  for (const changed of [{ name: 'Renamed' }, { role: 'other' }, { settings: { modelOptions: [{ connectionId: 'conn', modelId: 'model', temperature: 0.2 }] } }, { settings: { modelId: 'other' } }, { designScope: { working: [], dependencies: ['work/metadata.json'] } }]) {
     await draft(f, path, { ...current, ...changed }, 'New prompt');
     const review = await f.team.configuration.validate(f.lead.memberId, '.rsi/members');
     assert.equal(review.valid, false); assert.ok(review.issues.some(i => i.code === 'forbidden_update'), JSON.stringify(review.issues));
@@ -83,7 +84,7 @@ test('scoped Git deletion persists through materialization/restart and activatio
 
 test('malformed references, lead deletion, duplicate names and base-policy overrides refuse activation without changing active state', () => withTeam(async f => {
   await setup(f); const path = '.rsi/members/backend/member.json', original = await f.team.service.team(f.workspaceId);
-  for (const change of [{ promptFiles: ['../escape.md'] }, { promptFiles: ['prompts/missing.md'] }, { designScope: { working: ['user/missing.json'], dependencies: [] } }, { name: 'Lead' }, { extra: true }, { execute: { tools: ['anything'], allowedCommands: [] } }]) {
+  for (const change of [{ promptFiles: ['../escape.md'] }, { promptFiles: ['prompts/missing.md'] }, { designScope: { working: ['missing/metadata.json'], dependencies: [] } }, { name: 'Lead' }, { extra: true }, { execute: { tools: ['anything'], allowedCommands: [] } }]) {
     await draft(f, path, { ...manifest('Backend'), ...change });
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, false);
     const review = await commit(f); await assert.rejects(f.team.activateConfiguration(f.workspaceId, review.revision, review.digest), code('invalid_config'));
@@ -104,8 +105,8 @@ test('unrelated running workspace member blocks activation; stale active/config/
   await assert.rejects(f.team.activateConfiguration(f.workspaceId, review.revision, review.digest), code('workspace_busy'));
   assert.deepEqual(await f.team.service.team(f.workspaceId), before);
   f.runtime.end(other.memberId); await settle();
-  const design = await f.team.designs.read(f.workspaceId, 'user/work.json');
-  await f.team.designs.save(f.workspaceId, design.path, { content: 'Changed design', implementation: ['src'] }, design.revision, 'Change', { type: 'lead', memberId: f.lead.memberId, runId: 'test' });
+  const design = await f.team.designs.read(f.workspaceId, 'work/metadata.json');
+  await seedDesign(f.workspaces, f.workspaceId, design.path, { content: 'Changed design', implementation: ['src'] });
   await assert.rejects(f.team.activateConfiguration(f.workspaceId, review.revision, review.digest), code('stale_revision'));
   const refreshed = await f.team.reviewConfiguration(f.workspaceId);
   const originalActivate = f.store.activateMembers.bind(f.store); f.store.activateMembers = async () => { throw new Error('injected persistence failure'); };

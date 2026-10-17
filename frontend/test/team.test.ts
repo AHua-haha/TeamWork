@@ -9,7 +9,7 @@ import { callRecipient, toolHeading, toolLabels } from '../src/ui/tool-label.js'
 
 const settings = { connectionId: 'main', modelId: 'm1', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'm1', reasoning: 'high' as const }] };
 const member = (patch: Partial<Member> = {}): Member => ({
-  memberId: 'lead-1', workspaceId: 'w1', revision: 3, name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['user/design.json'], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, lead: true,
+  memberId: 'lead-1', workspaceId: 'w1', revision: 3, name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['metadata.json'], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, lead: true,
   settings, issues: [], ready: true, running: false, ...patch,
 });
 
@@ -90,7 +90,7 @@ test('a call to a member is headed by its recipient, and other tools keep their 
   assert.equal(toolHeading('assign_member', '{"to":"Backend","text":"Implement"}'), 'Assign → Backend');
   assert.equal(toolHeading('assign_member', '{"to":'), 'assign_member');
   assert.deepEqual(toolLabels('assign_member'), { input: 'Assignment', output: 'Report' });
-  assert.equal(toolHeading('save_design', '{"path":"user/design.json"}'), 'Update design');
+  assert.equal(toolHeading('save_design', '{"path":"metadata.json"}'), 'Update design');
   assert.deepEqual(toolLabels('save_design'), { input: 'Design change', output: 'Applied change' });
   assert.equal(toolHeading('read_design', '{}'), 'Read design');
 });

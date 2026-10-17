@@ -9,7 +9,9 @@ import type { WorkspaceModels, StoredWorkspaceModels } from './workspace-models.
 import { decodeText, encodeText, maxFileBytes, missing, sha256 } from './text.js';
 import { AppError, identity } from './types.js';
 
-export type Category = 'user' | 'agent';
+import { contextPath, validSegment, maxContextSegments as maxSegments } from './context-path.js';
+import { implementationContextFile } from './workspace-layout.js';
+export { contextPath, validSegment } from './context-path.js';
 export interface LeadAuthor { type: 'lead'; memberId: string; runId: string }
 export type Author = { type: 'user' } | { type: 'external' } | LeadAuthor;
 export type FileAction = 'create' | 'update' | 'move' | 'delete';
@@ -77,7 +79,7 @@ export interface ContextStore {
 
 export type ProblemCode = 'invalid_path' | 'duplicate_path' | 'not_text' | 'too_large' | 'not_file';
 export interface Problem { path: string; code: ProblemCode; message: string }
-export interface ContextOverview { workspaceId: string; seq: number; user: { files: number; bytes: number }; agent: { files: number; bytes: number }; problems: Problem[] }
+export interface ContextOverview { workspaceId: string; seq: number; files: number; bytes: number; problems: Problem[] }
 export type ContextTreeEntry = { path: string; type: 'file'; size: number; revision: string; updatedAt: number; author: Author } | { path: string; type: 'folder' };
 export interface ContextFile { path: string; revision: string; current: boolean; content: string; size: number; updatedAt: number; author: Author; reason: string | null }
 export interface ContextSave { path: string; revision: string; seq: number | null; created: boolean }
@@ -85,32 +87,12 @@ export interface DesignSave extends ContextSave { before: string | null; after: 
 export interface ContextVersion { revision: string | null; seq: number; time: number; action: FileAction; path: string; fromPath: string | null; size: number | null; author: Author; reason: string | null }
 export type ContextEvent = { version: 1; workspaceId: string } & ({ type: 'record'; record: ChangeRecord } | { type: 'sync'; seq: number });
 
-export const categories: readonly Category[] = ['agent', 'user'];
 export const maxTreeEntries = 2000;
 export const maxFindResults = 200;
 export const maxSearchMatches = 100;
 export const maxReasonLength = 1000;
-const maxSegments = 16;
 const maxPathLength = 512;
-const segmentPattern = /^[A-Za-z0-9_-](?:[A-Za-z0-9 _.-]{0,126}[A-Za-z0-9_-])?$/;
 const userAuthor: Author = { type: 'user' };
-
-/** 1–128 letters, digits, spaces, `-`, `_`, or `.`, not starting with `.` or a space and not ending with `.` or a space. */
-export function validSegment(name: string): boolean {
-  return segmentPattern.test(name);
-}
-
-/** Validates a context path. Folder parameters may name a category alone. */
-export function contextPath(value: string, minSegments: 1 | 2 = 2): string {
-  const segments = value.split('/');
-  if (value.length > maxPathLength || segments.length > maxSegments) throw new AppError('invalid_path', `A context path has at most ${maxSegments} segments and ${maxPathLength} characters`);
-  if (segments[0] !== 'user' && segments[0] !== 'agent') throw new AppError('invalid_path', 'A context path starts with user/ or agent/');
-  if (segments.length < minSegments) throw new AppError('invalid_path', 'The path must name a file or folder inside user/ or agent/');
-  for (const segment of segments.slice(1)) {
-    if (!validSegment(segment)) throw new AppError('invalid_path', `Invalid name "${segment}": use 1–128 letters, digits, spaces, "-", "_", or "."; a name cannot start with "." or a space or end with "." or a space`);
-  }
-  return value;
-}
 
 const keyOf = (path: string) => path.toLowerCase();
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -119,7 +101,7 @@ const notFound = (path: string) => new AppError('not_found', `${path} not found`
 const stale = (path: string) => new AppError('stale_revision', `${path} changed since it was read`, 409);
 
 function writable(path: string): void {
-  if (!path.startsWith('user/')) throw new AppError('read_only', 'Agent context is read-only here; ask the lead to change it', 403);
+  if (implementationContextFile(path)) throw new AppError('read_only', 'Implementation context is agent-maintained and read-only through this API', 403);
 }
 
 function checkReason(reason: string | null): void {
@@ -253,7 +235,7 @@ export class ContextBase {
     this.workspaceId = workspace.workspaceId;
     this.root = workspace.directory;
     this.contextDir = join(workspace.directory, '.rsi/context');
-    this.roots = categories.map(category => join(this.contextDir, category));
+    this.roots = [this.contextDir];
   }
 
   /** Loads the index and records the changes made while the backend was not watching. */
@@ -281,29 +263,24 @@ export class ContextBase {
 
   overview(): Promise<ContextOverview> {
     return this.current(() => {
-      const count = (category: Category) => {
-        const files = [...this.files.values()].filter(file => file.path.startsWith(`${category}/`));
-        return { files: files.length, bytes: files.reduce((total, file) => total + file.size, 0) };
-      };
-      return { workspaceId: this.workspaceId, seq: this.seq, user: count('user'), agent: count('agent'), problems: this.problems };
+      const files = [...this.files.values()];
+      return { workspaceId: this.workspaceId, seq: this.seq, files: files.length, bytes: files.reduce((sum,file)=>sum+file.size,0), problems: this.problems };
     });
   }
 
   async tree(path: string, depth: number): Promise<{ seq: number; path: string; entries: ContextTreeEntry[]; truncated: boolean }> {
-    if (path) contextPath(path, 1);
+    if (path) contextPath(path);
     if (!Number.isSafeInteger(depth) || depth < 1 || depth > maxSegments) throw new AppError('invalid_input', `depth is 1–${maxSegments}`);
     return this.current(() => {
       const folderKey = keyOf(path);
       const prefix = folderKey ? `${folderKey}/` : '';
       const files = [...this.files.values()].filter(file => keyOf(file.path).startsWith(prefix));
-      const category = folderKey === 'user' || folderKey === 'agent';
-      if (folderKey && !category && !files.length) {
+      if (folderKey && !files.length) {
         if (this.files.has(folderKey)) throw new AppError('invalid_path', `${path} is a file`);
         throw notFound(path);
       }
-      const base = folderKey && !category ? files[0]!.path.slice(0, folderKey.length) : folderKey;
+      const base = folderKey ? files[0]!.path.slice(0, folderKey.length) : folderKey;
       const entries = new Map<string, ContextTreeEntry>();
-      if (!folderKey) for (const name of categories) entries.set(name, { path: name, type: 'folder' });
       for (const file of files) {
         const rest = file.path.slice(prefix.length).split('/');
         for (let index = 0; index < Math.min(rest.length, depth); index++) {
@@ -391,11 +368,12 @@ export class ContextBase {
       const file = this.files.get(fromKey);
       const members = file ? [file] : this.under(fromKey);
       if (!members.length) throw notFound(from);
+      for (const member of members) { writable(member.path); writable(to + member.path.slice(from.length)); }
       this.checkBase(file, baseRevision);
       const source = file ? file.path : members[0]!.path.slice(0, fromKey.length);
       let target: string;
       if (fromKey === toKey) {
-        target = `${source.slice(0, source.lastIndexOf('/'))}/${to.slice(to.lastIndexOf('/') + 1)}`;
+        target = source.includes('/') ? `${source.slice(0, source.lastIndexOf('/'))}/${to.slice(to.lastIndexOf('/') + 1)}` : to;
         if (target === source) throw new AppError('invalid_input', `${source} already has that name; rename a folder to change its letter case`);
       } else target = await this.resolveNew(to);
       const disk = new DiskChange(this.roots);
@@ -427,6 +405,7 @@ export class ContextBase {
       const file = this.files.get(keyOf(path));
       const members = file ? [file] : this.under(keyOf(path));
       if (!members.length) throw notFound(path);
+      for (const member of members) writable(member.path);
       this.checkBase(file, baseRevision);
       const disk = new DiskChange(this.roots);
       try {
@@ -467,7 +446,7 @@ export class ContextBase {
 
   async search(q: string, path: string): Promise<{ matches: { path: string; line: number; text: string }[]; truncated: boolean }> {
     checkQuery(q);
-    if (path) contextPath(path, 1);
+    if (path) contextPath(path);
     return this.current(async () => {
       const scope = keyOf(path);
       const needle = q.toLowerCase();
@@ -574,9 +553,9 @@ export class ContextBase {
 
   /** The spelling for a new path: existing folders keep their spelling on disk, and nothing may exist at the target. */
   private async resolveNew(path: string): Promise<string> {
-    const [category, ...rest] = path.split('/') as [string, ...string[]];
-    const resolved = [category];
-    let folder = join(this.contextDir, category);
+    const rest = path.split('/');
+    const resolved: string[] = [];
+    let folder = this.contextDir;
     for (const [index, segment] of rest.entries()) {
       let entries: Dirent[] = [];
       try { entries = await readdir(folder, { withFileTypes: true }); }
@@ -610,7 +589,7 @@ export class ContextBase {
     }
     let ino: number;
     try {
-      for (const root of [join(this.root, '.rsi'), this.contextDir, ...this.roots]) {
+      for (const root of [join(this.root, '.rsi'), this.contextDir]) {
         try {
           const info = await lstat(root);
           if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('not a real folder');
@@ -696,7 +675,7 @@ export class ContextBase {
       const counts = new Map<string, number>();
       for (const entry of visible) counts.set(entry.name.toLowerCase(), (counts.get(entry.name.toLowerCase()) ?? 0) + 1);
       for (const entry of visible) {
-        const path = `${prefix}/${entry.name}`;
+        const path = prefix ? `${prefix}/${entry.name}` : entry.name;
         if (counts.get(entry.name.toLowerCase())! > 1) {
           problems.push({ path, code: 'duplicate_path', message: 'Another name differs only in letter case' });
           continue;
@@ -722,7 +701,7 @@ export class ContextBase {
         }
       }
     };
-    for (const category of categories) await visit(join(this.contextDir, category), category, 1);
+    await visit(this.contextDir, '', 0);
     return { files, problems };
   }
 

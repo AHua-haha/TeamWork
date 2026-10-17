@@ -1,3 +1,4 @@
+import { writableContextPath } from './context-path.js';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ContextFeed, WorkspaceClient, type ContextOverview, type Entry, type FeedSnapshot, type Found, type Workspace } from '../client/workspace-client.js';
 import { ancestorsOf, errorText, FolderTree, nameOf, useFolders } from './FileTree.js';
@@ -80,7 +81,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
   const [restartError, setRestartError] = useState<string | null>(null);
   const status = useSyncExternalStore(feed?.subscribe ?? noSubscribe, feed?.getSnapshot ?? idleSnapshot);
   const [overview, setOverview] = useState<ContextOverview>(workspace.context);
-  const context = useFolders(useCallback((path: string) => client.contextTree(id, path), [client, id]), ['user', 'agent']);
+  const context = useFolders(useCallback((path: string) => client.contextTree(id, path), [client, id]), ['']);
   const project = useFolders(useCallback((path: string) => client.projectTree(id, path), [client, id]), ['']);
   const [filter, setFilter] = useState('');
   const [found, setFound] = useState<{ context: Found; project: Found } | null>(null);
@@ -180,7 +181,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
     });
   };
 
-  const contextActions = (entry: Entry) => entry.path.startsWith('user/') && <>
+  const contextActions = (entry: Entry) => writableContextPath(entry.path) && <>
     {entry.type === 'folder' && <button type="button" className="tree-action" title="New file here" aria-label={`New file in ${entry.path}`} onClick={() => setDialog({ type: 'new', source: 'context', folder: entry.path })}><Glyph name="plus" /></button>}
     <button type="button" className="tree-action" title="Rename or move" aria-label={`Rename ${entry.path}`} onClick={() => setDialog({ type: 'move', path: entry.path, folder: entry.type === 'folder' })}><Glyph name="pencil" /></button>
     <button type="button" className="tree-action danger" title="Delete" aria-label={`Delete ${entry.path}`} onClick={() => setDialog({ type: 'delete', path: entry.path, folder: entry.type === 'folder' })}><Glyph name="trash" /></button>
@@ -256,11 +257,9 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
                 <span className={`feed-status ${status.connection}`} title={restartError ?? status.error ?? undefined}><span className="status-dot" />{connection}</span>
                 {status.connection === 'error' && <button type="button" className="text-button" onClick={() => void restartFeed()}>Retry</button>}
               </div>
-              <div className="tree-group-head"><span>User context</span><small>{overview.user.files} files</small>
-                <button type="button" className="tree-action" title="New file" aria-label="New user context file" onClick={() => setDialog({ type: 'new', source: 'context', folder: 'user' })}><Glyph name="plus" /></button></div>
-              <FolderTree tree={context} path="user" selected={selected('context')} empty="No files yet. Add notes the agent should know about you and this project." onOpen={path => show({ source: 'context', path })} actions={contextActions} />
-              <div className="tree-group-head"><span>Agent context</span><small>read-only</small></div>
-              <FolderTree tree={context} path="agent" selected={selected('context')} empty="No agent notes yet." onOpen={path => show({ source: 'context', path })} />
+              <div className="tree-group-head"><span>Project context</span><small>{overview.files} files</small>
+                <button type="button" className="tree-action" title="New file" aria-label="New context file" onClick={() => setDialog({ type: 'new', source: 'context', folder: '' })}><Glyph name="plus" /></button></div>
+              <FolderTree tree={context} path="" selected={selected('context')} empty="No project context yet." onOpen={path => show({ source: 'context', path })} actions={contextActions} />
               {overview.problems.length > 0 && <details className="tree-problems"><summary>{overview.problems.length} {overview.problems.length === 1 ? 'file needs' : 'files need'} attention</summary>
                 <ul>{overview.problems.map(problem => <li key={problem.path}><strong>{problem.path}</strong>{problem.message}</li>)}</ul></details>}
             </section>
@@ -277,7 +276,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
     </div>
     {dialog?.type === 'new' && <PathDialog eyebrow={dialog.source === 'context' ? 'CONTEXT BASE' : 'PROJECT'} title="New file" label="Path"
       initial={`${dialog.folder ? `${dialog.folder}/` : ''}untitled.md`} action="Create file"
-      hint={dialog.source === 'context' ? 'User context lives under user/. Names use letters, numbers, spaces, dots, dashes, and underscores.' : 'Relative to the workspace folder. Missing folders are created.'}
+      hint={dialog.source === 'context' ? 'Paths are relative to the project context tree. Design content is Markdown; metadata.json holds implementation paths. Implementation context is read-only here.' : 'Relative to the workspace folder. Missing folders are created.'}
       onClose={() => setDialog(null)} onSubmit={async path => {
         const source = dialog.source;
         const created = source === 'context' ? await client.saveContext(id, path, '', null) : await client.saveProject(id, path, '', null);

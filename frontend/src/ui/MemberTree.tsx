@@ -7,7 +7,7 @@ import { Glyph } from './Glyph.js';
 
 export function MemberTree({ name, designs, members, selected, onSelect, onDesign }: { name: string; designs: DesignSummary[]; members: Member[]; selected: string | null; onSelect(id: string): void; onDesign(path: string): void }) {
   const nodes = useMemo(() => memberTree(designs, members), [designs, members]);
-  const rootMembers = members.filter(member => member.lead || !member.harness.designScope.working.length);
+  const rootMembers = members.filter(member => member.lead || !member.harness.designScope.working.length || member.harness.designScope.working.some(path=>path.toLowerCase()==='metadata.json'));
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selected) return;

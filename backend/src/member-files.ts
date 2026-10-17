@@ -3,7 +3,7 @@ import type { Stats } from 'node:fs';
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { EditOperations, LsOperations, ReadOperations, WriteOperations } from '@earendil-works/pi-coding-agent';
-import { validSegment } from './context-base.js';
+import { contextPath } from './context-path.js';
 import { decodeText, encodeText, maxFileBytes, missing } from './text.js';
 import { AppError } from './types.js';
 
@@ -37,9 +37,14 @@ export class MemberFiles {
     };
     this.write = {
       mkdir: async directory => {
-        const segments = this.resolve(directory, 'write', true);
+        const segments = this.resolve(directory, 'see');
         this.names(segments);
-        await this.walk(segments);
+        const existing = await this.walk(segments);
+        if (existing) {
+          if (!existing.isDirectory()) throw new AppError('invalid_path', 'The parent path is not a directory');
+          return;
+        }
+        this.resolve(directory, 'write', true);
         await mkdir(join(this.root, ...segments), { recursive: true });
       },
       writeFile: (absolute, content) => this.save(absolute, content),
@@ -87,9 +92,7 @@ export class MemberFiles {
     const segments = path === '' ? [] : path.split(sep);
     if (segments.some(segment => segment.length > 255 || badCharacter.test(segment))) throw new AppError('invalid_path', `${path} has a name that is not allowed`);
     if (this.hidden(segments)) throw new AppError('not_found', `${path} not found`, 404);
-    if (segments[0]?.toLowerCase() === '.rsi' && segments[1]?.toLowerCase() === 'context' && (segments[0] !== '.rsi' || segments[1] !== 'context' || (segments.length > 2 && segments[2] !== 'agent' && segments[2] !== 'user'))) {
-      throw new AppError('invalid_path', '.rsi/context holds only user/ and agent/');
-    }
+    if(segments[0]?.toLowerCase()==='.rsi' && (segments[0]!=='.rsi'||(segments[1]&&segments[1]!==segments[1].toLowerCase())))throw new AppError('invalid_path','Use the canonical .rsi/context and .rsi/members roots');
     const label = segments.join('/');
     if (segments.length && this.access.deny(label, 'see') !== null) throw new AppError('not_found', `${label} not found`, 404);
     if (mode !== 'see') {
@@ -103,12 +106,10 @@ export class MemberFiles {
     return segments.some(segment => segment.toLowerCase() === '.git') || (segments[0]?.toLowerCase() === '.rsi' && !['context', 'members', undefined].includes(segments[1]?.toLowerCase()));
   }
 
-  /** Names under `.rsi/context/agent/` and `.rsi/context/user/` follow the context base's rules. */
+  /** Names under `.rsi/context/` follow the context base's rules. */
   private names(segments: string[]): void {
     if (segments[0] !== '.rsi' || segments[1] !== 'context') return;
-    for (const segment of segments.slice(3)) {
-      if (!validSegment(segment)) throw new AppError('invalid_path', `Invalid name "${segment}" in .rsi/context: use 1–128 letters, digits, spaces, "-", "_", or "."; a name cannot start with "." or a space or end with "." or a space`);
-    }
+    if (segments.length > 2) contextPath(segments.slice(2).join('/'));
   }
 
   /** The status of the entry, or null when it is missing. Fails when a step is a link, or a file before the last step. */

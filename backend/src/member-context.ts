@@ -25,7 +25,7 @@ export class MemberContext {
       lead
         ? [
             '- User messages without mentions trigger you. Help the user create, update, and maintain the whole project design and its subdesigns. Use common read/write/edit tools in your worktree. Explain pending changes and request user review; only user acceptance commits design.',
-            '- A design part stores content and implementation paths together. Start with user/design.json and related JSON files for subdesigns. Keep user-owned design decisions there.',
+            '- Keep user-owned design decisions in the system tree described by your harness.',
             '- When a design choice is unsettled, offer concrete choices with their tradeoffs and your recommendation, then end your reply and wait for the user\'s answer. Do not commit your recommendation as the user\'s choice or assign dependent work before it is settled.',
             '- Decompose based on accepted designs. Follow the management harness rules for maintaining and validating member files. Use list_models for workspace choices and assign only active members; pending or merely committed files do not activate a member.',
             '- Assign work in your final group response by mentioning the worker and stating the objective and expected result. Its designs come from its harness. Bring proposed design changes from a worker to the user.',

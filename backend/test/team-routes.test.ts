@@ -97,8 +97,8 @@ test('harness review and user commit endpoints pin the reviewed revision and enf
   const member = await worker(fixture, 'Backend', ['src']);
   const endpoint = `/workspaces/${fixture.workspaceId}/team/members/${member.memberId}/harness`;
   const files = await fixture.team.harness.files(member.memberId);
-  const path = join(files.root, '.rsi/context', member.harness.designScope.working[0]!);
-  await files.write.writeFile(path, JSON.stringify({ content: 'Pending', implementation: ['src'] }));
+  const path = join(files.root, '.rsi/context/systems/backend/design.md');
+  await files.write.writeFile(path, 'Pending');
   const review = await call(endpoint);
   const design = review.parts.find((p: Body) => p.state.part.id === 'design');
   const implementation = review.parts.find((p: Body) => p.state.part.id === 'implementation');
@@ -106,7 +106,7 @@ test('harness review and user commit endpoints pin the reviewed revision and enf
   assert.equal(design.state.part.commit, 'user');
   const input = { revision: design.revision, base: design.state.committed, message: 'Accept design' };
   await call(endpoint + '/design/commit', { method: 'POST', data: { ...input, actor: 'user' }, status: 400 });
-  await files.write.writeFile(path, JSON.stringify({ content: 'Changed after review', implementation: ['src'] }));
+  await files.write.writeFile(path, 'Changed after review');
   const stale = await call(endpoint + '/design/commit', { method: 'POST', data: input, status: 409 });
   assert.equal(stale.error.code, 'stale_revision');
   const updated = (await call(endpoint)).parts.find((p: Body) => p.state.part.id === 'design');
