@@ -156,7 +156,7 @@ export class HarnessHistory {
     }
     const visit = async (path: string): Promise<void> => {
       if (path && path !== '.') safePath(path);
-      if (part.exclude.some(p => coversPath(p, path)) || path.split('/').some(p => p.toLowerCase() === '.git')) return;
+      if (path === '.rsi/harness' || path.startsWith('.rsi/harness/') || part.exclude.some(p => coversPath(p, path)) || path.split('/').some(p => p.toLowerCase() === '.git')) return;
       const absolute = join(root, path === '.' ? '' : path);
       let info;
       try { info = await lstat(absolute); }
@@ -169,7 +169,7 @@ export class HarnessHistory {
         for (const name of (await readdir(absolute)).sort()) {
           if (name.toLowerCase() === '.git') continue;
           const child = path === '.' ? name : `${path}/${name}`;
-          if (seed && allowed && !child.startsWith('.context/') && child !== '.context' && !allowed.has(child)) continue;
+          if (seed && allowed && child !== '.rsi' && !child.startsWith('.rsi/context') && !child.startsWith('.rsi/members') && !allowed.has(child)) continue;
           await visit(child);
         }
       } else if (info.isFile() && partOwns(part, path)) {
@@ -380,7 +380,7 @@ export class HarnessHistory {
   async acceptedDesignPaths(): Promise<string[]> {
     const revisions = (await this.text(['for-each-ref', '--format=%(objectname)', 'refs/harness/designs/'])).split('\n').filter(Boolean);
     const paths = new Set<string>();
-    for (const revision of new Set(revisions)) for (const path of await this.paths(revision)) if (path.startsWith('.context/user/')) paths.add(path.slice('.context/'.length));
+    for (const revision of new Set(revisions)) for (const path of await this.paths(revision)) if (path.startsWith('.rsi/context/user/')) paths.add(path.slice('.rsi/context/'.length));
     return [...paths];
   }
   private scopeRepository(memberId: string, part: HarnessPart) { return join(this.storage, 'staging', memberId, part.id, this.key(part)); }
@@ -411,7 +411,7 @@ export class HarnessHistory {
       if (!command || !['status', 'diff', 'add', 'rm', 'log', 'show', 'restore', 'commit'].includes(command)) throw new AppError('command_denied', 'Supported scoped Git commands: status, diff, add, rm, log, show, restore, commit', 403);
       if (argv.some(value => typeof value !== 'string' || /[\u0000-\u001f]/.test(value))) throw new AppError('invalid_input', 'Invalid Git arguments');
       const rootPaths = [...part.paths.map(path => path === '.' ? ':/' : `:(top,literal)${path}`), ...part.exclude.map(path => `:(top,exclude,icase)${path}`), ':(top,exclude,icase)**/.git/**'];
-      const paths = (values: string[]) => {
+      const selectedPaths = (values: string[]) => {
         if (!values.length) throw new AppError('invalid_input', 'Name paths to stage or restore');
         const selected = new Set<string>();
         for (const value of values) {
@@ -421,8 +421,9 @@ export class HarnessHistory {
           if (partOwns(part, candidate)) selected.add(candidate);
           else { const children = part.paths.filter(p => candidate === '.' || coversPath(candidate, p)); if (!children.length) throw new AppError('access_denied', 'Git path is outside the selected scope', 403); for (const child of children) selected.add(child); }
         }
-        return [...selected].map(p => p === '.' ? ':/' : `:(top,literal)${p}`).concat(part.exclude.map(path => `:(top,exclude,icase)${path}`), [':(top,exclude,icase)**/.git/**']);
+        return [...selected];
       };
+      const paths = (values: string[]) => selectedPaths(values).map(p => p === '.' ? ':/' : `:(top,literal)${p}`).concat(part.exclude.map(path => `:(top,exclude,icase)${path}`), [':(top,exclude,icase)**/.git/**']);
       const verifyIndex = async () => {
         const entries = await this.entries((await run(['write-tree'])).trim());
         if (entries.some(entry => !partOwns(part, entry.path))) throw new AppError('access_denied', 'Index contains paths outside the selected scope', 403);
@@ -475,10 +476,18 @@ export class HarnessHistory {
       if (command === 'add') {
         const requested = args.filter(a => a !== '--' && a !== '-A' && a !== '--all');
         if (requested.some(a => a.startsWith('-'))) throw new AppError('command_denied', 'Use git add [-A] -- <paths>', 403);
-        await this.files(root, part);
+        const files = await this.files(root, part);
+        const selected = selectedPaths(requested.length ? requested : ['.']);
+        const tracked = await this.paths((await run(['write-tree'])).trim());
+        const allowed = [...new Set([...files.map(file=>file.path), ...tracked])].filter(path=>partOwns(part,path) && selected.some(scope=>coversPath(scope,path)));
         const index = join(repository, 'index'), before = await readFile(index);
-        try { const result = await run(['add', '-A', '--', ...paths(requested.length ? requested : ['.'])]); await verifyIndex(); return result; }
-        catch (error) { await writeFile(index, before); throw error; }
+        try {
+          // Enumerate authorized files, including tracked deletions, before native staging.
+          // Literal NUL-separated paths handle file and directory assignments identically.
+          const input = allowed.map(path=>`:(top,literal)${path}`).join('\0') + '\0';
+          const result = allowed.length ? (await this.git(['add','-A','--pathspec-from-file=-','--pathspec-file-nul'], input, undefined, repository, root, cwd)).toString('utf8') : '';
+          await verifyIndex(); return result;
+        } catch (error) { await writeFile(index, before); throw error; }
       }
       if (command === 'rm') {
         const requested = args.filter(a => !['--', '-r', '-f', '--force'].includes(a));
@@ -573,5 +582,5 @@ export class HarnessHistory {
 }
 
 export function harnessStorage(source: string): string {
-  return resolve(dirname(source), '.rsi-harness', sha256(source));
+  return resolve(source, '.rsi/harness');
 }

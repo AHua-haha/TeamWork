@@ -7,22 +7,22 @@ const files = ['ls', 'read', 'write', 'edit'];
 /** Fixed purpose policy; an assignment supplies design references, never permissions or tool definitions. */
 export function purposeHarnesses(member: StoredMember, implementation: ImplementationScope = { paths: [], usePaths: [] }): HarnessDefinition[] {
   const config = member.value.harness;
-  const designPaths = member.value.lead ? ['.context/user'] : config.designScope.working.map(path => `.context/${path}`);
+  const designPaths = member.value.lead ? ['.rsi/context/user'] : config.designScope.working.map(path => `.rsi/context/${path}`);
   return [
     {
       id: 'management',
       prompt: harnessPrompt('management'),
       tools: [...files, 'bash', ...(member.value.lead ? ['list_models', 'validate_member_config'] : [])],
       parts: [
-        ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: config.designScope.dependencies.map(path => `.context/${path}`), commit: 'user' as const, prompt: harnessPrompt('management-design') }] : []),
-        ...(member.value.lead ? [{ id: 'member-config', paths: ['.team/members'], exclude: [], commit: 'user' as const, prompt: harnessPrompt('management-members') }] : []),
+        ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: config.designScope.dependencies.map(path => `.rsi/context/${path}`), commit: 'user' as const, prompt: harnessPrompt('management-design') }] : []),
+        ...(member.value.lead ? [{ id: 'member-config', paths: ['.rsi/members'], exclude: [], commit: 'user' as const, prompt: harnessPrompt('management-members') }] : []),
       ],
     },
     {
       id: 'implementation',
       prompt: harnessPrompt('implementation'),
       tools: [...files, 'bash'],
-      parts: implementation.paths.length ? [{ id: 'implementation', paths: implementation.paths, exclude: ['.context', '.team', ...implementation.usePaths], commit: 'agent', prompt: harnessPrompt('implementation-scope') }] : [],
+      parts: implementation.paths.length ? [{ id: 'implementation', paths: implementation.paths, exclude: ['.rsi', ...implementation.usePaths], commit: 'agent', prompt: harnessPrompt('implementation-scope') }] : [],
     },
     {
       id: 'execute',

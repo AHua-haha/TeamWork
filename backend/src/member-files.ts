@@ -16,7 +16,7 @@ const badCharacter = /[\\:\u0000-\u001f\u007f]/;
 /**
  * The workspace folder as one agent may use it, in the form Pi's file tools take: operations that
  * check the agent's access, keep paths inside the folder, never pass through a link, and hide `.git`.
- * Files under `.context/` keep the context base's name rules, so every file written there is one it serves.
+ * Files under `.rsi/context/` keep the context base's name rules, so every file written there is one it serves.
  */
 export class MemberFiles {
   readonly read: ReadOperations;
@@ -87,8 +87,8 @@ export class MemberFiles {
     const segments = path === '' ? [] : path.split(sep);
     if (segments.some(segment => segment.length > 255 || badCharacter.test(segment))) throw new AppError('invalid_path', `${path} has a name that is not allowed`);
     if (this.hidden(segments)) throw new AppError('not_found', `${path} not found`, 404);
-    if (segments[0]?.toLowerCase() === '.context' && (segments[0] !== '.context' || (segments.length > 1 && segments[1] !== 'agent' && segments[1] !== 'user'))) {
-      throw new AppError('invalid_path', '.context holds only user/ and agent/');
+    if (segments[0]?.toLowerCase() === '.rsi' && segments[1]?.toLowerCase() === 'context' && (segments[0] !== '.rsi' || segments[1] !== 'context' || (segments.length > 2 && segments[2] !== 'agent' && segments[2] !== 'user'))) {
+      throw new AppError('invalid_path', '.rsi/context holds only user/ and agent/');
     }
     const label = segments.join('/');
     if (segments.length && this.access.deny(label, 'see') !== null) throw new AppError('not_found', `${label} not found`, 404);
@@ -100,14 +100,14 @@ export class MemberFiles {
   }
 
   private hidden(segments: string[]): boolean {
-    return segments[0]?.toLowerCase() === '.git';
+    return segments.some(segment => segment.toLowerCase() === '.git') || (segments[0]?.toLowerCase() === '.rsi' && !['context', 'members', undefined].includes(segments[1]?.toLowerCase()));
   }
 
-  /** Names under `.context/agent/` and `.context/user/` follow the context base's rules. */
+  /** Names under `.rsi/context/agent/` and `.rsi/context/user/` follow the context base's rules. */
   private names(segments: string[]): void {
-    if (segments[0] !== '.context') return;
-    for (const segment of segments.slice(2)) {
-      if (!validSegment(segment)) throw new AppError('invalid_path', `Invalid name "${segment}" in .context: use 1–128 letters, digits, spaces, "-", "_", or "."; a name cannot start with "." or a space or end with "." or a space`);
+    if (segments[0] !== '.rsi' || segments[1] !== 'context') return;
+    for (const segment of segments.slice(3)) {
+      if (!validSegment(segment)) throw new AppError('invalid_path', `Invalid name "${segment}" in .rsi/context: use 1–128 letters, digits, spaces, "-", "_", or "."; a name cannot start with "." or a space or end with "." or a space`);
     }
   }
 

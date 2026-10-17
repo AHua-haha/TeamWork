@@ -31,7 +31,7 @@ test('create/adopt persist model defaults with the lead; invalid model config cr
     assert.deepEqual((await service.models(created.workspaceId)).value, models);
     const adopted = await mkdtemp(join(folder, 'adopt-'));
     await service.create({ name: 'Adopt', directory: adopted, adopt: true, models });
-    assert.ok((await readdir(adopted)).includes('.context'));
+    assert.ok((await readdir(adopted)).includes('.rsi'));
     const insert = store.createMember.bind(store);
     store.createMember = async () => { throw new Error('Lead insert failed'); };
     await assert.rejects(service.create({ name: 'Fail', directory: join(folder, 'fail'), adopt: false, models }), /Lead insert failed/);

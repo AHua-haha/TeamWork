@@ -12,7 +12,7 @@ test('current catalog discovers unassigned designs by schema, omits ordinary not
   const backend = await worker(fixture, 'Backend', ['backend']);
   const seq = (await base.overview()).seq;
   const catalog = await fixture.team.designs.list(fixture.workspaceId);
-  assert.deepEqual(catalog.designs.map(item => item.path), ['user/architecture.md', 'user/design/backend.json']);
+  assert.deepEqual(catalog.designs.map(item => item.path), ['user/architecture.md', 'user/design.json', 'user/design/backend.json']);
   assert.deepEqual(catalog.designs[0], { path: 'user/architecture.md', revision: loose.revision, implementation: ['src'] });
   assert.equal(catalog.truncated, false);
   assert.equal((await base.overview()).seq, seq);
@@ -25,5 +25,5 @@ test('current catalog discovers unassigned designs by schema, omits ordinary not
   assert.deepEqual(valid.design, { content: '# Architecture', implementation: ['src'] });
   await base.delete('user/architecture.md', loose.revision, null);
   await assert.rejects(fixture.team.designs.inspect(fixture.workspaceId, 'user/architecture.md'), code('not_found'));
-  assert.deepEqual((await fixture.team.designs.list(fixture.workspaceId)).designs.map(item => item.path), ['user/design/backend.json']);
+  assert.deepEqual((await fixture.team.designs.list(fixture.workspaceId)).designs.map(item => item.path), ['user/design.json', 'user/design/backend.json']);
 }));

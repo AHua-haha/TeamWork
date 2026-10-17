@@ -145,3 +145,8 @@ A dedicated configuration changes component reads the unified backend response a
 - [Configuration changes](../../../frontend/src/ui/ConfigurationChanges.tsx) owns inspected review state, independent status/history and user operations. It refreshes on entry, focus, explicit refresh and every three seconds during team work. Exact reviewed tokens go to the backend; local activity hints supplement authoritative backend idle checks.
 - [File diff](../../../frontend/src/ui/ConfigurationDiff.tsx) and [diff line projection](../../../frontend/src/ui/configuration-diff.ts) own flat path selection and unified line-number rendering. React renders patch text literally.
 - [Member UI tests](../../../frontend/test/member-inspection.test.ts) cover hierarchy, shared assignments, missing designs, tree/detail separation, escaped unified diffs and exact separate operation payloads. Browser verification covers keyboard preview, active details, desktop/narrow layouts, file selection, commit and activation with pending edits; evidence is in the task tests.jsonl.
+
+
+## Workspace bootstrap path coordination
+
+Discussion reference formatting, physical-design-reference normalization and member configuration diff labels use .rsi/context and .rsi/members. Logical context requests and design hierarchy grouping retain user/... identities. No additional creation request fields or frontend initialization step is needed: workspace create/adopt succeeds only after the backend baseline is ready.

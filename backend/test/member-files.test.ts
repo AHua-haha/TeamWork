@@ -20,9 +20,11 @@ function tools(files: MemberFiles, root: string) {
   };
 }
 async function writableLead(fixture: Fixture) {
-  await fixture.team.designs.save(fixture.workspaceId, 'user/design.json', { content: 'Whole project', implementation: ['.'] }, null, 'Test design', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
+  await fixture.team.designs.save(fixture.workspaceId, 'user/design.json', { content: 'Whole project', implementation: ['.'] }, (await fixture.team.designs.read(fixture.workspaceId, 'user/design.json')).revision, 'Test design', { type: 'lead', memberId: fixture.lead.memberId, runId: 'r' });
   await configureHarness(fixture, 'Lead', { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] });
-  return open(fixture, fixture.lead.memberId);
+  const result = await open(fixture, fixture.lead.memberId);
+  await result.write('.rsi/context/user/design.json', JSON.stringify({content:'Whole project',implementation:['.']}));
+  return result;
 }
 test('file tools edit pending working design and implementation while dependencies remain read-only', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['backend']);
@@ -35,13 +37,13 @@ test('file tools edit pending working design and implementation while dependenci
   const file = await open(fixture, backend.memberId);
   await file.write('backend/src/main.ts', 'backend');
   assert.equal(await readFile(join(file.root, 'backend', 'src', 'main.ts'), 'utf8'), 'backend');
-  assert.match(await file.read('.context/user/design/backend.json'), /Design for Backend/);
-  assert.match(await file.read('.context/user/api.json'), /API contract/);
+  assert.match(await file.read('.rsi/context/user/design/backend.json'), /Design for Backend/);
+  assert.match(await file.read('.rsi/context/user/api.json'), /API contract/);
   assert.match(await file.read('shared/api.ts'), /api/);
-  await file.write('.context/user/design/backend.json', 'pending design');
-  assert.equal(await readFile(join(file.root, '.context/user/design/backend.json'), 'utf8'), 'pending design');
-  assert.match(await readFile(join(fixture.directory, '.context/user/design/backend.json'), 'utf8'), /Design for Backend/);
-  await assert.rejects(file.write('.context/user/api.json', 'x'), fail(/read-only/));
+  await file.write('.rsi/context/user/design/backend.json', 'pending design');
+  assert.equal(await readFile(join(file.root, '.rsi/context/user/design/backend.json'), 'utf8'), 'pending design');
+  assert.match(await readFile(join(fixture.directory, '.rsi/context/user/design/backend.json'), 'utf8'), /Design for Backend/);
+  await assert.rejects(file.write('.rsi/context/user/api.json', 'x'), fail(/read-only/));
   await assert.rejects(file.write('backend/shared/types.ts', 'x'), fail(/Dependency implementation is read-only/));
   await assert.rejects(file.write('shared/api.ts', 'x'), fail(/read-only|outside your configured implementation scope/));
   await assert.rejects(file.write('frontend/a.ts', 'x'), fail(/not found/));
@@ -92,6 +94,6 @@ test('editing replaces one match and keeps the file unchanged on a mismatch', ()
   await lead.edit('src/a.ts', 'const b = 2;', 'const b = 3;');
   assert.equal(await readFile(join(lead.root, 'src/a.ts'), 'utf8'), 'const a = 1;\nconst b = 3;\n');
   await assert.rejects(lead.edit('src/a.ts', 'missing', 'x'), fail(/Could not find/));
-  await lead.edit('.context/user/design.json', 'Whole project', 'Changed');
-  assert.match(await lead.read('.context/user/design.json'), /Changed/);
+  await lead.edit('.rsi/context/user/design.json', 'Whole project', 'Changed');
+  assert.match(await lead.read('.rsi/context/user/design.json'), /Changed/);
 }));

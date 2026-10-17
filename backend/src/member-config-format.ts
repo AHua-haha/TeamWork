@@ -1,3 +1,4 @@
+import { memberRoot } from './workspace-layout.js';
 import { createHash } from 'node:crypto';
 import type { RunSettings } from './config.js';
 import type { HarnessConfig } from './harness-config.js';
@@ -19,7 +20,7 @@ export function sourceBundle(path: string, files: Record<string, string>, submit
 export function generatedSource(fields: ConfigFields, memberId: string): MemberConfigSource {
   const { prompt, ...settings } = fields.settings;
   const manifest = { name: fields.name, role: fields.role, responsibility: fields.responsibility, settings, promptFiles: ['prompts/member.md'], designScope: fields.harness.designScope, execute: { allowedCommands: fields.harness.allowedCommands } };
-  return sourceBundle(`.team/members/${memberId}/member.json`, { 'member.json': JSON.stringify(manifest, null, 2) + '\n', 'prompts/member.md': prompt }, 'user');
+  return sourceBundle(`${memberRoot}/${memberId}/member.json`, { 'member.json': JSON.stringify(manifest, null, 2) + '\n', 'prompts/member.md': prompt }, 'user');
 }
 /** Startup-only conversion preserves the exact previous source and every prompt byte. */
 export function migrateMemberSource(source: MemberConfigSource, allowedCommands: HarnessConfig['allowedCommands'] = []): MemberConfigSource | null {

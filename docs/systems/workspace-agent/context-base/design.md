@@ -19,7 +19,7 @@ This document defines the HTTP API that the frontend uses to view and edit conte
 
 ## Inputs and preconditions
 
-- **Workspace.** Every workspace has a context base, stored in its project directory under `.context/user/` and `.context/agent/`. The [Workspace module](../workspace/design.md) creates and registers workspaces; opening a context base creates the two folders when they are missing.
+- **Workspace.** Every workspace has a context base, stored in its project directory under `.rsi/context/user/` and `.rsi/context/agent/`. The [Workspace module](../workspace/design.md) creates and registers workspaces; opening a context base creates the two folders when they are missing.
 - **Paths.** Every file has a path whose first segment is its category, `user` or `agent`. For example: `user/goals.md`, `agent/design/overview.md`.
   - Segments are separated by `/`. Each segment has 1–128 ASCII characters: letters, digits, spaces, `-`, `_`, and `.`. A segment starts and ends with a letter, digit, `-`, or `_`. Dot names are reserved for the context base and ignored on disk; other names that break these rules are listed as problems.
   - A path has at most 16 segments and 512 characters.
@@ -31,7 +31,7 @@ This document defines the HTTP API that the frontend uses to view and edit conte
 
 ### User design parts and attributed saves
 
-A design part is a file in user context containing JSON `{content: "Markdown text", implementation: [project paths]}`. The mapping lists at most 50 distinct files/directories, workspace-relative, allowing `.` for the project root and excluding `.git` and `.context`. Paths may name future implementation. Designs can be arranged as subdesign files independent of team membership. Malformed design metadata prevents using that record as a harness reference but remains readable as ordinary raw context for repair. Current design discovery returns valid user-design summaries independently of team assignments; current inspection exposes raw content and metadata issues through read-only workspace design operations. Discovery inherits context listing limits and reports truncation.
+A design part is a file in user context containing JSON `{content: "Markdown text", implementation: [project paths]}`. The mapping lists at most 50 distinct files/directories, workspace-relative, allowing `.` for the project root and excluding `.git` and `.rsi/context`. Paths may name future implementation. Designs can be arranged as subdesign files independent of team membership. Malformed design metadata prevents using that record as a harness reference but remains readable as ordinary raw context for repair. Current design discovery returns valid user-design summaries independently of team assignments; current inspection exposes raw content and metadata issues through read-only workspace design operations. Discovery inherits context listing limits and reports truncation.
 
 The backend in-process attributed design save supplies the complete record, prior revision (null only to create), nonempty reason up to 1,000 characters, and lead/run author. It uses the same queue, revision protection, durability and sequence rules as user saves. It returns `{path, revision, seq, created, before, after, reason}` plus parsed design at the semantic boundary. A byte-identical save has null sequence and no new version. There is no HTTP operation that lets the user forge a lead author; existing user save/move/delete remain user-authored. Members use common tools to edit pending design copies in their harness worktrees. Those histories and user acceptance records belong to the harness; accepting them does not automatically publish them into this original context base.
 
@@ -161,6 +161,6 @@ All paths below are under `/workspaces/:workspaceId/context`, written `…`:
 7. **Restore.** From the history of `user/spec.md`, the user reads an earlier revision and saves its content as current with the reason "Restore". The history shows every version.
 8. **Reconnect.** After a restart, the frontend follows with its last applied `seq` and receives every record it missed before `sync`.
 9. **Changes while closed.** With the backend stopped, the user runs `git checkout`, which changes two user-context files and removes one. After the next start, the first request to the workspace waits for the scan, which records all three changes in one record authored by `external`.
-10. **Problem file.** The user copies `photo.png` into `.context/user/`. It is not listed, and the overview's `problems` names it with `not_text`.
+10. **Problem file.** The user copies `photo.png` into `.rsi/context/user/`. It is not listed, and the overview's `problems` names it with `not_text`.
 
 11. **Attributed backend design import.** A backend design save records one attributed version and change and returns its exact previous/resulting content. Agent pending edits and their approval instead use harness history. A stale revision leaves the file unchanged.

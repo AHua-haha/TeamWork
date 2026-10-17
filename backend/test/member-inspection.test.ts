@@ -63,9 +63,10 @@ test('file commit rejects changed reviewed content and activation marker partici
   await files.write.writeFile(join(files.root, dirname(source.path), 'prompts/member.md'), 'Changed after review');
   await assert.rejects(f.team.commitConfiguration(f.workspaceId, review.commit.revision, review.commit.base, 'Stale'), code('stale_revision'));
   const committed = await accept(f);
+  const initialMarker = await f.store.getMemberActivation(f.workspaceId);
   const original = f.store.activateMembers.bind(f.store); f.store.activateMembers = async () => { throw new Error('injected failure'); };
   await assert.rejects(f.team.activateConfiguration(f.workspaceId, committed.activation.revision, committed.activation.digest), /injected failure/);
-  assert.equal(await f.store.getMemberActivation(f.workspaceId), null); f.store.activateMembers = original;
+  assert.deepEqual(await f.store.getMemberActivation(f.workspaceId), initialMarker); f.store.activateMembers = original;
   await f.team.activateConfiguration(f.workspaceId, committed.activation.revision, committed.activation.digest);
   assert.equal((await f.store.getMemberActivation(f.workspaceId))!.revision, committed.activation.revision);
   await assert.rejects(f.team.activateConfiguration(f.workspaceId, committed.activation.revision, committed.activation.digest), code('stale_revision'));
@@ -77,12 +78,13 @@ test('file commit rejects changed reviewed content and activation marker partici
 test('binary extra files have explicit preview issues and legacy active sources retain an honest history boundary', () => withTeam(async f => {
   await f.team.configuration.materialize(f.lead.memberId);
   const files = await f.team.harness.files(f.lead.memberId);
-  await writeFile(join(files.root, '.team/members/extra.bin'), Buffer.from([0xff, 0, 0xfe]));
+  await writeFile(join(files.root, '.rsi/members/extra.bin'), Buffer.from([0xff, 0, 0xfe]));
   let view = await f.team.currentConfiguration(f.workspaceId);
   assert.match(view.current.files.find(file => file.path.endsWith('extra.bin'))!.problem!, /Binary/);
   assert.ok(view.changes.some(file => file.path.endsWith('extra.bin')));
   const stored = f.store.members.get(f.lead.memberId)!.member;
   stored.value.configuration!.acceptedRevision = 'old-source-reference';
+  f.store.memberActivations.delete(f.workspaceId);
   view = await f.team.currentConfiguration(f.workspaceId);
   assert.equal(view.status.historyKnown, false);
 }));

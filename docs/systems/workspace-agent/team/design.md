@@ -22,7 +22,7 @@ Three semantic operations are derived from the proposed member files:
 
 Changing a working/dependency assignment is not an update; an explicit replacement can be proposed with create/delete and remains subject to user review. Implementation access is always derived from accepted assigned designs; it cannot be independently configured. A separately user-approved design-mapping change remains a design change, not a member reassignment.
 
-Working mappings grant writable implementation and dependency mappings grant read-only implementation, with read-only precedence and protected control paths. Base tools and enforced policy cannot be changed through member prompt or execution configuration. The lead keeps management bootstrap access to .context/user and .team/members; unassigned implementation access remains empty.
+Working mappings grant writable implementation and dependency mappings grant read-only implementation, with read-only precedence and protected control paths. Base tools and enforced policy cannot be changed through member prompt or execution configuration. The lead keeps management bootstrap access to .rsi/context/user and .rsi/members; unassigned implementation access remains empty.
 
 ### Member change workflow
 
@@ -36,7 +36,7 @@ Activation revalidates the exact committed snapshot against current active confi
 
 The editable JSON fields are name, role, responsibility, settings, promptFiles, designScope and execute: {allowedCommands}. Prompt references are ordered safe bundle-relative prompts/*.md paths (at most 20); relevant files must be UTF-8 text within existing text limits. Unknown fields/base overrides are invalid. Backend envelope formatVersion 4 and acceptedRevision belong to metadata outside those files. Startup converts active older source envelopes once, preserving previous exact source/settings/commands and existing drafts. Legacy drafts are not rewritten; reconcile their schema before validation. Retired bundle paths cannot be reused for a new identity; use a fresh bundle.
 
-The lead calls validate_member_config({path: ".team/members"}) for the whole pending change set. It has no commit or activation authority. Member names must remain unique in the resulting team (at most 20); a create/delete replacement may reuse a retiring member name within the batch. No structured agent create/update/delete or activation tool bypasses the file/validation/user-acceptance flow. Member inspection remains read-only and distinguishes active source from pending or committed-but-inactive files.
+The lead calls validate_member_config({path: ".rsi/members"}) for the whole pending change set. It has no commit or activation authority. Member names must remain unique in the resulting team (at most 20); a create/delete replacement may reuse a retiring member name within the batch. No structured agent create/update/delete or activation tool bypasses the file/validation/user-acceptance flow. Member inspection remains read-only and distinguishes active source from pending or committed-but-inactive files.
 
 ### Work and cooperation
 
@@ -156,3 +156,8 @@ A validation issue contains path, code and message. Raw previews remain availabl
 The activation boundary is persisted atomically even when no member fields change. Replaying a successful activation review is stale; refreshing can review the same files against the new boundary. Before the first tracked activation, active source bytes supply the comparison baseline. A legacy team with earlier accepted sources or retirements and no workspace activation marker reports `historyKnown: false`; available history is not claimed to begin at an exact known activation. The next successful activation establishes that boundary. Active runtime loading continues using database source snapshots independently of the Git marker.
 
 A changed pending snapshot or committed base refuses commit with `stale_revision`. Changed activation, active team, models or referenced designs refuse activation with `stale_revision`. Busy commit reports `member_busy`; busy activation reports `workspace_busy`; invalid activation reports `invalid_config`. Errors preserve active state and require refreshed review rather than silently selecting different bytes. Unknown request fields and query parameters are refused.
+
+
+## Initial lead configuration
+
+A newly created/adopted workspace already has a valid active lead assigned to user/design.json, using the workspace default model, no dependencies and no execution allowances. Its exact JSON/Markdown source is materialized under .rsi/members before success. Bootstrap records the initial activation/history boundary, so initial current inspection has no pending edits, no active-to-current diff and no commits awaiting activation. Backend-owned bootstrap baselines are already active; subsequent changes retain normal user acceptance and idle activation requirements. Reopening does not reset pending files or activate them.

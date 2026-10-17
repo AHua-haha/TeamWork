@@ -69,7 +69,7 @@ test('workspace endpoints register workspaces and serve project files', () => wi
   const directory = join(folder, 'project');
   const created = await call('/workspaces', { method: 'POST', data: { workspaceId: 'demo', name: 'Demo', directory, models: testModels(), adopt: false }, status: 201 });
   assert.equal(created.directory, directory);
-  assert.equal(created.context.seq, 0);
+  assert.equal(created.context.seq, 1);
   assert.deepEqual((await call('/workspaces')).workspaces.map((item: Body) => item.workspaceId), ['demo']);
   assert.equal((await call('/workspaces/demo')).name, 'Demo');
   assert.equal((await call('/workspaces', { method: 'POST', data: { workspaceId: 'again', name: 'Again', directory, models: testModels(), adopt: true }, status: 409 })).error.code, 'workspace_exists');
@@ -84,7 +84,7 @@ test('workspace endpoints register workspaces and serve project files', () => wi
   assert.equal((await call('/workspaces/demo/files/file?path=src/main.ts', { method: 'PUT', data: { content: 'x' }, status: 400 })).error.code, 'invalid_input');
   await writeFile(join(directory, 'image.bin'), Buffer.from([0xff, 0xfe, 0x00]));
   assert.equal((await call('/workspaces/demo/files/file?path=image.bin', { status: 415 })).error.code, 'unsupported_file');
-  assert.equal((await call('/workspaces/demo/files/file?path=.context/user', { status: 400 })).error.code, 'invalid_path');
+  assert.equal((await call('/workspaces/demo/files/file?path=.rsi/context/user', { status: 400 })).error.code, 'invalid_path');
   assert.deepEqual((await call('/workspaces/demo/files/tree?depth=2')).entries.map((entry: Body) => entry.path), ['image.bin', 'src', 'src/main.ts']);
   assert.equal((await call('/workspaces/demo/files/tree?depth=0', { status: 400 })).error.code, 'invalid_input');
   assert.equal((await call('/workspaces/demo/files/tree?deep=1', { status: 400 })).error.code, 'invalid_input');
@@ -94,7 +94,7 @@ test('workspace endpoints register workspaces and serve project files', () => wi
 test('workspace endpoints edit the context base and stream its changes', () => withServer(async (call, server, folder) => {
   await call('/workspaces', { method: 'POST', data: { workspaceId: 'demo', name: 'Demo', directory: join(folder, 'project'), models: testModels(), adopt: false }, status: 201 });
   const created = await call('/workspaces/demo/context/file?path=user/notes/a.md', { method: 'PUT', data: { content: '# A\nalpha', baseRevision: null, reason: 'start' }, status: 201 });
-  assert.equal(created.seq, 1);
+  assert.equal(created.seq, 2);
   assert.equal((await call('/workspaces/demo/context/file?path=agent/plan.md', { method: 'PUT', data: { content: 'x', baseRevision: null }, status: 403 })).error.code, 'read_only');
   assert.equal((await call('/workspaces/demo/context/file?path=user/notes/a.md', { method: 'PUT', data: { content: 'late', baseRevision: null }, status: 409 })).error.code, 'file_exists');
   const read = await call('/workspaces/demo/context/file?path=user/notes/a.md');
@@ -103,23 +103,23 @@ test('workspace endpoints edit the context base and stream its changes', () => w
 
   const moved = await call('/workspaces/demo/context/move', { method: 'POST', data: { from: 'user/notes', to: 'user/archive', reason: 'tidy' } });
   assert.deepEqual(moved.moved.map((item: Body) => [item.from, item.to]), [['user/notes/a.md', 'user/archive/a.md']]);
-  assert.equal(moved.seq, 2);
-  assert.deepEqual((await call('/workspaces/demo/context/tree?path=user&depth=2')).entries.map((entry: Body) => entry.path), ['user/archive', 'user/archive/a.md']);
+  assert.equal(moved.seq, 3);
+  assert.deepEqual((await call('/workspaces/demo/context/tree?path=user&depth=2')).entries.map((entry: Body) => entry.path), ['user/archive', 'user/archive/a.md', 'user/design.json']);
   assert.deepEqual((await call('/workspaces/demo/context/find?q=a.md')).paths, ['user/archive/a.md']);
   assert.deepEqual((await call('/workspaces/demo/context/search?q=ALPHA')).matches, [{ path: 'user/archive/a.md', line: 2, text: 'alpha' }]);
   const history = await call('/workspaces/demo/context/history?path=user/archive/a.md&limit=1');
-  assert.deepEqual([history.versions.map((version: Body) => version.action), history.next], [['move'], 2]);
+  assert.deepEqual([history.versions.map((version: Body) => version.action), history.next], [['move'], 3]);
   assert.equal((await call(`/workspaces/demo/context/file?revision=${created.revision}`)).current, false);
   assert.deepEqual((await call('/workspaces/demo/context/delete', { method: 'POST', data: { path: 'user/archive/a.md', baseRevision: moved.moved[0].revision } })).deleted, ['user/archive/a.md']);
-  assert.equal((await call('/workspaces/demo/context')).seq, 3);
+  assert.equal((await call('/workspaces/demo/context')).seq, 4);
 
   const changes = await call('/workspaces/demo/context/changes?after=1&limit=1');
-  assert.deepEqual([changes.records.map((record: Body) => record.seq), changes.seq, changes.more], [[2], 3, true]);
+  assert.deepEqual([changes.records.map((record: Body) => record.seq), changes.seq, changes.more], [[2], 4, true]);
   assert.equal((await call('/workspaces/demo/context/changes?after=-1', { status: 400 })).error.code, 'invalid_input');
   assert.equal((await call('/workspaces/demo/context/follow?after=9', { status: 409 })).error.code, 'invalid_cursor');
   const response = await send(server, '/workspaces/demo/context/follow?after=1');
   assert.equal(response.headers['content-type'], 'text/event-stream; charset=utf-8');
-  assert.deepEqual((await events(response, 'sync')).map(event => [event.type, event.data.workspaceId, event.data.record?.seq ?? event.data.seq]), [['record', 'demo', 2], ['record', 'demo', 3], ['sync', 'demo', 3]]);
+  assert.deepEqual((await events(response, 'sync')).map(event => [event.type, event.data.workspaceId, event.data.record?.seq ?? event.data.seq]), [['record', 'demo', 2], ['record', 'demo', 3], ['record', 'demo', 4], ['sync', 'demo', 4]]);
 }));
 
 test('workspace model endpoints support validated revision-checked settings and require models on creation', () => withServer(async (call, _server, folder) => {
@@ -143,7 +143,7 @@ test('read-only design endpoints discover current designs and explain invalid me
   await call('/workspaces/designs/context/file?path=user/bad.json', { method: 'PUT', status: 201, data: { content: '{"content":"Bad"}', baseRevision: null } });
   const catalog = await call('/workspaces/designs/designs');
   assert.equal(catalog.truncated, false);
-  assert.deepEqual(catalog.designs.map((item: Body) => [item.path, item.implementation]), [['user/design/backend.json', ['backend/src']]]);
+  assert.deepEqual(catalog.designs.map((item: Body) => [item.path, item.implementation]), [['user/design.json', []], ['user/design/backend.json', ['backend/src']]]);
   const selected = await call('/workspaces/designs/designs/file?path=user/design/backend.json');
   assert.deepEqual(selected.design, record);
   assert.equal(selected.designIssue, null);

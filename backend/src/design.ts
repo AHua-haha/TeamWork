@@ -12,7 +12,7 @@ export interface ResolvedDesign extends DesignPart { path: string; revision: str
 
 export function designPath(value: unknown): string {
   if (typeof value !== 'string') throw new AppError('invalid_input', 'A design reference is a path');
-  const path = contextPath(value.replace(/^\.context\//, ''));
+  const path = contextPath(value.replace(/^\.rsi\/context\//, ''));
   if (!path.startsWith('user/')) throw new AppError('read_only', 'The user design belongs in user context', 403);
   return path;
 }
@@ -20,7 +20,7 @@ export function designPath(value: unknown): string {
 export function implementationPath(value: unknown): string {
   if (typeof value !== 'string') throw new AppError('invalid_path', 'An implementation reference is a project path');
   if (value === '.') return value;
-  if (value.toLowerCase() === '.team' || value.toLowerCase().startsWith('.team/')) throw new AppError('invalid_path', '.team is reserved for member configuration');
+  if (value.toLowerCase() === '.rsi' || value.toLowerCase().startsWith('.rsi/')) throw new AppError('invalid_path', '.rsi is reserved for backend-managed state');
   return projectPath(value.replace(/\/+$/, '')).join('/');
 }
 
@@ -51,7 +51,7 @@ export class DesignService {
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   }
   private async file(workspaceId: string, path: string): Promise<ContextFile> {
-    const accepted = await (await this.history(workspaceId))?.acceptedDesign(`.context/${path}`);
+    const accepted = await (await this.history(workspaceId))?.acceptedDesign(`.rsi/context/${path}`);
     if (accepted) {
       if (accepted.content === null) throw new AppError('not_found', 'This design was deleted in its accepted history', 404);
       return { path, content: accepted.content, size: Buffer.byteLength(accepted.content), revision: accepted.state.revision, updatedAt: accepted.state.time, current: true, author: { type: 'user' }, reason: accepted.state.message };

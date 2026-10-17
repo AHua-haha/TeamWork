@@ -96,3 +96,8 @@ activateMembers serializes with publishChat on the workspace row, validates the 
 ## Configuration activation tracking
 
 Add member_activation state keyed by workspace ID. Read it through TeamStore and update it inside activateMembers after checking the expected previous activation revision. The same transaction stores all member/source changes and the marker, so process restart retains the inspection history boundary without filesystem/database dual writes. Existing databases acquire the table through the current idempotent schema initializer.
+
+
+## Workspace bootstrap transaction
+
+createWorkspace accepts prepared bootstrap activation/context state and persists both before commit. writeContext contains the shared context mutation body for both bootstrap and normal context commits; it runs on the caller's transaction connection. Filesystem preparation/rollback is owned by WorkspaceService. The administrative reset module owns ordered dependent-table deletion and provider/config preservation, using MySqlStore ownership and one transactional connection. The SQL integration suite injects a bootstrap context insert failure and reset foreign-key failure to verify rollback and source-file preservation.

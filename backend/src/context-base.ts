@@ -3,6 +3,7 @@ import { watch, type Dirent, type FSWatcher } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { Changes } from './changes.js';
+import type { WorkspaceBootstrap } from './workspace-bootstrap.js';
 import type { NewMember } from './team.js';
 import type { WorkspaceModels, StoredWorkspaceModels } from './workspace-models.js';
 import { decodeText, encodeText, maxFileBytes, missing, sha256 } from './text.js';
@@ -59,7 +60,7 @@ export interface ContextStore {
   listWorkspaces(): Promise<WorkspaceRecord[]>;
   getWorkspace(workspaceId: string): Promise<WorkspaceRecord | null>;
   /** Stores the workspace and its team's lead together, or neither. Fails with 409 `workspace_exists` for a duplicate ID or directory key. */
-  createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember, models?: WorkspaceModels): Promise<void>;
+  createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember, models?: WorkspaceModels, bootstrap?: WorkspaceBootstrap): Promise<void>;
   getWorkspaceModels(workspaceId: string): Promise<StoredWorkspaceModels | null>;
   saveWorkspaceModels(workspaceId: string, revision: number | null, value: WorkspaceModels, initializeLead: boolean): Promise<StoredWorkspaceModels>;
   loadContext(workspaceId: string): Promise<{ seq: number; files: IndexedFile[] }>;
@@ -228,7 +229,7 @@ class DiskChange {
 interface DiskFile { path: string; key: string; size: number; mtimeMs: number }
 
 /**
- * One workspace's context base. Current files are the files under `.context/` on disk, and the store
+ * One workspace's context base. Current files are the files under `.rsi/context/` on disk, and the store
  * holds every version and change record. Operations run one at a time; each first records the
  * changes made outside the application.
  */
@@ -251,7 +252,7 @@ export class ContextBase {
   private constructor(private readonly store: ContextStore, workspace: WorkspaceRecord) {
     this.workspaceId = workspace.workspaceId;
     this.root = workspace.directory;
-    this.contextDir = join(workspace.directory, '.context');
+    this.contextDir = join(workspace.directory, '.rsi/context');
     this.roots = categories.map(category => join(this.contextDir, category));
   }
 
@@ -609,12 +610,16 @@ export class ContextBase {
     }
     let ino: number;
     try {
-      for (const root of this.roots) await mkdir(root, { recursive: true });
+      for (const root of [join(this.root, '.rsi'), this.contextDir, ...this.roots]) {
+        try {
+          const info = await lstat(root);
+          if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('not a real folder');
+        } catch (error) { if (!missing(error)) throw error; await mkdir(root); }
+      }
       const info = await lstat(this.contextDir);
-      for (const root of [this.contextDir, ...this.roots]) if (!(await lstat(root)).isDirectory()) throw new Error('not a folder');
       ino = info.ino;
     } catch {
-      throw unavailable('has no usable .context folder');
+      throw unavailable('has no usable .rsi/context folder');
     }
     this.watch(ino);
 

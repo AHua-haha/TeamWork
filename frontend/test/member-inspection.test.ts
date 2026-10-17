@@ -40,7 +40,7 @@ test('unified diff parsing preserves independent line numbers, multiple hunks, l
   assert.deepEqual(lines.filter(l => l.kind === 'add').map(l=>l.after),[5,6,21]);
   assert.equal(lines.find(l=>l.kind==='add')!.text,'<script>alert(1)</script>');
   assert.equal(diffLines('Binary files a/file and b/file differ\n')[0]!.kind,'note');
-  const html = renderToStaticMarkup(createElement(ConfigurationDiff,{files:[{path:'.team/members/backend/member.json',action:'modify',patch,truncated:false}],selected:null,onSelect(){}}));
+  const html = renderToStaticMarkup(createElement(ConfigurationDiff,{files:[{path:'.rsi/members/backend/member.json',action:'modify',patch,truncated:false}],selected:null,onSelect(){}}));
   assert.match(html,/Changed files/); assert.match(html,/Unified diff/); assert.match(html,/&lt;script&gt;/);
   assert.ok(!html.includes('<script>')); assert.ok(!html.includes('Configuration operations')); assert.ok(!html.includes('<details'));
 });

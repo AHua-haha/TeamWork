@@ -79,7 +79,7 @@ export class TeamSystem {
     return this.runner.workspaceOperation(workspaceId, async () => {
       if (origin === 'committed') return this.configuration.review(workspaceId);
       const lead = (await this.service.active(workspaceId)).find(m => m.value.lead)!;
-      return this.configuration.validate(lead.id, '.team/members');
+      return this.configuration.validate(lead.id, '.rsi/members');
     });
   }
   activateConfiguration(workspaceId: string, revision: string, digest: string) {

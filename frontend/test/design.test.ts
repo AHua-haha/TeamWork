@@ -32,7 +32,7 @@ test('dependency mappings take precedence on equal, ancestor, and whole-project 
 test('discussion references add only a named reference to user input and never include stored design content', () => {
   const ref = { kind: 'design' as const, path: design.path };
   assert.equal(referenceLabel(ref), 'Design · user/design/api.json');
-  assert.equal(discussionInput('Please clarify the API.', ref), 'Regarding design .context/user/design/api.json:\n\nPlease clarify the API.');
+  assert.equal(discussionInput('Please clarify the API.', ref), 'Regarding design .rsi/context/user/design/api.json:\n\nPlease clarify the API.');
   assert.equal(discussionInput('My draft', null), 'My draft');
   assert.equal(discussionInput('Change responsibility', { kind: 'member', memberId: 'm1', name: 'Backend' }), 'Regarding team member Backend (member ID m1):\n\nChange responsibility');
 });

@@ -7,7 +7,7 @@ export function memberTree(designs: readonly DesignSummary[], members: readonly 
   const nodes = new Map<string, MemberTreeNode>(), roots: MemberTreeNode[] = [];
   const paths = new Set([...designs.map(d => d.path), ...members.flatMap(m => m.harness.designScope.working)]);
   for (const path of paths) {
-    const parts = path.replace(/^\.context\//, '').split('/');
+    const parts = path.replace(/^\.rsi\/context\//, '').split('/');
     if (parts[0] === 'user') parts.shift();
     let parent = roots, prefix = 'user';
     for (const [index, name] of parts.entries()) {

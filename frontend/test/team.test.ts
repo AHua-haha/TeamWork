@@ -15,7 +15,7 @@ const member = (patch: Partial<Member> = {}): Member => ({
 
 test('the team client reads roster and consolidated member inspection without a member write API', async () => {
   const calls: { path: string; method: string }[] = [];
-  const inspection = { member: member(), configuration: { path: '.team/members/lead/member.json', files: { 'member.json': '{}', 'prompts/member.md': 'Be brief' }, digest: 'digest', submittedBy: 'user', submittedAt: 1 }, harnesses: [{ id: 'project', tools: ['read'], parts: [], prompt: 'Fixed rules' }] };
+  const inspection = { member: member(), configuration: { path: '.rsi/members/lead/member.json', files: { 'member.json': '{}', 'prompts/member.md': 'Be brief' }, digest: 'digest', submittedBy: 'user', submittedAt: 1 }, harnesses: [{ id: 'project', tools: ['read'], parts: [], prompt: 'Fixed rules' }] };
   const api = new WorkspaceClient((async (input, init) => {
     calls.push({ path: String(input), method: init?.method ?? 'GET' });
     return new Response(JSON.stringify(String(input).endsWith('/team') ? { workspaceId: 'w 1', members: [member()] } : inspection));

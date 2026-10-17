@@ -14,7 +14,7 @@ Backend-maintained management/member Markdown rules are updated to explain creat
 
 ## Decisions and constraints
 
-No agent activation or implicit acceptance from conversation/run completion. Existing model discovery stays read-only. Supplementary member prompts are editable; fixed base rules remain backend-owned. Deleted workers retain their prior history/files. validate_member_config accepts only a path naming .team/members, contributes no activation authority and is assembled only for the lead. Member JSON examples and maintenance rules live in management-members.md; MemberContext supplies current member locations. Frontend activation presentation remains separate.
+No agent activation or implicit acceptance from conversation/run completion. Existing model discovery stays read-only. Supplementary member prompts are editable; fixed base rules remain backend-owned. Deleted workers retain their prior history/files. validate_member_config accepts only a path naming .rsi/members, contributes no activation authority and is assembled only for the lead. Member JSON examples and maintenance rules live in management-members.md; MemberContext supplies current member locations. Frontend activation presentation remains separate.
 
 ## Code map
 

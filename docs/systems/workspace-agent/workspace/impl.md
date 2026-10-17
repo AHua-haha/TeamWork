@@ -27,9 +27,9 @@
    - a new project requires a missing path or an empty folder, and resolves the real path of its nearest existing parent;
 3. compares the planned path, without letter case, with every registered directory, in both directions;
 4. creates the folder for a new project;
-5. stores the record, together with the workspace's lead from `newLead`, in one store call: the SHA-256 of the lower-cased real path is its directory key, whose unique key also stops another process from registering the same directory at the same time, and the lead's record is initialized from the validated workspace default. The store registers workspace, model settings and lead in one transaction.
+5. creates the .rsi bootstrap files, lead worktree and scoped baseline; then stores the record, together with the workspace's lead from `newLead`, in one store call: the SHA-256 of the lower-cased real path is its directory key, whose unique key also stops another process from registering the same directory at the same time, and the lead's record is initialized from the validated workspace default. The store registers workspace, model settings, lead, activation marker and initial context record in one transaction.
 
-Model choices/default and provider parameters are validated before any directory creation. If storing fails, the folder the service created is removed, and no workspace, model record or lead is left. The response is `get`, which opens the context base and returns its overview.
+Model choices/default and provider parameters are validated before any directory creation. If storing fails, the managed root and any project folder this attempt created are removed, and no workspace, model record or lead is left. The response is `get`, which opens the context base using its already stored initial design version and returns its overview.
 
 **Opening context bases.** The first request for a workspace starts `ContextBase.open` and caches the pending result, so concurrent requests share one open. A failed open is removed from the cache, so the next request tries again, for example after a missing folder returns.
 
@@ -82,3 +82,14 @@ workspace-models.ts owns the strict model-list/default shape and projects a sele
 Startup initializes missing legacy workspace_models once from active members' selected models in lead-first order, retaining selected per-model options; no selections yield an empty repairable record. Existing records are never overwritten by discovery. Model records are read independently of context files and worktree creation.
 
 [Workspace models](../../../../backend/src/workspace-models.ts), [model tests](../../../../backend/test/workspace-models.test.ts), [HTTP tests](../../../../backend/test/workspace-routes.test.ts), and [SQL integration](../../../../backend/test/integration/backend.test.ts) cover invalid input without side effects, atomic lead initialization, conflicts, preservation and reopen durability.
+
+
+## Bootstrap coordination
+
+A workspace layout module owns filesystem paths and a bootstrap helper creates the managed root, root design and exact lead bundle, then initializes the lead's private worktree and scoped history. WorkspaceService performs model/path/overlap validation first, runs bootstrap before registry storage, and rolls its files back on failure. The store registers workspace, models, lead and bootstrap activation marker in one transaction. ContextBase opens the already persisted initial design index through its existing logical user/agent API. Harness snapshots explicitly exclude private storage to prevent recursion and disclosure. Project files hide the managed root; harness file/Bash policy protects private metadata and only exposes authorized management paths.
+
+Verification covers new/adopted workspace, immediate root-design/member inspection, no pending bootstrap edits, default model, empty implementation permissions, restarts, collision/symlink refusal, failure rollback and implementation preservation. The local cleanup uses a stopped backend, its database ownership lock and explicit workspace-managed paths; provider records and credentials are retained.
+
+[Bootstrap](../../../../backend/src/workspace-bootstrap.ts) prepares files/history and the initial ContextCommit. [Layout](../../../../backend/src/workspace-layout.ts) names the managed paths. [Administrative reset](../../../../backend/src/workspace-reset.ts) and its CLI preserve all non-agent config records, acquire the runtime ownership lock, quarantine explicit managed paths, delete dependent runtime records in one transaction, restore quarantined paths on failure, then remove them after commit. No HTTP or agent reset operation exists. [Bootstrap tests](../../../../backend/test/workspace-bootstrap.test.ts) and disposable MySQL reset tests verify those effects and exclusions.
+
+The reset discovers which known application tables exist so it can clear earlier prototype schemas without first migrating them. Unknown dependent tables cause transaction refusal and file restoration rather than disabling foreign-key checks. Provider records are not rewritten or decrypted.

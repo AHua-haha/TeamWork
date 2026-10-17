@@ -2,7 +2,7 @@
 
 ## Contract
 
-[Context base design](design.md). Current files are the files under `.context/user/` and `.context/agent/` in the workspace folder. The store holds the index of current files, every version, the content of every version, and the change records. The [Workspace module](../workspace/design.md) registers workspaces and opens each workspace's context base; the [database](../../database/design.md) stores its data.
+[Context base design](design.md). Current files are the files under `.rsi/context/user/` and `.rsi/context/agent/` in the workspace folder. The store holds the index of current files, every version, the content of every version, and the change records. The [Workspace module](../workspace/design.md) registers workspaces and opens each workspace's context base; the [database](../../database/design.md) stores its data.
 
 ## Responsibilities and decomposition
 
@@ -44,8 +44,8 @@ Reading a version by revision, `changes`, and `follow` read the store only and d
 **New paths.** A new path keeps the spelling of folders that already exist on disk. It fails with `file_exists` when the target exists, or when an existing ancestor is not a folder, has an invalid name, or has a duplicate that differs only in case. A move whose source and target differ only in case renames the last segment in place.
 
 **Reconcile.**
-1. Check that the workspace folder exists, then create the category folders and check that `.context` and both categories are real folders. Otherwise fail with 503 `workspace_unavailable`.
-2. Start the watcher if none is running on the current `.context` folder.
+1. Check that the workspace folder exists, then create the category folders and check that `.rsi/context` and both categories are real folders. Otherwise fail with 503 `workspace_unavailable`.
+2. Start the watcher if none is running on the current `.rsi/context` folder.
 3. Scan both categories. Dot entries are skipped. Names that differ only in case, invalid names or paths, special entries, and files over 1 MiB become problems; invalid folders are not walked.
 4. Compare each remaining file with the index:
    - unchanged path, size, and modification time: skip;
@@ -54,7 +54,7 @@ Reading a version by revision, `changes`, and `follow` read the store only and d
    - the same content hash: only update the stored modification time in memory.
 5. Build one `Batch` authored by `external`: a delete for every indexed file that is no longer served, an update for changed content at the same path, and a delete plus a create when the spelling differs. A non-empty batch commits like any other change.
 
-**Watcher.** A recursive watcher on `.context` schedules a reconcile 150 ms after the last event. The scheduled reconcile runs in the queue like an operation. The watcher and its timer do not keep the process alive. If the watcher fails or cannot start, the next reconcile starts it again; until then each operation still reconciles first.
+**Watcher.** A recursive watcher on `.rsi/context` schedules a reconcile 150 ms after the last event. The scheduled reconcile runs in the queue like an operation. The watcher and its timer do not keep the process alive. If the watcher fails or cannot start, the next reconcile starts it again; until then each operation still reconciles first.
 
 **Follow.**
 1. Read the notification version, then send the stored records from the cursor up to the current `seq`, at most 500 per read. A missing or out-of-order record fails with `corrupt_data`.

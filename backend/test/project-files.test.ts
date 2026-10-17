@@ -11,7 +11,7 @@ const code = (expected: string) => (error: unknown) => (error as { code?: string
 async function project(folder: string): Promise<ProjectFiles> {
   await mkdir(join(folder, 'src', 'lib'), { recursive: true });
   await mkdir(join(folder, '.git'));
-  await mkdir(join(folder, '.context', 'user'), { recursive: true });
+  await mkdir(join(folder, '.rsi/context', 'user'), { recursive: true });
   await writeFile(join(folder, 'README.md'), '# Project\n');
   await writeFile(join(folder, '.env.example'), 'KEY=\n');
   await writeFile(join(folder, 'src', 'main.ts'), 'main();\n');
@@ -24,7 +24,7 @@ async function project(folder: string): Promise<ProjectFiles> {
 test('project paths reject traversal and the reserved folders', () => {
   assert.deepEqual(projectPath('src/main.ts'), ['src', 'main.ts']);
   assert.deepEqual(projectPath('', true), []);
-  for (const path of ['', '../x', 'a/./b', 'a//b', 'a\\b', 'c:x', '.git/HEAD', '.Context/user/a.md']) assert.throws(() => projectPath(path), code('invalid_path'), path);
+  for (const path of ['', '../x', 'a/./b', 'a//b', 'a\\b', 'c:x', '.git/HEAD', '.RSI/context/user/a.md']) assert.throws(() => projectPath(path), code('invalid_path'), path);
 });
 
 test('the tree lists files and folders breadth-first without .git or .context', () => withFolder(async folder => {

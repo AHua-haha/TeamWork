@@ -103,11 +103,11 @@ export async function executeBash(environment: BashEnvironment): Promise<Command
     await writeFile(join(area, 'git.mjs'), proxy.split('\n').slice(1).join('\n'), { mode: 0o400 });
     await writeFile(join(area, 'git'), `#!/bin/bash\nexec ${quote(process.execPath)} ${quote(join(area, 'git.mjs'))} "$@"\n`, { mode: 0o500 });
     const atRoot = (path: string) => path === '.' ? root : join(root, path);
-    const protectedPaths = ['.git', '.context', '.team', ...environment.readonly].map(atRoot);
+    const protectedPaths = ['.git', '.rsi', ...environment.readonly].map(atRoot);
     const config: SandboxRuntimeConfig = {
       network: { allowedDomains: [], deniedDomains: [], allowUnixSockets: [socketPath], allowAllUnixSockets: process.platform === 'linux' },
       filesystem: {
-        denyRead: ['/', ...['.git', '.context', '.team'].map(atRoot)],
+        denyRead: ['/', ...['.git', '.rsi'].map(atRoot)],
         allowRead: ['/bin', '/usr', '/sbin', '/System', '/Library', '/private/etc', '/etc', '/dev', dirname(dirname(process.execPath)), area, ...environment.readable.map(atRoot)],
         allowWrite: [scratch, ...environment.writable.map(atRoot)],
         denyWrite: protectedPaths,

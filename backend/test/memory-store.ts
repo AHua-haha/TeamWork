@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/context-base.js';
+import type { WorkspaceBootstrap } from '../src/workspace-bootstrap.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../src/team.js';
 import { randomUUID } from 'node:crypto';
 import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/group-chat.js';
@@ -121,13 +122,20 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     return this.workspaces.get(workspaceId)?.record ?? null;
   }
 
-  async createWorkspace(record: WorkspaceRecord, key: string, lead: NewMember, models?: WorkspaceModels): Promise<void> {
+  async createWorkspace(record: WorkspaceRecord, key: string, lead: NewMember, models?: WorkspaceModels, bootstrap?: WorkspaceBootstrap): Promise<void> {
     if (this.workspaces.has(record.workspaceId) || [...this.workspaces.values()].some(stored => stored.key === key)) throw new AppError('workspace_exists', 'A workspace with this ID or folder already exists', 409);
+    const members = structuredClone(this.members), contexts = structuredClone(this.agentContexts), delivery = structuredClone(this.delivery), ordinal = this.ordinal;
     this.workspaces.set(record.workspaceId, { record, key, seq: 0, blobs: new Map(), versions: [], files: new Map(), records: [] });
-    try { await this.createMember(lead); if (models) this.workspaceModels.set(record.workspaceId, { revision: 0, value: structuredClone(models) }); }
+    try { await this.createMember(lead); if (models) this.workspaceModels.set(record.workspaceId, { revision: 0, value: structuredClone(models) });
+      if (bootstrap) { await this.commitContext(record.workspaceId, 0, bootstrap.context); this.memberActivations.set(record.workspaceId, structuredClone(bootstrap.activation)); }
+    }
     catch (error) {
       // Like the real store's transaction: a workspace is never stored without its lead.
       this.workspaces.delete(record.workspaceId);
+      this.workspaceModels.delete(record.workspaceId); this.memberActivations.delete(record.workspaceId);
+      this.members.clear(); for (const [key,value] of members) this.members.set(key,value);
+      this.agentContexts.clear(); for (const [key,value] of contexts) this.agentContexts.set(key,value);
+      this.delivery.clear(); for (const [key,value] of delivery) this.delivery.set(key,value); this.ordinal = ordinal;
       throw error;
     }
   }

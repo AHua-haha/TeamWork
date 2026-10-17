@@ -7,3 +7,4 @@ output/playwright/
 !.env.example
 .test-mysql.env
 .run/
+.rsi/

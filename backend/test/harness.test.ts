@@ -12,8 +12,8 @@ const git = (scope: string, command: string) => ({ command, metadata: { git: { s
 
 test('assignment accepts design references only and never agent-owned implementation paths or authority metadata', () => {
   assert.deepEqual(designPart({content:'Design',implementation:['backend/']}),{content:'Design',implementation:['backend']});
-  for (const path of ['../outside','.context/user/design.json','.git/config','.team/members']) assert.throws(()=>designPart({content:'x',implementation:[path]}));
-  const value={...emptyHarness(),designScope:{working:['.context/user/api.json'],dependencies:['user/contracts.json']},allowedCommands:[{kind:'exact',argv:['bash','-c','npm test']}]};
+  for (const path of ['../outside','.rsi/context/user/design.json','.git/config','.rsi/members']) assert.throws(()=>designPart({content:'x',implementation:[path]}));
+  const value={...emptyHarness(),designScope:{working:['.rsi/context/user/api.json'],dependencies:['user/contracts.json']},allowedCommands:[{kind:'exact',argv:['bash','-c','npm test']}]};
   assert.equal(harnessConfig(value).designScope.working[0],'user/api.json');
   assert.throws(()=>harnessConfig({...value,implementationScope:{paths:['.'],usePaths:[]}}));
   assert.throws(()=>harnessConfig({...value,designScope:{working:['user/a'],dependencies:['user/A']}}));
@@ -25,7 +25,7 @@ test('assignment accepts design references only and never agent-owned implementa
 test('implementation access derives from accepted mappings; pending files do not expand it',()=>withTeam(async f=>{
   const member=await worker(f,'Backend',['src']);
   const files=await f.team.harness.files(member.memberId);
-  const path=join(files.root,'.context',member.harness.designScope.working[0]!);
+  const path=join(files.root,'.rsi/context',member.harness.designScope.working[0]!);
   await files.write.writeFile(path,JSON.stringify({content:'Pending',implementation:['outside']}));
   await assert.rejects(files.write.writeFile(join(files.root,'outside/x'),'no'),code('not_found'));
   const prepared=await f.team.harness.prepare(member.memberId,[]);
@@ -82,9 +82,9 @@ test('Bash and nested processes cannot write management files, inspect peers, or
   const files=await f.team.harness.files(member.memberId),leadRoot=(await f.team.harness.environment(f.lead.memberId)).root;
   const leadManifest=(await f.team.configuration.accepted(f.workspaceId,f.lead.memberId)).path;
   const node=JSON.stringify(process.execPath);
-  const attempt=await f.team.harness.bash(member.memberId,{command:`${node} -e 'require("fs").writeFileSync(".context/${member.harness.designScope.working[0]}","escape")'`},signal());
+  const attempt=await f.team.harness.bash(member.memberId,{command:`${node} -e 'require("fs").writeFileSync(".rsi/context/${member.harness.designScope.working[0]}","escape")'`},signal());
   assert.notEqual(attempt.exitCode,0);assert.match(attempt.stderr,/permitted|EACCES|EPERM|denied/i);
-  const hardlink=await f.team.harness.bash(member.memberId,{command:`ln .context/${member.harness.designScope.working[0]} alias.json && printf escape > alias.json`},signal());
+  const hardlink=await f.team.harness.bash(member.memberId,{command:`ln .rsi/context/${member.harness.designScope.working[0]} alias.json && printf escape > alias.json`},signal());
   assert.notEqual(hardlink.exitCode,0,'hard links cannot make protected management writable');
   const read=await f.team.harness.bash(member.memberId,{command:`cat ${JSON.stringify(join(leadRoot,leadManifest))}`},signal());
   assert.notEqual(read.exitCode,0,'peer member source cannot be read');
@@ -99,7 +99,8 @@ test('accepted design Git commits become authoritative for permission derivation
   const member=await worker(f,'Backend',['old']);
   const lead=await f.team.harness.files(f.lead.memberId);
   const designPath=member.harness.designScope.working[0]!;
-  await lead.write.writeFile(join(lead.root,'.context',designPath),JSON.stringify({content:'New accepted design',implementation:['new']}));
+  await lead.write.mkdir(join(lead.root,'.rsi/context/user/design'));
+  await lead.write.writeFile(join(lead.root,'.rsi/context',designPath),JSON.stringify({content:'New accepted design',implementation:['new']}));
   const review=(await f.team.harness.inspect(f.lead.memberId)).parts.find(p=>p.state.part.id==='design')!;
   await f.team.harness.commit(f.lead.memberId,'design','Accept new mapping',{type:'user',memberId:f.lead.memberId},review.revision,review.state.committed);
   assert.deepEqual((await f.team.service.get(f.workspaceId,member.memberId)).harness.implementationScope.paths,['new']);
@@ -125,7 +126,7 @@ test('independent scope staging survives implementation commits and dependency f
   await f.team.designs.save(f.workspaceId,'user/dependency.json',{content:'Read only',implementation:['src/shared']},null,'Dependency',{type:'lead',memberId:f.lead.memberId,runId:'fixture'});
   await configureHarness(f,'Backend',{designScope:{working:member.harness.designScope.working,dependencies:['user/dependency.json']},allowedCommands:[{kind:'executable',executable:'bash'}]});
   const files=await f.team.harness.files(member.memberId);
-  const design=join(files.root,'.context',member.harness.designScope.working[0]!);
+  const design=join(files.root,'.rsi/context',member.harness.designScope.working[0]!);
   await files.write.writeFile(design,JSON.stringify({content:'Pending',implementation:['src']}));
   await files.write.mkdir(join(files.root,'src'));await files.write.writeFile(join(files.root,'src/a.txt'),'Own implementation');
   assert.equal((await f.team.harness.bash(member.memberId,git('design','git add .'),signal())).exitCode,0);
@@ -133,7 +134,7 @@ test('independent scope staging survives implementation commits and dependency f
   assert.equal(committed.exitCode,0,committed.stderr);
   const staged=await f.team.harness.bash(member.memberId,git('design','git diff --cached'),signal());
   assert.match(staged.stdout,/Pending/);assert.doesNotMatch(staged.stdout,/Own implementation/);
-  const read=await f.team.harness.bash(member.memberId,{command:'cat .context/user/dependency.json'},signal());
+  const read=await f.team.harness.bash(member.memberId,{command:'cat .rsi/context/user/dependency.json'},signal());
   assert.equal(read.exitCode,0,read.stderr);assert.match(read.stdout,/Read only/);
   const write=await f.team.harness.bash(member.memberId,{command:'mkdir -p src/shared && printf escape > src/shared/x.txt'},signal());
   assert.notEqual(write.exitCode,0);
@@ -151,4 +152,13 @@ test('scoped Git rejects stale commits and explicitly restores latest accepted s
   await bf.write.writeFile(join(bf.root,'src/a.txt'),'Second');
   const fresh=await f.team.harness.bash(b.memberId,git('implementation','git add . && git commit -m "Second"'),signal());assert.equal(fresh.exitCode,0,fresh.stderr);
   assert.equal(await readFile(join(af.root,'src/a.txt'),'utf8'),'First');
+}));
+
+test('a file-sized implementation scope stages and commits inside the managed worktree',()=>withTeam(async f=>{
+  const member=await worker(f,'File Worker',['src/result.txt']);
+  const files=await f.team.harness.files(member.memberId);
+  await files.write.mkdir(join(files.root,'src')); await files.write.writeFile(join(files.root,'src/result.txt'),'Done');
+  const result=await f.team.harness.bash(member.memberId,git('implementation','git status --short && git add . && git diff --cached && git commit -m "Implement file"'),signal());
+  assert.equal(result.exitCode,0,JSON.stringify(result));
+  assert.ok((await f.team.harness.history(member.memberId,'implementation')).some(r=>r.kind==='commit' && r.actor.type==='agent'));
 }));

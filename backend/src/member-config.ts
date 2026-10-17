@@ -1,3 +1,4 @@
+import { memberRoot } from './workspace-layout.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { keys, obj, validateRunSettings } from './config.js';
@@ -18,7 +19,6 @@ export interface MemberConfigReview {
   changes: MemberChange[]; issues: { path: string; code: string; message: string }[];
 }
 interface Plan { review: MemberConfigReview; active: StoredMember[]; modelsRevision: number; activation: MemberActivationState | null; configurations: { path: string; memberId?: string; fields: MemberFields }[] }
-const memberRoot = '.team/members';
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const assignment = (scope: MemberFields['harness']['designScope']) => ({ working: scope.working.map(p => p.toLowerCase()).sort(), dependencies: scope.dependencies.map(p => p.toLowerCase()).sort() });
 const withoutPrompt = (settings: MemberFields['settings']) => { const { prompt: _prompt, ...rest } = settings; return rest; };
@@ -148,14 +148,14 @@ export class MemberConfigService {
     };
     if (origin === 'committed') {
       const selected = await environment.history.revision(revision);
-      if (selected.kind !== 'commit' || selected.actor.type !== 'user') review.issues.push({ path: memberRoot, code: 'approval_required', message: 'User must commit the member-config files before activation' });
+      if (revision !== activation?.revision && (selected.kind !== 'commit' || selected.actor.type !== 'user')) review.issues.push({ path: memberRoot, code: 'approval_required', message: 'User must commit the member-config files before activation' });
     }
     const designs = new Map<string, string>(), known = new Map(active.map(m => [m.value.configuration!.path.toLowerCase(), m]));
     const manifests = paths.filter(path => path.toLowerCase().endsWith('/member.json')), seen = new Set<string>(), resulting: MemberFields[] = [];
     for (const path of manifests) {
       try {
-        const match = /^\.team\/members\/([^/]+)\/member\.json$/.exec(path);
-        if (!match) throw new AppError('invalid_path', 'Member manifests belong at .team/members/<bundle>/member.json');
+        const match = /^\.rsi\/members\/([^/]+)\/member\.json$/.exec(path);
+        if (!match) throw new AppError('invalid_path', 'Member manifests belong at .rsi/members/<bundle>/member.json');
         identity(match[1], 'bundle');
         if (seen.has(path.toLowerCase())) throw new AppError('invalid_config', 'Duplicate member bundle ignoring case');
         seen.add(path.toLowerCase());

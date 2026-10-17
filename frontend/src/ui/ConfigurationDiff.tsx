@@ -8,9 +8,9 @@ export function ConfigurationDiff({ files, selected, onSelect }: { files: Config
   return <section className="configuration-file-review" aria-label="Configuration file changes">
     <div className="configuration-file-heading"><h3>File changes <span>{files.length}</span></h3><span>Active → current</span></div>
     {!file ? <p className="configuration-empty">Current configuration matches the active snapshot.</p> : <div className="configuration-diff-layout">
-      <nav className="configuration-file-list" aria-label="Changed files"><div className="configuration-file-root">.team/members/</div>
+      <nav className="configuration-file-list" aria-label="Changed files"><div className="configuration-file-root">.rsi/members/</div>
         {files.map(item => <button type="button" key={item.path} className={file.path === item.path ? 'selected' : ''} aria-current={file.path === item.path ? 'true' : undefined} onClick={() => onSelect(item.path)}>
-          <Glyph name="file" /><code>{item.path.replace(/^\.team\/members\//, '')}</code><span className={`file-action ${item.action}`} aria-label={item.action}>{item.action === 'add' ? 'A' : item.action === 'delete' ? 'D' : 'M'}</span>
+          <Glyph name="file" /><code>{item.path.replace(/^\.rsi\/members\//, '')}</code><span className={`file-action ${item.action}`} aria-label={item.action}>{item.action === 'add' ? 'A' : item.action === 'delete' ? 'D' : 'M'}</span>
         </button>)}
       </nav>
       <div className="configuration-text-diff" aria-label={`Diff for ${file.path}`}>

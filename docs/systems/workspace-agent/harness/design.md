@@ -10,7 +10,7 @@ Three fixed bases provide management, implementation and execute authority. The 
 
 A member assignment contains designScope: {working: [user design paths], dependencies: [user design paths]}. The lists must be disjoint, valid and resolvable. It contains no independently configurable implementationScope. Member execution rules can be configured through member files and validated under the fixed execute base policy.
 
-The lead can maintain .context/user/ and .team/members/ immediately, before any design exists. Dependencies remain read-only. Other members can edit their working designs and read dependency designs; member files are lead-only among agents. Implementation authority starts empty until accepted designs are assigned.
+The lead can maintain .rsi/context/user/ and .rsi/members/ immediately; new workspace bootstrap already supplies the root design. Dependencies remain read-only. Other members can edit their working designs and read dependency designs; member files are lead-only among agents. Implementation authority starts empty until accepted design mappings grant implementation paths.
 
 Common ls/read/write/edit tools operate on pending files. One bash tool takes {command, metadata?: {git: {scope}}}; scope is design, member-config or implementation when that member owns the part. No identity, revision, approval, repository, index or reference may be supplied through metadata.
 
@@ -30,7 +30,7 @@ Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Li
 
 Base harness rule prompts are maintained as backend-owned Markdown files, including shared rules and per-scope maintenance instructions. Runtime and inspection use those same file contents. Templates receive backend-owned worktree/command values; files cannot grant permissions or replace enforced policy. They load when the backend starts; changing source prompts requires restarting development mode or rebuilding/restarting the compiled backend. Missing or empty required prompt files fail startup rather than using hardcoded fallback rules.
 
-Tools are assembled once and all base/member prompts form the system prompt. Member files cannot override base policy. Working mappings yield writable implementation; dependency mappings yield read-only use paths. Read-only wins overlaps. Git metadata, .context and .team are excluded from implementation even for root mappings. Pending design edits grant no authority. Accepted designs are resolved at inspection, tool and request preparation; no new active-run update protocol is introduced.
+Tools are assembled once and all base/member prompts form the system prompt. Member files cannot override base policy. Working mappings yield writable implementation; dependency mappings yield read-only use paths. Read-only wins overlaps. Git metadata, .rsi/context and .rsi are excluded from implementation even for root mappings. Pending design edits grant no authority. Accepted designs are resolved at inspection, tool and request preparation; no new active-run update protocol is introduced.
 
 ### Scoped Git and stable history
 
@@ -55,7 +55,7 @@ Automatic checkpoints occur at run end, including failure/cancellation and inter
 
 User-approved design snapshots feed semantic design reads/discovery and implementation permission resolution. Pending design bytes do not. Raw original-workspace context files/history remain their existing separate review surface; accepted Git snapshots are not automatically copied into the original checkout or existing peer worktrees.
 
-Member JSON holds name, role, responsibility, settings, ordered prompt references, designScope and execute: {allowedCommands}. Backend retains identity/path association, format version, revisions and exact active source bytes separately. The lead edits and validates create/update/delete changes in files. Updates may change only responsibility, supplementary prompts and execution rules, preserving name, role, model/run settings and assignments. validate_member_config({path: ".team/members"}) reports pending create/update/delete and issues without acceptance or activation. Deliberately deleted seeded member files remain pending across materialization/restart. Delete retires and preserves history/files; lead deletion is refused. User commit accepts file bytes only. Separate user activation applies the reviewed committed change set atomically when the whole workspace team is idle. Busy/invalid/stale activation leaves all active settings unchanged; no automatic activation or activation by an agent is allowed. Uncommitted edits stay pending.
+Member JSON holds name, role, responsibility, settings, ordered prompt references, designScope and execute: {allowedCommands}. Backend retains identity/path association, format version, revisions and exact active source bytes separately. The lead edits and validates create/update/delete changes in files. Updates may change only responsibility, supplementary prompts and execution rules, preserving name, role, model/run settings and assignments. validate_member_config({path: ".rsi/members"}) reports pending create/update/delete and issues without acceptance or activation. Deliberately deleted seeded member files remain pending across materialization/restart. Delete retires and preserves history/files; lead deletion is refused. User commit accepts file bytes only. Separate user activation applies the reviewed committed change set atomically when the whole workspace team is idle. Busy/invalid/stale activation leaves all active settings unchanged; no automatic activation or activation by an agent is allowed. Uncommitted edits stay pending.
 
 ### Execution
 
@@ -85,3 +85,5 @@ Startup converts active legacy member records to backend-owned metadata and desi
 6. A user reviews design, then files change: acceptance refuses the stale revision. Accepting a current design snapshot makes its mapping visible to semantic reads and scope resolution.
 7. A lead stages member JSON/prompt changes. Agent commit is refused; user file acceptance alone does not change active member settings.
 8. A child process attempts to write a management/dependency path or open native Git metadata: the execution boundary refuses it.
+
+Private harness storage is .rsi/harness inside the managed workspace root. It is excluded from snapshots and unavailable through agent file/Bash tools and project-file APIs. Bootstrap initializes the lead design/member scopes as accepted baselines; later commits retain their user-only policy.

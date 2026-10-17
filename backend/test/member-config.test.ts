@@ -49,7 +49,7 @@ test('materialization preserves intentional deletions after seeding rather than 
   await rm(join(files.root, dirname(source.path)), { recursive: true });
   await f.team.configuration.materialize(f.lead.memberId);
   await assert.rejects(readFile(join(files.root, source.path), 'utf8'), code('ENOENT'));
-  const plan = await f.team.configuration.validate(f.lead.memberId, '.team/members');
+  const plan = await f.team.configuration.validate(f.lead.memberId, '.rsi/members');
   assert.ok(plan.changes.some(change => change.type === 'delete' && change.memberId === member.memberId));
 }));
 

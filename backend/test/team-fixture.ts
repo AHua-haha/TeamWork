@@ -141,8 +141,7 @@ export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void
       const root = await realpath(folder);
       const directory = join(root, 'project');
       const { workspaceId } = await workspaces.create({ workspaceId: 'w1', name: 'Project', directory, models: testModels(), adopt: false });
-      const first = (await team.service.team(workspaceId)).members[0]!;
-      const lead = await team.service.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: { designScope: first.harness.designScope, allowedCommands: first.harness.allowedCommands }, settings: { ...first.settings, ...ready } });
+      const lead = (await team.service.team(workspaceId)).members[0]!;
       await run({ folder: root, store, workspaces, team, runtime, workspaceId, directory, lead });
     } finally {
       team.runner.close();

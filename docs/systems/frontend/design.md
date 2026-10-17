@@ -243,3 +243,8 @@ Team provides Active members and Configuration changes views. Configuration stat
 7. A catalog is truncated or a member's assigned design cannot be read: show the issue and keep the member reachable. Opening another member or retrying inspection does not lose the workspace conversation.
 
 Narrow panels display selected full active details in place of the tree, with Close returning to the tree. Configuration review stacks its independent sections and file list/diff as space requires. Truncated patches and binary differences are identified explicitly; legacy history with an unknown activation boundary is labeled as available commits rather than exact history since activation.
+
+
+## Initialized workspace
+
+After successful create/adopt, Design already shows user/design.json and Team shows the lead assigned there (also represented at the workspace root). Initial configuration review is clean and active; bootstrap does not require the user to commit or activate it. Empty group chat remains empty. Paths in discussion references and configuration file review use the managed .rsi/context and .rsi/members layout; logical context paths remain user/... and agent/....

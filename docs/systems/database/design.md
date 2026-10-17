@@ -130,3 +130,8 @@ activateMembers(workspaceId, {expected, modelsRevision, create, update}) applies
 ## Configuration activation tracking
 
 The store retains the workspace's latest activated member-config revision/time independently of individual member source metadata. It changes atomically with member activation under the workspace lock and participates in stale-review checks, including no-member-change activations. A failed activation preserves both roster and activation marker. Existing member source snapshots remain durable and independently usable for agent execution.
+
+
+## Fresh workspace baseline persistence
+
+Normal workspace creation supplies a prepared bootstrap context change and member activation marker. createWorkspace stores them in the same transaction as workspace, models and lead. The initial context sequence is 1 with the root design; source metadata pins the lead's member-config baseline. A failure rolls back all database effects. Low-level storage imports may omit bootstrap, but the application create/adopt endpoint always supplies it. Administrative reset requires exclusive runtime ownership and removes runtime/workspace records and agent config records while retaining provider, app, catalog and model-cache records.

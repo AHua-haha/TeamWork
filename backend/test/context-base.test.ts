@@ -26,7 +26,7 @@ function withBase(run: (base: ContextBase, store: MemoryStore, record: Workspace
   });
 }
 
-const onDisk = (record: WorkspaceRecord, path: string) => join(record.directory, '.context', ...path.split('/'));
+const onDisk = (record: WorkspaceRecord, path: string) => join(record.directory, '.rsi/context', ...path.split('/'));
 
 test('paths name a category and valid segments', () => {
   for (const name of ['a', 'Notes.md', 'my file.txt', '_x-1', 'a.b.c']) assert.ok(validSegment(name), name);
@@ -37,7 +37,7 @@ test('paths name a category and valid segments', () => {
 });
 
 test('opening creates both categories and an empty overview', () => withBase(async (base, _store, record) => {
-  assert.deepEqual((await readdir(join(record.directory, '.context'))).sort(), ['agent', 'user']);
+  assert.deepEqual((await readdir(join(record.directory, '.rsi/context'))).sort(), ['agent', 'user']);
   const overview = await base.overview();
   assert.deepEqual(overview, { workspaceId: 'w1', seq: 0, user: { files: 0, bytes: 0 }, agent: { files: 0, bytes: 0 }, problems: [] });
   assert.deepEqual((await base.tree('', 1)).entries, [{ path: 'agent', type: 'folder' }, { path: 'user', type: 'folder' }]);

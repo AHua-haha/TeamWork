@@ -54,9 +54,9 @@ export interface TeamStore {
 export const leadResponsibility = 'Works with the user on this project: helps maintain the user design, forms the team the project needs, gives work to the members, and reports results.';
 
 /** A workspace lead initialized with supplied default settings; empty settings support legacy imports. */
-export function newLead(workspaceId: string, settings: RunSettings = emptyRunSettings): NewMember {
+export function newLead(workspaceId: string, settings: RunSettings = emptyRunSettings, working: string[] = []): NewMember {
   const id = randomUUID();
-  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: emptyHarness(), settings };
+  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: { ...emptyHarness(), designScope: { working, dependencies: [] } }, settings };
   return {
     id, workspaceId, lead: true, nameKey: 'lead',
     value: { workspaceId, ...fields, configuration: generatedSource(fields, id), lead: true, createdAt: Date.now(), retiredAt: null },

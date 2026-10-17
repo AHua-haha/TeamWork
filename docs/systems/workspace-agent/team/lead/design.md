@@ -22,7 +22,7 @@ Forbidden update fields, unsafe/missing references, duplicate names, lead deleti
 
 ## Guarantees and limits
 
-Only the lead accesses member files among agents. Only the user commits/activates member changes, in separate actions. Existing design acceptance, harness scope, Bash/Git enforcement and group-publication rules remain. Global base rule files are backend-owned. The file validation tool is validate_member_config with path .team/members; user review/activation uses the team configuration control API. No frontend activation controls are added in this backend prototype.
+Only the lead accesses member files among agents. Only the user commits/activates member changes, in separate actions. Existing design acceptance, harness scope, Bash/Git enforcement and group-publication rules remain. Global base rule files are backend-owned. The file validation tool is validate_member_config with path .rsi/members; user review/activation uses the team configuration control API. No frontend activation controls are added in this backend prototype.
 
 ## Acceptance examples
 

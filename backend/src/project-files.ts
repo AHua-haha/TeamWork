@@ -12,7 +12,7 @@ export const maxProjectEntries = 2000;
 export const maxProjectFindResults = 200;
 const maxFindExamined = 50_000;
 const maxDepth = 16;
-const hiddenTop = new Set(['.git', '.context']);
+const hiddenTop = new Set(['.git', '.rsi']);
 const badCharacter = /[\\:\u0000-\u001f\u007f]/;
 
 function validName(name: string): boolean {
@@ -32,7 +32,7 @@ const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const byPath = (a: { path: string }, b: { path: string }) => compare(a.path.toLowerCase(), b.path.toLowerCase()) || compare(a.path, b.path);
 const updatedAt = (info: Stats) => Math.floor(info.mtimeMs);
 
-/** The files of one workspace directory, outside `.git` and `.context`. Paths never pass through a link. */
+/** The files of one workspace directory, outside `.git` and `.rsi/context`. Paths never pass through a link. */
 export class ProjectFiles {
   constructor(private readonly root: string) {}
 

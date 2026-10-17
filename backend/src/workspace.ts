@@ -3,6 +3,8 @@ import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { ContextBase, type ContextOverview, type ContextStore, type WorkspaceRecord } from './context-base.js';
 import { ProjectFiles } from './project-files.js';
+import { bootstrapWorkspace } from './workspace-bootstrap.js';
+import { managedRoot, rootDesignPath } from './workspace-layout.js';
 import { newLead } from './team.js';
 import { missing, sha256 } from './text.js';
 import { AppError, identity } from './types.js';
@@ -106,11 +108,15 @@ export class WorkspaceService {
         if (within(otherKey, key) || within(key, otherKey)) throw new AppError('workspace_exists', `${directory} overlaps workspace ${other.name}`, 409);
       }
       const made = adopt ? undefined : await mkdir(directory, { recursive: true });
+      let initialized = false;
       try {
         const record: WorkspaceRecord = { workspaceId, name, directory: await realpath(directory), createdAt: Date.now() };
-        await this.store.createWorkspace(record, sha256(folderKey(record.directory)), newLead(workspaceId, defaultRunSettings(models)), models);
+        const lead = newLead(workspaceId, defaultRunSettings(models), [rootDesignPath]);
+        const bootstrap = await bootstrapWorkspace(record, lead); initialized = true;
+        await this.store.createWorkspace(record, sha256(folderKey(record.directory)), lead, models, bootstrap);
         this.records.set(workspaceId, record);
       } catch (error) {
+        if (initialized) await rm(join(directory, managedRoot), { recursive: true, force: true });
         if (made) await rm(made, { recursive: true, force: true }).catch(() => undefined);
         throw error;
       }

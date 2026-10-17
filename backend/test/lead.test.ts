@@ -12,8 +12,8 @@ test('lead bootstraps pending designs and member files through common tools; des
     return output.content.map(p => p.type === 'text' ? p.text : '').join('');
   };
   assert.deepEqual(prepared.tools.map(t => t.definition.name).sort(), ['bash', 'edit', 'ls', 'read', 'write']);
-  await call('write', { path: '.context/user/new.json', content: JSON.stringify({ content: 'Pending project', implementation: ['src'] }) });
-  await call('write', { path: '.team/members/example/member.json', content: '{"name":"Example"}' });
+  await call('write', { path: '.rsi/context/user/new.json', content: JSON.stringify({ content: 'Pending project', implementation: ['src'] }) });
+  await call('write', { path: '.rsi/members/example/member.json', content: '{"name":"Example"}' });
   assert.match(await call('bash', { command: 'git add . && git commit -m "Define project"', metadata: { git: { scope: 'design' } } }), /approval_required/);
   const review = (await f.team.harness.inspect(f.lead.memberId)).parts.find(p => p.state.part.id === 'design')!;
   const accepted = await f.team.harness.commit(f.lead.memberId, 'design', 'Accept project', { type: 'user', memberId: f.lead.memberId }, review.revision, review.state.committed);

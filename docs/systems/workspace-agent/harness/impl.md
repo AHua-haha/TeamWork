@@ -13,7 +13,7 @@ Reusable file adapters and one Bash adapter receive runtime identity; policy is 
 ## Coordination and data flow
 
 1. Resolve accepted working/dependency designs and derive writable/read-only paths. Validate/control exclusions and dependency precedence define file access. Materialize missing active member bundles for the lead without replacing drafts.
-2. Open private bare storage next to the source at .rsi-harness/<path-hash>/repository.git and one linked worktree per member. Initialize scope refs by normalized paths/exclusions, preserving existing pending work when the shape changes.
+2. Open private bare storage inside the managed root at .rsi/harness/repository.git and one linked worktree per member. Initialize scope refs by normalized paths/exclusions, preserving existing pending work when the shape changes.
 3. Assemble unique ls/read/write/edit/bash plus lead list_models and validate_member_config. File tools resolve through MemberFiles. Bash resolves requested scope against current parts; supplied metadata can select only that scope.
 4. For scoped Git, create one backend-only bare metadata directory under staging/<member>/<part>/<scope-hash>. It has its own HEAD/index and shares the main object directory through GIT_OBJECT_DIRECTORY. Private repositories, worktree .git and backend storage are unreadable/unwritable to shell children.
 5. A per-invocation Unix socket receives actual Git argv/cwd from the immutable PATH Git bridge. Backend validates cwd, command/options/path intersection, source revisions and actor policy. Native Git runs with explicit private git-dir/worktree, no global/system config, hooks, fsmonitor or external diff/textconv. Protected acceptance is serialized across design parts as well as per-scope implementation acceptance. Stage integrity is checked; failed add restores the index. Commit performs compare-and-swap accepted/base updates under a scope queue. Protected commits refuse before acceptance.
@@ -52,3 +52,8 @@ The [team implementation](../team/impl.md) owns semantic validation and workspac
 ## Member configuration file review support
 
 HarnessHistory supplies bounded immutable file previews, trusted import of database source text into a temporary Git tree, per-file unified patches and committed-chain history since an activation boundary. These operations share private objects and do not modify a member's working files or staged index. Team owns source interpretation, activation baseline persistence and endpoint responses.
+
+
+## Managed-root storage and staging
+
+The private repository/worktrees live under .rsi/harness in the registered project. Snapshot traversal always excludes this private subtree, including when seeding a whole project, so it cannot recursively snapshot itself. Seed discovery includes managed context/member files despite project ignore rules. File tools hide all private .rsi subtrees and Git metadata; Bash protects .rsi and allows only authorized narrower management reads. Implementation excludes the complete .rsi root. Scoped Git add enumerates authorized regular files and tracked deletions, then passes literal NUL-delimited pathspecs through native Git stdin; it uses the same flow for directory and individual-file scopes and preserves unrelated staging.

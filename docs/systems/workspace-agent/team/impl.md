@@ -50,3 +50,8 @@ MemberConfigService captures pending and committed snapshots under the lead oper
 GET team/configuration/current returns active baseline metadata, current configuration/files, a flat file-change list with text patches, independent pending/commit/validation state and exact commit/activation tokens. POST team/configuration/commit accepts reviewed current revision, committed base and commit message. Existing explicit activation consumes only the committed revision/digest while whole-workspace idle. Review state changes refuse rather than applying a different snapshot. The frontend treats diff and operation data as separate consumers of this response.
 
 [Inspection tests](../../../../backend/test/member-inspection.test.ts) exercise mixed committed/pending content, invalid/binary proposals, marker durability, legacy history and stale/failed operations. [HTTP tests](../../../../backend/test/team-routes.test.ts) cover strict read/commit/activate payloads; [MySQL tests](../../../../backend/test/integration/backend.test.ts) verify marker persistence/reopen and transaction rollback.
+
+
+## Workspace-created lead baseline
+
+WorkspaceService supplies newLead with root working design references and stores the generated exact source together with the filesystem bootstrap baseline. MemberConfigService accepts the committed revision equal to the active bootstrap marker as an already active baseline; all other prospective activations require a user commit. Normal review digest/base/idle gates remain unchanged. member-config paths and validation now use .rsi/members. The initial worktree preserves the bootstrap design and source; later original-file edits do not overwrite member pending work.

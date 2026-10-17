@@ -15,7 +15,7 @@ export function teamTools(team: TeamService, configuration: MemberConfigService)
       return JSON.stringify(await team.models(member.workspaceId), null, 2);
     }),
   }, {
-    definition: { name: 'validate_member_config', description: 'Validate the complete pending .team/members file change set. Reports create/update/delete and issues; does not commit or activate anything.', parameters: Type.Object({ path: Type.String() }, { additionalProperties: false }) },
+    definition: { name: 'validate_member_config', description: 'Validate the complete pending .rsi/members file change set. Reports create/update/delete and issues; does not commit or activate anything.', parameters: Type.Object({ path: Type.String() }, { additionalProperties: false }) },
     execute: (args, scope) => refusing(async () => JSON.stringify(await configuration.validate(scope.agentId, args.path), null, 2)),
   }] };
 }

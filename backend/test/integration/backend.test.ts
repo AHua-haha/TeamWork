@@ -1038,7 +1038,7 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     const { workspaceId } = await workspaceService.create({ name: 'Harness prototype', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: false });
     const base = await workspaceService.context(workspaceId);
     const design = { content: 'Create src/result.txt with Done.', implementation: ['src/result.txt'] };
-    await base.save('user/design.json', JSON.stringify(design), null, 'Initial accepted design');
+    await base.save('user/design.json', JSON.stringify(design), (await base.read({path:'user/design.json'})).revision, 'Initial accepted design');
     const first = (await team.team(workspaceId)).members[0]!;
     const lead = await team.update(workspaceId, first.memberId, first.revision, {
       name: first.name, role: first.role, responsibility: first.responsibility, harness: { designScope: first.harness.designScope, allowedCommands: [] },
@@ -1051,15 +1051,15 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     const firstStep = await requests.next();
     assert.ok(!firstStep.request.tools.some(tool => tool.definition.name === 'save_design'));
     assert.match(firstStep.request.context.systemPrompt!, /user approval/);
-    answer(firstStep.events, call('write', { path: '.context/user/design.json', content: JSON.stringify({ ...design, content: 'Pending design refinement' }) }));
+    answer(firstStep.events, call('write', { path: '.rsi/context/user/design.json', content: JSON.stringify({ ...design, content: 'Pending design refinement' }) }));
     const secondStep = await requests.next();
     answer(secondStep.events, call('bash', { command: 'git add . && git commit -m "Cannot self-approve"', metadata: { git: { scope: 'design' } } }));
     const thirdStep = await requests.next();
     assert.match(JSON.stringify(thirdStep.request.context.messages), /approval_required/);
     const manifest = { name: 'Pending new member', role: 'developer', responsibility: 'Future member', settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['user/design.json'], dependencies: [] } };
-    answer(thirdStep.events, call('write', { path: '.team/members/pending/prompts/member.md', content: 'Pending prompt.' }));
+    answer(thirdStep.events, call('write', { path: '.rsi/members/pending/prompts/member.md', content: 'Pending prompt.' }));
     const manifestStep = await requests.next();
-    answer(manifestStep.events, call('write', { path: '.team/members/pending/member.json', content: JSON.stringify(manifest) }));
+    answer(manifestStep.events, call('write', { path: '.rsi/members/pending/member.json', content: JSON.stringify(manifest) }));
     const fourthStep = await requests.next();
     assert.equal((await team.team(workspaceId)).members.length, 2, 'file changes do not activate members');
     assert.ok(!fourthStep.request.tools.some(t => t.definition.name === 'submit_member_config'));
@@ -1073,7 +1073,7 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     assert.equal(storedBundle.files['prompts/member.md'], 'Keep the result concise.');
     assert.deepEqual(JSON.parse(storedBundle.files['member.json']!).designScope, { working: ['user/design.json'], dependencies: [] });
     const leadFiles = await team.harness.files(lead.memberId);
-    await writeFile(join(leadFiles.root, '.team/members/pending/prompts/member.md'), 'UNSUBMITTED prompt');
+    await writeFile(join(leadFiles.root, '.rsi/members/pending/prompts/member.md'), 'UNSUBMITTED prompt');
     assert.equal((await team.configuration.accepted(workspaceId, activeWorker.id)).digest, storedBundle.digest);
     assert.ok(!workerStep.request.tools.some(tool => ['read_design', 'save_design', 'assign_member', 'create_member'].includes(tool.definition.name)));
     assert.match(workerStep.request.context.systemPrompt!, /Create src\/result.txt with Done/);
@@ -1082,6 +1082,8 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     const workerCommit = await requests.next();
     answer(workerCommit.events, call('bash', { command: 'git add . && git commit -m "Implement the requested result file"', metadata: { git: { scope: 'implementation' } } }));
     const workerCommand = await requests.next();
+    const commitResult = workerCommand.request.context.messages.findLast(item=>item.role==='toolResult' && item.toolName==='bash');
+    assert.match(JSON.stringify(commitResult), /Implement the requested result file/, JSON.stringify(commitResult));
     answer(workerCommand.events, call('bash', { command: 'cat src/result.txt' }));
     const workerFinish = await requests.next();
     const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'bash');
@@ -1138,46 +1140,46 @@ test('workspace registry refuses duplicates; context commits reload with history
     const saved = await context.save('user/a.md', 'alpha', null, 'first');
     await context.move('user/a.md', 'user/b.md', saved.revision, 'rename');
     const loaded = await reopened.loadContext(workspaceId);
-    assert.equal(loaded.seq, 2);
-    assert.deepEqual(loaded.files.map(file => [file.path, file.size, file.author, file.reason]), [['user/b.md', 5, { type: 'user' }, 'rename']]);
-    const file = loaded.files[0]!;
-    assert.deepEqual((await reopened.history(workspaceId, file.fileId, null, 10)).map(version => [version.seq, version.action, version.path, version.fromPath]), [[2, 'move', 'user/b.md', 'user/a.md'], [1, 'create', 'user/a.md', null]]);
-    assert.deepEqual((await reopened.history(workspaceId, file.fileId, 2, 10)).map(version => version.revision), [saved.revision]);
+    assert.equal(loaded.seq, 3);
+    assert.deepEqual(loaded.files.filter(file=>file.path !== 'user/design.json').map(file => [file.path, file.size, file.author, file.reason]), [['user/b.md', 5, { type: 'user' }, 'rename']]);
+    const file = loaded.files.find(file=>file.path==='user/b.md')!;
+    assert.deepEqual((await reopened.history(workspaceId, file.fileId, null, 10)).map(version => [version.seq, version.action, version.path, version.fromPath]), [[3, 'move', 'user/b.md', 'user/a.md'], [2, 'create', 'user/a.md', null]]);
+    assert.deepEqual((await reopened.history(workspaceId, file.fileId, 3, 10)).map(version => version.revision), [saved.revision]);
     assert.equal(await reopened.blob(workspaceId, file.hash), 'alpha');
     assert.equal((await reopened.version(workspaceId, saved.revision))?.path, 'user/a.md');
     assert.equal(await reopened.lastFileId(workspaceId, 'user/a.md'), file.fileId);
-    assert.deepEqual((await reopened.records(workspaceId, 0, 10)).map(item => [item.seq, item.author, item.reason, item.files]), [
-      [1, { type: 'user' }, 'first', [{ action: 'create', path: 'user/a.md', fromPath: null, revision: saved.revision }]],
-      [2, { type: 'user' }, 'rename', [{ action: 'move', path: 'user/b.md', fromPath: 'user/a.md', revision: file.revision }]],
+    assert.deepEqual((await reopened.records(workspaceId, 1, 10)).map(item => [item.seq, item.author, item.reason, item.files]), [
+      [2, { type: 'user' }, 'first', [{ action: 'create', path: 'user/a.md', fromPath: null, revision: saved.revision }]],
+      [3, { type: 'user' }, 'rename', [{ action: 'move', path: 'user/b.md', fromPath: 'user/a.md', revision: file.revision }]],
     ]);
 
     // A second process reloads the index and finds nothing to record.
     const service = new WorkspaceService(reopened, testModelValidator);
     try {
-      assert.equal((await service.get(workspaceId)).context.seq, 2);
+      assert.equal((await service.get(workspaceId)).context.seq, 3);
       assert.equal((await (await service.context(workspaceId)).read({ path: 'user/b.md' })).content, 'alpha');
     } finally { await service.close(); }
 
-    // Another process stores change 3; this process's next change, also built on 2, is refused and undone on disk.
+    // Another process stores change 4; this process's next change, also built on 3, is refused and undone on disk.
     const time = Date.now();
     const fileId = randomUUID();
     const revision = randomUUID();
     const hash = sha256('other');
     const external = { type: 'external' } as const;
     const other: ContextCommit = {
-      seq: 3,
+      seq: 4,
       blobs: [{ hash, content: 'other', size: 5 }],
-      versions: [{ fileId, seq: 3, revision, action: 'create', path: 'user/c.md', fromPath: null, hash, size: 5, time, author: external, reason: null }],
+      versions: [{ fileId, seq: 4, revision, action: 'create', path: 'user/c.md', fromPath: null, hash, size: 5, time, author: external, reason: null }],
       removeKeys: ['user/c.md'],
       files: [{ path: 'user/c.md', fileId, revision, hash, size: 5, mtimeMs: time, updatedAt: time, author: external, reason: null }],
-      record: { seq: 3, time, author: external, reason: null, files: [{ action: 'create', path: 'user/c.md', fromPath: null, revision }] },
+      record: { seq: 4, time, author: external, reason: null, files: [{ action: 'create', path: 'user/c.md', fromPath: null, revision }] },
     };
-    await reopened.commitContext(workspaceId, 2, other);
+    await reopened.commitContext(workspaceId, 3, other);
     await assert.rejects(context.save('user/d.md', 'mine', null, null), code('backend_error'));
-    await assert.rejects(stat(join(directory, '.context', 'user', 'd.md')), code('ENOENT'));
-    await assert.rejects(reopened.commitContext(workspaceId, 2, { ...other, versions: [], files: [], removeKeys: [] }), code('backend_error'));
-    assert.deepEqual((await reopened.records(workspaceId, 0, 10)).map(item => item.seq), [1, 2, 3]);
-    assert.deepEqual((await reopened.loadContext(workspaceId)).files.map(item => item.path).sort(), ['user/b.md', 'user/c.md']);
+    await assert.rejects(stat(join(directory, '.rsi/context', 'user', 'd.md')), code('ENOENT'));
+    await assert.rejects(reopened.commitContext(workspaceId, 3, { ...other, versions: [], files: [], removeKeys: [] }), code('backend_error'));
+    assert.deepEqual((await reopened.records(workspaceId, 0, 10)).map(item => item.seq), [1, 2, 3, 4]);
+    assert.deepEqual((await reopened.loadContext(workspaceId)).files.map(item => item.path).sort(), ['user/b.md', 'user/c.md', 'user/design.json']);
   } finally {
     await reopened.close();
     await rm(folder, { recursive: true, force: true });
@@ -1245,7 +1247,7 @@ async function groupFixture() {
   const { workspaceId } = await workspaceService.create({ name: 'Group', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: false });
   const first = (await team.team(workspaceId)).members[0]!;
   const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: { designScope: first.harness.designScope, allowedCommands: first.harness.allowedCommands }, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
-  await team.designs.save(workspaceId, 'user/design.json', { content: 'Shared test design', implementation: ['.'] }, null, 'Test', { type: 'lead', memberId: lead.memberId, runId: 'fixture' });
+  await team.designs.save(workspaceId, 'user/design.json', { content: 'Shared test design', implementation: ['.'] }, (await team.designs.read(workspaceId,'user/design.json')).revision, 'Test', { type: 'lead', memberId: lead.memberId, runId: 'fixture' });
   const harness = { designScope: { working: ['user/design.json'], dependencies: [] }, allowedCommands: [] };
   const backend = await team.create(workspaceId, { name: 'Backend', role: 'developer', harness });
   const frontend = await team.create(workspaceId, { name: 'Frontend', role: 'developer', harness });
@@ -1589,16 +1591,16 @@ test('member file activation atomically replaces/updates the team, retains histo
     const { dirname, join: pathJoin } = await import('node:path');
     await rm(pathJoin(files.root, backendSource.path));
     await files.write.writeFile(pathJoin(files.root, frontendSource.path), JSON.stringify({ ...JSON.parse(frontendSource.files['member.json']!), responsibility: 'Updated atomically' }));
-    await files.write.mkdir(pathJoin(files.root, '.team/members/replacement/prompts'));
+    await files.write.mkdir(pathJoin(files.root, '.rsi/members/replacement/prompts'));
     const manifest = { name:'Backend',role:'developer',responsibility:'Replacement',settings:{},promptFiles:['prompts/member.md'],designScope:{working:['user/design.json'],dependencies:[]},execute:{allowedCommands:[]} };
-    await files.write.writeFile(pathJoin(files.root, '.team/members/replacement/member.json'), JSON.stringify(manifest));
-    await files.write.writeFile(pathJoin(files.root, '.team/members/replacement/prompts/member.md'), 'Accepted prompt');
-    const pending = await f.team.configuration.validate(f.lead.memberId, '.team/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
+    await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/member.json'), JSON.stringify(manifest));
+    await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/prompts/member.md'), 'Accepted prompt');
+    const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
     const part = (await f.team.harness.inspect(f.lead.memberId)).parts.find(p => p.state.part.id === 'member-config')!;
     await f.team.harness.commit(f.lead.memberId, 'member-config', 'User accepts team replacement', {type:'user',memberId:f.lead.memberId}, part.revision, part.state.committed);
     const review = await f.team.reviewConfiguration(f.workspaceId);
     assert.deepEqual(review.changes.map(c => c.type).sort(), ['create','delete','update']);
-    await files.write.writeFile(pathJoin(files.root, '.team/members/replacement/prompts/member.md'), 'Pending after commit');
+    await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/prompts/member.md'), 'Pending after commit');
     await f.team.activateConfiguration(f.workspaceId, review.revision, review.digest);
     const replacement = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
     const marker = await store.getMemberActivation(f.workspaceId);
@@ -1622,18 +1624,62 @@ test('member activation store rejects busy/stale state and rolls back earlier me
   const f = await groupFixture();
   try {
     const active = await f.team.service.active(f.workspaceId), before = await store.getMember(f.frontend.memberId);
+    const marker = await store.getMemberActivation(f.workspaceId);
     const modelsRevision = (await f.team.service.models(f.workspaceId)).revision;
     const expected = active.map(m => ({id:m.id,revision:m.revision}));
     const update = { ...before!,revision:before!.revision+1,value:{...before!.value,responsibility:'Must roll back'} };
     const duplicate = { id:randomUUID(),workspaceId:f.workspaceId,lead:false,nameKey:'frontend',value:{...before!.value,lead:false} };
-    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:null,activation:{revision:'test',time:0},expected,modelsRevision,create:[duplicate],update:[update]}),code('member_exists'));
-    assert.equal(await store.getMemberActivation(f.workspaceId), null, 'activation marker rolls back with roster changes');
+    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:marker,activation:{revision:'test',time:0},expected,modelsRevision,create:[duplicate],update:[update]}),code('member_exists'));
+    assert.deepEqual(await store.getMemberActivation(f.workspaceId), marker, 'activation marker rolls back with roster changes');
     assert.deepEqual(await store.getMember(f.frontend.memberId),before);
-    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:null,activation:{revision:'test',time:0},expected:[],modelsRevision,create:[],update:[]}),code('config_conflict'));
+    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:marker,activation:{revision:'test',time:0},expected:[],modelsRevision,create:[],update:[]}),code('config_conflict'));
     const accepted = await f.team.runner.postUser(f.workspaceId,'@Backend work');
     const response = await f.requests.next();
-    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:null,activation:{revision:'test',time:0},expected,modelsRevision,create:[],update:[update]}),code('workspace_busy'));
+    await assert.rejects(store.activateMembers(f.workspaceId,{expectedActivation:marker,activation:{revision:'test',time:0},expected,modelsRevision,create:[],update:[update]}),code('workspace_busy'));
     assert.deepEqual(await store.getMember(f.frontend.memberId),before);
     answer(response.events,message('Done.')); await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
   } finally { await f.close(); }
+});
+
+test('fresh bootstrap and administrative reset persist atomic baselines, preserve providers/files and roll back failed cleanup', {timeout:30_000}, async () => {
+  const database = `bootstrap_${randomUUID().replaceAll('-','')}`, url = new URL(databaseUrl!); url.pathname = `/${database}`;
+  await store.pool.query(`CREATE DATABASE ${database}`);
+  const isolated = new MySqlStore(url.toString()), service = new WorkspaceService(isolated,testModelValidator);
+  const folder = await mkdtemp(join(tmpdir(),'bootstrap-reset-'));
+  const {mkdir,readdir} = await import('node:fs/promises');
+  const {resetWorkspaceData} = await import('../../src/workspace-reset.js');
+  try {
+    await isolated.migrate();
+    await isolated.createConfig('connection','provider',{label:'Keep',encryptedKey:'opaque-ciphertext'});
+    await isolated.createConfig('app','settings',{title:'Keep settings'});
+    await isolated.createAgent('stale-solo');
+    const before = await isolated.pool.query('SELECT scope,id,revision,data FROM config_records WHERE scope <> ? ORDER BY scope,id',['agent']);
+    const directory = join(folder,'project'); await mkdir(directory); await writeFile(join(directory,'code.ts'),'implementation');
+    const workspace = await service.create({workspaceId:'fresh',name:'Fresh',directory,adopt:true,models:testModels()});
+    assert.equal(workspace.context.seq,1); assert.equal(workspace.context.user.files,1);
+    const lead = (await isolated.listMembers('fresh'))[0]!;
+    assert.deepEqual(lead.value.harness.designScope.working,['user/design.json']);
+    assert.equal((await isolated.getMemberActivation('fresh'))!.revision,lead.value.configuration!.acceptedRevision);
+    const reopened = new MySqlStore(url.toString());
+    try { assert.deepEqual(await reopened.getMemberActivation('fresh'),await isolated.getMemberActivation('fresh')); assert.equal((await reopened.loadContext('fresh')).files.length,1); }
+    finally {await reopened.close();}
+    const original = isolated.createWorkspace.bind(isolated);
+    isolated.createWorkspace = async (record,key,member,models,bootstrap) => { bootstrap!.context.files.push(bootstrap!.context.files[0]!); return original(record,key,member,models,bootstrap); };
+    const failed = join(folder,'failed'); await mkdir(failed); await writeFile(join(failed,'code.ts'),'kept');
+    await assert.rejects(service.create({workspaceId:'failed',name:'Failed',directory:failed,adopt:true,models:testModels()}));
+    assert.equal(await isolated.getWorkspace('failed'),null); assert.equal(await isolated.getMemberActivation('failed'),null);
+    assert.deepEqual(await isolated.listMembers('failed'),[]); assert.deepEqual(await readdir(failed),['code.ts']); isolated.createWorkspace = original;
+    await service.close();
+    const blocker = new MySqlStore(url.toString()); await blocker.acquireRuntime(()=>{});
+    try {await assert.rejects(resetWorkspaceData(isolated),code('runtime_conflict'));} finally {await blocker.close();}
+    await isolated.pool.query('CREATE TABLE reset_failure (workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))');
+    await isolated.pool.query("INSERT INTO reset_failure VALUES ('fresh')");
+    await assert.rejects(resetWorkspaceData(isolated));
+    assert.ok(await isolated.getWorkspace('fresh')); assert.ok((await readdir(directory)).includes('.rsi'));
+    await isolated.pool.query('DROP TABLE reset_failure');
+    const result = await resetWorkspaceData(isolated); assert.equal(result.workspaces,1);
+    assert.deepEqual(await isolated.listWorkspaces(),[]); assert.deepEqual(await isolated.listAgents(),[]);
+    const [remaining] = await isolated.pool.query("SELECT scope,id,revision,data FROM config_records WHERE scope <> ? ORDER BY scope,id",['agent']);
+    assert.deepEqual(remaining,before[0]); assert.equal(await readFile(join(directory,'code.ts'),'utf8'),'implementation'); assert.deepEqual(await readdir(directory),['code.ts']);
+  } finally { await service.close(); await isolated.close(); await rm(folder,{recursive:true,force:true}); await store.pool.query(`DROP DATABASE ${database}`); }
 });

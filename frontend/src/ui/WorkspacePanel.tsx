@@ -165,7 +165,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
   };
   const requestClose = (key: number) => { if (dirtyKeys.has(key)) setClosing(key); else closeTab(key); };
   const browse = () => { setActiveKey('files'); setTreeOpen(true); setFilterFocus(value => value + 1); };
-  const openDesign = (path: string) => { setScopeNote(null); setSelectedDesign(path.replace(/^\.context\//, '')); setActiveKey('design'); setTreeOpen(false); };
+  const openDesign = (path: string) => { setScopeNote(null); setSelectedDesign(path.replace(/^\.rsi\/context\//, '')); setActiveKey('design'); setTreeOpen(false); };
   const openMember = (memberId: string) => { setSelectedMember(memberId); setActiveKey('team'); setTreeOpen(false); void team.refresh(); };
   const openImplementation = (path: string) => {
     setScopeNote(null);

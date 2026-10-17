@@ -6,6 +6,7 @@ import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, 
 import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from './context-base.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from './team.js';
 import { defaultRunSettings, workspaceModels, type WorkspaceModels, type StoredWorkspaceModels } from './workspace-models.js';
+import type { WorkspaceBootstrap } from './workspace-bootstrap.js';
 import { generatedSource } from './member-config-format.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
 
@@ -902,7 +903,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
   }
 
   /** Registers the workspace and its team's lead together; if either fails, neither is stored. */
-  async createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember, models?: WorkspaceModels): Promise<void> {
+  async createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember, models?: WorkspaceModels, bootstrap?: WorkspaceBootstrap): Promise<void> {
     await this.transaction(async db => {
       try {
         await db.execute('INSERT INTO workspaces (id, name, directory, directory_key, created_at) VALUES (?, ?, ?, ?, ?)', [workspace.workspaceId, workspace.name, workspace.directory, directoryKey, workspace.createdAt]);
@@ -912,6 +913,10 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       }
       await this.insertMember(db, lead);
       if (models) await db.execute('INSERT INTO workspace_models (workspace_id, data) VALUES (?, ?)', [workspace.workspaceId, encode(models)]);
+      if (bootstrap) {
+        await db.execute('INSERT INTO member_activation (workspace_id, revision, time) VALUES (?, ?, ?)', [workspace.workspaceId, bootstrap.activation.revision, bootstrap.activation.time]);
+        await this.writeContext(db, workspace.workspaceId, 0, bootstrap.context);
+      }
     });
   }
 
@@ -965,21 +970,22 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
 
   /** Stores one change. The sequence check refuses the commit if another writer advanced the workspace. */
   async commitContext(workspaceId: string, expectedSeq: number, commit: ContextCommit): Promise<void> {
-    await this.transaction(async db => {
-      const [result] = await db.execute<ResultSetHeader>('UPDATE workspaces SET seq = ? WHERE id = ? AND seq = ?', [commit.seq, workspaceId, expectedSeq]);
-      if (result.affectedRows !== 1) throw new AppError('backend_error', 'The context base changed outside this process', 503);
-      for (const blob of commit.blobs) await db.execute('INSERT IGNORE INTO context_blobs (workspace_id, hash, content, size) VALUES (?, ?, ?, ?)', [workspaceId, blob.hash, blob.content, blob.size]);
-      await insertRows(db, 'INSERT INTO context_versions (workspace_id, file_id, seq, revision, action, path, path_key, from_path, hash, size, time, author, reason) VALUES ?', commit.versions.map(version => [
-        workspaceId, version.fileId, version.seq, version.revision, version.action, version.path, version.path.toLowerCase(), version.fromPath, version.hash, version.size, version.time, encode(version.author), version.reason,
-      ]));
-      for (let start = 0; start < commit.removeKeys.length; start += 500) {
-        await db.query('DELETE FROM context_files WHERE workspace_id = ? AND path_key IN (?)', [workspaceId, commit.removeKeys.slice(start, start + 500)]);
-      }
-      await insertRows(db, 'INSERT INTO context_files (workspace_id, path_key, path, file_id, revision, hash, size, mtime_ms) VALUES ?', commit.files.map(file => [
-        workspaceId, file.path.toLowerCase(), file.path, file.fileId, file.revision, file.hash, file.size, file.mtimeMs,
-      ]));
-      await db.execute('INSERT INTO context_records (workspace_id, seq, data) VALUES (?, ?, ?)', [workspaceId, commit.seq, encode(commit.record)]);
-    });
+    await this.transaction(db => this.writeContext(db, workspaceId, expectedSeq, commit));
+  }
+  private async writeContext(db: PoolConnection, workspaceId: string, expectedSeq: number, commit: ContextCommit): Promise<void> {
+    const [result] = await db.execute<ResultSetHeader>('UPDATE workspaces SET seq = ? WHERE id = ? AND seq = ?', [commit.seq, workspaceId, expectedSeq]);
+    if (result.affectedRows !== 1) throw new AppError('backend_error', 'The context base changed outside this process', 503);
+    for (const blob of commit.blobs) await db.execute('INSERT IGNORE INTO context_blobs (workspace_id, hash, content, size) VALUES (?, ?, ?, ?)', [workspaceId, blob.hash, blob.content, blob.size]);
+    await insertRows(db, 'INSERT INTO context_versions (workspace_id, file_id, seq, revision, action, path, path_key, from_path, hash, size, time, author, reason) VALUES ?', commit.versions.map(version => [
+      workspaceId, version.fileId, version.seq, version.revision, version.action, version.path, version.path.toLowerCase(), version.fromPath, version.hash, version.size, version.time, encode(version.author), version.reason,
+    ]));
+    for (let start = 0; start < commit.removeKeys.length; start += 500) {
+      await db.query('DELETE FROM context_files WHERE workspace_id = ? AND path_key IN (?)', [workspaceId, commit.removeKeys.slice(start, start + 500)]);
+    }
+    await insertRows(db, 'INSERT INTO context_files (workspace_id, path_key, path, file_id, revision, hash, size, mtime_ms) VALUES ?', commit.files.map(file => [
+      workspaceId, file.path.toLowerCase(), file.path, file.fileId, file.revision, file.hash, file.size, file.mtimeMs,
+    ]));
+    await db.execute('INSERT INTO context_records (workspace_id, seq, data) VALUES (?, ?, ?)', [workspaceId, commit.seq, encode(commit.record)]);
   }
 
   async blob(workspaceId: string, hash: string): Promise<string | null> {

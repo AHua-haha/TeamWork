@@ -97,7 +97,7 @@ test('harness review and user commit endpoints pin the reviewed revision and enf
   const member = await worker(fixture, 'Backend', ['src']);
   const endpoint = `/workspaces/${fixture.workspaceId}/team/members/${member.memberId}/harness`;
   const files = await fixture.team.harness.files(member.memberId);
-  const path = join(files.root, '.context', member.harness.designScope.working[0]!);
+  const path = join(files.root, '.rsi/context', member.harness.designScope.working[0]!);
   await files.write.writeFile(path, JSON.stringify({ content: 'Pending', implementation: ['src'] }));
   const review = await call(endpoint);
   const design = review.parts.find((p: Body) => p.state.part.id === 'design');
@@ -149,9 +149,13 @@ test('configuration review and separate user activation enforce exact input and 
 
 test('current configuration endpoint supplies file diff and separate commit/activation operations', () => withServer(async (call, f) => {
   const base = `/workspaces/${f.workspaceId}/team/configuration`;
+  const initial = await call(base + '/current');
+  assert.equal(initial.status.hasPending,false); assert.equal(initial.activation.valid,true);
+  const files = await f.team.harness.files(f.lead.memberId);
+  await files.write.writeFile(join(files.root, '.rsi/members', f.lead.memberId, 'prompts/member.md'), 'Pending instructions');
   const current = await call(base + '/current');
   assert.ok(current.current.files.length); assert.equal(current.status.hasPending, true);
-  assert.equal(current.activation.valid, false, 'baseline is not user acceptance');
+  assert.equal(current.activation.valid, true, 'bootstrap is the initial active baseline');
   await call(base+'/commit',{method:'POST',data:{...current.commit,message:'User accepts initial files',actor:'user'},status:400});
   await call(base+'/commit',{method:'POST',data:{...current.commit,message:'User accepts initial files'}});
   const accepted = await call(base+'/current'); assert.equal(accepted.status.hasPending,false); assert.equal(accepted.activation.valid,true);

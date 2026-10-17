@@ -29,19 +29,21 @@ export async function resolveHarness(designs: DesignService, workspaceId: string
 
 /** Purpose assignments define authority; read-only use paths take precedence over writes. */
 export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): FileAccess {
-  const designFiles = [...resolved.working, ...resolved.dependencies].map(part => `.context/${part.path}`);
+  const designFiles = [...resolved.working, ...resolved.dependencies].map(part => `.rsi/context/${part.path}`);
   return { deny(path, mode) {
     const key = path.toLowerCase();
-    if (key === '.team' || key.startsWith('.team/')) return member.value.lead && (key === '.team/members' || key.startsWith('.team/members/') || (key === '.team' && mode === 'see')) ? null : 'Member configuration is outside your scope';
-    if (key === '.context' || key.startsWith('.context/')) {
+    if (key === '.rsi' && mode === 'see') return null;
+    if (key === '.rsi/members' || key.startsWith('.rsi/members/')) return member.value.lead ? null : 'Member configuration is outside your scope';
+    if (key === '.rsi/context' || key.startsWith('.rsi/context/')) {
       if (mode === 'write' || mode === 'mkdir') {
-        const working = resolved.working.map(part => `.context/${part.path}`);
-        if (resolved.dependencies.some(p => key === `.context/${p.path}`.toLowerCase())) return 'Dependency design is read-only';
-        return member.value.lead && (key === '.context/user' || key.startsWith('.context/user/')) || working.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'Dependency design and agent context are read-only';
+        const working = resolved.working.map(part => `.rsi/context/${part.path}`);
+        if (resolved.dependencies.some(p => key === `.rsi/context/${p.path}`.toLowerCase())) return 'Dependency design is read-only';
+        return member.value.lead && (key === '.rsi/context/user' || key.startsWith('.rsi/context/user/')) || working.some(file => key === file.toLowerCase() || (mode === 'mkdir' && ancestor(path, file))) ? null : 'Dependency design and agent context are read-only';
       }
-      if ((member.value.lead && (key === '.context' || key === '.context/user' || key.startsWith('.context/user/'))) || designFiles.some(file => key === file.toLowerCase() || (mode === 'see' && ancestor(path, file)))) return null;
+      if ((member.value.lead && (key === '.rsi/context' || key === '.rsi/context/user' || key.startsWith('.rsi/context/user/'))) || designFiles.some(file => key === file.toLowerCase() || (mode === 'see' && ancestor(path, file)))) return null;
       return 'This context is outside your design scope';
     }
+    if (key === '.rsi' || key.startsWith('.rsi/')) return 'Private workspace state is outside your scope';
     if (!path && mode === 'see') return null;
     if (mode === 'write' || mode === 'mkdir') {
       if (resolved.readonly.some(scope => covers(scope, path))) return 'Dependency implementation is read-only';
@@ -94,8 +96,8 @@ export class HarnessService {
     // A dependency is an independent read-only view. Hydrate it once when first assigned,
     // without granting its paths to a writable part or refreshing another agent's edits.
     const dependencies: HarnessPart[] = [
-      ...resolved.dependencies.map(p => ({ id: `dep-${p.revision.slice(0, 32)}`, paths: [`.context/${p.path}`], exclude: [], commit: 'user' as const, prompt: '' })),
-      ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.context', '.team'], commit: 'user' as const, prompt: '' }] : []),
+      ...resolved.dependencies.map(p => ({ id: `dep-${p.revision.slice(0, 32)}`, paths: [`.rsi/context/${p.path}`], exclude: [], commit: 'user' as const, prompt: '' })),
+      ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.rsi'], commit: 'user' as const, prompt: '' }] : []),
     ];
     for (const part of dependencies) await history.ensure(id, part, root);
     return { root, history, definitions, parts };
@@ -123,7 +125,7 @@ export class HarnessService {
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const part = request.metadata?.git ? this.part(env, request.metadata.git.scope) : null;
     if (!part && !commandAllowed(member.value.harness.allowedCommands, ['bash', '-c', request.command])) throw new AppError('command_denied', 'General Bash requires an allowed ["bash", "-c", command] rule; scoped Git uses metadata.git.scope', 403);
-    const designRead = member.value.lead ? ['.context/user', '.team/members'] : [...resolved.working, ...resolved.dependencies].map(d => `.context/${d.path}`);
+    const designRead = member.value.lead ? ['.rsi/context/user', '.rsi/members'] : [...resolved.working, ...resolved.dependencies].map(d => `.rsi/context/${d.path}`);
     const readable = [...resolved.readable, ...designRead];
     // Management Git Bash is read-only except for operations mediated by Git.
     // General execution may write implementation only; it cannot edit management files.
@@ -157,7 +159,7 @@ export class HarnessService {
         // Validate structured design files at acceptance, while allowing intermediate raw file edits.
         const files = new MemberFiles(env.root, { deny: () => null });
         const paths = await env.history.paths(checkpoint);
-        const assigned = new Set((await this.active(id)).value.harness.designScope.working.map(path => `.context/${path}`));
+        const assigned = new Set((await this.active(id)).value.harness.designScope.working.map(path => `.rsi/context/${path}`));
         for (const path of paths.filter(path => path.endsWith('.json') || assigned.has(path))) {
           const bytes = await files.read.readFile(join(env.root, path));
           let value;
@@ -213,7 +215,7 @@ export class HarnessService {
     let used = 0;
     return parts.map(part => {
       const size = Buffer.byteLength(part.content);
-      const heading = `### .context/${part.path} (revision ${part.revision})\nImplementation: ${part.implementation.join(', ') || '(none)'}`;
+      const heading = `### .rsi/context/${part.path} (revision ${part.revision})\nImplementation: ${part.implementation.join(', ') || '(none)'}`;
       if (used + size > viewBudget) return heading + '\nContent not loaded; read this design file with your tools.';
       used += size;
       return heading + '\n' + part.content;
@@ -236,7 +238,7 @@ export class HarnessService {
     const access = harnessAccess(member, await resolveHarness(this.designs, member.workspaceId, member.value.harness));
     let used = 0;
     for (const path of [...candidates].sort()) {
-      if (path.toLowerCase() === '.team' || path.toLowerCase().startsWith('.team/') || access.deny(path, 'read') !== null) continue;
+      if (path.toLowerCase() === '.rsi' || path.toLowerCase().startsWith('.rsi/') || access.deny(path, 'read') !== null) continue;
       try {
         const file = await files.read(path);
         if (used + file.size > viewBudget) { notes.push(`Not loaded: ${path}`); continue; }
