@@ -4,6 +4,8 @@ Design: `{{design}}`
 
 ## Implemented contract
 
+Describe the same system as its design, from its caller's perspective: what the implemented system does, what it can be used for and exactly how to use it. Splitting this context into impl/ documents preserves this boundary. A child node documents its own subsystem's contract. Internal realization notes below support the usable contract.
+
 No implemented interfaces have been documented yet. Examine the actual implementation before documenting each exposed interface using these sections.
 
 ### Input

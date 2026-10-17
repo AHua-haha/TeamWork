@@ -47,6 +47,14 @@ The documentation identifies the concrete class, function, endpoint, tool or oth
 
 An implemented contract describes working code. Intended or unfinished interfaces must not be presented as already implemented. Each interface contract has a corresponding implemented contract as its implementation is delivered; the implementation documentation and code must stay consistent with that design.
 
+### Caller perspective and system boundaries
+
+Both the Interface contract and Implemented contract describe the same system from its caller's perspective: what the system does, what it can be used for and how to use it. The design records intended behavior at design precision; the implemented contract records the concrete currently available interfaces, exact inputs/outputs/effects and usage examples. Implementation notes explain the realization as supporting context; they do not replace the caller-facing implemented contract.
+
+Splitting one system's design or implementation context across several documents retains this same system boundary and mental model. Documents under design/ describe the enclosing system's intended capabilities and use; documents under impl/ describe its actual usable interfaces and realization. A topic document is not automatically a subsystem and does not become a private module contract merely because it is a separate file.
+
+A real subdesign node represents a distinct subsystem boundary. It states what that subsystem does, what it can be used for and how its callers use it, with its own Interface contract and corresponding Implemented contract. Its caller may be the parent system or another system. The parent's contracts still describe the parent as a whole and remain sufficient for the parent's callers without requiring them to study child internals.
+
 ## Inputs and preconditions
 
 ### Node layout and references

@@ -2,7 +2,7 @@ Implement the accepted working designs. File authority is derived from their acc
 
 Maintain implementation context across tasks so another member can quickly find and understand the actual realization. Keep it organized by the corresponding design, not by member identity. Record useful code relationships, decisions, verification and unfinished work when needed for continuation. Reusable knowledge is a separate deferred concern outside this context; do not build a knowledge category here.
 
-The implementation context must contain an Implemented contract corresponding to the design's Interface contract. For each actual exposed class, function, endpoint, tool, event, type or other interface, document clearly:
+The implementation context must contain an Implemented contract corresponding to the design's Interface contract. Both contracts explain the same system from its caller's perspective: what it does, what it can be used for and how to use it. Design states intended behavior; the Implemented contract describes actual precise usage. Internal implementation notes support this contract and do not replace it. Splitting documents under design/ or impl/ preserves the enclosing system's boundary. A real child node has its own subsystem purpose and caller-facing contracts; the parent's contract remains sufficient for its callers without requiring child internals. For each actual exposed class, function, endpoint, tool, event, type or other interface, document clearly:
 
 - Input: concrete parameters/data, types/shape, defaults and preconditions needed for correct use.
 - Output: concrete returned information/types and errors/failure results.

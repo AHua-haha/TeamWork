@@ -77,6 +77,8 @@ Harness implementation-context parts cover both file/directory forms for each wo
 
 Safe stored assignment strings are parsed independently of resolving actual nodes, so unavailable references remain inspectable and unready. New member file validation and run admission resolve real metadata/Markdown before granting authority. There is no old JSON-content parser fallback, automatic data conversion or peer/original-workspace publication.
 
+Content guidance is carried by management-design.md, implementation.md and the bootstrap Markdown templates: both contracts stay at the selected system's caller boundary, while design/impl directory splitting preserves that boundary. Explicit child nodes introduce distinct caller-facing subsystem contracts. Implementation notes remain supporting realization facts. This distinction changes model instructions and new-workspace templates, not structural validation, stored schema, tools or authority.
+
 ## Decisions and constraints
 
 - **Disk holds current files.** Users and editors see and change ordinary files. The index caches path, revision, content hash, size, modification time, author, and reason, so reads and listings do not walk the disk.
