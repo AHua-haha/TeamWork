@@ -55,6 +55,10 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
       const [, partId, action] = extra;
       identity(partId, 'part');
       if (extra.length !== 3) throw notFound();
+      if (method === 'GET' && action === 'review') {
+        json(response, 200, await team.harness.review(memberId, partId));
+        return;
+      }
       if (method === 'GET' && action === 'history') {
         json(response, 200, { history: await team.harness.history(memberId, partId) });
         return;

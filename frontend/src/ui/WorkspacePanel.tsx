@@ -7,6 +7,7 @@ import { Glyph } from './Glyph.js';
 import { DesignTab } from './DesignTab.js';
 import type { DiscussionReference } from '../client/discussion-reference.js';
 import { useDesigns } from './useDesigns.js';
+import { ChangesTab } from './ChangesTab.js';
 import { TeamTab } from './TeamTab.js';
 import type { TeamState } from './useTeam.js';
 import { ConfirmDialog, PathDialog } from './WorkspaceDialogs.js';
@@ -87,7 +88,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
   const [found, setFound] = useState<{ context: Found; project: Found } | null>(null);
   const [findError, setFindError] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
-  const [activeKey, setActiveKey] = useState<number | 'design' | 'team' | 'files'>('design');
+  const [activeKey, setActiveKey] = useState<number | 'design' | 'team' | 'changes' | 'files'>('design');
   const [selectedDesign, setSelectedDesign] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const designs = useDesigns(client, id, feed);
@@ -195,7 +196,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
       <button type="button" className="tree-action" aria-pressed={treeOpen} aria-label="File tree" title={treeOpen ? 'Hide file tree' : 'Show file tree'} onClick={() => setTreeOpen(!treeOpen)}><Glyph name="tree" /></button>
       {actions}
     </>}>
-      {(['design', 'team', 'files'] as const).map(view => <div key={view} className={`workspace-tab pinned ${activeKey === view ? 'active' : ''}`}>
+      {(['design', 'team', 'changes', 'files'] as const).map(view => <div key={view} className={`workspace-tab pinned ${activeKey === view ? 'active' : ''}`}>
         <button type="button" aria-current={activeKey === view ? 'true' : undefined} onClick={() => {
           setActiveKey(view); setScopeNote(null); if (view === 'team') void team.refresh(); if (view === 'files') setTreeOpen(true); else setTreeOpen(false);
         }}>
@@ -233,6 +234,9 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
         <div className="file-tab-panel" hidden={!showTeam}>
           <TeamTab team={team} workspace={workspace} designs={designs.designs} designsError={designs.error} designsTruncated={designs.truncated} selected={selectedMember} onSelect={setSelectedMember}
             onDesign={openDesign} onImplementation={openImplementation} onDiscuss={member => onDiscuss({ kind: 'member', memberId: member.memberId, name: member.name })} onBrowse={browse} />
+        </div>
+        <div className="file-tab-panel" hidden={activeKey !== 'changes'}>
+          <ChangesTab workspaceId={id} team={team} visible={activeKey === 'changes'} onApproved={() => { void designs.refresh(); void team.refresh(); }} />
         </div>
         <div className="file-tab-panel" hidden={activeKey !== 'files'}><div className="files-overview"><span className="eyebrow">FILES</span><h2>Workspace files</h2><p>Open an implementation or context file from the tree.</p>
           <button type="button" className="secondary-button" onClick={browse}>Browse files</button></div></div>

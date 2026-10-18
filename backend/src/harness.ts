@@ -170,6 +170,14 @@ export class HarnessService {
     if (!part) throw new AppError('not_found', 'No writable harness part with that ID', 404);
     return part;
   }
+  async review(id: string, partId: string) {
+    return this.operation(id, async () => {
+      const env = await this.environment(id), part = this.part(env, partId);
+      const snapshot = await env.history.checkpoint(id, part, env.root, { type: 'harness', memberId: id }, 'Review pending files');
+      const state = await env.history.ensure(id, part, env.root);
+      return { memberId: id, partId, revision: snapshot.revision, base: state.committed, changes: await env.history.compareSnapshots(state.committed, snapshot.revision) };
+    });
+  }
   async inspect(id: string) {
     return this.operation(id, async () => {
       const env = await this.environment(id);

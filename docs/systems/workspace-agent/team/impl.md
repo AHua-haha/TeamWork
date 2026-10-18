@@ -73,3 +73,5 @@ Agent cooperation uses the optional leading mention-header contract owned by [gr
 ## Conversation reset
 
 The group-chat child owns the reset contract; teamRoutes exposes POST team/chat/reset and TeamRunner coordinates workspace-idle admission with publication and member activation. MySqlStore owns atomic conversation deletion and persistent shared cursor boundaries. Runtime/harness execution logic and files remain unchanged.
+
+The harness child exposes scoped pending file review through teamRoutes for the unified frontend Changes tab. Existing member current inspection, user file commit and separate idle activation contracts stay unchanged. Design acceptance remains its independent user harness commit; subsequent current inspection re-resolves accepted designs and can clear member activation blockers.

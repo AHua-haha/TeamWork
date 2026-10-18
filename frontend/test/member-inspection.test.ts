@@ -4,9 +4,10 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { WorkspaceClient, type Member, type DesignSummary } from '../src/client/workspace-client.js';
 import { memberTree } from '../src/ui/member-tree.js';
+import { TeamTab } from '../src/ui/TeamTab.js';
 import { MemberTree } from '../src/ui/MemberTree.js';
-import { ConfigurationDiff } from '../src/ui/ConfigurationDiff.js';
-import { diffLines } from '../src/ui/configuration-diff.js';
+import { FileDiff } from '../src/ui/FileDiff.js';
+import { diffLines } from '../src/ui/file-diff.js';
 
 const member = (id: string, working: string[], dependencies: string[] = []): Member => ({ memberId: id, workspaceId: 'w', revision: 1, name: id, role: 'developer', responsibility: 'Own assigned design', lead: id === 'Lead', ready: true, running: false, issues: [], settings: { connectionId: 'c', modelId: 'm', toolOptionIds: [], promptOptionIds: [], prompt: '', modelOptions: [] }, harness: { designScope: { working, dependencies }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] } });
 const design = (path: string): DesignSummary => ({ path, revision: 'r', implementation: [] });
@@ -40,7 +41,7 @@ test('unified diff parsing preserves independent line numbers, multiple hunks, l
   assert.deepEqual(lines.filter(l => l.kind === 'add').map(l=>l.after),[5,6,21]);
   assert.equal(lines.find(l=>l.kind==='add')!.text,'<script>alert(1)</script>');
   assert.equal(diffLines('Binary files a/file and b/file differ\n')[0]!.kind,'note');
-  const html = renderToStaticMarkup(createElement(ConfigurationDiff,{files:[{path:'.rsi/members/backend/member.json',action:'modify',patch,truncated:false}],selected:null,onSelect(){}}));
+  const html = renderToStaticMarkup(createElement(FileDiff,{files:[{path:'.rsi/members/backend/member.json',action:'modify',patch,truncated:false}],selected:null,onSelect(){}}));
   assert.match(html,/Changed files/); assert.match(html,/Unified diff/); assert.match(html,/&lt;script&gt;/);
   assert.ok(!html.includes('<script>')); assert.ok(!html.includes('Configuration operations')); assert.ok(!html.includes('<details'));
 });
@@ -64,4 +65,39 @@ test('unavailable file assignments remain visible when that path now contains de
   const html = renderToStaticMarkup(createElement(MemberTree,{name:'Project',designs,members,selected:null,onSelect(){},onDesign(){}}));
   assert.match(html,/Open Previous active details/);
   assert.match(html,/Open Current active details/);
+});
+
+
+test('scope review and approval clients keep design/member tokens separate', async () => {
+  const calls: { path: string; method: string; body: unknown }[] = [];
+  const client = new WorkspaceClient((async (input, init) => { calls.push({ path: String(input), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null }); return new Response('{}'); }) as typeof fetch);
+  await client.scopeReview('w 1', 'lead 1', 'design');
+  await client.scopeReview('w 1', 'lead 1', 'member-config');
+  await client.approveScope('w 1', 'lead 1', 'design', { revision: 'design-reviewed', base: 'design-base', message: 'Approve design changes' });
+  assert.deepEqual(calls, [
+    { path: '/workspaces/w%201/team/members/lead%201/harness/design/review', method: 'GET', body: null },
+    { path: '/workspaces/w%201/team/members/lead%201/harness/member-config/review', method: 'GET', body: null },
+    { path: '/workspaces/w%201/team/members/lead%201/harness/design/commit', method: 'POST', body: { revision: 'design-reviewed', base: 'design-base', message: 'Approve design changes' } },
+  ]);
+});
+
+test('the shared pending file diff supports design/member paths and an empty review without approval controls', () => {
+  const files = [{ path: '.rsi/context/design/backend/design.md', action: 'add' as const, patch, truncated: false }, { path: '.rsi/members/backend/member.json', action: 'modify' as const, patch, truncated: false }];
+  const html = renderToStaticMarkup(createElement(FileDiff, { files, selected: files[1]!.path, onSelect() {} }));
+  assert.match(html, /Design/); assert.match(html, /Members/); assert.match(html, /Approved → pending/);
+  assert.match(html, /Diff for .rsi\/members\/backend\/member.json/); assert.ok(!html.includes('<script>'));
+  assert.ok(!html.includes('Approve members'));
+  assert.match(renderToStaticMarkup(createElement(FileDiff, { files: [], selected: null, onSelect() {} })), /No pending design or member changes/);
+});
+
+
+test('Team contains active member information without a configuration change subpage', () => {
+  const lead = member('Lead', ['metadata.json']); lead.lead = true;
+  const html = renderToStaticMarkup(createElement(TeamTab, {
+    team: { team: { workspaceId: 'w', members: [lead] }, loading: false, error: null, refresh: async () => {} },
+    workspace: { workspaceId: 'w', name: 'Project', directory: '/tmp/project', createdAt: 1, context: { workspaceId: 'w', seq: 1, files: 3, bytes: 20, problems: [] } },
+    designs: [design('metadata.json')], selected: null, onSelect() {}, onDesign() {}, onImplementation() {}, onDiscuss() {}, onBrowse() {},
+  }));
+  assert.match(html, /Open Lead active details/);
+  assert.ok(!html.includes('Configuration changes')); assert.ok(!html.includes('Approve members')); assert.ok(!html.includes('team-view-tabs'));
 });
