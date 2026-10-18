@@ -94,3 +94,7 @@ For harness-equipped members, final publication first persists scoped run-end ch
 ## Unified streaming and model completion
 
 Ordinary assistant text and tools stream to the user as one private activity flow. Backend selects a final candidate after model completion, using native phase where available and normal terminal reasons where absent. Successful publication establishes acceptance. Accepted references pin exact text block indices; frontend disclosure cannot publish or trigger work. Busy/mention-budget refusal remains atomic. Historical accepted references remain immutable.
+
+## Scoped package identifiers
+
+A bare @name immediately followed by / is part of a scoped package/path identifier, such as @joplin/lib or @types/node, and is not a routing mention. This applies in both user and member publications and even when an active member has that scope's name. Explicit @Name and @{Name With Spaces} mentions retain their behavior. Real unknown member mentions still refuse the whole publication; technical package identifiers do not consume mention budget or trigger a member. This does not introduce general Markdown parsing or change how otherwise explicit routing tokens are written.

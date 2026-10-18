@@ -278,7 +278,7 @@ test('web tool Markdown and metadata persist independently of context and replay
   let unavailable = false;
   const key = 'integration-web-key-not-a-real-credential';
   const tools = webTools(key, async url => unavailable ? new Response(key, { status: 429 }) : Response.json(String(url).endsWith('/search')
-    ? { results: [{ title: 'Example', url: 'https://example.com', summary: 'Search summary.', snippet: '' }] }
+    ? { results: [{ title: 'Example', url: 'https://example.com', summary: 'Verbose summary must stay out.', snippet: 'Search snippet.' }] }
     : { title: 'Example', content: '# Page\n\nFetched Markdown.' }));
   const f = await fixture({ policy: fixedPolicy(model, tools) });
   const team = teamFor(f.runtime);
@@ -304,7 +304,7 @@ test('web tool Markdown and metadata persist independently of context and replay
     const records = before.filter(event => event.type === 'message').map(event => event.record);
     const results = records.filter(record => record.message.role === 'toolResult');
     assert.equal(results.length, 2);
-    assert.match(JSON.stringify(results[0]!.message), /Search summary/);
+    assert.match(JSON.stringify(results[0]!.message), /Search snippet/);
     assert.match(JSON.stringify(results[1]!.message), /Fetched Markdown/);
     for (const record of results) {
       assert.equal(record.message.role, 'toolResult');
@@ -1319,6 +1319,33 @@ async function groupFixture() {
   await runtime.open();
   return { workspaceId, lead, backend, frontend, team, runtime, requests, async close() { await runtime.close(); team.runner.close(); await workspaceService.close(); await rm(folder, { recursive: true, force: true }); } };
 }
+
+test('scoped package references produce one accepted report without private publication retries', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    const accepted = await f.team.runner.postUser(f.workspaceId, 'Review @joplin/lib and @types/node');
+    assert.equal(accepted.runs.length, 1);
+    assert.equal(accepted.runs[0]!.agentId, f.lead.memberId);
+    const report = 'Use `@joplin/lib`, @types/node and @Backend/package. Complete report.';
+    answer((await f.requests.next()).events, message(report));
+    const finished = await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    assert.equal(finished.status, 'completed');
+    assert.equal(finished.step, 1);
+    const history = await store.followSnapshot(f.lead.memberId, finished.runId, 0);
+    assert.equal(history.history.filter(record => record.message.role === 'assistant').length, 1);
+    assert.ok(!history.history.some(record => record.metadata.source === 'publication-feedback'));
+    const chat = await store.chatSnapshot(f.workspaceId);
+    assert.equal(chat.messages.length, 2);
+    assert.equal(chat.messages[1]!.text, report);
+    assert.deepEqual(chat.messages[1]!.recipients, []);
+    const entry = (await store.chatTimeline(f.workspaceId)).changes.at(-1)!.entry;
+    assert.ok(entry.kind === 'member' && entry.finalRef);
+    if (entry.kind !== 'member') return;
+    assert.equal(entry.text, report);
+    assert.deepEqual(entry.finalRef!.contentIndices, [0]);
+    assert.equal((await f.runtime.getState(f.backend.memberId)).run, null);
+  } finally { await f.close(); }
+});
 
 test('native commentary continues; stored ordinary final text streams and pins exact final blocks', { timeout: 30_000 }, async () => {
   const f = await groupFixture();

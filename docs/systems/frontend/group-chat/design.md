@@ -122,3 +122,7 @@ Private inspection failure does not remove or replace shared messages. Failed, c
 Hovering over, focusing or clicking an active member avatar in group chat opens an interactive model picker. It remains open while using its controls and closes on Escape, outside click or leaving the avatar/panel. The panel uses the existing composer controls for provider/model selection, per-model reasoning, maximum output tokens, temperature and context budget. Opening it writes nothing. Model and reasoning save on selection; the additional options use Save/Discard. Colors and avatar geometry remain unchanged. Historical retired members cannot be configured.
 
 Settings belong to that member, persist through reload and apply to its next run. In-flight runs retain their prepared configuration. Errors are visible and stale revisions require reviewing the latest values. A single panel is open at a time; it stays within the viewport and supports keyboard and touch interaction. Changes do not alter prompts, responsibility, tools or design assignments.
+
+## Repeated publication attempts
+
+Expanded Work may contain distinct unpublished response attempts followed by refusal feedback. Similar wording does not make these duplicate records. Exclude only the exact accepted final source from Work and render that accepted report once outside it. Do not hide or merge genuinely different attempts by comparing their text. Collapsing Work leaves only the accepted report visible.

@@ -11,6 +11,27 @@ test('mentions use exact names, braces and case-insensitive deduplication; email
   for (const text of ['@{Backend Worker', '@{}', '@{Backend\nWorker}']) assert.throws(() => mentions(text), code('invalid_input'));
 });
 
+test('scoped package and path identifiers are not member mentions', () => {
+  assert.deepEqual(mentions('Use `@joplin/lib`, @types/node and @anthropic-ai/sdk.'), []);
+  assert.deepEqual(mentions('@scope/package@1.0.0 https://registry.npmjs.org/@scope/package'), []);
+  assert.deepEqual(mentions('@joplin/lib @Backend review this with @{Frontend Worker} and @types/node'), ['Backend', 'Frontend Worker']);
+  assert.deepEqual(mentions('@Backend/path @Backend @{Backend}'), ['Backend']);
+});
+
+test('reports with scoped packages publish once without activating matching member names', () => withTeam(async f => {
+  const namedLikePackage = await worker(f, 'joplin');
+  const accepted = await f.team.runner.postUser(f.workspaceId, 'Research @joplin/lib and @types/node');
+  assert.equal(accepted.runs.length, 1);
+  assert.equal(accepted.runs[0]!.agentId, f.lead.memberId);
+  const report = 'Use `@joplin/lib` with @types/node. This is the complete report.';
+  const published = await f.team.runner.publishFinal(f.lead.memberId, accepted.runs[0]!.runId, report, 'final');
+  assert.deepEqual(published.recipients, []);
+  assert.equal(published.text, report);
+  assert.equal(f.runtime.active(namedLikePackage.memberId), undefined);
+  const chat = await f.team.runner.snapshot(f.workspaceId);
+  assert.equal(chat.messages.filter(message => message.author.type === 'member').length, 1);
+}));
+
 test('all members receive messages but only mentioned members activate, in parallel', () => withTeam(async f => {
   const backend = await worker(f, 'Backend'); const frontend = await worker(f, 'Frontend');
   const result = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');

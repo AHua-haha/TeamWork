@@ -90,6 +90,8 @@ export function mentions(text: string): string[] {
   const result = new Map<string, string>();
   const pattern = /(^|[^\p{L}\p{N}_.@-])@(?:\{([^{}\r\n]+)\}|([A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?))/gu;
   for (const match of text.matchAll(pattern)) {
+    // A bare @scope/package is a technical identifier, not a routing token.
+    if (match[3] && text[match.index! + match[0].length] === '/') continue;
     const name = (match[2] ?? match[3])!;
     result.set(name.toLowerCase(), name);
   }

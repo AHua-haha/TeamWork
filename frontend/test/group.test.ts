@@ -132,6 +132,18 @@ test('refused attempts and feedback stay visible; empty work has no placeholder'
   assert.deepEqual(runActivity(snapshot([record(1,'final','Answer')]),accepted),[]);
 });
 
+test('three similar report attempts remain two refused private candidates and one accepted final', () => {
+  const feedback = (position: number) => ({ ...record(position, `feedback-${position}`, ''), metadata: { source: 'publication-feedback' }, message: { role: 'user' as const, content: 'Group publication refused: No active member named "joplin".', timestamp: 1 } });
+  const accepted = { ...member, run: run('completed'), working: { after: 0, through: 5 }, finalRef: { agentId, runId, messageId: 'accepted', position: 5, contentIndices: [0] }, text: 'The report.' };
+  const state = snapshot([record(1, 'attempt-1', 'The report.'), feedback(2), record(3, 'attempt-2', 'The report.'), feedback(4), record(5, 'accepted', 'The report.')]);
+  const before = structuredClone(state);
+  const work = runActivity(state, accepted);
+  assert.deepEqual(work.map(item => item.id), ['attempt-1-0', 'feedback-2', 'attempt-2-0', 'feedback-4']);
+  assert.equal(work.filter(item => item.kind === 'text' && item.text === accepted.text).length, 2, 'distinct unpublished attempts are retained, not text-deduplicated');
+  assert.ok(!work.some(item => item.id === 'accepted-0'), 'accepted source is not also rendered inside Work');
+  assert.deepEqual(state, before);
+});
+
 test('historical accepted references exclude only their original final content', () => {
   const historical={...member,run:run('completed'),working:{after:0,through:2},finalRef:{agentId,runId,messageId:'final',position:2},text:'Answer'};
   assert.deepEqual(runActivity(snapshot([record(1,'earlier','Earlier work'),record(2,'final','Answer')]),historical),[{id:'earlier-0',kind:'text',text:'Earlier work'}]);

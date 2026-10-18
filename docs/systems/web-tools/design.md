@@ -14,9 +14,9 @@ Reusable capabilities let any harness-equipped agent search the public web and r
 
 Each tool returns one text content block: readable Markdown core content followed by a distinct `<metadata>` ... `</metadata>` block containing named metadata fields in YAML syntax. There is no outer JSON serialization. The same text is available to the model and recorded in normal stable tool history for frontend inspection.
 
-Search core content contains a numbered result list, with each result's title, URL and provider summary (snippet when summary is empty). Metadata includes tool/provider/status, retrieval timestamp, query, requested/result counts, truncation status, and per-result source URL, publication date, site name and provider ranking/authority signals when supplied. No matches is a successful `No results found.` result with result_count 0. Search requests do not include full page content.
+Search core content contains a numbered result list, with each result's title, URL and provider snippet. Each snippet is capped at 300 Unicode characters including a final ellipsis when shortened; titles and URLs retain their source attribution. Metadata includes tool/provider/status, retrieval timestamp, query, requested/result counts, truncation status, and per-result source URL, publication date, site name and provider ranking/authority signals when supplied, plus snippet_truncated for each source. Top-level truncated is true when any snippet or the total Markdown core was shortened. No matches is a successful `No results found.` result with result_count 0. Search requests do not include full page content.
 
-Fetch core content contains the page title and provider Markdown body. Metadata includes tool/provider/status, requested URL, title, retrieval timestamp and truncation status. URL denotes the request, not a claimed canonical/redirect destination. No extra model call summarizes or rewrites either result.
+Fetch core content contains the page title and provider Markdown body. Metadata includes tool/provider/status, requested URL, title, retrieval timestamp and truncation status. URL denotes the request, not a claimed canonical/redirect destination. No extra model call summarizes or rewrites either result. Search ignores provider summary/content even when snippet is empty; an empty snippet leaves its title and URL available.
 
 ## Failure behavior
 
@@ -40,7 +40,7 @@ Cancellation propagates to in-flight HTTP/body reading and remains run cancellat
 ### 1. Page title
 https://example.com/article
 
-The source summary.
+The short source snippet.
 
 <metadata>
 tool: "web_search"
@@ -56,6 +56,7 @@ sources:
     site_name: "Example"
     rerank_score: 2.4
     authority: 3
+    snippet_truncated: false
 truncated: false
 </metadata>
 ```
@@ -64,8 +65,10 @@ Fetch uses the same single-text structure with page Markdown as core content and
 
 ## Acceptance examples
 
-1. Search query with site/date filters and omitted count calls DeepSeek with count 5 and returns Markdown summaries plus metadata.
+1. Search query with site/date filters and omitted count calls DeepSeek with count 5 and returns Markdown snippets plus metadata.
 2. Fetch of an HTTP page returns its title/Markdown with requested URL metadata, without an outer JSON string.
 3. A no-match search succeeds with an empty-result notice. A 401 or 429 returns a recorded tool failure without exposing request headers or provider error body.
 4. A worker with no allowed Bash commands still has both web tools; Bash remains network-isolated.
 5. Cancelling a run aborts the tool request. An oversized body fails; a long successful page is visibly truncated.
+
+6. A provider returns a 5000-character summary and a 150-character snippet. Only the snippet appears. A 500-character snippet becomes at most 300 Unicode characters, with a visible ellipsis, source snippet_truncated true and top-level truncated true; full page reading remains web_fetch.

@@ -5,10 +5,11 @@ import { toolText, type ToolOutput } from './tool-result.js';
 const endpoint = 'https://api.deepseek.com/v1/tools/';
 const responseLimit = 4 * 1024 * 1024;
 const contentLimit = 64 * 1024;
+const snippetLimit = 300;
 const deadlineMs = 30_000;
 type Metadata = Record<string, unknown>;
 type SearchInput = { query: string; count: number; original_question?: string };
-type Source = { title: string; url: string; summary: string; metadata: Metadata };
+type Source = { title: string; url: string; snippet: string; metadata: Metadata };
 
 class WebFailure extends Error {
   constructor(readonly code: string, message: string, readonly retryable = false, readonly httpStatus?: number) { super(message); }
@@ -50,10 +51,12 @@ function searchSources(value: unknown): Source[] {
   if (!Array.isArray(data.results) || data.results.length > 50) return malformed();
   return data.results.map(value => {
     const row = object(value), title = text(row.title), url = text(row.url);
-    const summary = text(row.summary) || text(row.snippet);
-    return { title, url, summary, metadata: {
+    const characters = [...text(row.snippet)], snippetTruncated = characters.length > snippetLimit;
+    const snippet = snippetTruncated ? characters.slice(0, snippetLimit - 1).join('') + '…' : characters.join('');
+    return { title, url, snippet, metadata: {
       url, published_at: optionalText(row.date), site_name: optionalText(row.site_name),
       rerank_score: optionalNumber(row.rerank_score), authority: optionalNumber(row.authority),
+      snippet_truncated: snippetTruncated,
     } };
   });
 }
@@ -68,8 +71,9 @@ function metadataText(metadata: Metadata): string {
 function output(core: string, metadata: Metadata, isError: boolean, key?: string): ToolOutput {
   const redact = (value: string) => key ? value.split(key).join('[redacted]') : value;
   core = redact(core);
-  const bytes = Buffer.from(core), truncated = bytes.length > contentLimit;
-  if (truncated) {
+  const bytes = Buffer.from(core), coreTruncated = bytes.length > contentLimit;
+  const truncated = coreTruncated || metadata.truncated === true;
+  if (coreTruncated) {
     const notice = '\n\n[Content truncated at the tool output limit.]';
     core = new TextDecoder().decode(bytes.subarray(0, contentLimit - Buffer.byteLength(notice)), { stream: true }) + notice;
   }
@@ -138,8 +142,8 @@ export function webTools(apiKey?: string, request: typeof fetch = fetch): Runtim
       const metadata = { tool, provider: 'deepseek', status: 'success', retrieved_at: new Date().toISOString() };
       if (search) {
         const sources = searchSources(data);
-        const core = '## Search results\n\n' + (sources.length ? sources.map((row, index) => `### ${index + 1}. ${row.title}\n${row.url}\n\n${row.summary}`).join('\n\n') : 'No results found.');
-        return output(core, { ...metadata, query: search.query, requested_count: search.count, result_count: sources.length, sources: sources.map(row => row.metadata) }, false, key);
+        const core = '## Search results\n\n' + (sources.length ? sources.map((row, index) => `### ${index + 1}. ${row.title}\n${row.url}${row.snippet ? `\n\n${row.snippet}` : ''}`).join('\n\n') : 'No results found.');
+        return output(core, { ...metadata, query: search.query, requested_count: search.count, result_count: sources.length, sources: sources.map(row => row.metadata), truncated: sources.some(row => row.metadata.snippet_truncated === true) }, false, key);
       }
       const page = object(data), title = text(page.title), content = text(page.content);
       if (!content.trim()) return malformed();
@@ -156,7 +160,7 @@ export function webTools(apiKey?: string, request: typeof fetch = fetch): Runtim
   };
   return [
     {
-      definition: { name: 'web_search', description: 'Search the web for current information. Put site:, -site:, quoted phrases, lang:, after: and before: filters directly in query. Returns Markdown titles, URLs and summaries followed by metadata. Use web_fetch to read a selected page.', parameters: Type.Object({
+      definition: { name: 'web_search', description: 'Search the web for current information. Put site:, -site:, quoted phrases, lang:, after: and before: filters directly in query. Returns Markdown titles, URLs and snippets of at most 300 characters each, followed by metadata. Use web_fetch to read a selected page.', parameters: Type.Object({
         query: Type.String({ minLength: 1, maxLength: 128, description: 'Search query including any filters; at most 128 Unicode characters.' }),
         count: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, default: 5 })),
         original_question: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: 'Short original question to clarify search intent.' })),

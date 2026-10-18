@@ -43,3 +43,9 @@ TeamSystem checkpoints harness state before invoking final publication. Its runt
 Ordinary assistant text and tools stream to the user as one private activity flow. Backend selects a final candidate after model completion, using native phase where available and normal terminal reasons where absent. Successful publication establishes acceptance. Accepted references pin exact text block indices; frontend disclosure cannot publish or trigger work. Busy/mention-budget refusal remains atomic. Historical accepted references remain immutable.
 
 Publication/admission and user member-config control share TeamRunner's per-workspace operation gate. User activation refuses any active/admitted/finalizing job and rechecks durable active-run state during the database transaction. Concurrent publication runs before or after the complete activation, never within its idle-check/write window. This coordination does not queue a busy member trigger or automatically retry activation. Sender mention-slot release still permits normal handoffs; the separate run-job map remains until terminal finalization finishes.
+
+## Mention token boundaries
+
+mentions() in group-chat.ts excludes bare-name matches immediately followed by a slash, preserving scoped package/path tokens as ordinary text. TeamRunner uses the same parser for user/member publication. Explicit braces and real unknown/busy mentions retain existing refusal rules. No frontend string matching, report deduplication, message deletion or provider-specific routing exception is used. Refused candidates remain real private records; accepted finalRef alone selects the published report.
+
+Regression tests cover scoped packages with unknown and existing member names, mixed package tokens plus real mentions, single-publication acceptance of reports containing package names, and the frontend's projection of two genuine refused attempts plus one accepted final.

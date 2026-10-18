@@ -26,18 +26,18 @@ test('search maps inputs to the fixed DeepSeek API and returns one Markdown text
   assert.deepEqual(JSON.parse(calls[0]!.init.body as string), { query, count: 5, need_content: false, ori_question: 'How can agents use a harness?' });
   assert.equal(result.isError, false);
   assert.equal(result.content.length, 1);
-  assert.match(content(result), /^## Search results\n\n### 1\. Agent harness\nhttps:\/\/example.com\/harness\n\nA source summary\./);
+  assert.match(content(result), /^## Search results\n\n### 1\. Agent harness\nhttps:\/\/example.com\/harness\n\nShort snippet\./);
   assert.match(content(result), /<metadata>\ntool: "web_search"\nprovider: "deepseek"\nstatus: "success"/);
   assert.match(content(result), /requested_count: 5\nresult_count: 1\nsources:\n  - url: "https:\/\/example.com\/harness"/);
   assert.match(content(result), /published_at: "2026-10-01T00:00:00Z"/);
-  assert.match(content(result), /rerank_score: 2.4\n    authority: 3\ntruncated: false\n<\/metadata>$/);
-  assert.doesNotMatch(content(result), /Unused full page|Short snippet|test-web-key/);
+  assert.match(content(result), /rerank_score: 2.4\n    authority: 3\n    snippet_truncated: false\ntruncated: false\n<\/metadata>$/);
+  assert.doesNotMatch(content(result), /Unused full page|A source summary|test-web-key/);
   assert.throws(() => JSON.parse(content(result)), 'not a JSON envelope');
 });
 
-test('count boundaries, Unicode queries, zero matches and snippet fallback are supported', async () => {
+test('count boundaries, Unicode queries, zero matches and empty snippets are supported', async () => {
   const requests: Record<string, unknown>[] = [];
-  const tools = webTools(key, async (_url, init) => { requests.push(JSON.parse(init!.body as string)); return json({ results: requests.length === 1 ? [] : [{ ...source, summary: '', date: null, site_name: null }] }); });
+  const tools = webTools(key, async (_url, init) => { requests.push(JSON.parse(init!.body as string)); return json({ results: requests.length === 1 ? [] : [{ ...source, snippet: '', date: null, site_name: null }] }); });
   const empty = await invoke(tools, 'web_search', { query: '😀'.repeat(128), count: 1 });
   assert.equal(empty.isError, false);
   assert.match(content(empty), /No results found\./);
@@ -47,7 +47,8 @@ test('count boundaries, Unicode queries, zero matches and snippet fallback are s
   assert.equal(fallback.isError, false);
   assert.equal(requests[1]!.count, 50);
   assert.ok(!Object.hasOwn(requests[1]!, 'ori_question'));
-  assert.match(content(fallback), /Short snippet\./);
+  assert.match(content(fallback), /Agent harness/);
+  assert.doesNotMatch(content(fallback), /A source summary|Short snippet/);
   assert.match(content(fallback), /published_at: null/);
 });
 
@@ -106,7 +107,7 @@ test('missing configuration fails without HTTP and provider HTTP errors expose o
 });
 
 test('malformed provider data fails and accidental credential echoes are removed from successful output', async () => {
-  for (const data of [{}, { results: null }, { results: [{}] }, { results: [{ ...source, summary: 123 }] }, { results: [{ ...source, date: 123 }] }]) {
+  for (const data of [{}, { results: null }, { results: [{}] }, { results: [{ ...source, snippet: 123 }] }, { results: [{ ...source, date: 123 }] }]) {
     const tools = webTools(key, async () => json(data));
     const result = await invoke(tools, 'web_search', { query: 'test' });
     assert.equal(result.isError, true);
@@ -139,6 +140,26 @@ test('oversized provider bodies fail; long Markdown is bounded without broken UT
   assert.match(content(result), /Content truncated at the tool output limit/);
   assert.match(content(result), /truncated: true/);
   assert.match(content(result), /url: "https:\/\/example.com"/);
+});
+
+test('search snippets are bounded per result and verbose summaries never enter output', async () => {
+  const sources = [
+    { ...source, snippet: '😀'.repeat(301), summary: 'VERBOSE_SUMMARY'.repeat(1000) },
+    { ...source, title: 'Empty snippet', snippet: '', summary: 'DO_NOT_FALL_BACK' },
+    { ...source, title: 'Exact boundary', snippet: '😀'.repeat(300) },
+  ];
+  const result = await invoke(webTools(key, async () => json({ results: sources })), 'web_search', { query: 'test' });
+  assert.equal(result.isError, false);
+  const text = content(result);
+  const excerpt = text.split('https://example.com/harness\n\n')[1]!.split('\n\n### 2.')[0]!;
+  assert.equal([...excerpt].length, 300);
+  assert.ok(excerpt.endsWith('…'));
+  assert.doesNotMatch(text, /VERBOSE_SUMMARY|DO_NOT_FALL_BACK|�/);
+  assert.match(text, /snippet_truncated: true/);
+  assert.match(text, /truncated: true\n<\/metadata>$/);
+  assert.equal((text.match(/snippet_truncated: false/g) ?? []).length, 2);
+  assert.match(text, /### 2\. Empty snippet\nhttps:\/\/example.com\/harness/);
+  assert.ok(text.includes('😀'.repeat(300)), 'an exactly 300-character snippet is preserved');
 });
 
 test('run cancellation reaches HTTP and stays cancellation; pre-cancelled runs make no request', async () => {
