@@ -60,9 +60,8 @@ const model = fauxProvider().getModel();
 const staticConfig = { resolveForRun: async () => ({ model, tools: [], systemPrompt: '', options: {}, source: { appRevision: 0, agentRevision: 0, catalogRevisions: {} } }) };
 const message = (text = 'answer') => fauxAssistantMessage(text);
 const user = { role: 'user' as const, content: 'hello', timestamp: 1 };
-const limits = { maxChunks: 2, maxBytes: 100_000 };
 
-async function fixture(options: { policy?: RuntimePolicy; retention?: typeof limits; maxSteps?: number } = {}) {
+async function fixture(options: { policy?: RuntimePolicy; progressCapacity?: number; maxSteps?: number } = {}) {
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
   const runtime = new AgentRuntime(store, staticConfig, options.policy ?? fixedPolicy(model), request => {
     const events = new Queue<AssistantMessageEvent>();
@@ -112,26 +111,28 @@ test('MySQL atomic history/context, revision conflicts, immutable history and co
   await store.finishRun(agentId, run.value.runId, 'completed');
 });
 
-test('MySQL keeps count/byte retention boundaries after full eviction and clears chunks on commit', { timeout: 15_000 }, async () => {
+test('MySQL stores completed messages and run markers without transient chunk tables', { timeout: 15_000 }, async () => {
   const { agentId } = await store.createAgent();
-  const run = await store.startRun(agentId, user);
-  const id = randomUUID();
-  await store.beginMessage(agentId, run.runId, id, 1);
-  const partial = message('one');
-  await store.appendChunk(agentId, run.runId, id, { type: 'start', partial }, limits);
-  for (let i = 1; i < 5; i++) await store.appendChunk(agentId, run.runId, id, { type: 'text_delta', contentIndex: 0, delta: String(i), partial }, limits);
-  let live = (await store.followSnapshot(agentId, run.runId, 0)).live!;
-  assert.equal(live.firstAvailable, 3);
-  assert.deepEqual(live.chunks.map(chunk => chunk.sequence), [3, 4]);
-  await store.appendChunk(agentId, run.runId, id, { type: 'text_delta', contentIndex: 0, delta: 'x', partial }, { maxChunks: 10, maxBytes: 1 });
-  live = (await store.followSnapshot(agentId, run.runId, 0)).live!;
-  assert.equal(live.firstAvailable, 6);
-  assert.equal(live.chunks.length, 0);
-  await store.commitMessage(agentId, run.runId, { messageId: id, message: partial, metadata: { kept: true } });
+  const run = await store.startRun(agentId, user), id = randomUUID();
+  assert.equal(await store.beginMessage(agentId, run.runId, id, 1), 1);
+  const preserved = await store.followSnapshot(agentId, run.runId, 0);
+  await store.pool.query('CREATE TABLE live_messages (id VARCHAR(64) PRIMARY KEY)');
+  await store.pool.query('CREATE TABLE chunks (message_id VARCHAR(64), FOREIGN KEY (message_id) REFERENCES live_messages(id))');
+  await store.pool.query("INSERT INTO live_messages VALUES ('obsolete')");
+  await store.pool.query("INSERT INTO chunks VALUES ('obsolete')");
+  await store.migrate();
+  assert.deepEqual(await store.followSnapshot(agentId, run.runId, 0), preserved, 'transient migration preserves stable history and run state');
+  const [tables] = await store.pool.query("SHOW TABLES LIKE 'chunks'");
+  assert.deepEqual(tables, []);
+  const [live] = await store.pool.query("SHOW TABLES LIKE 'live_messages'");
+  assert.deepEqual(live, []);
+  const before = await store.followSnapshot(agentId, run.runId, 0);
+  assert.equal(before.state.run?.activeMessageId, id);
+  assert.equal(before.history.length, 1);
+  await store.commitMessage(agentId, run.runId, { messageId: id, message: message('whole'), metadata: { kept: true } });
   const snapshot = await store.followSnapshot(agentId, run.runId, 0);
-  assert.equal(snapshot.live, null);
+  assert.equal(snapshot.state.run?.activeMessageId, null);
   assert.equal(snapshot.history[1]?.messageId, id);
-  assert.equal(snapshot.history[1]?.metadata.kept, true);
   await store.finishRun(agentId, run.runId, 'completed');
 });
 
@@ -198,7 +199,7 @@ test('live Pi chunks keep stable identity; disconnect/reconnect gets complete re
 });
 
 test('slow follower sees gap after pruning and waits for full message; no tail masquerades as complete', { timeout: 15_000 }, async () => {
-  const f = await fixture({ retention: { maxChunks: 0, maxBytes: 0 } });
+  const f = await fixture({ progressCapacity: 0 });
   try {
     const run = await f.runtime.start(f.agentId, 'go');
     const { events } = await f.requests.next();
@@ -207,6 +208,7 @@ test('slow follower sees gap after pruning and waits for full message; no tail m
     events.push({ type: 'start', partial: message('partial') });
     const gap = await until(stream, 'gap');
     assert.equal(gap.type, 'gap');
+    events.push({ type: 'text_start', contentIndex: 0, partial: message('partialtail') });
     events.push({ type: 'text_delta', contentIndex: 0, delta: 'tail', partial: message('partialtail') });
     events.push({ type: 'done', reason: 'stop', message: message('full') });
     const rest = await collect(stream);
@@ -369,7 +371,7 @@ test('runtime owner lock excludes second owner and startup recovers abandoned ru
   try {
     const state = await recovered.getState(f.agentId);
     assert.equal(state.run?.status, 'interrupted');
-    assert.equal((await store.followSnapshot(f.agentId, abandoned.runId, 0)).live, null);
+    assert.equal((await store.followSnapshot(f.agentId, abandoned.runId, 0)).state.run?.activeMessageId, null);
   } finally { await recovered.close(); }
 });
 
@@ -1425,13 +1427,15 @@ test('native commentary continues; stored ordinary final text streams and pins e
     ]);
     second.events.push({ type: 'start', partial: { ...final, content: [], stopReason: 'pending' } });
     const partial = { ...final, content: [{ type: 'text' as const, text: 'Model' }], stopReason: 'pending' as const };
+    second.events.push({ type: 'text_start', contentIndex: 0, partial: { ...partial, content: [{ type: 'text', text: '' }] } });
     second.events.push({ type: 'text_delta', contentIndex: 0, delta: 'Model', partial });
     const stream = f.runtime.follow(f.lead.memberId, { runId: accepted.runs[0]!.runId })[Symbol.asyncIterator]();
     let chunk = await until(stream, 'chunk');
     while (chunk.type !== 'chunk' || chunk.event.type !== 'text_delta') chunk = await until(stream, 'chunk');
-    assert.equal(chunk.event.partial.content[0]?.type, 'text');
+    assert.equal(chunk.event.delta, 'Model');
+    assert.equal('partial' in chunk.event, false);
     assert.equal('output' in chunk, false, 'raw stored blocks need no separate response annotation');
-    assert.ok((await store.followSnapshot(f.lead.memberId, accepted.runs[0]!.runId, 0)).live?.chunks.some(c => c.event.type === 'text_delta'));
+    assert.ok(f.runtime.progress.read(f.lead.memberId, accepted.runs[0]!.runId, chunk.messageId)?.chunks.some(c => c.event.type === 'text_delta'));
     assert.equal((await store.chatSnapshot(f.workspaceId)).position, 1, 'streaming text is not yet shared');
     second.events.push({ type: 'done', reason: 'stop', message: final });
     assert.equal((await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId)).status, 'completed');
@@ -1912,7 +1916,9 @@ test('workspace chat reset atomically clears member conversation storage and sta
     const contextBefore = await store.getContext(f.lead.memberId);
     const before = await store.chatTimeline(f.workspaceId);
     const oldCursor = before.cursor;
+    const retained = accepted.runs.map(run => ({ run, messageId: f.runtime.progress.lane(run.agentId).ring.find(Boolean)!.messageId }));
     const result = await f.team.runner.reset(f.workspaceId);
+    for (const { run, messageId } of retained) assert.equal(f.runtime.progress.read(run.agentId, run.runId, messageId), undefined, 'reset also clears retired-member progress');
     assert.ok(result.resetCursor > oldCursor);
     const timeline = await store.chatTimeline(f.workspaceId, oldCursor);
     assert.deepEqual(timeline.changes, []); assert.equal(timeline.more, false);
@@ -2040,4 +2046,62 @@ test('member can publish a final response after a private web tool error in the 
     const entry = (await store.chatTimeline(f.workspaceId)).changes.at(-1)!.entry;
     assert.ok(entry.kind === 'member' && entry.finalRef && entry.run.status === 'completed');
   } finally { await f.close(); }
+});
+
+test('compact streaming performs no SQL reads between durable boundaries and completion remains authoritative', { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  const original = store.followSnapshot.bind(store); let reads = 0;
+  store.followSnapshot = async (...args) => { reads++; return original(...args); };
+  try {
+    const run = await f.runtime.start(f.agentId, 'go');
+    const { events } = await f.requests.next();
+    const stream = f.runtime.follow(f.agentId, { runId: run.runId });
+    await until(stream, 'sync');
+    events.push({ type: 'start', partial: { ...message(''), content: [], stopReason: 'pending' } });
+    events.push({ type: 'text_start', contentIndex: 0, partial: message('') });
+    await until(stream, 'chunk'); await until(stream, 'chunk');
+    const baseline = reads;
+    for (let i = 0; i < 100; i++) events.push({ type: 'text_delta', contentIndex: 0, delta: 'x', partial: message('x'.repeat(i + 1)) });
+    let bytes = 0;
+    for (let i = 0; i < 100; i++) {
+      const chunk = await until(stream, 'chunk');
+      assert.equal(chunk.type, 'chunk');
+      if (chunk.type === 'chunk') {
+        assert.equal(chunk.event.type, 'text_delta'); assert.equal('partial' in chunk.event, false);
+        bytes += Buffer.byteLength(JSON.stringify(chunk));
+      }
+    }
+    assert.equal(reads, baseline, 'incoming deltas read memory only');
+    assert.ok(bytes < 30_000, `compact transfer: ${bytes}`);
+    events.push({ type: 'done', reason: 'stop', message: message('x'.repeat(100)) });
+    const rest = await collect(stream);
+    assert.equal(rest.filter(e => e.type === 'message').length, 1);
+    const completed = rest.find(e => e.type === 'message');
+    assert.equal(completed?.type === 'message' && completed.record.message.role === 'assistant' && completed.record.message.content[0]?.type === 'text' && completed.record.message.content[0].text.length, 100);
+    assert.equal(rest.at(-1)?.type, 'end');
+  } finally { store.followSnapshot = original; await f.runtime.close(); }
+});
+
+test('FIFO eviction while SQL synchronization is paused discards the tail and recovers at the next message start', { timeout: 15_000 }, async () => {
+  const f = await fixture({ progressCapacity: 3, policy: { ...fixedPolicy(model), shouldContinue: scope => scope.step === 1 } });
+  try {
+    const run = await f.runtime.start(f.agentId, 'go'), first = await f.requests.next();
+    const follower = f.runtime.follow(f.agentId, { runId: run.runId });
+    assert.equal((await follower.next()).value?.type, 'message'); // Hold initial SQL sync at a slow reader.
+    first.events.push({ type: 'start', partial: { ...message(''), content: [] } });
+    first.events.push({ type: 'text_start', contentIndex: 0, partial: message('') });
+    for (let i = 0; i < 8; i++) first.events.push({ type: 'text_delta', contentIndex: 0, delta: 'x', partial: message('x') });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const gap = await until(follower, 'gap'); assert.equal(gap.type, 'gap');
+    first.events.push({ type: 'done', reason: 'stop', message: message('first whole') });
+    const second = await f.requests.next();
+    second.events.push({ type: 'start', partial: { ...message(''), content: [] } });
+    const stable = await until(follower, 'message');
+    assert.equal(stable.type === 'message' && stable.record.message.role === 'assistant' && stable.record.message.content[0]?.type === 'text' && stable.record.message.content[0].text, 'first whole');
+    const start = await until(follower, 'chunk');
+    assert.equal(start.type === 'chunk' && start.event.type, 'start');
+    assert.equal(start.type === 'chunk' && start.sequence, 0);
+    second.events.push({ type: 'done', reason: 'stop', message: message('second whole') });
+    assert.equal((await collect(follower)).at(-1)?.type, 'end');
+  } finally { await f.runtime.close(); }
 });

@@ -71,7 +71,7 @@ const tools = (items: ActivityItem[]) => items.flatMap(item => item.kind === 'to
 
 test('ordinary text streams immediately in one flow while thinking remains hidden', () => {
   const partial = { ...assistant(''), content: [{type:'thinking' as const,thinking:'hidden'}, {type:'text' as const,text:'Let me check'}] };
-  const live = {messageId:'live',runId,message:partial,nextSequence:2,lastEvent:{type:'text_delta' as const,contentIndex:1,delta:'Let me check',partial}};
+  const live = {messageId:'live',runId,message:partial,nextSequence:2,lastEvent:{type:'text_delta' as const,contentIndex:1,delta:'Let me check'}};
   assert.deepEqual(runActivity(snapshot([], [live]), member), [{id:'live-1',kind:'text',text:'Let me check'}]);
   const extended = {...partial,content:[...partial.content.slice(0,1),{type:'text' as const,text:'Let me check the files.'}]};
   assert.equal(runActivity(snapshot([], [{...live,message:extended}]), member)[0]?.kind, 'text');
@@ -82,7 +82,7 @@ test('a leading routing envelope stays hidden while streaming and only its body 
   const header = ' \n<mentions>\n["Backend"]\n</mentions>\n\n';
   for (let index = 1; index <= header.length; index++) {
     const partial = assistant(header.slice(0, index));
-    const live = { messageId: 'header', runId, message: partial, nextSequence: 1, lastEvent: { type: 'start' as const, partial } };
+    const live = { messageId: 'header', runId, message: partial, nextSequence: 1, lastEvent: { type: 'start' as const, message: {...partial,content:[]} } };
     assert.deepEqual(runActivity(snapshot([], [live]), member), [], `header prefix ${index}`);
   }
   const body = '# Report\n\n@Nobody and @joplin/lib are ordinary content.\n<mentions>not routing</mentions>';
@@ -133,7 +133,7 @@ test('visible text separates tool sets in the original block order', () => {
 
 test('late tool calls extend the visible stream instead of creating a provisional final', () => {
   const partial=assistant('I will inspect it');
-  const live={messageId:'live',runId,message:partial,nextSequence:2,lastEvent:{type:'text_delta' as const,contentIndex:0,delta:'I will inspect it',partial}};
+  const live={messageId:'live',runId,message:partial,nextSequence:2,lastEvent:{type:'text_delta' as const,contentIndex:0,delta:'I will inspect it'}};
   const withTool={...partial,content:[...partial.content,{type:'toolCall' as const,id:'late',name:'read',arguments:{path:'src'}}]};
   assert.deepEqual(runActivity(snapshot([], [{...live,message:withTool}]),member).map(item=>item.kind),['text','tools']);
 });
@@ -154,7 +154,7 @@ test('tool results retain call order across parallel completion and reused IDs',
 test('projection respects run and stable range boundaries and excludes terminal partials', () => {
   const old={...record(1,'old','old'),runId:'old-run'}, next={...record(4,'next','next'),runId:'next-run'};
   const partial=assistant('unfinished');
-  const live={messageId:'live',runId,message:partial,nextSequence:1,lastEvent:{type:'start' as const,partial}};
+  const live={messageId:'live',runId,message:partial,nextSequence:1,lastEvent:{type:'start' as const,message:{...partial,content:[]}}};
   const state=snapshot([old,record(2,'candidate','private candidate'),record(3,'final','Answer'),next],[live]);
   const entry={...member,run:run('failed'),working:{after:1,through:3}};
   assert.deepEqual(runActivity(state,entry).map(item=>item.kind==='text'?item.text:''),['private candidate','Answer']);

@@ -134,3 +134,7 @@ Acceptance: after resetting a completed exchange, timeline/messages and every me
 ## Recoverable private tool errors
 
 A member's ordinary tool failure is private error-result context for its next model step. It does not fail the activation or publish an error as a shared answer by itself. Other calls in that response can finish; the member can use the results, revise its approach and publish a normal final response under the existing acceptance/mention rules. Cancellation, model/protocol, persistence and finalization failures retain terminal behavior. No automatic retry is introduced.
+
+## Private execution progress
+
+The version-1 durable group timeline and final references are unchanged. Private execution follows use the runtime’s version-2 compact in-memory progress contract. SQL completed messages remain authoritative; transient gaps/restarts do not rewrite group order or publish partial work. Idle reset clears both durable conversations and member progress buffers.

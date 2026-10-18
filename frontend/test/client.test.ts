@@ -5,7 +5,7 @@ import { ProtocolError, readSse } from '../src/client/sse.js';
 import { agentId, assistant, event, record, run, runId, streamResponse, until } from './fixtures.js';
 import type { FollowEvent } from '../src/client/protocol.js';
 
-const base = { version: 1 as const, agentId, runId };
+const base = { version: 2 as const, agentId, runId };
 
 test('SSE parser accepts split UTF-8, CRLF, comments and multiline data', async () => {
   const bytes = new TextEncoder().encode(': ping\r\nevent: note\r\ndata: café\r\ndata: next\r\n\r\n');
@@ -40,23 +40,23 @@ test('completed history syncs, deduplicates on refresh and ends without polling'
   client.dispose();
 });
 
-test('cumulative Pi partials keep one live identity until a persisted record replaces it', async () => {
+test('compact deltas keep one live identity until a persisted record replaces it', async () => {
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
   const client = new AgentClient(agentId, { fetcher: async () => streamResponse(body) });
   const push = (value: FollowEvent) => controller.enqueue(new TextEncoder().encode(event(value)));
   client.follow(runId);
   push({ ...base, type: 'sync', historyPosition: 0, run: run() });
-  push({ ...base, type: 'chunk', messageId: 'm1', sequence: 0, event: { type: 'start', partial: assistant('', 'pending') } });
-  push({ ...base, type: 'chunk', messageId: 'm1', sequence: 1, event: { type: 'text_delta', contentIndex: 0, delta: 'Hello', partial: assistant('Hello', 'pending') } });
+  push({ ...base, type: 'chunk', messageId: 'm1', sequence: 0, event: { type: 'start', message: {...assistant('', 'pending'),content:[]} } });
+  push({ ...base, type: 'chunk', messageId: 'm1', sequence: 1, event: { type: 'text_start', contentIndex: 0, content: { type: 'text', text: '' } } });
+  push({ ...base, type: 'chunk', messageId: 'm1', sequence: 2, event: { type: 'text_delta', contentIndex: 0, delta: 'Hello' } });
   await until(() => {
     const block = client.getSnapshot().live[0]?.message.content[0];
     return block?.type === 'text' && block.text === 'Hello';
   });
   assert.equal(client.getSnapshot().live.length, 1);
-  push({ ...base, type: 'chunk', messageId: 'm1', sequence: 2, event: { type: 'done', reason: 'stop', message: assistant('Hello!') } });
-  await until(() => client.getSnapshot().live[0]?.lastEvent.type === 'done');
-  assert.equal(client.getSnapshot().completed.length, 0, 'Pi done is not persistence');
+  assert.equal(client.getSnapshot().live[0]?.lastEvent.type, 'text_delta');
+  assert.equal(client.getSnapshot().completed.length, 0, 'progress is not persistence');
   push({ ...base, type: 'message', record: record(1, 'm1', 'Hello!') });
   push({ ...base, type: 'end', historyPosition: 1, run: run('completed') });
   controller.close();
@@ -68,10 +68,10 @@ test('cumulative Pi partials keep one live identity until a persisted record rep
 
 test('gap discards partial and waits for completed message', async () => {
   const payload = event({ ...base, type: 'sync', historyPosition: 0, run: run() })
-    + event({ ...base, type: 'chunk', messageId: 'm1', sequence: 0, event: { type: 'start', partial: assistant('', 'pending') } })
-    + event({ ...base, type: 'chunk', messageId: 'm1', sequence: 1, event: { type: 'text_delta', contentIndex: 0, delta: 'abc', partial: assistant('abc', 'pending') } })
+    + event({ ...base, type: 'chunk', messageId: 'm1', sequence: 0, event: { type: 'start', message: {...assistant('', 'pending'),content:[]} } })
+    + event({ ...base, type: 'chunk', messageId: 'm1', sequence: 1, event: { type: 'text_start', contentIndex: 0, content: { type: 'text', text: 'abc' } } })
     + event({ ...base, type: 'gap', messageId: 'm1', expectedSequence: 2, firstAvailable: 5 })
-    + event({ ...base, type: 'chunk', messageId: 'm1', sequence: 5, event: { type: 'text_delta', contentIndex: 0, delta: 'z', partial: assistant('abcz', 'pending') } })
+    + event({ ...base, type: 'chunk', messageId: 'm1', sequence: 5, event: { type: 'text_delta', contentIndex: 0, delta: 'z' } })
     + event({ ...base, type: 'message', record: record(1, 'm1', 'complete') })
     + event({ ...base, type: 'end', historyPosition: 1, run: run('completed') });
   const client = new AgentClient(agentId, { fetcher: async () => streamResponse(payload) });
@@ -85,7 +85,7 @@ test('gap discards partial and waits for completed message', async () => {
 test('unexpected EOF clears partials, reconnects with completed cursor, then ends', async () => {
   const requests: string[] = [];
   const responses = [
-    event({ ...base, type: 'sync', historyPosition: 0, run: run() }) + event({ ...base, type: 'chunk', messageId: 'm1', sequence: 0, event: { type: 'start', partial: assistant('old', 'pending') } }),
+    event({ ...base, type: 'sync', historyPosition: 0, run: run() }) + event({ ...base, type: 'chunk', messageId: 'm1', sequence: 0, event: { type: 'start', message: {...assistant('old', 'pending'),content:[]} } }),
     event({ ...base, type: 'message', record: record(1, 'm1', 'complete') }) + event({ ...base, type: 'sync', historyPosition: 1, run: run('completed') }) + event({ ...base, type: 'end', historyPosition: 1, run: run('completed') }),
   ];
   const client = new AgentClient(agentId, { fetcher: async input => {
@@ -156,12 +156,12 @@ test('stored text metadata survives streamed-to-completed reconciliation without
   const client = new AgentClient(agentId, { fetcher: async () => streamResponse(body) });
   const partial = assistant('Streaming text');
   client.follow(runId);
-  controller.enqueue(new TextEncoder().encode(event({version:1,agentId,runId,type:'sync',historyPosition:0,run:run()})+event({version:1,agentId,runId,type:'chunk',messageId:'m1',sequence:0,event:{type:'start',partial}})));
+  controller.enqueue(new TextEncoder().encode(event({version:2,agentId,runId,type:'sync',historyPosition:0,run:run()})+event({version:2,agentId,runId,type:'chunk',messageId:'m1',sequence:0,event:{type:'start',message:{...partial,content:[]}}})));
   await until(() => client.getSnapshot().live.length === 1);
   const completed = record(1, 'm1', 'Final text');
   const signature = JSON.stringify({v:1,id:'native',phase:'final_answer'});
   completed.message = { ...assistant('Final text'), content: [{type:'text',text:'Final text',textSignature:signature}] };
-  controller.enqueue(new TextEncoder().encode(event({version:1,agentId,runId,type:'message',record:completed})+event({version:1,agentId,runId,type:'end',historyPosition:1,run:run('completed')})));
+  controller.enqueue(new TextEncoder().encode(event({version:2,agentId,runId,type:'message',record:completed})+event({version:2,agentId,runId,type:'end',historyPosition:1,run:run('completed')})));
   await until(() => client.getSnapshot().connection === 'idle');
   assert.deepEqual(client.getSnapshot().completed[0]!.message, completed.message);
   assert.equal(client.getSnapshot().live.length, 0);

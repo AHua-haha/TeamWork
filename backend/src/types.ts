@@ -1,4 +1,5 @@
-import type { AssistantMessageEvent, JsonObject, Message } from '@earendil-works/pi-ai';
+import type { ProgressEvent } from './progress.js';
+import type { JsonObject, Message } from '@earendil-works/pi-ai';
 
 export class AppError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) {
@@ -44,38 +45,20 @@ export interface CurrentState {
   run: RunState | null;
 }
 
-export interface Chunk {
-  sequence: number;
-  event: AssistantMessageEvent;
-}
-
-export interface LiveRange {
-  messageId: string;
-  firstAvailable: number;
-  nextSequence: number;
-  chunks: Chunk[];
-}
-
 export interface FollowSnapshot {
   state: CurrentState;
   history: CompletedMessage[];
-  live: LiveRange | null;
 }
 
-/** Pi payloads remain intact inside versioned backend envelopes. Positions start at 1; chunks at 0. */
-export type FollowEvent = { version: 1; agentId: string; runId: string | null } & (
+/** Whole Pi records and compact progress frames. Positions start at 1; chunks at 0 per message. */
+export type FollowEvent = { version: 2; agentId: string; runId: string | null } & (
   | { type: 'message'; record: CompletedMessage }
   | { type: 'sync'; historyPosition: number; run: RunState | null }
-  | { type: 'chunk'; messageId: string; sequence: number; event: AssistantMessageEvent }
+  | { type: 'chunk'; messageId: string; sequence: number; event: ProgressEvent }
   | { type: 'gap'; messageId: string; expectedSequence: number; firstAvailable: number }
   | { type: 'state'; run: RunState }
   | { type: 'end'; historyPosition: number; run: RunState | null }
 );
-
-export interface Retention {
-  maxChunks: number;
-  maxBytes: number;
-}
 
 export function identity(value: unknown, label = 'identity'): asserts value is string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {

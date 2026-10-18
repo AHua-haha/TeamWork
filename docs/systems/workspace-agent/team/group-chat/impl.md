@@ -30,7 +30,7 @@ Shutdown fences new publication, waits for accepted in-flight publications to re
 
 ## Coordination and data flow
 
-TeamSystem receives the durable assistant record after tool execution. finalAnswer selects naturally completed text blocks; native commentary continues and truncation fails. TeamRunner validates mentions and invokes publishChat with the exact message identity. The store revalidates text selection and atomically completes the sender, records its final reference and admits recipient runs. Private follow returns stored Pi blocks/chunks unchanged; the frontend projects its own visible activity and applies accepted contentIndices only after group publication.
+TeamSystem receives the durable assistant record after tool execution. finalAnswer selects naturally completed text blocks; native commentary continues and truncation fails. TeamRunner validates mentions and invokes publishChat with the exact message identity. The store revalidates text selection and atomically completes the sender, records its final reference and admits recipient runs. Private follow returns whole stored Pi records and compact in-memory progress frames; the frontend projects its own visible activity and applies accepted contentIndices only after group publication.
 
 ## Decisions and constraints
 
@@ -65,3 +65,7 @@ Frontend projection hides a leading routing header, including incomplete prefixe
 TeamRunner.reset serializes with publication and configuration activation through the workspace operation gate, rejects any active/admitted/finalizing job and invokes one database reset transaction. SQL rechecks all workspace member active-run markers while holding workspace then agent locks. Clearing durable history follows dependency order; no filesystem operation is involved. Successful reset wakes timeline and legacy followers. Both follow loops emit a reset boundary before post-reset data and continue using monotonic positions. A reset cannot race with a new run inside the gate.
 
 AgentRuntime persists recoverable tool errors and completes the call batch before invoking team continuation policy. TeamSystem already continues any response with tool calls; the next step reads the full canonical context including error results. Final publication/checkpoint/mentions stay on the same natural-completion path. No team retry scheduler or provider-specific exception is added.
+
+## Private execution progress
+
+The version-1 durable group timeline and final references are unchanged. Private execution follows use the runtime’s version-2 compact in-memory progress contract. SQL completed messages remain authoritative; transient gaps/restarts do not rewrite group order or publish partial work. Idle reset clears both durable conversations and member progress buffers.

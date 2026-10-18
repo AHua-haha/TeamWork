@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { MySqlStore } from './database.js';
 import { missing, sha256 } from './text.js';
 
-const tables = ['chat_changes', 'chat_entries', 'chat_clock', 'chat_delivery', 'chat_runs', 'chat_messages', 'chat_exchanges', 'chat_settings', 'chunks', 'live_messages', 'messages', 'runs', 'members', 'member_activation', 'context_files', 'context_versions', 'context_blobs', 'context_records', 'workspace_models', 'workspaces', 'agents'];
+const tables = ['chat_changes', 'chat_entries', 'chat_clock', 'chat_delivery', 'chat_runs', 'chat_messages', 'chat_exchanges', 'chat_settings', 'messages', 'runs', 'members', 'member_activation', 'context_files', 'context_versions', 'context_blobs', 'context_records', 'workspace_models', 'workspaces', 'agents'];
 /** Administrative reset, never an agent or HTTP capability. Requires exclusive database ownership. */
 export async function resetWorkspaceData(store: MySqlStore) {
   await store.acquireRuntime(() => {});

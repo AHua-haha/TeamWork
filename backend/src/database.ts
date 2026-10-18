@@ -2,14 +2,14 @@ import { finalAnswer } from './final-answer.js';
 import { parseMemberResponse } from './member-response.js';
 import { createHash, randomUUID } from 'node:crypto';
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
-import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
-import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, validateEvent, validateRun } from './codec.js';
+import type { UserMessage } from '@earendil-works/pi-ai';
+import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, validateRun } from './codec.js';
 import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from './context-base.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from './team.js';
 import { defaultRunSettings, workspaceModels, type WorkspaceModels, type StoredWorkspaceModels } from './workspace-models.js';
 import type { WorkspaceBootstrap } from './workspace-bootstrap.js';
 import { generatedSource } from './member-config-format.js';
-import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
+import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type RunState, type RunStatus } from './types.js';
 
 import { defaultMentionLimit, groupEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset } from './group-chat.js';
 
@@ -68,19 +68,6 @@ const schema = [
     run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     entry JSON NOT NULL, PRIMARY KEY(agent_id, position), UNIQUE KEY(agent_id, id),
     FOREIGN KEY (agent_id) REFERENCES agents(id), FOREIGN KEY (run_id) REFERENCES runs(id)
-  ) ENGINE=InnoDB`,
-  `CREATE TABLE IF NOT EXISTS live_messages (
-    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
-    run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
-    next_sequence BIGINT UNSIGNED NOT NULL DEFAULT 0,
-    first_available BIGINT UNSIGNED NOT NULL DEFAULT 0,
-    FOREIGN KEY (run_id) REFERENCES runs(id)
-  ) ENGINE=InnoDB`,
-  `CREATE TABLE IF NOT EXISTS chunks (
-    message_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    sequence BIGINT UNSIGNED NOT NULL, event JSON NOT NULL, bytes INT UNSIGNED NOT NULL,
-    PRIMARY KEY(message_id, sequence),
-    FOREIGN KEY (message_id) REFERENCES live_messages(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS config_records (
     scope VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -240,6 +227,9 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     for (const column of ['reset_cursor', 'reset_position']) {
       if (!columns.some(row => row.Field === column)) await this.pool.query(`ALTER TABLE chat_settings ADD COLUMN ${column} BIGINT UNSIGNED NOT NULL DEFAULT 0`);
     }
+    // Retired transient storage. Completed messages, context and run state are preserved.
+    await this.pool.query('DROP TABLE IF EXISTS chunks');
+    await this.pool.query('DROP TABLE IF EXISTS live_messages');
     await this.importChatHistory();
   }
 
@@ -460,42 +450,14 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     return state;
   }
 
-  async beginMessage(agentId: string, runId: string, messageId: string, step: number): Promise<void> {
+  async beginMessage(agentId: string, runId: string, messageId: string, step: number): Promise<number> {
     identity(messageId, 'messageId');
-    await this.transaction(async db => {
+    return this.transaction(async db => {
       const agent = await this.agent(db, agentId, true);
       const run = await this.active(db, agent, runId);
       if (run.activeMessageId) throw new AppError('conflict', 'A model message is already active', 409);
-      await db.execute('INSERT INTO live_messages (id, run_id) VALUES (?, ?)', [messageId, runId]);
       await this.saveRun(db, { ...run, phase: 'model', step, activeMessageId: messageId });
-    });
-  }
-
-  async appendChunk(agentId: string, runId: string, messageId: string, event: AssistantMessageEvent, retention: Retention): Promise<void> {
-    validateEvent(event);
-    const serialized = encode(event); // Copy mutable Pi partials before the first await.
-    position(retention.maxChunks);
-    position(retention.maxBytes);
-    await this.transaction(async db => {
-      const agent = await this.agent(db, agentId, true);
-      const run = await this.active(db, agent, runId);
-      if (run.activeMessageId !== messageId) throw new AppError('conflict', 'Chunk does not belong to the active message', 409);
-      const [live] = await rows(db, 'SELECT * FROM live_messages WHERE id = ?', [messageId]);
-      if (!live) throw new AppError('corrupt_data', 'Active message descriptor missing', 500);
-      const next = live.next_sequence;
-      await db.execute('INSERT INTO chunks (message_id, sequence, event, bytes) VALUES (?, ?, ?, ?)', [messageId, next, serialized, Buffer.byteLength(serialized)]);
-      const sizes = await rows(db, 'SELECT sequence, bytes FROM chunks WHERE message_id = ? ORDER BY sequence DESC', [messageId]);
-      let bytes = 0;
-      let keep = 0;
-      let first = next + 1;
-      for (const row of sizes) {
-        if (keep >= retention.maxChunks || bytes + row.bytes > retention.maxBytes) break;
-        bytes += row.bytes;
-        keep++;
-        first = row.sequence;
-      }
-      await db.execute('DELETE FROM chunks WHERE message_id = ? AND sequence < ?', [messageId, first]);
-      await db.execute('UPDATE live_messages SET next_sequence = ?, first_available = ? WHERE id = ?', [next + 1, first, messageId]);
+      return agent.history_position as number;
     });
   }
 
@@ -508,7 +470,6 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       if (entry.message.role === 'assistant' && run.activeMessageId !== entry.messageId) throw new AppError('conflict', 'Assistant message identity does not match active message', 409);
       const record = await this.append(db, agent, runId, entry);
       if (run.activeMessageId === entry.messageId) {
-        await db.execute('DELETE FROM live_messages WHERE id = ?', [entry.messageId]);
         await this.saveRun(db, { ...run, activeMessageId: null, phase: 'tools' });
       }
       return record;
@@ -522,7 +483,6 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       if (existing.status !== 'running') return existing;
       const run = await this.active(db, agent, runId);
       const finished: RunState = { ...run, status, phase: 'finished', activeMessageId: null, endedAt: Date.now(), endPosition: agent.history_position, error };
-      await db.execute('DELETE FROM live_messages WHERE run_id = ?', [runId]);
       await this.saveRun(db, finished);
       await db.execute('UPDATE agents SET active_run_id = NULL WHERE id = ?', [agentId]);
       await this.finishChatEntry(db, finished);
@@ -547,7 +507,9 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
   async followSnapshot(agentId: string, runId: string | null | undefined = undefined, after = 0, includeHistory = true): Promise<FollowSnapshot> {
     position(after);
     return this.transaction(async db => {
-      const agent = await this.agent(db, agentId);
+      identity(agentId, 'agentId');
+      const [agent] = await rows(db, 'SELECT id, latest_run_id, history_position, context_revision FROM agents WHERE id = ?', [agentId]);
+      if (!agent) throw new AppError('not_found', 'Agent not found', 404);
       const selected = runId === undefined ? agent.latest_run_id : runId;
       const run = selected ? await this.run(db, agentId, selected) : null;
       const upper = run?.endPosition ?? agent.history_position;
@@ -557,14 +519,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
         const entry = decode<ContextEntry>(row.entry, value => validateEntries([value]));
         return { ...entry, agentId, runId: row.run_id as string, position: row.position as number };
       });
-      let live: LiveRange | null = null;
-      if (run?.activeMessageId) {
-        const [descriptor] = await rows(db, 'SELECT * FROM live_messages WHERE id = ?', [run.activeMessageId]);
-        if (!descriptor) throw new AppError('corrupt_data', 'Active message descriptor missing', 500);
-        const chunks = await rows(db, 'SELECT sequence, event FROM chunks WHERE message_id = ? ORDER BY sequence', [run.activeMessageId]);
-        live = { messageId: run.activeMessageId, firstAvailable: descriptor.first_available, nextSequence: descriptor.next_sequence, chunks: chunks.map(row => ({ sequence: row.sequence as number, event: decode<AssistantMessageEvent>(row.event, validateEvent) })) };
-      }
-      return { state: { agentId, contextRevision: agent.context_revision, historyPosition: upper, run }, history, live };
+      return { state: { agentId, contextRevision: agent.context_revision, historyPosition: upper, run }, history };
     });
   }
 
@@ -837,7 +792,6 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       await db.execute('DELETE FROM chat_exchanges WHERE workspace_id = ?', [workspaceId]);
       for (const member of members) {
         const value = decode<MemberRecord>(member.data, () => undefined);
-        await db.execute('DELETE l FROM live_messages l JOIN runs r ON r.id = l.run_id WHERE r.agent_id = ?', [member.id]);
         await db.execute('DELETE FROM messages WHERE agent_id = ?', [member.id]);
         await db.execute('DELETE FROM runs WHERE agent_id = ?', [member.id]);
         await db.execute('UPDATE agents SET context = ?, context_revision = context_revision + 1, history_position = 0, active_run_id = NULL, latest_run_id = NULL WHERE id = ?', [encode([]), member.id]);

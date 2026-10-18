@@ -1,4 +1,4 @@
-import type { AssistantMessageEvent, Message } from '@earendil-works/pi-ai';
+import type { Message } from '@earendil-works/pi-ai';
 import type { Author, ChangeRecord } from './context-base.js';
 import { AppError, identity, type ContextEntry, type RunState } from './types.js';
 
@@ -96,27 +96,6 @@ export function validateEntries(value: unknown): asserts value is ContextEntry[]
     object(entry.metadata);
     jsonValue(entry.metadata);
   }
-}
-
-export function validateEvent(value: unknown): asserts value is AssistantMessageEvent {
-  object(value);
-  if (value.type === 'done' || value.type === 'error') {
-    const message = value.type === 'done' ? value.message : value.error;
-    validateMessage(message);
-    if (message.role !== 'assistant' || message.stopReason !== value.reason) invalid('Invalid Pi terminal event');
-    if (!(value.type === 'done' ? ['stop', 'length', 'toolUse', 'deferred'] : ['aborted', 'error']).includes(String(value.reason))) invalid('Invalid terminal reason');
-  } else if (['start', 'text_start', 'text_delta', 'text_end', 'thinking_start', 'thinking_delta', 'thinking_end', 'toolcall_start', 'toolcall_delta', 'toolcall_end'].includes(String(value.type))) {
-    validateMessage(value.partial);
-    if (value.partial.role !== 'assistant') invalid('Pi partial must be an assistant message');
-    if (value.type !== 'start' && (!Number.isSafeInteger(value.contentIndex) || (value.contentIndex as number) < 0)) invalid('Invalid content index');
-    if (String(value.type).endsWith('_delta') && typeof value.delta !== 'string') invalid('Invalid delta');
-    if (['text_end', 'thinking_end'].includes(String(value.type)) && typeof value.content !== 'string') invalid('Invalid completed content block');
-    if (value.type === 'toolcall_end') {
-      object(value.toolCall);
-      validateMessage({ ...value.partial, content: [value.toolCall] });
-      if (value.toolCall.type !== 'toolCall') invalid('Invalid completed tool call');
-    }
-  } else invalid('Unknown Pi event');
 }
 
 export function validateRun(value: unknown): asserts value is RunState {

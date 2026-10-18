@@ -34,16 +34,15 @@ The `afterRun` lifecycle callback executes after outstanding policy/tool effects
 
 ### Frontend follow protocol
 
-- Completed-message payloads use Pi AI's message format, and live payloads use Pi's event format. Backend envelopes add runtime metadata, identities, ordering information, and synchronization or run-lifecycle signals. Conversion into a UI library's presentation format belongs to the frontend.
-- Each follow connection is scoped to one run. It sends the final available updates and ends when that run finishes. If there is no active run, it synchronizes completed history and ends. Following a subsequent run opens another connection; a Pi model-call completion event does not itself finish the agent run.
-- Each follow connection has a **sync phase** followed by a **live phase**. In the sync phase, the runtime sends completed frontend messages as whole records, after the caller's completed-message position or from the beginning when none is supplied. It then marks sync complete and sends live chunks as they become available.
-- A message has the same `messageId` in live chunks and in its completed record. Chunks have ordered positions within that message. A completed-message record carries a stable history position.
-- A message that completes during the sync-to-live handoff appears in the completed sync or the subsequent live output. Duplicate delivery, if any, is identifiable by `messageId` and stable history position.
-- The runtime retains only a bounded range of live chunks, under its own retention policy. It may prune chunks while a frontend is following or disconnected. It reports a missing range explicitly rather than presenting a truncated range as the complete stream.
-- If the buffer still contains an active message from its first chunk, a new follower may receive those retained chunks before following new ones. If the initial chunks are missing, the follower is told of the gap and later receives the complete message when it is committed.
-- The runtime sends the whole committed message to connected followers. A reconnecting frontend can also obtain it through the sync phase even if it missed the completion notification.
-- The frontend discards an incomplete local draft on reconnect or on a reported chunk gap. It replaces that draft with the completed message when available. If the message is still active, it waits; a temporary absence of that message is allowed.
-- The frontend can request current runtime state separately from completed history. Current state describes what is true now rather than what happened in the timeline.
+Completed member history is durable and separate from mutable model context. The group timeline stores user input, reserved response positions, final-message references and working-history ranges; it does not own private execution content.
+
+Progress lives only in a per-member in-memory FIFO limited to 1,024 compact events across recent messages. Appending beyond capacity immediately evicts the oldest event, regardless of connected readers. No accumulated Pi partial is serialized into progress events. Start metadata, content block identities, text/thinking deltas, tool-call descriptors/argument updates and authoritative block ends permit reconstruction. Completed whole messages are persisted before their completion is announced and supersede the matching partial by messageId.
+
+Each follow connection stays scoped to one run. Initial/reconnect and gap recovery locate a retained start for the unfinished message, synchronize completed SQL history through its recorded preceding history boundary, then replay from that start and follow new events. If no complete start remains, synchronize available completed history and suppress the unfinished tail; resume at its durable completion or the next message start. Detect eviction during SQL loading/replay and resynchronize instead of silently presenting incomplete content. Connected slow readers use the same recovery as reconnecting readers.
+
+Completed-history positions and progress sequence numbers are independent. Stable display records are delivered in order and deduplicated by position/message identity. Model-message completion differs from accepted group final publication and run completion. Run state/terminal status and group publication remain authoritative. Follow ends after delivering terminal history. Incoming deltas wake memory readers without querying SQL; SQL is read for initial synchronization and new durable records/state only. Multiple followers do not drive execution or prevent eviction.
+
+Restart loses temporary progress. Completed records survive and abandoned runs use existing interrupted-run recovery. The frontend discards invalid partials and recovers from stored history.
 
 ### HTTP operations
 
@@ -64,13 +63,13 @@ The config API exposes `GET`/`PUT /config/app`, `GET /config/capabilities`, `GET
 
 Follow omits `runId` to select the latest run when it starts. With no run, it synchronizes history and ends. The selected run never changes during a connection. `after` is the last completed-message position applied by the client; omitted or 0 starts from the beginning. It is not a live-chunk cursor. A cursor ahead of the selected run is rejected with 409. A client reconnects by discarding partials and using its completed-history cursor. SSE comment heartbeats keep idle connections open; they do not poll the database or extend a completed run.
 
-Every SSE data event contains `{version: 1, type, agentId, runId}`. The SSE `event` field equals `type`. Event-specific fields are:
+Every member/solo execution SSE data event contains `{version: 2, type, agentId, runId}`. The SSE `event` field equals `type`. Event-specific fields are:
 
 | Type | Additional fields | Meaning |
 | --- | --- | --- |
 | `message` | `record: {agentId, runId, messageId, position, message, metadata}` | Whole committed Pi message; may be history synchronization or a newly completed message |
 | `sync` | `historyPosition, run` | Initial completed history has been delivered; subsequent output follows the run |
-| `chunk` | `messageId, sequence, event` | Unmodified Pi `AssistantMessageEvent` payload, with per-message sequence starting at 0 |
+| `chunk` | `messageId, sequence, event` | Compact progress event without cumulative partial, with per-message sequence starting at 0; start carries an empty-content message header |
 | `gap` | `messageId, expectedSequence, firstAvailable` | Requested chunk range is missing; discard this partial and wait for its completed record |
 | `state` | `run` | Current run-state snapshot, separate from the message timeline |
 | `end` | `historyPosition, run` | All completed records through this run's terminal position were delivered; connection closes |
@@ -85,7 +84,7 @@ The in-process TypeScript API exposes a single runtime loop with a policy. `befo
 
 The standard policy builds each request from the run snapshot and the stored context. A caller may wrap it to replace tools and augment instructions for each model call, as the team does using member harnesses. An in-process caller may wait for a run to end and read its final state, and then read the run's last assistant text. A tool may start another agent's run and wait for it, and a cancellation of the tool's own run reaches the tool through its abort signal. Defaults are one active run per agent, sequential tools, continuation when a response contains tool calls, and a limit of 32 model calls. These limits and the policy are configurable. Under the standard policy, model responses without tool calls stop the run; a response truncated by token length is persisted with Pi's `length` reason. Deferred provider jobs are not supported. Tool arguments are validated against the tool declarations in the constructed request before runtime execution.
 
-The default buffer retains up to 256 events and 8 MiB of serialized event data for the active model response. Completion clears its chunks transactionally. A slow follower may receive a gap or go directly from partial output to a full committed record. After a gap, that connection suppresses the incomplete tail of that message. No follower acknowledgement or independent replay log is required.
+The default FIFO retains up to 1,024 compact progress events per member across recent messages, including overlap with completed records. Capacity is count-only. Completion persists the whole record in SQL; FIFO eviction remains independent and immediate. A slow follower may receive a gap or go directly from partial output to a full committed record. After a gap, that connection suppresses the incomplete tail of that message. No follower acknowledgement or independent replay log is required.
 
 ## Failure behavior
 
@@ -124,11 +123,11 @@ Team coordination resolves configurations using `prepareRun`, persists run creat
 
 ## Unified streaming and model completion
 
-The follow API returns stored Pi messages and chunks without a separate response-action annotation. Text, thinking, tool blocks and native signatures are preserved for callers. The team policy uses completed model output for continuation and publication; the generic loop does not classify partial text for the UI.
+The follow API returns stored whole Pi messages and compact in-memory progress frames without a separate response-action annotation. Text, thinking, tool blocks and native signatures are preserved for callers. The team policy uses completed model output for continuation and publication; the generic loop does not classify partial text for the UI.
 
 ## Workspace conversation reset exception
 
-The workspace team may explicitly reset all its members' conversation state when the entire team is idle. This user operation deletes private display history/runs/chunks and model context, leaving the agents/configuration and durable project files intact. Subsequent state has no current/latest run, history position zero and a newer context revision. Old explicit run IDs return not_found. Normal context edits and compaction still never rewrite display history. Solo agents are unaffected by workspace reset.
+The workspace team may explicitly reset all its members' conversation state when the entire team is idle. This user operation deletes private display history/runs and model context and clears in-memory progress, leaving the agents/configuration and durable project files intact. Subsequent state has no current/latest run, history position zero and a newer context revision. Old explicit run IDs return not_found. Normal context edits and compaction still never rewrite display history. Solo agents are unaffected by workspace reset.
 
 ## Recoverable tool failure examples
 

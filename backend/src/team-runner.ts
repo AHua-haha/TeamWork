@@ -1,12 +1,12 @@
 import { HarnessQueue } from './harness-history.js';
 import type { AgentRuntime } from './runtime.js';
-import type { TeamService } from './team.js';
+import type { TeamService, TeamStore } from './team.js';
 import { Changes } from './changes.js';
 import { chatText, userMentions, mentionLimit, type ChatStore, type ChatMessage, type ChatAcceptance } from './group-chat.js';
 import { parseMemberResponse } from './member-response.js';
 import { AppError, type RunState } from './types.js';
 
-export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback'>;
+export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback' | 'clearProgress'>;
 
 /** Shared publication and independent member activations. Private calls and call chains do not exist here. */
 export class TeamRunner {
@@ -16,7 +16,7 @@ export class TeamRunner {
   private readonly publications = new Set<Promise<unknown>>();
   private readonly gate = new HarnessQueue();
   private readonly jobs = new Map<string, string>();
-  constructor(private readonly team: TeamService, private readonly store: ChatStore, private readonly runtime: () => RunHost) {}
+  constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost) {}
 
   isRunning(memberId: string): boolean { return this.active.has(memberId); }
 
@@ -156,7 +156,12 @@ export class TeamRunner {
   }
 
   reset(workspaceId: string) {
-    return this.idleWorkspace(workspaceId, () => this.store.resetChat(workspaceId), 'Stop team work and wait for every member to finish before resetting the chat');
+    return this.idleWorkspace(workspaceId, async () => {
+      const members = await this.store.listMembers(workspaceId);
+      const result = await this.store.resetChat(workspaceId);
+      for (const member of members) this.runtime().clearProgress(member.id);
+      return result;
+    }, 'Stop team work and wait for every member to finish before resetting the chat');
   }
 
   async stop(workspaceId: string): Promise<void> {

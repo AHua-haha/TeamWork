@@ -16,7 +16,7 @@ The team supplies member config resolution and wraps the runtime policy for curr
 
 ## Coordination and data flow
 
-Accept input transactionally, run the shared loop independently of frontend connections, reread canonical context before each call, publish serialized Pi events, commit final messages, execute tools, and decide continuation. A versioned in-process notification wakes followers after database commits; the context base uses the same notification for its followers. Each follow iteration reads a consistent database snapshot; generation checks avoid lost wakeups during reads. Slow readers hold no event queue. A terminal run's history bound prevents delivery from a later run.
+Accept input transactionally, run the shared loop independently of frontend connections, reread canonical context before each call, publish compact frames to the in-memory FIFO, commit completed messages, execute tools, and decide continuation. Scoped versioned notifications distinguish memory progress from durable changes. Initial synchronization and durable changes read consistent SQL snapshots; progress-only wakeups read the FIFO. Version checks prevent lost wakeups during SQL reads and slow delivery. Slow readers hold no event queue. A terminal run's history bound prevents delivery from a later run.
 
 `start` asks the config source to resolve and validate a snapshot before the database accepts input. The snapshot is stored in the run's in-memory step scope. `configuredPolicy` builds Pi requests from that snapshot and the current canonical context. The API layer delegates config CRUD to `ConfigService`, including optimistic revision conflicts. App config governs agent creation and per-request input size.
 
@@ -27,6 +27,7 @@ Node.js/TypeScript and Pi AI 0.87.1 directly; no Agent Core loop. One active run
 ## Code map
 
 - [src/runtime.ts](../../../backend/src/runtime.ts): shared loop, policy hooks, Pi provider adapter, cancellation, follow generator.
+- [src/progress.ts](../../../backend/src/progress.ts): fixed-count FIFO, per-member notifications and active start/history boundary.
 - [src/changes.ts](../../../backend/src/changes.ts): versioned notification shared with the context base.
 - [Config service](../config/impl.md): editable choices, validation, and consistent run resolution.
 - [src/http.ts](../../../backend/src/http.ts): agent and config endpoints, and routing of `/workspaces` to the [workspace routes](../workspace-agent/workspace/impl.md).
@@ -56,7 +57,7 @@ Harness integration uses the generic `afterRun` lifecycle callback. The loop tra
 
 ## Unified streaming and model completion
 
-The follow API returns stored Pi messages and chunks without a separate response-action annotation. Text, thinking, tool blocks and native signatures are preserved for callers. The team policy uses completed model output for continuation and publication; the generic loop does not classify partial text for the UI.
+The follow API returns stored whole Pi messages and compact in-memory frames without a separate response-action annotation. Text, thinking, tool blocks and native signatures are preserved for callers. The team policy uses completed model output for continuation and publication; the generic loop does not classify partial text for the UI.
 
 TeamRunner retains separate per-run jobs until runtime.finished settles, in addition to mention-slot tracking. User configuration activation checks these jobs so publication's early sender release does not make finalizing file/policy work appear idle. Runtime itself does not implement member approval/activation or a second loop.
 
@@ -64,8 +65,16 @@ Group routing remains a team publication concern. The runtime persists raw assis
 
 ## Workspace conversation reset boundary
 
-TeamRunner only resets an idle workspace after all tracked jobs, including afterRun finalization, have settled. MySqlStore.resetChat owns deletion; the runtime has no retained conversation cache to clear because requests/history read canonical storage. Old member response views unmount on the group reset event, closing their private follows. No reset tool or alternate run loop is added.
+TeamRunner only resets an idle workspace after all tracked jobs, including afterRun finalization, have settled. MySqlStore.resetChat owns deletion; the runtime clears the affected members’ progress FIFOs after durable reset succeeds; requests/history still read canonical storage. Old member response views unmount on the group reset event, closing their private follows. No reset tool or alternate run loop is added.
 
 ## Recoverable tool execution boundary
 
 The sequential tool loop owns lookup, argument validation and execution. Returned isError results and converted exceptions are committed through the same result path, appended to the results array and passed to normal continuation policy after the batch. It no longer throws solely because a tool result failed. Abort and database ownership are checked before converting an exception; message persistence stays outside that catch. Model/protocol checks, per-run limits and afterRun finalization keep their existing terminal behavior. No retry loop or tool-specific runtime branch is added. Integration tests cover schema repair, missing tools, thrown and returned errors, later batch calls, preserved details and final answer publication alongside existing fatal/cancellation cases.
+
+## In-memory streaming implementation
+
+A dedicated bounded progress store owns per-agent FIFO events, active message start/history boundary and scoped change notifications. Pi's AssistantMessageFrameEncoder provides compact replayable block semantics, including queued mutable-partial handling; the wire start uses an empty-content message header, without a partial field. Runtime writes frames without database awaits, commits whole messages and separately signals durable changes. Follow synchronizes SQL only when durable state changes and reads FIFO sequences directly between those boundaries. Frontend uses an incremental frame reducer, never a full accumulated frame replay per delta. SQL chunk tables/methods and transient joins are removed from state/history/reset. Existing reset clears member progress after durable deletion.
+
+Progress uses the same block frame semantics as Pi's compact encoder. The start frame renames its empty-content partial header to message on the wire; no mutable accumulator is retained. ProgressStore.begin records the cutover returned by SQL beginMessage; changed increments a durable generation, while append only wakes memory readers. Follow snapshots durable history/run state only on generation changes and rechecks generation/FIFO availability after each yielded event. Each member has one FIFO across recent messages; reader cursors never pin entries. settle checks run/message identity so earlier finalization cannot clear a successor. ProgressReducer in the frontend is incremental because Pi's exported reducer replays an entire iterable; equivalence tests compare its results against Pi replay for interleaved blocks/signatures/tool checkpoints.
+
+Verification additionally covers FIFO wrap/zero capacity, startup loss, eviction during paused SQL synchronization, next-start recovery, durable message replacement, reset cleanup and a 100-delta run whose followers perform zero extra SQL snapshot reads until completion.

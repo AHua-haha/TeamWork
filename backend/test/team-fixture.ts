@@ -43,6 +43,7 @@ export class FakeRuntime implements RunHost {
   }
   async prepareRun(): Promise<ResolvedRunConfig> { return {} as ResolvedRunConfig; }
   launch(run: RunState): void { void this.start(run.agentId, undefined, run.runId); }
+  clearProgress(): void {}
   async feedback(): Promise<void> {}
   private readonly startWaiters = new Map<string, (() => void)[]>();
   started(agentId: string): Promise<void> {

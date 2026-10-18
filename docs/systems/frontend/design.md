@@ -77,7 +77,7 @@ The backend owns execution, durable group history and response ordering, private
 | Open or refresh a conversation | Synchronize completed records, then follow an active run if present. | Show whole completed messages before live updates. |
 | Reconnect | Discard previous partial messages and resynchronize completed history. | Replace stale partial output with current records and reconstructible live output. |
 | Send input | Submit user input, then follow that run through the backend operation. | Show backend-accepted messages and subsequent output. |
-| Receive a live Pi event | Update the corresponding partial Pi message by backend identity. | Update one displayed message in place. |
+| Receive a compact progress frame | Update the corresponding partial Pi message by backend identity. | Update one displayed message in place. |
 | Receive a completed record | Reconcile it with history and remove a partial with the same identity. | Show the whole message once. |
 | Encounter a missing chunk range | Discard the affected partial. | Show the completed record when it becomes available. |
 | Receive run completion | Apply final updates and finish following. | Preserve history and final run state. |
@@ -200,7 +200,7 @@ Member details are read-only and loaded from active member inspection. Show mode
 
 ## Unified streaming and model completion
 
-Workspace group chat follows each active run from stored history/chunks and displays text plus collapsible tool sets in order, with thinking hidden. After accepted final identity arrives, it folds earlier work once and keeps the complete final report visible in the reserved section. Tool-only responses extend consecutive tool sets; visible text separates them. The child group-chat design owns presentation details.
+Workspace group chat follows each active run from stored history and in-memory progress and displays text plus collapsible tool sets in order, with thinking hidden. After accepted final identity arrives, it folds earlier work once and keeps the complete final report visible in the reserved section. Tool-only responses extend consecutive tool sets; visible text separates them. The child group-chat design owns presentation details.
 
 ## Member tree, active details and configuration changes
 
@@ -247,3 +247,7 @@ Design catalog and member assignments identify systems by metadata.json paths; l
 Hovering over, focusing or clicking an active member avatar in group chat opens an interactive model picker. It remains open while using its controls and closes on Escape, outside click or leaving the avatar/panel. The panel uses the existing composer controls for provider/model selection, per-model reasoning, maximum output tokens, temperature and context budget. Opening it writes nothing. Model and reasoning save on selection; the additional options use Save/Discard. Colors and avatar geometry remain unchanged. Historical retired members cannot be configured.
 
 Settings belong to that member, persist through reload and apply to its next run. In-flight runs retain their prepared configuration. Errors are visible and stale revisions require reviewing the latest values. A single panel is open at a time; it stays within the viewport and supports keyboard and touch interaction. Changes do not alter prompts, responsibility, tools or design assignments.
+
+## Compact execution stream
+
+Member and solo execution follows use version-2 envelopes with compact start/block/delta/end frames. Whole completed messages remain authoritative. The frontend incrementally reconstructs text, thinking and tool arguments by block index without receiving cumulative partials or replaying the entire frame list on each update. It preserves native signatures at block/message completion. Missing starts/evicted sequences discard only the affected partial; completed SQL history and a subsequent valid message start recover the display. Reconnect uses its completed-history cursor and SQL-to-retained-start cutover. Group timeline remains version 1 with existing reservation and final-reference/folding behavior.

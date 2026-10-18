@@ -31,7 +31,7 @@ The app, prompt, tool, and advanced agent configuration editors have no visible 
 
 ## Coordination and data flow
 
-On mount or refresh, the client opens a run-scoped SSE follow request. Completed records fill its ordered history. The `sync` event establishes that the history is current, then chunks update a Pi partial by replacing it with the event's cumulative Pi `partial`. A `message` event supersedes the partial with the same identity. Gaps and reconnections clear affected partials; an unexpected EOF retries the follow operation using the last completed position. `end` closes the connection and no periodic request is scheduled. A submit POST carries only new user content; its accepted run ID starts another follow request. Leaving a conversation disposes only that frontend follow client; the backend run continues and resynchronizes when the user returns.
+On mount or refresh, the client opens a run-scoped SSE follow request. Completed records fill its ordered history. The `sync` event establishes that the history is current, then compact frames incrementally update a local partial by block index. A `message` event supersedes the partial with the same identity. Gaps and reconnections clear affected partials; an unexpected EOF retries the follow operation using the last completed position. `end` closes the connection and no periodic request is scheduled. A submit POST carries only new user content; its accepted run ID starts another follow request. Leaving a conversation disposes only that frontend follow client; the backend run continues and resynchronizes when the user returns.
 
 App loads workspaces, solo agents (`GET /agents`, which leaves out team members), and connections on mount and refreshes those lists on window focus. Creating a solo conversation calls the create-agent endpoint, initializes an empty agent config, and opens its chat. Adding a workspace opens the create dialog; the created workspace joins the list and its page opens. Renaming fetches the latest agent config and updates only its name at that revision; the mounted conversation refreshes its config afterward. The provider sidebar contains shortcuts to cards on the single overview page.
 
@@ -79,6 +79,7 @@ The team is read, not followed: the backend has no change feed for it, and a pol
 
 ## Code map
 
+- [Progress projection](../../../frontend/src/client/progress.ts): incremental compact-frame reconstruction and per-block tool JSON state.
 - [Client protocol](../../../frontend/src/client/protocol.ts), [SSE parser](../../../frontend/src/client/sse.ts), and [agent client](../../../frontend/src/client/agent-client.ts): backend-format data and commands.
 - [Config client](../../../frontend/src/client/config-client.ts): backend-format config data and requests.
 - [Workspace client](../../../frontend/src/client/workspace-client.ts): workspace, project-file, and context-base requests and the context change feed.
@@ -129,7 +130,7 @@ MemberInspector requests the accepted member/configuration/harnesses projection 
 
 ## Unified streaming and model completion
 
-Workspace group chat follows each active run from stored history/chunks and displays text plus collapsible tool sets in order, with thinking hidden. After accepted final identity arrives, it folds earlier work once and keeps the complete final report visible in the reserved section. Tool-only responses extend consecutive tool sets; visible text separates them. The child group-chat design owns presentation details.
+Workspace group chat follows each active run from stored history and in-memory progress and displays text plus collapsible tool sets in order, with thinking hidden. After accepted final identity arrives, it folds earlier work once and keeps the complete final report visible in the reserved section. Tool-only responses extend consecutive tool sets; visible text separates them. The child group-chat design owns presentation details.
 
 ChangesTab calls the separate backend user commit/activation APIs. Avatar details remain read-only and generic Design/Files review is retained. Active source may include execute assignment and backend acceptedRevision metadata. Source-file display is generic; effective tools/commands continue to come from backend inspection. Generic working tool cards can display validate_member_config without a new frontend execution path.
 
@@ -172,3 +173,7 @@ ComposerSettings and ModelSettingsPanel share ModelSettingsPicker, model discove
 ## Unified change review coordination
 
 WorkspacePanel mounts permanent Design/Team/Changes/Files panels and passes Changes visibility and refresh callbacks. TeamTab has no view switcher or change review. ChangesTab first loads current member inspection to materialize active source bundles, then reads the lead's design and member-config scope reviews. It guards stale requests and serializes user operations. Scope reviews provide per-file patches and exact revision/base tokens. Approval uses existing design harness commit or member commit APIs; activation remains the separate existing user endpoint. After operations, reload both scopes and activation validation; refresh accepted design discovery and the active team. FileDiff and file-diff.ts render safe flat per-file unified patches with explicit pending-baseline labeling. Removed ConfigurationChanges/ConfigurationDiff are replaced by these single-purpose components, and obsolete status/history/tab styles are removed.
+
+## Compact progress projection
+
+AgentClient accepts execution envelope version 2 and uses client/progress.ts to apply compact frames incrementally, replacing only the affected message/block. Start metadata has empty content; block starts, deltas/checkpoints and authoritative ends reconstruct content and signatures. Tool JSON buffers are private to each reducer. Completed records remove reducers/partials; gaps and reconnects discard invalid reducers. No whole-frame-log replay or cumulative partial wire payload remains. GroupClient remains on the independent version-1 group timeline.

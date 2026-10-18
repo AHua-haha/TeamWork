@@ -61,9 +61,11 @@ The model ID in the agent config comes from the backend's model-list response. K
 
 The input body contains only new user content. Sending stored model context is rejected. Concurrent input returns 409; submission is not idempotent, so an uncertain response must not be blindly retried.
 
-On open/refresh, omit `runId` to sync and follow the latest run. On reconnect, discard local partials and send the last applied completed-message `position` as `after`. Positions start at 1. Deduplicate completed records by `messageId`/`position`. The same `messageId` identifies its live chunks. A `gap` means drop that partial and wait for a whole record. A Pi `done` event does not mean the backend persisted the response or finished the run; only `message` supplies a committed record and `end` closes the run follow operation. An EOF without `end` requires reconnect/synchronization.
+On open/refresh, omit `runId` to select the latest run. Reconnect discards local partials and supplies the last completed history `position` as `after`. The API synchronizes SQL history, then replays a retained start for the unfinished message and follows compact progress. A missing/evicted start yields a gap: discard that partial and wait for its whole completed record or the next message start. Completion is persisted before announcement. EOF without `end` reconnects through the same synchronization.
 
-SSE types: `message`, `sync`, `chunk`, `gap`, `state`, `end`; transport errors use `stream_error`. Pi payloads are preserved inside versioned JSON envelopes. `partial` in a Pi event is cumulative; a client using it should replace the current partial rather than appending the same delta again. There is no periodic frontend polling or connection spanning runs.
+Execution SSE envelopes are version **2**, with `message`, `sync`, `chunk`, `gap`, `state`, `end` (transport failures use `stream_error`). Chunks carry compact Pi-derived start/block/delta/end frames; start uses `message` with empty content and no frame contains cumulative `partial`. Text/thinking/tool identities and signatures are preserved. Whole Pi completed records replace reconstructed partials. Provider `done` is not exposed as durable completion. Group timeline remains version 1.
+
+Progress lives only in a per-member FIFO of 1,024 events across recent messages. Immediate count-based eviction never waits for readers. No chunk writes/reads occur in SQL; the old transient tables are removed at migration. Progress-only notifications read memory; durable notifications read SQL history/state. Restart loses unfinished progress and recovers interrupted runs while retaining completed history.
 
 ## Web search and fetch
 
@@ -291,7 +293,7 @@ try {
 
 Context replacement uses `{revision, entries}` from `scope.readContext()` and `scope.replaceContext(revision, entries)`. It changes actual stored context and never edits display history. An update after a provider request was constructed affects subsequent calls. Metadata and compaction policy are application-defined.
 
-Defaults: maximum 32 model calls per run; sequential tools; retain at most 256 active-message events / 8 MiB of serialized event data. Counts and byte limits are constructor options. Message completion atomically clears its chunks. Tool/model errors fail the run; completed records survive. Cancelled or failed partial model output is discarded. Restart marks unfinished runs interrupted; it does not replay external tool effects. Tools and hooks must honor cancellation.
+Defaults: maximum 32 model calls per run; sequential tools; retain at most 1,024 compact progress events per member in memory (`progressCapacity` is the constructor option). FIFO eviction is independent of readers and completed SQL history. Recoverable tool errors remain recorded results and allow normal continuation; fatal model/protocol/persistence errors fail the run; completed records survive. Cancelled or failed partial model output is discarded. Restart marks unfinished runs interrupted; it does not replay external tool effects. Tools and hooks must honor cancellation.
 
 ## Verify
 
@@ -334,7 +336,7 @@ Old prototype history imports once in publication order. New admissions reserve 
 
 Workspace members finish with ordinary assistant text. Tool calls continue execution. At natural model completion (`stop`), native `final_answer` text blocks are selected when present; otherwise unphased text blocks are selected, excluding native `commentary`. Commentary-only output continues, and token truncation fails without publication. The team checkpoints, parses the optional leading mention header and offers its body for atomic group acceptance. Busy/invalid mentions refuse the whole publication and return private feedback so the same run can continue.
 
-Private `/agents/:id/follow` reads stored message history and retained chunks and returns their Pi payloads unchanged, preserving native signatures. The frontend streams visible text and tools in one activity flow, hiding thinking. Successful group publication pins the latest committed assistant record and exact ordered text-block `contentIndices`; only then does the frontend fold earlier work and keep the complete final visible. Historical plain-message and retired response-tool references remain readable as immutable accepted history. New runs use no completion tool or response-action annotation. Restart the backend and reload the frontend together to use this contract.
+Private `/agents/:id/follow` synchronizes SQL completed history and version-2 compact in-memory progress, preserving native signatures without cumulative partials. The frontend streams visible text and tools in one activity flow, hiding thinking. Successful group publication pins the latest committed assistant record and exact ordered text-block `contentIndices`; only then does the frontend fold earlier work and keep the complete final visible. Historical plain-message and retired response-tool references remain readable as immutable accepted history. New runs use no completion tool or response-action annotation. Restart the backend and reload the frontend together to use this contract.
 
 
 ### Fresh workspace initialization and local reset

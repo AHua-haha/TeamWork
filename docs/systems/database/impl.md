@@ -2,7 +2,7 @@
 
 ## Contract
 
-[Database design](design.md). Preserve Pi payloads and metadata, immutable ordered display records, independently replaceable context, atomic writes, and explicit chunk gaps. Store context-base changes atomically at an expected sequence number.
+[Database design](design.md). Preserve Pi payloads and metadata, immutable ordered display records, independently replaceable context, atomic writes. Store context-base changes atomically at an expected sequence number.
 
 ## Responsibilities and decomposition
 
@@ -14,7 +14,7 @@ The team calls it through the `TeamStore` interface, which the repository also i
 
 ## Coordination and data flow
 
-Agent rows serialize writers with row locks. Starting a run atomically appends the accepted input to context and display history. Completing a message atomically appends both records and clears its temporary chunks. Context replacement uses a revision check. Runs record terminal history bounds so a follower cannot drift into a later run. Consistent transactional follow snapshots join durable history, run state, and the bounded active chunk range.
+Agent rows serialize writers with row locks. Starting a run atomically appends the accepted input to context and display history. Completing a message atomically appends both records and clears its active message marker. Context replacement uses a revision check. Runs record terminal history bounds so a follower cannot drift into a later run. Consistent transactional follow snapshots join durable history and run state.
 
 `config_records` stores app, catalog, connection, model-cache, and agent values as versioned JSON envelopes. Creates, updates, and deletes are atomic, with updates/deletes checking the expected revision. `configBundle` reads app, agent, and catalog in one repeatable-read transaction. New agents receive a blank config record in their creation transaction. Config initialization can populate that record for preexisting agents.
 
@@ -61,7 +61,7 @@ Context paths are ASCII by the path rules and are stored with a binary collation
 
 [Codec tests](../../../backend/test/codec.test.ts) cover rejection and preservation, including Pi tool schemas and opaque signatures. [MySQL integration tests](../../../backend/test/integration/backend.test.ts) cover atomicity, stale revisions, immutable history, serialized-byte/count pruning including full eviction, concurrent starts, pool reopening, corruption rejection, ownership exclusion, and restart recovery. They also cover the context store: registry conflicts, commits with history and index reload, and refusal at a stale sequence number. The [context base tests](../../../backend/test/context-base.test.ts) exercise the same `ContextStore` contract with an in-memory store. From `backend/`, set `VERIFY_TASK_ID=2026-10-07-workspace-agent` and run `node scripts/verify.mjs npm test` and `node scripts/verify.mjs npm run test:mysql`; the latter creates and removes a disposable MySQL 8.4 container.
 
-Runtime message/context mutations lock the agent row; workspace publication and member lifecycle mutations acquire their workspace lock before agent locks; snapshot reads use one repeatable-read transaction. The advisory ownership lock is held on a dedicated pooled connection, its error listener is removed on release, and ownership loss is reported to the runtime. Schema initialization is idempotent for the initial schema, not a migration engine for future versions. JSON envelopes are versioned independently of the schema. Raw Pi event partials are serialized before awaiting database operations so later in-process mutations cannot rewrite retained events.
+Runtime message/context mutations lock the agent row; workspace publication and member lifecycle mutations acquire their workspace lock before agent locks; snapshot reads use one repeatable-read transaction. The advisory ownership lock is held on a dedicated pooled connection, its error listener is removed on release, and ownership loss is reported to the runtime. Schema initialization is idempotent for the initial schema, not a migration engine for future versions. JSON envelopes are versioned independently of the schema. Whole completed Pi messages are serialized for SQL. Compact progress frames are independent in-memory values; no partial event serialization or SQL retention remains.
 
 The config integration tests in [backend.test.ts](../../../backend/test/integration/backend.test.ts) cover revision conflicts, repeatable initialization, and a running agent's independence from later catalog edits/deletions.
 
@@ -112,4 +112,8 @@ Member publication parses the leading routing header from the immutable finalAns
 
 ## Workspace conversation reset
 
-chat_settings adds reset_cursor and reset_position with zero defaults; migrate inspects existing columns and adds absent columns before serving. resetChat takes workspace, sorted member-agent and clock locks in publication order, rejects active runs, deletes chat changes/entries/messages, chat-run links and exchanges, resets member delivery cursors while preserving retired-member cutoffs, clears member live_messages (chunks cascade), private messages and runs, then clears model contexts/current-run pointers and advances context revisions. It preserves member/settings rows, all filesystem/context-base state and monotonic chat clocks. The transaction returns durable reset boundaries; snapshots clamp pagination to these boundaries and expose them to TeamRunner followers.
+chat_settings adds reset_cursor and reset_position with zero defaults; migrate inspects existing columns and adds absent columns before serving. resetChat takes workspace, sorted member-agent and clock locks in publication order, rejects active runs, deletes chat changes/entries/messages, chat-run links and exchanges, resets member delivery cursors while preserving retired-member cutoffs, private messages and runs, then clears model contexts/current-run pointers and advances context revisions. It preserves member/settings rows, all filesystem/context-base state and monotonic chat clocks. The transaction returns durable reset boundaries; snapshots clamp pagination to these boundaries and expose them to TeamRunner followers.
+
+## Transient progress removal
+
+Database storage has no appendChunk or live-range reads. beginMessage returns the stable history position before the response, establishing the memory start boundary. followSnapshot selects agent identity/run pointers/positions without fetching its canonical context JSON. Migration drops only obsolete transient chunks/live_messages tables. Completed-message and terminal transactions retain their existing atomic history/context and group coordination guarantees. Runtime ProgressStore owns temporary events and eviction.

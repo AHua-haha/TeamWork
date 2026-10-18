@@ -1,4 +1,4 @@
-import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi-ai';
+import { ProgressReducer, type ProgressEvent } from './progress.js';
 import { ProtocolError, readSse } from './sse.js';
 import type { ClientSnapshot, CompletedRecord, FollowEvent, LiveMessage, RunState, UserInput } from './protocol.js';
 
@@ -51,7 +51,7 @@ function envelope(raw: string, eventName: string, agentId: string): FollowEvent 
   catch { throw new ProtocolError('Invalid JSON in follow stream'); }
   if (!value || typeof value !== 'object') throw new ProtocolError('Invalid follow event');
   const event = value as Partial<FollowEvent>;
-  if (event.version !== 1 || event.agentId !== agentId || event.type !== eventName || !['message', 'sync', 'chunk', 'gap', 'state', 'end'].includes(String(event.type))) {
+  if (event.version !== 2 || event.agentId !== agentId || event.type !== eventName || !['message', 'sync', 'chunk', 'gap', 'state', 'end'].includes(String(event.type))) {
     throw new ProtocolError('Unsupported follow event');
   }
   return event as FollowEvent;
@@ -67,6 +67,7 @@ export class AgentClient {
   private readonly records = new Map<number, CompletedRecord>();
   private readonly identities = new Map<string, number>();
   private readonly partials = new Map<string, LiveMessage>();
+  private readonly reducers = new Map<string, ProgressReducer>();
   private readonly gaps = new Set<string>();
   private controller: AbortController | null = null;
   private generation = 0;
@@ -105,7 +106,7 @@ export class AgentClient {
     const controller = new AbortController();
     this.controller = controller;
     const generation = ++this.generation;
-    this.partials.clear();
+    this.partials.clear(); this.reducers.clear();
     this.gaps.clear();
     this.publish({ synchronized: false, connection: 'syncing', error: null });
     void this.followUntilEnd(runId, controller.signal, generation);
@@ -144,7 +145,7 @@ export class AgentClient {
         if (signal.aborted || generation !== this.generation) return;
         const message = error instanceof Error ? error.message : 'Follow connection failed';
         const fatal = error instanceof ProtocolError || (error instanceof BackendError && error.status >= 400 && error.status < 500);
-        this.partials.clear();
+        this.partials.clear(); this.reducers.clear();
         this.gaps.clear();
         this.publish({ synchronized: false, connection: fatal ? 'error' : 'disconnected', error: message });
         if (fatal) return;
@@ -168,7 +169,7 @@ export class AgentClient {
         if (record.position !== this.snapshot.historyPosition + 1 || this.identities.has(record.messageId)) throw new ProtocolError('Completed-message history has a gap or duplicate identity');
         this.records.set(record.position, record);
         this.identities.set(record.messageId, record.position);
-        this.partials.delete(record.messageId);
+        this.partials.delete(record.messageId); this.reducers.delete(record.messageId);
         this.gaps.delete(record.messageId);
         this.publish({ historyPosition: record.position });
         return;
@@ -184,30 +185,32 @@ export class AgentClient {
         this.applyChunk(event.messageId, event.runId, event.sequence, event.event);
         return;
       case 'gap':
-        this.partials.delete(event.messageId);
+        this.partials.delete(event.messageId); this.reducers.delete(event.messageId);
         this.gaps.add(event.messageId);
         this.publish();
         return;
       case 'end':
         if (event.historyPosition !== this.snapshot.historyPosition) throw new ProtocolError('Run ended before completed history was delivered');
-        this.partials.clear();
+        this.partials.clear(); this.reducers.clear();
         this.gaps.clear();
         this.publish({ synchronized: true, connection: 'idle', run: event.run, error: null });
     }
   }
 
-  private applyChunk(messageId: string, runId: string | null, sequence: number, event: AssistantMessageEvent): void {
+  private applyChunk(messageId: string, runId: string | null, sequence: number, event: ProgressEvent): void {
     if (this.identities.has(messageId) || this.gaps.has(messageId)) return;
     const previous = this.partials.get(messageId);
     const expected = previous?.nextSequence ?? 0;
     if (sequence < expected) return;
     if (sequence !== expected || (!previous && event.type !== 'start') || !runId) {
-      this.partials.delete(messageId);
+      this.partials.delete(messageId); this.reducers.delete(messageId);
       this.gaps.add(messageId);
       this.publish();
       return;
     }
-    const message: AssistantMessage = event.type === 'done' ? event.message : event.type === 'error' ? event.error : event.partial;
+    const reducer = this.reducers.get(messageId) ?? new ProgressReducer();
+    const message = reducer.apply(event);
+    this.reducers.set(messageId, reducer);
     this.partials.set(messageId, { messageId, runId, message, nextSequence: sequence + 1, lastEvent: event });
     this.publish();
   }

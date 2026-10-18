@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type AssistantMessageEvent, type Context, type JsonObject, type Message, type Model, type Models, type SimpleStreamOptions, type Tool, type ToolCall, type ToolResultMessage, type UserMessage } from '@earendil-works/pi-ai';
+import { AssistantMessageFrameEncoder, getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type AssistantMessageEvent, type Context, type JsonObject, type Message, type Model, type Models, type SimpleStreamOptions, type Tool, type ToolCall, type ToolResultMessage, type UserMessage } from '@earendil-works/pi-ai';
 import { MySqlStore } from './database.js';
 import type { ResolvedRunConfig } from './config.js';
 import { encode, validateMessage } from './codec.js';
-import { Changes } from './changes.js';
-import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowEvent, type Retention, type RunState } from './types.js';
+import { ProgressStore } from './progress.js';
+import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowEvent, type FollowSnapshot, type RunState } from './types.js';
 
 export interface StepScope {
   agentId: string;
@@ -75,25 +75,24 @@ function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
 interface Job { agentId: string; controller: AbortController; done: Promise<void> }
 
 export class AgentRuntime {
-  private readonly changes = new Changes();
+  readonly progress: ProgressStore;
   private readonly jobs = new Map<string, Job>();
   private readonly finalizationFailures = new Map<string, unknown>();
   private accepting = false;
-  private readonly retention: Retention;
   private readonly maxSteps: number;
   private pendingStarts = new Set<Promise<RunState>>();
 
-  constructor(readonly store: MySqlStore, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, options: { retention?: Retention; maxSteps?: number } = {}) {
-    this.retention = options.retention ?? { maxChunks: 256, maxBytes: 8 * 1024 * 1024 };
+  constructor(readonly store: MySqlStore, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, options: { progressCapacity?: number; maxSteps?: number } = {}) {
+    this.progress = new ProgressStore(options.progressCapacity);
     this.maxSteps = options.maxSteps ?? 32;
-    if (!Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1 || Object.values(this.retention).some(value => !Number.isSafeInteger(value) || value < 0)) throw new AppError('invalid_config', 'Invalid runtime limits');
+    if (!Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1) throw new AppError('invalid_config', 'Invalid runtime limits');
   }
 
   async open(): Promise<void> {
     await this.store.acquireRuntime(() => {
       this.accepting = false;
       for (const job of this.jobs.values()) job.controller.abort();
-      this.changes.publish();
+      this.progress.close();
     });
     try {
       await this.store.recoverInterruptedRuns(async run => this.policy.afterRun?.({ ...run, status: 'interrupted' }));
@@ -114,7 +113,7 @@ export class AgentRuntime {
     this.accepting = false;
     await Promise.allSettled(this.pendingStarts);
     for (const job of this.jobs.values()) job.controller.abort();
-    this.changes.publish();
+    this.progress.close();
     await Promise.allSettled([...this.jobs.values()].map(job => job.done));
     await this.store.releaseRuntime();
   }
@@ -149,13 +148,13 @@ export class AgentRuntime {
     const controller = new AbortController();
     const done = Promise.resolve().then(() => this.runLoop(run, config, controller.signal)).finally(() => this.jobs.delete(run.runId));
     this.jobs.set(run.runId, { agentId: run.agentId, controller, done });
-    this.changes.publish();
+    this.progress.changed(run.agentId);
   }
 
   /** Refused final publications are private input to the same model/tool loop. */
   async feedback(agentId: string, runId: string, text: string): Promise<void> {
     await this.store.commitMessage(agentId, runId, { messageId: randomUUID(), message: { role: 'user', content: text, timestamp: Date.now() }, metadata: { source: 'publication-feedback' } });
-    this.changes.publish();
+    this.progress.changed(agentId);
   }
 
   async cancel(agentId: string, runId: string): Promise<void> {
@@ -187,6 +186,8 @@ export class AgentRuntime {
     return '';
   }
 
+  clearProgress(agentId: string): void { this.progress.clear(agentId); }
+
   async getState(agentId: string): Promise<CurrentState> {
     this.available();
     const state = await this.store.getState(agentId);
@@ -197,7 +198,7 @@ export class AgentRuntime {
   async replaceContext(agentId: string, revision: number, entries: ContextEntry[]): Promise<ContextHistory> {
     this.available();
     const result = await this.store.replaceContext(agentId, revision, entries);
-    this.changes.publish();
+    this.progress.changed(agentId);
     return result;
   }
 
@@ -237,8 +238,9 @@ export class AgentRuntime {
           tools.set(tool.definition.name, tool);
         }
         const messageId = randomUUID();
-        await this.store.beginMessage(run.agentId, run.runId, messageId, step);
-        this.changes.publish();
+        const boundary = await this.store.beginMessage(run.agentId, run.runId, messageId, step);
+        this.progress.begin(run.agentId, run.runId, messageId, boundary);
+        const encoder = new AssistantMessageFrameEncoder();
         let response: AssistantMessage | undefined;
         let started = false;
         const iterator = this.stream(request, signal)[Symbol.asyncIterator]();
@@ -251,8 +253,9 @@ export class AgentRuntime {
               if (started) throw new AppError('invalid_stream', 'Duplicate Pi start event');
               started = true;
             } else if (event.type !== 'error' && !started) throw new AppError('invalid_stream', 'Pi update arrived before start');
-            await this.store.appendChunk(run.agentId, run.runId, messageId, event, this.retention);
-            this.changes.publish();
+            if (event.type === 'done' && event.reason !== event.message.stopReason) throw new AppError('invalid_stream', 'Terminal reason does not match completed message');
+            const frame = encoder.encode(event);
+            if (frame) this.progress.append(run.agentId, frame.type === 'start' ? { type: 'start', message: frame.partial } : frame);
             if (event.type === 'error') throw new AppError('model_error', event.error.errorMessage || 'Model request failed');
             if (event.type === 'done') {
               response = structuredClone(event.message);
@@ -267,7 +270,7 @@ export class AgentRuntime {
         if (!response) throw new AppError('invalid_stream', 'Model stream ended without a final response');
         if (!['stop', 'length', 'toolUse'].includes(response.stopReason)) throw new AppError('model_error', `Unsupported terminal model state: ${response.stopReason}`);
         const record = await this.store.commitMessage(run.agentId, run.runId, { messageId, message: response, metadata: this.policy.messageMetadata?.(scope, response) ?? {} });
-        this.changes.publish();
+        this.progress.settle(run.agentId, run.runId, messageId);
         const calls = response.content.filter(part => part.type === 'toolCall');
         if (new Set(calls.map(call => call.id)).size !== calls.length) throw new AppError('invalid_tool_calls', 'Duplicate tool-call identity');
         const results: ToolResultMessage[] = [];
@@ -288,7 +291,7 @@ export class AgentRuntime {
           }
           signal.throwIfAborted();
           await this.store.commitMessage(run.agentId, run.runId, { messageId: randomUUID(), message: result, metadata: this.policy.messageMetadata?.(scope, result) ?? {} });
-          this.changes.publish();
+          this.progress.changed(run.agentId);
           results.push(result);
         }
         const again = this.policy.shouldContinue ? await abortable(track(Promise.resolve(this.policy.shouldContinue(scope, response, results, record))), signal) : calls.length > 0;
@@ -312,56 +315,65 @@ export class AgentRuntime {
       await this.store.finishRun(run.agentId, run.runId, status, failure);
     } catch (error) {
       this.finalizationFailures.set(run.runId, error);
-    } finally { this.changes.publish(); }
+    } finally { this.progress.settle(run.agentId, run.runId); }
   }
 
+  /** Completed SQL history and a bounded memory lane meet at the active message's start boundary. */
   async *follow(agentId: string, options: { runId?: string; after?: number; signal?: AbortSignal } = {}): AsyncGenerator<FollowEvent> {
     let selected: string | null | undefined = options.runId;
-    let after = options.after ?? 0;
-    let first = true;
-    let lastState = '';
+    let after = options.after ?? 0, first = true, lastState = '', durable = -1;
+    let state: FollowSnapshot['state'] | undefined;
     let active: { id: string; next: number; gapped: boolean } | undefined;
+    const lane = this.progress.lane(agentId);
     while (!options.signal?.aborted) {
       this.available();
-      const version = this.changes.version;
-      const snapshot = await this.store.followSnapshot(agentId, selected, after);
-      const { run } = snapshot.state;
-      selected = run?.runId ?? null;
-      this.checkFinalization(run?.runId);
-      const base = { version: 1 as const, agentId, runId: selected };
-      for (const record of snapshot.history) {
-        after = record.position;
-        yield { ...base, type: 'message', record };
-      }
-      if (first) {
-        first = false;
-        yield { ...base, type: 'sync', historyPosition: after, run };
-      }
-      const state = encode(run);
-      if (run && state !== lastState) {
-        lastState = state;
-        yield { ...base, type: 'state', run };
-      }
-      if (!run || run.status !== 'running') {
-        yield { ...base, type: 'end', historyPosition: after, run };
-        return;
-      }
-      const live = snapshot.live;
-      if (live) {
-        if (active?.id !== live.messageId) active = { id: live.messageId, next: 0, gapped: false };
-        if (!active.gapped && active.next < live.firstAvailable) {
-          active.gapped = true;
-          yield { ...base, type: 'gap', messageId: live.messageId, expectedSequence: active.next, firstAvailable: live.firstAvailable };
+      const version = lane.changes.version;
+      if (!state || durable !== lane.durable) {
+        // Capture before awaiting: commits during synchronization force another SQL read.
+        durable = lane.durable;
+        const snapshot = await this.store.followSnapshot(agentId, selected, after);
+        state = snapshot.state; selected = state.run?.runId ?? null;
+        this.checkFinalization(state.run?.runId);
+        for (const record of snapshot.history) {
+          after = record.position;
+          if (active?.id === record.messageId) active = undefined;
+          yield { version: 2, agentId, runId: selected, type: 'message', record };
         }
-        if (!active.gapped) {
-          for (const chunk of live.chunks) {
-            if (chunk.sequence < active.next) continue;
-            active.next = chunk.sequence + 1;
-            yield { ...base, type: 'chunk', messageId: live.messageId, ...chunk };
+      }
+      const { run } = state;
+      const base = { version: 2 as const, agentId, runId: selected ?? null };
+      if (first) { first = false; yield { ...base, type: 'sync', historyPosition: after, run }; }
+      const current = encode(run);
+      if (run && current !== lastState) { lastState = current; yield { ...base, type: 'state', run }; }
+      // A completion may have happened while history/state events were yielded.
+      if (durable !== lane.durable) continue;
+      if (!run || run.status !== 'running') { yield { ...base, type: 'end', historyPosition: after, run }; return; }
+      if (run.activeMessageId) {
+        const id = run.activeMessageId;
+        if (active?.id !== id) active = { id, next: 0, gapped: false };
+        const range = this.progress.read(agentId, run.runId, id, active.next);
+        if (range && range.historyPositionBeforeMessage === after && !active.gapped) {
+          if (active.next < range.firstAvailable) {
+            active.gapped = true;
+            yield { ...base, type: 'gap', messageId: id, expectedSequence: active.next, firstAvailable: range.firstAvailable };
+          } else {
+            // Never hold a copied queue across a slow reader: recheck FIFO for every event.
+            while (!options.signal?.aborted && durable === lane.durable) {
+              const next = this.progress.read(agentId, run.runId, id, active.next);
+              if (!next || active.next >= next.nextSequence) break;
+              if (active.next < next.firstAvailable) {
+                active.gapped = true;
+                yield { ...base, type: 'gap', messageId: id, expectedSequence: active.next, firstAvailable: next.firstAvailable };
+                break;
+              }
+              const chunk = next.chunks[0]; if (!chunk) break;
+              active.next = chunk.sequence + 1;
+              yield { ...base, type: 'chunk', messageId: id, sequence: chunk.sequence, event: chunk.event };
+            }
           }
         }
       }
-      await this.changes.wait(version, options.signal);
+      await lane.changes.wait(version, options.signal);
     }
   }
 }

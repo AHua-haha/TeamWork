@@ -12,7 +12,7 @@ function snapshot(completed: CompletedRecord[], live: ClientSnapshot['live'] = [
 test('projects completed and cumulative live Pi messages under stable identities', () => {
   const user = { ...record(1, 'u1', ''), message: { role: 'user' as const, content: 'Hello', timestamp: 1 } };
   const partial = assistant('Working', 'pending');
-  const state = snapshot([user], [{ messageId: 'm1', runId, message: partial, nextSequence: 2, lastEvent: { type: 'text_delta', contentIndex: 0, delta: 'Working', partial } }]);
+  const state = snapshot([user], [{ messageId: 'm1', runId, message: partial, nextSequence: 2, lastEvent: { type: 'text_delta', contentIndex: 0, delta: 'Working' } }]);
   const first = projectSnapshot(state);
   assert.equal(first[0]?.role, 'user');
   assert.equal(first[1]?.id, 'm1');

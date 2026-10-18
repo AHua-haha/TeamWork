@@ -1,4 +1,6 @@
-import type { AssistantMessage, AssistantMessageEvent, JsonObject, Message, UserMessage } from '@earendil-works/pi-ai';
+import type { AssistantMessage, JsonObject, Message, UserMessage } from '@earendil-works/pi-ai';
+
+import type { ProgressEvent } from './progress.js';
 
 /** Backend-owned records and Pi payloads. No assistant-ui types cross this boundary. */
 export interface CompletedRecord {
@@ -24,10 +26,10 @@ export interface RunState {
   error: { code: string; message: string } | null;
 }
 
-export type FollowEvent = { version: 1; agentId: string; runId: string | null } & (
+export type FollowEvent = { version: 2; agentId: string; runId: string | null } & (
   | { type: 'message'; record: CompletedRecord }
   | { type: 'sync'; historyPosition: number; run: RunState | null }
-  | { type: 'chunk'; messageId: string; sequence: number; event: AssistantMessageEvent }
+  | { type: 'chunk'; messageId: string; sequence: number; event: ProgressEvent }
   | { type: 'gap'; messageId: string; expectedSequence: number; firstAvailable: number }
   | { type: 'state'; run: RunState }
   | { type: 'end'; historyPosition: number; run: RunState | null }
@@ -40,7 +42,7 @@ export interface LiveMessage {
   runId: string;
   message: AssistantMessage;
   nextSequence: number;
-  lastEvent: AssistantMessageEvent;
+  lastEvent: ProgressEvent;
 }
 
 export type ConnectionStatus = 'idle' | 'syncing' | 'following' | 'disconnected' | 'error';
