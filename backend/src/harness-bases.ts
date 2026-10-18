@@ -37,7 +37,7 @@ export function purposeHarnesses(member: StoredMember, implementation: Implement
     {
       id: 'execute',
       prompt: harnessPrompt('execute', { allowedCommands: JSON.stringify(config.allowedCommands) }),
-      tools: config.allowedCommands.length ? ['bash'] : [], parts: [],
+      tools: ['web_search', 'web_fetch', ...(config.allowedCommands.length ? ['bash'] : [])], parts: [],
     },
   ];
 }

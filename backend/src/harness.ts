@@ -15,6 +15,7 @@ import { AppError } from './types.js';
 import type { WorkspaceService } from './workspace.js';
 import { contextRoot, designRoot, implementationContextPath, contextPaths, contextLocation, designContextPaths } from './workspace-layout.js';
 import { decodeText } from './text.js';
+import { webTools } from './web-tools.js';
 
 export const viewBudget = 64 * 1024;
 export interface ResolvedHarness { working: ResolvedDesign[]; dependencies: ResolvedDesign[]; readable: string[]; writable: string[]; readonly: string[] }
@@ -91,7 +92,7 @@ export interface HarnessEnvironment {
 export class HarnessService {
   private readonly histories = new Map<string, Promise<HarnessHistory>>();
   private readonly operations = new HarnessQueue();
-  constructor(private readonly workspaces: WorkspaceService, readonly designs: DesignService, private readonly member: (id: string) => Promise<StoredMember | null>) {}
+  constructor(private readonly workspaces: WorkspaceService, readonly designs: DesignService, private readonly member: (id: string) => Promise<StoredMember | null>, private readonly web: RuntimeTool[] = webTools()) {}
   private async active(id: string): Promise<StoredMember> {
     const member = await this.member(id);
     if (!member || member.value.retiredAt !== null) throw new AppError('not_found', 'This agent is not an active team member', 404);
@@ -228,7 +229,7 @@ export class HarnessService {
     const member = await this.active(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const env = await this.operation(id, () => this.environment(id));
-    const available = [...harnessFileTools(this, env.parts.length > 0), harnessBashTool(this), ...teamTools];
+    const available = [...harnessFileTools(this, env.parts.length > 0), harnessBashTool(this), ...this.web, ...teamTools];
     const selected = new Set(env.definitions.flatMap(d => d.tools));
     const tools = available.filter(tool => selected.has(tool.definition.name));
     const parts = [

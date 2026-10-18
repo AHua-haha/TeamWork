@@ -33,7 +33,7 @@ test('implementation access derives from accepted mappings; pending files do not
   await lead.write.writeFile(join(lead.root,'.rsi/context/design',member.harness.designScope.working[0]!),JSON.stringify({implementation:['outside']}));
   await assert.rejects(files.write.writeFile(join(files.root,'outside/x'),'no'),code('not_found'));
   const prepared=await f.team.harness.prepare(member.memberId,[]);
-  assert.deepEqual(prepared.tools.map(t=>t.definition.name).sort(),['bash','edit','ls','read','write']);
+  assert.deepEqual(prepared.tools.map(t=>t.definition.name).sort(),['bash','edit','ls','read','web_fetch','web_search','write']);
   assert.deepEqual((await f.team.inspect(f.workspaceId,member.memberId)).harnesses.map(h=>h.id),['management','implementation','execute']);
 }));
 

@@ -16,7 +16,7 @@ Common ls/read/write/edit tools operate on pending files. One bash tool takes {c
 
 Scoped Git Bash is available independently of general execution allowances. General Bash requires an exact allowance for ["bash", "-c", command], or executable "bash". Previous non-Bash executable allowances remain stored but do not authorize a shell. Richer execution-rule capabilities remain outside this prototype.
 
-Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Linux bubblewrap with the sandbox runtime's dependencies. Unsupported/unavailable isolation fails closed. The prototype has no network allowance.
+Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Linux bubblewrap with the sandbox runtime's dependencies. Unsupported/unavailable isolation fails closed. Bash has no network allowance. The backend separately provides web_search and web_fetch through the fixed execute base for all members, independently of Bash allowances and model provider.
 
 ## Outputs and observable effects
 
@@ -26,7 +26,7 @@ Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Li
 | --- | --- | --- |
 | management | Lead-only design editing and member files; other members read working/dependency designs, common file tools and scoped Git Bash; lead model discovery and file validation | User acceptance for design and member-config |
 | implementation | Writable implementation from accepted working mappings and paired working-design context; read-only dependency implementation/context; common file tools and scoped Git Bash | Agent may commit code and implementation context independently |
-| execute | General Bash under existing allowances and applicable filesystem restrictions | Cannot override protected scopes or Git acceptance |
+| execute | General Bash under existing allowances and applicable filesystem restrictions; reusable web_search/web_fetch through backend-managed DeepSeek credentials | Cannot override protected scopes or Git acceptance |
 
 Base harness rule prompts are maintained as backend-owned Markdown files, including shared rules, per-scope maintenance instructions and initial Markdown templates. Runtime and inspection use those same file contents. Templates receive backend-owned worktree/command values; files cannot grant permissions or replace enforced policy. They load when the backend starts; changing source prompts requires restarting development mode or rebuilding/restarting the compiled backend. Missing or empty required prompt files fail startup rather than using hardcoded fallback rules.
 
@@ -123,7 +123,7 @@ Member JSON holds name, role, responsibility, settings, ordered prompt reference
 
 Scoped Git Bash can read authorized context/implementation and use the trusted Git bridge; direct shell writes are disabled. General Bash can write authorized implementation only. Management files and Git metadata are protected from direct Bash and descendant processes. File tools provide pending management editing and working implementation-context editing. Git without scope metadata cannot use the bridge; absolute native Git cannot access protected harness repositories. Read-only dependency restrictions apply to descendants as well.
 
-Commands start in the member worktree. A script may need cd to an assigned directory: directory contents outside read scope are unavailable even when scoped Git can operate from the root. Minimal runtime/system files and temporary scratch are available; provider credentials and the backend environment are not inherited. Network access is disabled. Output is capped at 64 KiB and execution at 60 seconds; cancellation/timeout terminates the process group before checkpointing and outstanding broker operations settle first.
+Commands start in the member worktree. A script may need cd to an assigned directory: directory contents outside read scope are unavailable even when scoped Git can operate from the root. Minimal runtime/system files and temporary scratch are available; provider credentials and the backend environment are not inherited. Bash network access is disabled. Output is capped at 64 KiB and execution at 60 seconds; cancellation/timeout terminates the process group before checkpointing and outstanding broker operations settle first.
 
 ## Failure behavior
 
@@ -133,7 +133,7 @@ Unapproved protected commits preserve pending files and staging. Stale reviews/b
 
 ## Guarantees and limits
 
-Each member retains its private worktree. Scope acceptance and checkpoint history are independent of group publication and active member configuration. The original checkout's Git branch/index remain untouched. No automatic merge, implementation-worktree refresh, new approval UI, network allowance or automatic context-maintenance algorithm is provided.
+Each member retains its private worktree. Scope acceptance and checkpoint history are independent of group publication and active member configuration. The original checkout's Git branch/index remain untouched. No automatic merge, implementation-worktree refresh, new approval UI, Bash network allowance or automatic context-maintenance algorithm is provided.
 
 Startup converts active legacy member records to backend-owned metadata and design-only assignments, preserving identity/settings/commands, exact prior source and pending drafts. Old Git references remain reachable; matching scopes retain their history. When a scope shape changes, existing pending files are preserved and a new scope reference is initialized; old references are retained. Stale or legacy drafts are not rewritten automatically. Member execution configuration may update allowances within the fixed command schema; non-Bash allowances do not independently authorize a shell. Linux isolation requires its external dependencies; verification in this task uses macOS.
 
@@ -155,3 +155,9 @@ Private harness storage is .rsi/harness inside the managed workspace root. It is
 Safe unresolvable stored assignments remain visible in member source/readiness inspection but provide no derived implementation-context authority and cannot run. New member validation and run admission resolve real nodes; no old-layout content fallback or automatic migration is introduced.
 
 Ordinary members read currently accepted designs. On the next environment assembly their read-only design views hydrate that accepted revision, including new files, changed text and document deletions/form transitions. This does not refresh their implementation context/code or grant design-edit authority.
+
+## Web capabilities
+
+Every member receives web_search({query,count?,original_question?}) and web_fetch({url}) from the fixed execute base even when allowedCommands is empty. Search filters live in query; count defaults to 5 (1–50), query and original_question allow 1–128 Unicode characters. Fetch requires an HTTP/HTTPS URL with a host and no credentials, at most 8192 characters. Backend deployment manages the DeepSeek API key; no member configuration fields or credential inspection are introduced. Runtime and active harness inspection expose the same capability names and file-backed rules.
+
+Each tool returns one Markdown text content block, followed by a distinct <metadata> block using named YAML fields. Search core content contains titles, URLs and summaries; fetch preserves page Markdown. Metadata records attribution, retrieval time, status and truncation. There is no outer JSON string and no extra summarizing model call. Empty search is successful. Invalid input, missing credentials, HTTP/network/timeout/response failures become recorded tool errors under the existing runtime failure behavior; cancellation aborts the request. No automatic retries are added. Body reads are limited to 4 MiB, the entire request to 30 seconds and Markdown core text to 64 KiB with explicit truncation. Bash isolation and file/Git permissions remain enforced independently.

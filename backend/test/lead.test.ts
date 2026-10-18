@@ -11,7 +11,7 @@ test('lead bootstraps pending designs and member files through common tools; des
     const output = await prepared.tools.find(t => t.definition.name === name)!.execute(args as never, scope(f.lead.memberId), {} as never);
     return output.content.map(p => p.type === 'text' ? p.text : '').join('');
   };
-  assert.deepEqual(prepared.tools.map(t => t.definition.name).sort(), ['bash', 'edit', 'ls', 'read', 'write']);
+  assert.deepEqual(prepared.tools.map(t => t.definition.name).sort(), ['bash', 'edit', 'ls', 'read', 'web_fetch', 'web_search', 'write']);
   await call('write', { path: '.rsi/context/design/new/metadata.json', content: JSON.stringify({ implementation: ['src'] }) });
   await call('write', { path: '.rsi/context/design/new/design.md', content: 'Pending project' });
   await call('write', { path: '.rsi/members/example/member.json', content: '{"name":"Example"}' });

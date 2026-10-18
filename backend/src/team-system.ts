@@ -8,7 +8,8 @@ import { HarnessService } from './harness.js';
 import { inspectHarnesses } from './harness-bases.js';
 import { MemberContext } from './member-context.js';
 import { teamTools } from './member-tools.js';
-import type { RunConfigSource, RuntimePolicy } from './runtime.js';
+import type { RunConfigSource, RuntimePolicy, RuntimeTool } from './runtime.js';
+import { webTools } from './web-tools.js';
 import { TeamRunner, type RunHost } from './team-runner.js';
 import { TeamService, teamRunConfig, type MemberView, type TeamStore, type TeamView } from './team.js';
 import type { WorkspaceService } from './workspace.js';
@@ -28,10 +29,10 @@ export class TeamSystem {
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
 
-  constructor(store: TeamStore & ChatStore, workspaces: WorkspaceService, private readonly config: ConfigService) {
+  constructor(store: TeamStore & ChatStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools()) {
     this.designs = new DesignService(workspaces);
     this.service = new TeamService(store, workspaces, config, this.designs);
-    this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id));
+    this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id), web);
     this.context = new MemberContext(this.service, workspaces, id => this.runner.isRunning(id));
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');

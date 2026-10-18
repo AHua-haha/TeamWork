@@ -5,6 +5,7 @@ import { AgentRuntime, configuredPolicy, piModelStream } from './runtime.js';
 import { createAgentServer } from './http.js';
 import { TeamSystem } from './team-system.js';
 import { WorkspaceService } from './workspace.js';
+import { webTools } from './web-tools.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
@@ -12,7 +13,7 @@ const models = builtinModels();
 const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
 const workspaces = new WorkspaceService(store, config);
-const team = new TeamSystem(store, workspaces, config);
+const team = new TeamSystem(store, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY));
 const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models));
 team.attach(runtime);
 const server = createAgentServer(runtime, config, workspaces, team);

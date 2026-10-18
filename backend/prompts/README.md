@@ -7,7 +7,7 @@ Maintain harness rule text in the Markdown files under `harness/`:
 - `management-design.md` and `management-members.md`: per-scope maintenance instructions.
 - `implementation.md`, `implementation-scope.md` and `implementation-context.md`: implementation-code/context maintenance and independent history rules.
 - `design-template.md` and `implementation-context-template.md`: initial root context content rendered at workspace bootstrap.
-- `execute.md`: Bash execution rules and allowed-command information.
+- `execute.md`: Bash execution rules, allowed-command information, and reusable web-search/fetch usage rules.
 
 `{{worktree}}` in common and `{{allowedCommands}}` in execute are replaced with backend-owned values. `{{design}}` and `{{context}}` render each implementation-context scope; `{{project}}` renders the initial design title and `{{design}}` also renders the initial implementation-context reference. Other text is delivered as written to runtime/inspection. Unknown template values fail assembly. Required files are loaded once; missing/empty files fail backend startup. There are no hardcoded fallback rules.
 

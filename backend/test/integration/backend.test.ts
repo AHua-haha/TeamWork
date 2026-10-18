@@ -17,6 +17,7 @@ import { ConfigService } from '../../src/config.js';
 import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/runtime.js';
 import { createAgentServer } from '../../src/http.js';
 import { TeamSystem } from '../../src/team-system.js';
+import { webTools } from '../../src/web-tools.js';
 import { newLead } from '../../src/team.js';
 import { WorkspaceService } from '../../src/workspace.js';
 import type { ContextCommit } from '../../src/context-base.js';
@@ -271,6 +272,66 @@ test('model errors and tool validation failures become run failures without fabr
     const tool = result.find(event => event.type === 'message' && event.record.message.role === 'toolResult');
     assert.ok(tool && tool.type === 'message' && tool.record.message.role === 'toolResult' && tool.record.message.isError);
   } finally { await f.runtime.close(); }
+});
+
+test('web tool Markdown and metadata persist independently of context and replay through the frontend follow API', { timeout: 15_000 }, async () => {
+  let unavailable = false;
+  const key = 'integration-web-key-not-a-real-credential';
+  const tools = webTools(key, async url => unavailable ? new Response(key, { status: 429 }) : Response.json(String(url).endsWith('/search')
+    ? { results: [{ title: 'Example', url: 'https://example.com', summary: 'Search summary.', snippet: '' }] }
+    : { title: 'Example', content: '# Page\n\nFetched Markdown.' }));
+  const f = await fixture({ policy: fixedPolicy(model, tools) });
+  const team = teamFor(f.runtime);
+  const server = createAgentServer(f.runtime, config, workspaces, team);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const port = (server.address() as { port: number }).port;
+  const call = (name: string, args: JsonObject) => fauxAssistantMessage([{ type: 'toolCall', id: randomUUID(), name, arguments: args }], { stopReason: 'toolUse' });
+  const follow = async (runId: string) => {
+    const response = await fetch(`http://127.0.0.1:${port}/agents/${f.agentId}/follow?runId=${runId}&after=0`);
+    assert.equal(response.status, 200);
+    return [...(await response.text()).matchAll(/^data: (.*)$/gm)].map(match => JSON.parse(match[1]!) as FollowEvent);
+  };
+  try {
+    const run = await f.runtime.start(f.agentId, 'Search and read');
+    answer((await f.requests.next()).events, call('web_search', { query: 'example site:example.com' }));
+    const second = await f.requests.next();
+    assert.ok(second.request.context.messages.some(m => m.role === 'toolResult' && m.toolName === 'web_search'));
+    answer(second.events, call('web_fetch', { url: 'https://example.com' }));
+    answer((await f.requests.next()).events, message('Read the source.'));
+    assert.equal((await f.runtime.finished(f.agentId, run.runId)).status, 'completed');
+    const before = await follow(run.runId);
+    const records = before.filter(event => event.type === 'message').map(event => event.record);
+    const results = records.filter(record => record.message.role === 'toolResult');
+    assert.equal(results.length, 2);
+    assert.match(JSON.stringify(results[0]!.message), /Search summary/);
+    assert.match(JSON.stringify(results[1]!.message), /Fetched Markdown/);
+    for (const record of results) {
+      assert.equal(record.message.role, 'toolResult');
+      if (record.message.role !== 'toolResult') continue;
+      assert.equal(record.message.isError, false);
+      assert.ok(record.message.content.some(part => part.type === 'text' && part.text.includes('<metadata>') && part.text.endsWith('</metadata>')));
+      assert.ok(!JSON.stringify(record).includes(key));
+    }
+    const context = await store.getContext(f.agentId);
+    await store.replaceContext(f.agentId, context.revision, [{ messageId: 'web-summary', message: { role: 'user', content: 'Compacted source context.', timestamp: 1 }, metadata: {} }]);
+    assert.deepEqual((await follow(run.runId)).filter(event => event.type === 'message').map(event => event.record), records, 'frontend reads stable database history after model context changes');
+
+    unavailable = true;
+    const failure = await f.runtime.start(f.agentId, 'Try unavailable web provider');
+    answer((await f.requests.next()).events, call('web_fetch', { url: 'https://example.com' }));
+    assert.equal((await f.runtime.finished(f.agentId, failure.runId)).status, 'failed');
+    const events = await follow(failure.runId);
+    const failed = events.find(event => event.type === 'message' && event.record.runId === failure.runId && event.record.message.role === 'toolResult');
+    assert.ok(failed && failed.type === 'message' && failed.record.message.role === 'toolResult' && failed.record.message.isError);
+    assert.match(JSON.stringify(failed), /web_rate_limited/);
+    assert.ok(!JSON.stringify(events).includes(key));
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await team.runner.close();
+    await f.runtime.close();
+  }
 });
 
 test('database commit failure is never announced as completed and terminal failure is observable', { timeout: 15_000 }, async () => {

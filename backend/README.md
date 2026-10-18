@@ -65,6 +65,19 @@ On open/refresh, omit `runId` to sync and follow the latest run. On reconnect, d
 
 SSE types: `message`, `sync`, `chunk`, `gap`, `state`, `end`; transport errors use `stream_error`. Pi payloads are preserved inside versioned JSON envelopes. `partial` in a Pi event is cumulative; a client using it should replace the current partial rather than appending the same delta again. There is no periodic frontend polling or connection spanning runs.
 
+## Web search and fetch
+
+Set `DEEPSEEK_WEB_API_KEY` in the backend deployment environment or ignored `backend/.env`, then restart the backend. It is a backend-only credential, separate from model connection configuration; members can use any model provider. No UI or member configuration is required. All workspace members receive both capabilities through their fixed execute harness even with no Bash allowance. Bash remains network-isolated.
+
+- `web_search({query, count?, original_question?})`: count defaults to 5 (1–50); query and optional original_question are 1–128 Unicode characters and cannot be whitespace-only. Put filters in query, for example `agent harness site:github.com lang:en after:2026-01-01`. DeepSeek receives `ori_question` and `need_content: false`; full page reading uses fetch.
+- `web_fetch({url})`: HTTP/HTTPS URL with a host, no embedded credentials, at most 8192 characters. Returns the provider's Markdown page content.
+
+Both return a single text block containing Markdown core information followed by YAML metadata inside `<metadata>...</metadata>`, without an outer JSON string. Search core content lists titles, URLs and summaries; metadata includes query, source metadata and counts. Fetch metadata includes requested URL and title. Both include provider/status/retrieval time/truncation. Tool results use the existing stored execution history and follow API. There is no extra model summarization call.
+
+Requests have a 30-second deadline and a 4 MiB response-body limit. Core Markdown is capped at 64 KiB of UTF-8 text with visible truncation. No matches is successful; missing credentials, invalid input and provider failures return explicit error tool results, which fail the current run under the existing runtime policy. No automatic retry is performed. Cancellation aborts HTTP. Credentials and raw provider error bodies are excluded from results.
+
+[Web tool contract](../docs/systems/web-tools/design.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
+
 ## Workspace models
 
 Create/adopt requires `models: {models: [{connectionId, modelId, reasoning?, temperature?, maxTokens?, contextBudget?}], defaultModel: {connectionId, modelId}}`. Configure 1–50 distinct connection/model pairs and a default from that list. Models must already be available from configured providers. For example:

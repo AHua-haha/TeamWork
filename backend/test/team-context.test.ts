@@ -25,12 +25,16 @@ test('member requests get team rules and only their harness design and implement
   assert.doesNotMatch(request.context.systemPrompt!, /FRONTEND SOURCE|Design for Frontend/);
   assert.match(request.context.systemPrompt!, /commits require user approval/);
   assert.match(request.context.systemPrompt!, /standing words/);
-  assert.deepEqual(names(request).sort(), ['bash', 'edit', 'ls', 'read', 'write']);
+  assert.deepEqual(names(request).sort(), ['bash', 'edit', 'ls', 'read', 'web_fetch', 'web_search', 'write']);
   assert.deepEqual(request.context.tools!.map(tool => tool.name), names(request));
+  const inspected = await fixture.team.inspect(fixture.workspaceId, backend.memberId);
+  assert.deepEqual(inspected.harnesses.find(h => h.id === 'execute')!.tools, ['web_search', 'web_fetch']);
+  assert.match(request.context.systemPrompt!, /Bash remains network-isolated/);
+  assert.match(request.context.systemPrompt!, /<metadata>/);
 }));
 test('the lead receives design maintenance, choices and management tools with shared assignment instructions', () => withTeam(async fixture => {
   const request = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
-  assert.deepEqual(names(request).sort(), ['bash', 'edit', 'list_models', 'ls', 'read', 'validate_member_config', 'write']);
+  assert.deepEqual(names(request).sort(), ['bash', 'edit', 'list_models', 'ls', 'read', 'validate_member_config', 'web_fetch', 'web_search', 'write']);
   assert.match(request.context.systemPrompt!, /offer concrete choices with their tradeoffs and your recommendation/);
   assert.match(request.context.systemPrompt!, /wait for the user's answer/);
   assert.match(request.context.systemPrompt!, /Assign work in your final group response/);
