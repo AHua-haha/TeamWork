@@ -14,7 +14,7 @@ This is the agreed group-chat behavior with the prototype conventions recorded d
 - User messages select members through existing @ mention syntax; agent responses select recipients only through their optional leading structured mention header.
 - A user message without mentions triggers the lead. With explicit mentions, it triggers the mentioned members; the lead is not additionally triggered by default.
 - A member response without mentions triggers no member.
-- Multiple mentioned members may execute in parallel. Each member has at most one active run. A busy recipient's mention is refused, with no queue or deferred activation; the sender must try again when it is free.
+- User-selected recipients execute sequentially in mention order. Agent responses select at most one distinct recipient. Each member has at most one active run. A busy recipient's mention is refused, with no queue or deferred activation; the sender must try again when it is free.
 - Eligible recipients belong to the chat and have runnable configuration and harness scope.
 - User mentions use `@Name` or `@{Name With Spaces}`. Agent header names are exact active member names, compared ignoring case; duplicates select one recipient. Unknown, retired, unready, self or busy recipients refuse the whole publication with private feedback. Agent body text is never scanned for mentions.
 - Automatic exchange continues while messages activate members, ending when there are no remaining active members or when the mention limit prevents further activation. Counting and exhaustion semantics are defined below.
@@ -39,11 +39,11 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 
 ### Mention-limit semantics
 
-- Each accepted user message starts an exchange with a configurable budget, initially 32 member activations. Responses and their triggered descendants belong to that exchange even when they run in parallel.
+- Each accepted user message starts an exchange with a configurable budget, initially 32 member activations. Responses and their triggered descendants belong to that exchange including sequential handoffs.
 - Each distinct recipient activated by an accepted message consumes one slot. Default lead activation consumes one slot. Duplicate mentions of the same recipient in one message consume one slot; activating that member again later consumes another.
 - Refused publication attempts consume no slots. A new user message starts a separate exchange and budget; it remains subject to busy-recipient refusal.
 - If accepting all recipients would exceed the remaining budget, refuse the whole publication and return explicit private feedback to the sending agent. Publish no candidate message and activate none of its recipients.
-- Already-started members may finish. They can publish responses without mentions after the budget is exhausted. The exchange becomes idle when all its runs finish; one response without mentions does not stop other parallel participants.
+- Already-started members may finish. They can publish responses without mentions after the budget is exhausted. The exchange becomes idle when all its runs finish; one response without mentions does not stop other admitted participants.
 - This budget bounds automatic cooperation across members. The runtime's separate per-run limit still bounds private execution, including revisions after refused publication.
 
 ## Guarantees and limits
@@ -63,7 +63,7 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 3. Frontend can read Backend's published report when activated but does not receive Backend's tool trace.
 4. A member posts a report without mentions. Under mention-only routing, that report causes no automatic member activation.
 5. The user posts a message without mentions. The lead is activated.
-6. A message mentions Backend and Frontend. Both can work in parallel, and each publishes its own final response into the shared transcript.
+6. A message mentions Backend and Frontend. For user input both are admitted in mention order and execute sequentially. An agent response naming both is refused atomically.
 7. Backend is working when another sender mentions it. The publication is refused and no later activation is queued. The sending agent receives private feedback and must make a new attempt when Backend is free.
 8. Frontend publishes a response without mentioning busy Backend. The response enters idle members' contexts immediately and is buffered for Backend. When Backend finishes, append that response after Backend's private working context without triggering another Backend activation.
 9. A candidate mentions busy Backend and free Frontend. Refuse the whole publication; neither is activated by that attempt. The sender can revise its recipients or try again later.
@@ -113,7 +113,7 @@ An agent may start its selected final response text with this optional routing h
 Message body, including ordinary @ references.
 ```
 
-The entire block may be omitted when nobody should be triggered. Empty or whitespace-only block contents and [] also mean no recipients. Allow leading whitespace before the opening tag. The first opening/tag spelling is case-sensitive and has no attributes; malformed leading reserved <mentions syntax, missing closing tag, invalid JSON, non-array data or empty/non-string/whitespace-padded member names refuse publication. Only this initial block is interpreted; all later content, including @Name, @{...}, package identifiers and later mention-like blocks, is ordinary body text. Explicit recipient names are deduplicated ignoring case in first-mentioned order. Existing eligibility, parallel launch, busy/self/unknown refusal and exchange-budget rules remain atomic.
+The entire block may be omitted when nobody should be triggered. Empty or whitespace-only block contents and [] also mean no recipients. Allow leading whitespace before the opening tag. The first opening/tag spelling is case-sensitive and has no attributes; malformed leading reserved <mentions syntax, missing closing tag, invalid JSON, non-array data or empty/non-string/whitespace-padded member names refuse publication. Only this initial block is interpreted; all later content, including @Name, @{...}, package identifiers and later mention-like blocks, is ordinary body text. Explicit recipient names are deduplicated ignoring case in first-mentioned order. Existing eligibility, ordered admission and sequential execution, busy/self/unknown refusal and exchange-budget rules remain atomic.
 
 Remove the routing block and following blank-line separator from the published body. A nonempty body is required. No-header responses retain their text exactly. Member contexts and chat APIs receive the body and resolved recipient IDs; the immutable private assistant message retains its original blocks including the header. Backend-owned final references add bodyOffset (a UTF-16 string offset) into the joined selected text; source contentIndices still identify every selected final block. Older references without bodyOffset retain their original accepted content unchanged.
 
@@ -125,7 +125,7 @@ Malformed-header refusals produce private feedback and allow the same activation
 
 Reset deletes the shared transcript, response reservations and change records, exchanges, runs, private completed messages, temporary streamed chunks and model conversation context for every workspace member, including retired members. Their current/latest run becomes null, private history position becomes zero, and context revision advances to invalidate stale context edits. Subsequent input starts a fresh conversation without replaying removed group messages. This explicit destructive operation is the exception to normal history retention.
 
-Member identities, accepted/pending configuration, models, workspace settings including mention limit, project/design/implementation context files, harness worktrees/checkpoints/commits and provider connections are preserved. Other workspaces and solo agents are unaffected. Reset does not undo tool/file effects.
+Member identities, accepted/pending configuration, models, workspace settings including mention limit, project/design/implementation context files, harness checkpoints/commits and provider connections are preserved. Other workspaces and solo agents are unaffected. Reset does not undo tool/file effects.
 
 Shared cursors are never reused. Snapshots add `resetCursor` (timeline) or `resetPosition` (shared messages), initially 0. A successful reset advances both boundaries beyond preceding history, clears old records, and preserves these boundaries durably. A timeline follower whose `after` precedes the reset receives a version-1 `reset` event `{workspaceId,cursor:resetCursor}` before newer entries, then continues from that cursor. Shared-message follow uses a `reset` event with `position:resetPosition` before newer messages. Consumers discard pre-reset records and ignore delayed acknowledgements at/before the boundary. Reload and reconnect see only the new conversation. Empty snapshots at a reset boundary have `more:false`; boundaries are not chat messages.
 
@@ -138,3 +138,9 @@ A member's ordinary tool failure is private error-result context for its next mo
 ## Private execution progress
 
 The version-1 durable group timeline and final references are unchanged. Private execution follows use the runtime’s version-2 compact in-memory progress contract. SQL completed messages remain authoritative; transient gaps/restarts do not rewrite group order or publish partial work. Idle reset clears both durable conversations and member progress buffers.
+
+### Sequential workspace execution
+
+All admitted member runs in one workspace share an execution lock. It covers request construction, model/tool work, outstanding effects, run-end checkpointing and terminal persistence. An admitted handoff waits for its sender to finish finalization. Different workspaces can execute independently. User routing, default lead, availability/busy refusal, shared delivery and budget rules are unchanged. User multi-recipient admission is preserved in mention order; only one member executes at a time. Already admitted waiting recipients count as busy. This execution wait does not queue or retry refused mentions.
+
+An agent final header may contain zero or one distinct case-insensitive member name. More than one refuses the whole publication with private feedback; no message, reservation or budget is consumed. Duplicate spellings of the same name still count once. Stop/shutdown cancel waiting runs before model/tools and without checkpointing someone else's files. Waiting runs retain the existing running/admitted API state and can have step zero; no new public run status is introduced.

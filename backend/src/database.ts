@@ -562,6 +562,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
   }
 
   async publishChat(input: ChatPublication): Promise<ChatAcceptance> {
+    if (input.author.type === 'member' && input.recipients.length > 1) throw new AppError('invalid_mentions', 'An agent response can mention at most one member');
     return this.transaction(async db => {
       // Workspace lock serializes publication, budget allocation and stop. Runtime writes lock agents.
       if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [input.workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);

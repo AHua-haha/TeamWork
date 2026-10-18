@@ -86,7 +86,7 @@ export async function executeBash(environment: BashEnvironment): Promise<Command
           const request = JSON.parse(bytes.slice(0, newline));
           if (!Array.isArray(request.argv) || request.argv.length > 128 || request.argv.some((v: unknown) => typeof v !== 'string') || typeof request.cwd !== 'string') throw new AppError('invalid_input', 'Invalid Git invocation');
           const cwd = await realpath(request.cwd), path = relative(root, cwd);
-          if (isAbsolute(path) || path === '..' || path.startsWith('../')) throw new AppError('access_denied', 'Git working directory must stay in this member worktree', 403);
+          if (isAbsolute(path) || path === '..' || path.startsWith('../')) throw new AppError('access_denied', 'Git working directory must stay in this workspace', 403);
           const stdout = await environment.git(request.argv, cwd);
           socket.end(JSON.stringify({ stdout, stderr: '', code: 0 }) + '\n');
         } catch (error) {
@@ -99,7 +99,7 @@ export async function executeBash(environment: BashEnvironment): Promise<Command
   try {
     await new Promise<void>((resolve, reject) => { server.once('error', reject);server.listen(socketPath, resolve); });
     const proxy = `#!${process.execPath}\nimport {connect} from 'node:net';\nconst client=connect(${JSON.stringify(socketPath)});let raw='';client.on('connect',()=>client.write(JSON.stringify({argv:process.argv.slice(2),cwd:process.env.PWD})+'\\n'));client.on('data',data=>{raw+=data;const end=raw.indexOf('\\n');if(end<0)return;const result=JSON.parse(raw.slice(0,end));process.stdout.write(result.stdout);process.stderr.write(result.stderr);process.exitCode=result.code;client.end();});client.on('error',()=>{process.stderr.write('Git context is unavailable\\n');process.exitCode=1;});\n`;
-    // The script is an .mjs target because Node's module mode cannot depend on the worktree package.json.
+    // The script is an .mjs target because Node's module mode cannot depend on the workspace package.json.
     await writeFile(join(area, 'git.mjs'), proxy.split('\n').slice(1).join('\n'), { mode: 0o400 });
     await writeFile(join(area, 'git'), `#!/bin/bash\nexec ${quote(process.execPath)} ${quote(join(area, 'git.mjs'))} "$@"\n`, { mode: 0o500 });
     const atRoot = (path: string) => path === '.' ? root : join(root, path);

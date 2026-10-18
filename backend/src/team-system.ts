@@ -116,6 +116,13 @@ export class TeamSystem {
     const checkpointed = new Set<string>();
     return {
       ...base,
+      acquireRun: async (run, signal) => {
+        const release = await this.runner.acquireExecution(run.agentId, signal);
+        try {
+          const releaseBase = await base.acquireRun?.(run, signal);
+          return () => { try { releaseBase?.(); } finally { release(); } };
+        } catch (error) { release(); throw error; }
+      },
       afterRun: async run => {
         try {
           if (await this.service.find(run.agentId)) {

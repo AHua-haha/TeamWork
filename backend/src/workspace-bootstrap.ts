@@ -30,10 +30,10 @@ export async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMe
     }
     const history = new HarnessHistory(harnessStorage(workspace.directory), workspace.directory);
     await history.open();
-    const worktree = await history.worktree(lead.id);
+    const rootDirectory = workspace.directory;
     let memberRevision = '';
     for (const part of purposeHarnesses({ ...lead, revision: 0 }).flatMap(harness => harness.parts)) {
-      const state = await history.ensure(lead.id, part, worktree);
+      const state = await history.ensure(lead.id, part, rootDirectory);
       if (part.id === 'member-config') memberRevision = state.committed;
     }
     await history.initializeMemberBundle(lead.id, lead.value.configuration!.path, async () => {});

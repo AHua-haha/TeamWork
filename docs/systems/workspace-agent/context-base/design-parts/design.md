@@ -12,11 +12,11 @@ Design content uses design.md or design/README.md plus other Markdown documents.
 
 ## Outputs and observable effects
 
-GET /workspaces/:workspaceId/designs returns {designs: [{path, revision, implementation}], truncated}. Discover metadata nodes, independently of assignments; omit invalid/unavailable designs and report listing truncation. Root and child nodes follow folder hierarchy. No worktree, member or run is created.
+GET /workspaces/:workspaceId/designs returns {designs: [{path, revision, implementation}], truncated}. Discover metadata nodes, independently of assignments; omit invalid/unavailable designs and report listing truncation. Root and child nodes follow folder hierarchy. No member, run or additional checkout is created.
 
 GET /workspaces/:workspaceId/designs/file?path=... returns metadata file information plus {design, designIssue}. design contains {implementation, content, documents:[{path,content}]}; content joins ordered Markdown documents, entry first. Raw metadata/document paths include design/ and preserve source spelling for correct relative links. Valid design revision covers metadata and every design document, so document-only changes invalidate it. It is not a raw metadata-file revision for saving. Invalid designs return null design and an issue with inspectable raw metadata; missing metadata returns not_found.
 
-User-accepted harness snapshots overlay original design files, including additions and deletions; pending worktree bytes do not. Semantic reads supply permission mappings. Raw file/history APIs continue observing original files. No semantic save API/tool is exposed: ordinary file tools edit pending Markdown and metadata; user acceptance commits their exact reviewed scope.
+User-accepted harness snapshots overlay original design files, including additions and deletions; pending workspace bytes do not. Semantic reads supply permission mappings. Raw file/history APIs continue observing original files. No semantic save API/tool is exposed: ordinary file tools edit pending Markdown and metadata; user acceptance commits their exact reviewed scope.
 
 ## Failure behavior
 

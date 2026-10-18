@@ -15,10 +15,29 @@ export class TeamRunner {
   private closed = false;
   private readonly publications = new Set<Promise<unknown>>();
   private readonly gate = new HarnessQueue();
+  private readonly execution = new HarnessQueue();
   private readonly jobs = new Map<string, string>();
   constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost) {}
 
   isRunning(memberId: string): boolean { return this.active.has(memberId); }
+
+  /** Admission remains atomic; only actual execution waits, including sender finalization. */
+  async acquireExecution(memberId: string, signal: AbortSignal): Promise<() => void> {
+    const workspaceId = this.active.get(memberId)?.workspaceId ?? (await this.team.find(memberId))?.workspaceId;
+    if (!workspaceId) return () => {};
+    signal.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(new AppError('cancelled', 'Run cancelled before execution'));
+      signal.addEventListener('abort', abort, { once: true });
+      void this.execution.run(workspaceId, async () => {
+        signal.removeEventListener('abort', abort);
+        if (signal.aborted) { abort(); return; }
+        return new Promise<void>(release => resolve(release));
+      }).catch(reject);
+      if (signal.aborted) abort();
+    });
+  }
+
 
   async startUser(agentId: string, input: Parameters<AgentRuntime['start']>[1]): Promise<RunState> {
     if (await this.team.find(agentId)) throw new AppError('member_conversation', 'Post workspace input to the shared team chat', 409);

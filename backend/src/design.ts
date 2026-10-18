@@ -52,7 +52,23 @@ export class DesignService {
   private async file(workspaceId:string,path:string,history:HarnessHistory|null):Promise<ContextFile>{
     const accepted=await history?.acceptedDesign(`${contextRoot}/${path}`);
     if(accepted){
-      if(accepted.content===null)throw new AppError('not_found','This file was deleted in accepted design history',404);
+      // SQL distinguishes explicit user saves from observations of pending agent edits.
+      const base = await this.workspaces.context(workspaceId);
+      let selected: { revision: string | null } | undefined;
+      try {
+        let before: number | null = null;
+        do {
+          const page = await base.history(path,before,100);
+          const user = page.versions.find(version=>version.author.type==='user');
+          if (user) { if(user.time > accepted.state.time) selected=user; break; }
+          before=page.next;
+        } while(before!==null);
+      } catch(error) { if(!(error instanceof AppError)||error.code!=='not_found') throw error; }
+      if(selected) {
+        if(!selected.revision) throw new AppError('not_found',`${path} not found in accepted design history`,404);
+        return base.read({revision:selected.revision});
+      }
+      if(accepted.content===null)throw new AppError('not_found',`${path} not found in accepted design history`,404);
       return {path,content:accepted.content,size:Buffer.byteLength(accepted.content),revision:accepted.state.revision,updatedAt:accepted.state.time,current:true,author:{type:'user'},reason:accepted.state.message};
     }
     return (await this.workspaces.context(workspaceId)).read({path});

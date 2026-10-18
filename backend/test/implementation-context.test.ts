@@ -35,7 +35,7 @@ test('root bootstrap supplies design and implemented-contract templates and agen
   assert.equal(committed.exitCode,0,committed.stderr);
   const after=(await f.team.harness.inspect(f.lead.memberId)).parts.find(p=>p.state.part.id==='design')!;
   assert.equal(after.state.committed,before.state.committed);
-  assert.equal((await base.read({path:'implement/impl.md'})).content,context.content,'raw context remains its existing original-workspace view');
+  assert.equal((await base.read({path:'implement/impl.md'})).content,context.content+'\nCurrent implementation notes.\n','raw context observes the same shared workspace');
 }));
 
 test('working context is writable/searchable while dependencies, unrelated context, member and private state stay protected',()=>withTeam(async f=>{
@@ -62,7 +62,7 @@ test('working context is writable/searchable while dependencies, unrelated conte
   assert.notEqual(shell.exitCode,0);assert.match(await readFile(join(files.root,own.paths[0]!), 'utf8'),/Implemented contract/);
 }));
 
-test('a replacement with a different assignment set inherits committed context and cannot overwrite a newer accepted base',()=>withTeam(async f=>{
+test('a replacement with a different assignment set sees and maintains the same current context',()=>withTeam(async f=>{
   const a=await worker(f,'A',['src']), b=await worker(f,'B',['lib']);
   const design=a.harness.designScope.working[0]!, part=implementationContextPart(design);
   const files=await f.team.harness.files(a.memberId);await files.write.mkdir(join(files.root,part.paths[0]!.slice(0,part.paths[0]!.lastIndexOf('/'))));
@@ -73,7 +73,7 @@ test('a replacement with a different assignment set inherits committed context a
   const next=await f.team.harness.files(replacement.memberId);
   assert.equal((await next.read.readFile(join(next.root,part.paths[0]!))).toString(),'Committed context v1');
   await files.write.writeFile(join(files.root,part.paths[0]!), 'Committed context v2');assert.equal((await commit(a.memberId)).exitCode,0);
-  await next.write.writeFile(join(next.root,part.paths[0]!), 'Stale overwrite');const refused=await commit(replacement.memberId);
-  assert.notEqual(refused.exitCode,0);assert.match(refused.stderr,/stale_revision/);
-  assert.equal((await files.read.readFile(join(files.root,part.paths[0]!))).toString(),'Committed context v2');
+  await next.write.writeFile(join(next.root,part.paths[0]!), 'Committed context v3');const committed=await commit(replacement.memberId);
+  assert.equal(committed.exitCode,0,committed.stderr);
+  assert.equal((await files.read.readFile(join(files.root,part.paths[0]!))).toString(),'Committed context v3');
 }));

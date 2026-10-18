@@ -1092,7 +1092,7 @@ test('persisted context survives reopening the pool; corrupt stored schema fails
 
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 
-test('member harnesses edit in isolated worktrees, checkpoint runs and separate agent commits from user design acceptance', { timeout: 30_000 }, async () => {
+test('members edit the shared project, checkpoint runs and separate project commits from user design acceptance', { timeout: 60_000 }, async () => {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'harness-prototype-')));
   const workspaceService = new WorkspaceService(store, { issuesFor: settings => service.issuesFor(settings) });
   const service = new ConfigService(store, builtinModels());
@@ -1173,7 +1173,7 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     const backend = (await team.team(workspaceId)).members.find(m => m.name === 'Backend')!;
     const env = await team.harness.environment(backend.memberId);
     assert.equal(await readFile(join(env.root, 'src/result.txt'), 'utf8'), 'Done');
-    await assert.rejects(stat(join(folder, 'project/src/result.txt')), code('ENOENT'));
+    assert.equal(await readFile(join(folder, 'project/src/result.txt'),'utf8'),'Done');
     assert.ok((await team.harness.history(backend.memberId, 'implementation')).some(r => r.kind === 'commit' && r.actor.type === 'agent'));
     const review = await team.harness.inspect(lead.memberId);
     const pending = review.parts.find(p => p.state.part.id === 'design')!;
@@ -1308,13 +1308,13 @@ test('workspace model SQL persistence initializes leads atomically and default e
   } finally { await team.runner.close(); await workspaceService.close(); await rm(folder, { recursive: true, force: true }); }
 });
 
-async function groupFixture() {
+async function groupFixture(basePolicy: RuntimePolicy = configuredPolicy()) {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'group-chat-')));
   const workspaceService = new WorkspaceService(store, { issuesFor: settings => service.issuesFor(settings) });
   const service = new ConfigService(store, builtinModels());
   const team = new TeamSystem(store, workspaceService, service);
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
-  const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), request => {
+  const runtime = new AgentRuntime(store, team.runConfig, team.policy(basePolicy), request => {
     const events = new Queue<AssistantMessageEvent>(); requests.push({ request, events }); return events;
   });
   team.attach(runtime);
@@ -1370,17 +1370,17 @@ test('agent headers route atomically and persist only the referenced body while 
     assert.ok(retry.request.context.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('invalid_mentions')));
     assert.equal((await store.chatSnapshot(f.workspaceId)).position, 1);
     assert.equal((await f.runtime.getState(f.backend.memberId)).run, null);
-    answer(retry.events, message('<mentions>["Backend", "Missing"]</mentions>\n\nAnother private candidate.'));
+    answer(retry.events, message('<mentions>["Missing"]</mentions>\n\nAnother private candidate.'));
     const corrected = await f.requests.next();
     assert.ok(corrected.request.context.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('No active member named "Missing"')));
     const body = '# Work\n\n@Lead @Nobody @joplin/lib @{unfinished\n<mentions>ordinary body example</mentions>';
-    const raw = '<mentions>\n["Backend", "backend", "Frontend"]\n</mentions>\n\n' + body;
+    const raw = '<mentions>\n["Backend", "backend"]\n</mentions>\n\n' + body;
     answer(corrected.events, message(raw));
-    const left = await f.requests.next(), right = await f.requests.next();
+    const left = await f.requests.next();
     assert.equal((await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId)).status, 'completed');
     const shared = (await store.chatSnapshot(f.workspaceId)).messages.at(-1)!;
     assert.equal(shared.text, body);
-    assert.deepEqual(shared.recipients, [f.backend.memberId, f.frontend.memberId]);
+    assert.deepEqual(shared.recipients, [f.backend.memberId]);
     const entry = (await store.chatTimeline(f.workspaceId)).changes.filter(change => change.entry.entryId === accepted.runs[0]!.runId).at(-1)!.entry;
     assert.ok(entry.kind === 'member');
     if (entry.kind !== 'member') return;
@@ -1390,7 +1390,7 @@ test('agent headers route atomically and persist only the referenced body while 
     const history = await store.runMessages(f.lead.memberId, accepted.runs[0]!.runId);
     assert.ok(history.some(record => record.message.role === 'assistant' && record.message.content.some(part => part.type === 'text' && part.text === raw)));
     assert.equal(history.filter(record => record.metadata.source === 'publication-feedback').length, 2);
-    for (const step of [left, right]) assert.ok(step.request.context.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.endsWith(body) && !m.content.includes('["Backend"')));
+    for (const step of [left]) assert.ok(step.request.context.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.endsWith(body) && !m.content.includes('["Backend"')));
     const context = await store.getContext(f.lead.memberId);
     await store.replaceContext(f.lead.memberId, context.revision, [{ messageId: 'header-summary', message: { role: 'user', content: 'Compacted context.', timestamp: 1 }, metadata: {} }]);
     assert.deepEqual(await store.runMessages(f.lead.memberId, accepted.runs[0]!.runId), history);
@@ -1398,12 +1398,11 @@ test('agent headers route atomically and persist only the referenced body while 
     try { assert.equal((await reopened.chatSnapshot(f.workspaceId)).messages.at(-1)!.text, body); }
     finally { await reopened.close(); }
     answer(left.events, message('<mentions>\n</mentions>\n\nFinished @Lead @Nobody'));
-    answer(right.events, message('Finished @Lead @Nobody'));
-    for (const member of [f.backend, f.frontend]) {
+    for (const member of [f.backend]) {
       const run = (await f.runtime.getState(member.memberId)).run!;
       assert.equal((await f.runtime.finished(member.memberId, run.runId)).status, 'completed');
     }
-    assert.equal((await store.chatSnapshot(f.workspaceId)).position, 4);
+    assert.equal((await store.chatSnapshot(f.workspaceId)).position, 3);
     assert.equal((await f.runtime.getState(f.lead.memberId)).run!.runId, accepted.runs[0]!.runId, 'body mentions trigger no successor');
   } finally { await f.close(); }
 });
@@ -1482,22 +1481,18 @@ test('truncated member text remains private and ends with an explicit incomplete
   } finally { await f.close(); }
 });
 
-test('group chat SQL/runtime: parallel work, private refusal feedback, deferred interleaving, and durable public-only history', { timeout: 30_000 }, async () => {
+test('group chat SQL/runtime: sequential execution, private refusal feedback, deferred interleaving and durable public-only history', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
     const start = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');
-    const first = await f.requests.next(); const second = await f.requests.next();
-    const backendStep = /You are Backend,/.test(first.request.context.systemPrompt!) ? first : second;
-    const frontendStep = backendStep === first ? second : first;
-    assert.match(frontendStep.request.context.systemPrompt!, /You are Frontend,/);
+    const backendStep = await f.requests.next();
+    assert.match(backendStep.request.context.systemPrompt!, /You are Backend,/);
     const backendRun = start.runs.find(run => run.agentId === f.backend.memberId)!;
     const frontendRun = start.runs.find(run => run.agentId === f.frontend.memberId)!;
     assert.equal((await f.runtime.getState(f.backend.memberId)).run?.status, 'running');
     assert.equal((await f.runtime.getState(f.frontend.memberId)).run?.status, 'running');
     assert.equal((await store.getContext(f.lead.memberId)).entries.length, 1);
     const user = await f.team.runner.postUser(f.workspaceId, '@Lead discuss');
-    const leadStep = await f.requests.next();
-    assert.match(leadStep.request.context.systemPrompt!, /You are Lead,/);
     assert.equal((await store.getContext(f.backend.memberId)).entries.length, 1, 'busy member receives no mid-work insertion');
     answer(backendStep.events, message('<mentions>["Lead"]</mentions>\n\nPRIVATE CANDIDATE: please review'));
     const revision = await f.requests.next();
@@ -1511,8 +1506,12 @@ test('group chat SQL/runtime: parallel work, private refusal feedback, deferred 
     assert.deepEqual(entries.map(entry => entry.metadata.groupPosition ?? entry.metadata.source ?? entry.message.role), [1, 'assistant', 'publication-feedback', 'assistant', 2, 3]);
     assert.deepEqual((await store.runMessages(f.backend.memberId, backendRun.runId)).map(record => record.metadata.source ?? record.message.role), ['assistant', 'publication-feedback', 'assistant']);
     assert.equal((await store.getContext(f.frontend.memberId)).entries.length, 1);
+    const frontendStep = await f.requests.next();
+    assert.match(frontendStep.request.context.systemPrompt!, /You are Frontend,/);
     answer(frontendStep.events, message('Frontend finished.'));
     await f.runtime.finished(f.frontend.memberId, frontendRun.runId);
+    const leadStep = await f.requests.next();
+    assert.match(leadStep.request.context.systemPrompt!, /You are Lead,/);
     answer(leadStep.events, message('Lead finished.'));
     await f.runtime.finished(f.lead.memberId, user.runs[0]!.runId);
     const transcript = await f.team.runner.snapshot(f.workspaceId);
@@ -1645,16 +1644,16 @@ test('group timeline reserves deterministic positions, pins final references and
   const f = await groupFixture();
   try {
     const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');
-    const first = await f.requests.next(); const second = await f.requests.next();
-    const backendStep = /You are Backend,/.test(first.request.context.systemPrompt!) ? first : second;
-    const frontendStep = backendStep === first ? second : first;
+    const backendStep = await f.requests.next();
     assert.deepEqual(accepted.entries.map(entry => entry.kind === 'member' ? entry.name : 'User'), ['User', 'Backend', 'Frontend']);
     const cursor = (await store.chatTimeline(f.workspaceId)).cursor;
-    const later = await f.team.runner.postUser(f.workspaceId, '@Lead discuss'); const leadStep = await f.requests.next();
-    answer(frontendStep.events, message('Frontend final first'));
-    await f.runtime.finished(f.frontend.memberId, accepted.runs[1]!.runId);
+    const later = await f.team.runner.postUser(f.workspaceId, '@Lead discuss');
     answer(backendStep.events, message('Backend final second'));
     await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId);
+    const frontendStep = await f.requests.next();
+    answer(frontendStep.events, message('Frontend final first'));
+    await f.runtime.finished(f.frontend.memberId, accepted.runs[1]!.runId);
+    const leadStep = await f.requests.next();
     answer(leadStep.events, message('Lead final'));
     await f.runtime.finished(f.lead.memberId, later.runs[0]!.runId);
     const snapshot = await store.chatTimeline(f.workspaceId);
@@ -2104,4 +2103,47 @@ test('FIFO eviction while SQL synchronization is paused discards the tail and re
     second.events.push({ type: 'done', reason: 'stop', message: message('second whole') });
     assert.equal((await collect(follower)).at(-1)?.type, 'end');
   } finally { await f.runtime.close(); }
+});
+
+
+test('shared workspace handoff waits for sender finalization before recipient execution', {timeout:30_000}, async()=>{
+  let release!:()=>void, entered!:()=>void, calls=0;
+  const hold=new Promise<void>(resolve=>{release=resolve;});
+  const finalizing=new Promise<void>(resolve=>{entered=resolve;});
+  const base=configuredPolicy();
+  const f=await groupFixture({...base,buildRequest:(scope,history)=>{calls++;return base.buildRequest(scope,history);},afterRun:async run=>{
+    if(run.agentId===f.lead.memberId){entered();await hold;}
+  }});
+  try{
+    const start=await f.team.runner.postUser(f.workspaceId,'Delegate');
+    const lead=await f.requests.next();
+    answer(lead.events,message('<mentions>["Backend"]</mentions>\nImplement.'));
+    await finalizing;
+    assert.equal(calls,1,'recipient model cannot start during sender finalization');
+    assert.equal((await f.runtime.getState(f.backend.memberId)).run?.step,0);
+    await assert.rejects(f.team.runner.postUser(f.workspaceId,'@Backend duplicate'),code('member_busy'));
+    release();await f.runtime.finished(f.lead.memberId,start.runs[0]!.runId);
+    const worker=await f.requests.next();assert.equal(calls,2);
+    answer(worker.events,message('Finished.'));
+    const run=(await f.runtime.getState(f.backend.memberId)).run!;
+    await f.runtime.finished(f.backend.memberId,run.runId);
+  }finally{release();await f.close();}
+});
+
+test('stopping shared workspace cancels waiting runs without executing or checkpointing them', {timeout:30_000}, async()=>{
+  let calls=0;const base=configuredPolicy();
+  const f=await groupFixture({...base,buildRequest:(scope,history)=>{calls++;return base.buildRequest(scope,history);}});
+  try{
+    const start=await f.team.runner.postUser(f.workspaceId,'@Backend @Frontend work');
+    await f.requests.next();assert.equal(calls,1);
+    await f.team.runner.stop(f.workspaceId);
+    const ended=await Promise.all(start.runs.map(run=>f.runtime.finished(run.agentId,run.runId)));
+    assert.deepEqual(ended.map(run=>run.status),['cancelled','cancelled']);assert.equal(calls,1);
+    const waiting=start.runs[1]!;
+    assert.deepEqual(await store.runMessages(waiting.agentId,waiting.runId),[]);
+    assert.ok(!(await f.team.harness.history(waiting.agentId,'implementation')).some(r=>r.actor.runId===waiting.runId));
+    const next=await f.team.runner.postUser(f.workspaceId,'Fresh request');
+    answer((await f.requests.next()).events,message('Ready.'));
+    assert.equal((await f.runtime.finished(f.lead.memberId,next.runs[0]!.runId)).status,'completed');
+  }finally{await f.close();}
 });

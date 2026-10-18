@@ -30,7 +30,7 @@ MySqlStore.activateMembers holds the workspace row, checks the complete active r
 
 HarnessHistory initializes one private persistent bundle marker after seeding. Activation pre-registers paths already represented by accepted files before database writes. Missing files after that point are intentional pending deletions, even across restart. Marker preparation changes no active settings and is safe if persistence later fails. No materialization overwrites existing pending bytes or recreates intentionally deleted files. Scoped Git rm provides file removal under existing authority with pre-removal checkpoint/index rollback; there is no extra lifecycle deletion tool.
 
-The low-level GET team/configuration still selects pending or committed semantic review. The frontend uses GET team/configuration/current and separate POST configuration/commit and configuration/activate controls. Member inspect/list stays read-only. Current file inspection may materialize/checkpoint the lead worktree; it does not activate or accept files.
+The low-level GET team/configuration still selects pending or committed semantic review. The frontend uses GET team/configuration/current and separate POST configuration/commit and configuration/activate controls. Member inspect/list stays read-only. Current file inspection may materialize/checkpoint the shared workspace; it does not activate or accept files.
 
 ## Code map
 
@@ -54,7 +54,7 @@ GET team/configuration/current returns active baseline metadata, current configu
 
 ## Workspace-created lead baseline
 
-WorkspaceService supplies newLead with root working design references and stores the generated exact source together with the filesystem bootstrap baseline. MemberConfigService accepts the committed revision equal to the active bootstrap marker as an already active baseline; all other prospective activations require a user commit. Normal review digest/base/idle gates remain unchanged. member-config paths and validation now use .rsi/members. The initial worktree preserves the bootstrap design and source; later original-file edits do not overwrite member pending work.
+WorkspaceService supplies newLead with root working design references and stores the generated exact source together with the filesystem bootstrap baseline. MemberConfigService accepts the committed revision equal to the active bootstrap marker as an already active baseline; all other prospective activations require a user commit. Normal review digest/base/idle gates remain unchanged. member-config paths and validation now use .rsi/members. The bootstrap design and source are the shared pending files; environment assembly never overwrites them.
 
 MemberContext keeps design as the shared agreement and delegates implementation-context maintenance instructions to the harness. Harness definitions derive one paired context scope per working design; dependencies remain read-only. No member JSON fields, active source snapshots, activation workflow or runtime loop change is needed. Context continuity uses committed scope state independently of member identity.
 

@@ -30,6 +30,8 @@ export interface ModelRequest {
 }
 
 export interface RuntimePolicy {
+  /** Acquire execution authority before any model/tool work; release after terminal finalization. */
+  acquireRun?(run: RunState, signal: AbortSignal): Promise<() => void>;
   /** Compaction writes canonical context here. The loop rereads storage afterward. */
   beforeStep?(scope: StepScope): Promise<void>;
   buildRequest(scope: StepScope, history: ContextHistory): Promise<ModelRequest> | ModelRequest;
@@ -209,6 +211,8 @@ export class AgentRuntime {
   private async runLoop(run: RunState, config: ResolvedRunConfig, signal: AbortSignal): Promise<void> {
     let status: 'completed' | 'failed' | 'cancelled' = 'completed';
     let failure: RunState['error'] = null;
+    let release: (() => void) | undefined;
+    let entered = !this.policy.acquireRun;
     const pendingEffects = new Set<Promise<unknown>>();
     const track = <T>(operation: Promise<T>): Promise<T> => {
       pendingEffects.add(operation);
@@ -216,6 +220,8 @@ export class AgentRuntime {
       return operation;
     };
     try {
+      if (this.policy.acquireRun) { release = await this.policy.acquireRun(run, signal); entered = true; }
+      signal.throwIfAborted();
       for (let step = 1; ; step++) {
         signal.throwIfAborted();
         this.store.assertRuntime();
@@ -305,7 +311,7 @@ export class AgentRuntime {
     // Cancellation stops observation promptly, but a checkpoint must wait for file effects to stop.
     await Promise.allSettled([...pendingEffects]);
     try {
-      await this.policy.afterRun?.({ agentId: run.agentId, runId: run.runId, status });
+      if (entered) await this.policy.afterRun?.({ agentId: run.agentId, runId: run.runId, status });
     } catch (error) {
       status = 'failed';
       failure = { code: error instanceof AppError ? error.code : 'harness_finalization_failed', message: error instanceof Error ? error.message : 'Run finalization failed' };
@@ -315,7 +321,7 @@ export class AgentRuntime {
       await this.store.finishRun(run.agentId, run.runId, status, failure);
     } catch (error) {
       this.finalizationFailures.set(run.runId, error);
-    } finally { this.progress.settle(run.agentId, run.runId); }
+    } finally { this.progress.settle(run.agentId, run.runId); release?.(); }
   }
 
   /** Completed SQL history and a bounded memory lane meet at the active message's start boundary. */

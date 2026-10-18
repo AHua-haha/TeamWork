@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { seedDesign } from './design-fixture.js';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -55,7 +57,7 @@ test('scoped Bash uses real Git staging and commits, preserving index across aut
   const restore=await f.team.harness.bash(member.memberId,git('implementation','git restore -- src/a.txt'),signal());
   assert.equal(restore.exitCode,0,restore.stderr);assert.equal(await readFile(join(files.root,'src/a.txt'),'utf8'),'first');
   const log=await f.team.harness.bash(member.memberId,git('implementation','git log --all --oneline'),signal());
-  assert.match(log.stdout,/Before Git restore/);
+  assert.match(log.stdout,/Implement first/);assert.doesNotMatch(log.stdout,/Before project Git restore/);
   const env=await f.team.harness.environment(member.memberId);
   const retained=await f.team.harness.history(member.memberId,'implementation');
   assert.ok((await Promise.all(retained.map(r=>env.history.readSnapshot(r.revision,'src/a.txt')))).includes('uncheckpointed edit'));
@@ -148,25 +150,72 @@ test('independent scope staging survives implementation commits and dependency f
   assert.notEqual(write.exitCode,0);
 }));
 
-test('scoped Git rejects stale commits and explicitly restores latest accepted scope without affecting another scope',()=>withTeam(async f=>{
+test('members share pending and committed implementation without synchronization or worktree creation',()=>withTeam(async f=>{
   const a=await worker(f,'Backend',['src']),b=await worker(f,'Other',['src']);
   const af=await f.team.harness.files(a.memberId),bf=await f.team.harness.files(b.memberId);
+  assert.equal(af.root,f.directory);assert.equal(bf.root,f.directory);
   await af.write.mkdir(join(af.root,'src'));await af.write.writeFile(join(af.root,'src/a.txt'),'First');
+  assert.equal((await bf.read.readFile(join(bf.root,'src/a.txt'))).toString(),'First');
   const commit=await f.team.harness.bash(a.memberId,git('implementation','git add . && git commit -m "First"'),signal());assert.equal(commit.exitCode,0,commit.stderr);
-  await bf.write.mkdir(join(bf.root,'src'));await bf.write.writeFile(join(bf.root,'src/a.txt'),'Stale');
-  const stale=await f.team.harness.bash(b.memberId,git('implementation','git add . && git commit -m "Stale"'),signal());assert.match(stale.stderr,/stale_revision/);
-  const latest=(await f.team.harness.inspect(b.memberId)).parts.find(p=>p.state.part.id==='implementation')!.state.committed;
-  const restored=await f.team.harness.bash(b.memberId,git('implementation',`git restore --staged --worktree --source=${latest} .`),signal());assert.equal(restored.exitCode,0,restored.stderr);
   await bf.write.writeFile(join(bf.root,'src/a.txt'),'Second');
-  const fresh=await f.team.harness.bash(b.memberId,git('implementation','git add . && git commit -m "Second"'),signal());assert.equal(fresh.exitCode,0,fresh.stderr);
-  assert.equal(await readFile(join(af.root,'src/a.txt'),'utf8'),'First');
+  const fresh=await f.team.harness.bash(b.memberId,git('implementation','git add . && git commit -m "Second" && git log --oneline'),signal());assert.equal(fresh.exitCode,0,fresh.stderr);
+  assert.match(fresh.stdout,/First/);assert.match(fresh.stdout,/Second/);
+  assert.equal(await readFile(join(af.root,'src/a.txt'),'utf8'),'Second');
+  await assert.rejects(readFile(join(f.directory,'.rsi/harness/worktrees',a.memberId,'.git')),code('ENOENT'));
 }));
 
-test('a file-sized implementation scope stages and commits inside the managed worktree',()=>withTeam(async f=>{
+test('a file-sized implementation scope stages and commits inside the shared project repository',()=>withTeam(async f=>{
   const member=await worker(f,'File Worker',['src/result.txt']);
   const files=await f.team.harness.files(member.memberId);
   await files.write.mkdir(join(files.root,'src')); await files.write.writeFile(join(files.root,'src/result.txt'),'Done');
   const result=await f.team.harness.bash(member.memberId,git('implementation','git status --short && git add . && git diff --cached && git commit -m "Implement file"'),signal());
   assert.equal(result.exitCode,0,JSON.stringify(result));
   assert.ok((await f.team.harness.history(member.memberId,'implementation')).some(r=>r.kind==='commit' && r.actor.type==='agent'));
+  await files.write.writeFile(join(files.root,'src/result.txt'),'Changed');
+  const restored=await f.team.harness.bash(member.memberId,git('implementation','git restore -- src/result.txt'),signal());
+  assert.equal(restored.exitCode,0,restored.stderr);
+  assert.equal(await readFile(join(files.root,'src/result.txt'),'utf8'),'Done');
+}));
+
+
+test('project Git preserves user branch/history and refuses unrelated shared-index staging',()=>withTeam(async f=>{
+  const exec=promisify(execFile);
+  await exec('git',['init','-b','user-review',f.directory]);
+  await writeFile(join(f.directory,'user.txt'),'User initial');
+  await exec('git',['-C',f.directory,'add','user.txt']);
+  await exec('git',['-C',f.directory,'-c','user.name=User','-c','user.email=user@localhost','commit','-m','User baseline']);
+  const head=(await exec('git',['-C',f.directory,'rev-parse','HEAD'])).stdout.trim();
+  const member=await worker(f,'Backend',['src']);
+  const files=await f.team.harness.files(member.memberId);
+  await files.write.mkdir(join(files.root,'src'));
+  await files.write.writeFile(join(files.root,'src/result.txt'),'Implementation');
+  await writeFile(join(f.directory,'user.txt'),'User pending');
+  await exec('git',['-C',f.directory,'add','user.txt']);
+  const denied=await f.team.harness.bash(member.memberId,git('implementation','git add . && git commit -m "Must not include user changes"'),signal());
+  assert.equal(denied.exitCode,1);assert.match(denied.stderr,/outside your implementation scope/);
+  assert.equal((await exec('git',['-C',f.directory,'show',':user.txt'])).stdout,'User pending');
+  assert.equal((await exec('git',['-C',f.directory,'rev-parse','HEAD'])).stdout.trim(),head);
+  await exec('git',['-C',f.directory,'restore','--staged','--','user.txt']);
+  const committed=await f.team.harness.bash(member.memberId,git('implementation','git commit -m "Implement result"'),signal());
+  assert.equal(committed.exitCode,0,committed.stderr);
+  assert.equal((await exec('git',['-C',f.directory,'branch','--show-current'])).stdout.trim(),'user-review');
+  assert.equal((await exec('git',['-C',f.directory,'rev-parse','HEAD^'])).stdout.trim(),head);
+  assert.equal((await exec('git',['-C',f.directory,'show','HEAD:user.txt'])).stdout,'User initial');
+  assert.equal(await readFile(join(f.directory,'user.txt'),'utf8'),'User pending');
+  assert.equal((await exec('git',['-C',f.directory,'show','HEAD:src/result.txt'])).stdout,'Implementation');
+}));
+
+
+test('root implementation checkpoints omit Git-ignored dependencies and build output',()=>withTeam(async f=>{
+  const member=await worker(f,'Root',['.']);
+  await writeFile(join(f.directory,'.gitignore'),'node_modules/\ndist/\n.rsi/\n');
+  const files=await f.team.harness.files(member.memberId);
+  await files.write.mkdir(join(files.root,'node_modules'));
+  await files.write.writeFile(join(files.root,'node_modules/cache.txt'),'Generated dependency');
+  await files.write.writeFile(join(files.root,'source.txt'),'Source');
+  const revisions=await f.team.harness.checkpoint(member.memberId,'root-check');
+  const revision=revisions.find((_,i)=>i===0)!;
+  const env=await f.team.harness.environment(member.memberId);
+  assert.ok((await env.history.paths(revision.revision)).includes('source.txt'));
+  assert.ok(!(await env.history.paths(revision.revision)).some(p=>p.startsWith('node_modules/')));
 }));

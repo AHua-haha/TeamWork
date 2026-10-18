@@ -62,6 +62,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   failNextPublication = false;
 
   async publishChat(input: ChatPublication) {
+    if (input.author.type === 'member' && input.recipients.length > 1) throw new AppError('invalid_mentions', 'An agent response can mention at most one member');
     this.stored(input.workspaceId);
     const active = [...this.chatRuns.values()].filter(item => item.run.status === 'running');
     for (const id of input.recipients) if (active.some(item => item.run.agentId === id)) throw new AppError('member_busy', 'Member is working', 409);

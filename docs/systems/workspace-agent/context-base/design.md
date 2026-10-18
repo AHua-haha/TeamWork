@@ -6,7 +6,7 @@ The context base stores a project's design and implementation context in paralle
 
 A system's design may occupy one Markdown file or multiple Markdown documents within design/. Its implementation context independently uses one file or impl/. Multiple documents remain the same system. Creating a child system with its own boundary, design, implementation context and metadata is a separate decomposition decision.
 
-Context stores information and versions. Purpose harnesses provide capabilities, scope, commit policy and maintenance instructions. Member configuration stays in .rsi/members, private Git/worktrees in .rsi/harness. Reusable knowledge is separate and deferred. Context does not store credentials, chat transcripts or project source code.
+Context stores information and versions. Purpose harnesses provide capabilities, scope, commit policy and maintenance instructions. Member configuration stays in .rsi/members, private Git snapshots in .rsi/harness. Reusable knowledge is separate and deferred. Context does not store credentials, chat transcripts or project source code.
 
 ## Content model
 
@@ -97,7 +97,7 @@ The complete design context, across its documents, retains purpose/responsibilit
 
 ### Harness maintenance and accepted state
 
-Agents edit their separate worktrees through common tools. Working-node implementation context can be read/edited/agent-committed; dependencies are read-only. Metadata/design commits require user acceptance. A directory representation does not create extra assignments or permissions. Lead management can create design nodes across the tree, including designs used as dependencies, without gaining unrelated implementation-context authority. Ordinary members read/follow working and dependency designs but cannot edit metadata or design prose.
+Agents edit the shared workspace through common tools, under workspace execution exclusion. Working-node implementation context can be read/edited/agent-committed; dependencies are read-only. Metadata/design commits require user acceptance. A directory representation does not create extra assignments or permissions. Lead management can create design nodes across the tree, including designs used as dependencies, without gaining unrelated implementation-context authority. Ordinary members read/follow working and dependency designs but cannot edit metadata or design prose.
 
 Each working node has a stable impl-context-<hash> Git part (first 16 SHA-256 hex characters of lower-case metadata reference), covering both impl.md and impl/. Inspection and assembled prompts give the exact ID/paths. Staging/checkpoints/semantic commits remain independent of code and design/member history. General Bash cannot write .rsi; scoped Bash Git and file tools supply permitted edits. New members opening a scope inherit its committed context; current peers are not overwritten, and stale-base commits refuse.
 

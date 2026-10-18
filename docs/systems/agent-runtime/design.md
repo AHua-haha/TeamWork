@@ -28,7 +28,7 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 
 ### Harness lifecycle
 
-Team members run file/command tools in their separate harness worktrees. Purpose and maintenance rule prompts are assembled into the system prompt. Tools are reusable; current harness authority and per-part commit policy determine their permitted effects. Implementation commits can be agent-authorized; design and member-configuration commits require user acceptance. The runtime does not interpret approval from conversation text or run completion.
+Team members run file/command tools in the registered shared workspace. Only one member executes per workspace, including pending effects and finalization. A waiting admitted run can be cancelled without executing tools or checkpointing files. Purpose and maintenance rule prompts are assembled into the system prompt. Tools are reusable; current harness authority and per-part commit policy determine their permitted effects. Implementation commits can be agent-authorized; design and member-configuration commits require user acceptance. The runtime does not interpret approval from conversation text or run completion.
 
 The `afterRun` lifecycle callback executes after outstanding policy/tool effects settle, before terminal persistence. It receives agent/run identity and completed/failed/cancelled status; interrupted-run startup recovery invokes it before marking abandoned runs interrupted. Errors fail normal finalization or prevent startup recovery. The team checkpoints before final group publication because that publication durably completes its sender before recipient launch; finalization skips that already completed checkpoint. Failed/cancelled runs still checkpoint their pending file state.
 

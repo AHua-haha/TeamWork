@@ -13,7 +13,7 @@ const code = (name: string) => (error: unknown) => (error as { code?: string }).
 const actor = { type: 'agent' as const, memberId: 'a', runId: 'r1' };
 const automatic = { ...actor, type: 'harness' as const };
 
-test('private worktrees and independent scoped checkpoints restore only their part and survive reopening', () => withFolder(async folder => {
+test('shared files and independent scoped checkpoints restore only their part and survive reopening', () => withFolder(async folder => {
   const source = join(folder, 'project');
   await mkdir(join(source, 'design'), { recursive: true });
   await mkdir(join(source, 'implementation'));
@@ -25,8 +25,8 @@ test('private worktrees and independent scoped checkpoints restore only their pa
   const head = (await exec('git', ['-C', source, 'rev-parse', 'HEAD'])).stdout;
   const index = await readFile(join(source, '.git', 'index'));
   const history = new HarnessHistory(join(folder, 'private'), source);
-  const a = await history.worktree('a'), b = await history.worktree('b');
-  assert.notEqual(a, b);
+  await history.open();
+  const a = source, b = source;
   const design = part('design', ['design'], 'user'), implementation = part('implementation');
   const d0 = await history.ensure('a', design, a);
   await history.ensure('a', implementation, a);
@@ -37,7 +37,7 @@ test('private worktrees and independent scoped checkpoints restore only their pa
   await writeFile(join(a, 'implementation', 'binary'), Buffer.from([0, 255, 1]));
   await chmod(join(a, 'implementation', 'a.txt'), 0o755);
   const i1 = await history.checkpoint('a', implementation, a, automatic, 'End of run r1');
-  assert.equal(await readFile(join(b, 'design', 'a.md'), 'utf8'), 'D0');
+  assert.equal(await readFile(join(b, 'design', 'a.md'), 'utf8'), 'D1');
   await history.restore('a', design, a, d0.checkpoint, actor);
   assert.equal(await readFile(join(a, 'design', 'a.md'), 'utf8'), 'D0');
   await assert.rejects(stat(join(a, 'design', 'new.md')), code('ENOENT'));
@@ -46,24 +46,25 @@ test('private worktrees and independent scoped checkpoints restore only their pa
   assert.equal((await history.ensure('a', design, a)).committed, d0.committed);
   assert.ok((await history.history('a', design, a)).some(r => r.revision === d1.revision));
   const reopened = new HarnessHistory(join(folder, 'private'), source);
-  assert.equal(await reopened.worktree('a'), a);
+  await reopened.open();
   assert.equal((await reopened.ensure('a', implementation, a)).checkpoint, i1.revision);
   assert.equal((await exec('git', ['-C', source, 'rev-parse', 'HEAD'])).stdout, head);
   assert.deepEqual(await readFile(join(source, '.git', 'index')), index);
-  assert.equal(await readFile(join(source, 'implementation', 'a.txt'), 'utf8'), 'I0');
-  assert.equal((await exec('git', ['-C', source, 'status', '--porcelain'])).stdout, '');
+  assert.equal(await readFile(join(source, 'implementation', 'a.txt'), 'utf8'), 'I1');
+  assert.match((await exec('git', ['-C', source, 'status', '--porcelain'])).stdout, /implementation/);
   const refs = (await exec('git', ['--git-dir', history.repository, 'for-each-ref', '--format=%(refname)', 'refs/harness/runs/a/r1'])).stdout;
   assert.match(refs, /design/);
   assert.match(refs, /implementation/);
 }));
 
-test('semantic commits enforce approval, exact reviewed bytes, and stale bases between agent worktrees', () => withFolder(async folder => {
+test('semantic acceptance enforces approval and reviewed bytes while shared scope state follows members', () => withFolder(async folder => {
   const source = join(folder, 'project');
   await mkdir(join(source, 'design'), { recursive: true });
   await mkdir(join(source, 'implementation'));
   await writeFile(join(source, 'design', 'a.md'), 'D0');
   const history = new HarnessHistory(join(folder, 'history'), source);
-  const a = await history.worktree('a'), b = await history.worktree('b');
+  await history.open();
+  const a = source, b = source;
   const design = part('design', ['design'], 'user'), implementation = part('implementation');
   const initial = await history.ensure('a', design, a);
   await writeFile(join(a, 'design', 'a.md'), 'D1');
@@ -87,11 +88,12 @@ test('semantic commits enforce approval, exact reviewed bytes, and stale bases b
   await mkdir(join(b, 'implementation'), { recursive: true });
   await writeFile(join(b, 'implementation', 'a.txt'), 'I2');
   const stale = await history.checkpoint('b', implementation, b, { type: 'harness', memberId: 'b' }, 'Run end');
-  await assert.rejects(history.commit('b', implementation, b, stale.revision, commit.revision, 'Overwrite I1', { type: 'agent', memberId: 'b' }), code('stale_revision'));
+  const second = await history.commit('b', implementation, b, stale.revision, commit.revision, 'Implement I2', { type: 'agent', memberId: 'b' });
+  assert.equal((await history.ensure('a', implementation, a)).committed, second.revision);
   await history.restore('b', implementation, b, commit.revision, { type: 'agent', memberId: 'b' });
   assert.equal(await readFile(join(b, 'implementation', 'a.txt'), 'utf8'), 'I1');
-  assert.equal((await history.ensure('b', implementation, b)).base, commit.revision);
-  const c = await history.worktree('c');
+  assert.equal((await history.ensure('b', implementation, b)).base, second.revision);
+  const c = source;
   await history.ensure('c', implementation, c);
   assert.equal(await readFile(join(c, 'implementation', 'a.txt'), 'utf8'), 'I1');
 }));
@@ -105,7 +107,7 @@ test('scope definitions reject overlap and restore rejects another scope or syml
   await writeFile(join(source, 'a', 'x'), 'x');
   await writeFile(join(source, 'b', 'y'), 'y');
   const history = new HarnessHistory(join(folder, 'history'), source);
-  const root = await history.worktree('a');
+  await history.open(); const root = source;
   const a = part('a'), b = part('b');
   const initialA = await history.ensure('a', a, root), initialB = await history.ensure('a', b, root);
   await assert.rejects(history.restore('a', a, root, initialB.checkpoint, actor), code('invalid_revision'));
@@ -120,7 +122,7 @@ test('scoped restore handles file-directory transitions without deleting exclude
   await mkdir(join(source, 'a'), { recursive: true });
   await writeFile(join(source, 'a/switch'), 'file');
   const history = new HarnessHistory(join(folder, 'history'), source);
-  const root = await history.worktree('a');
+  await history.open(); const root = source;
   const scope = { ...part('a'), exclude: ['a/switch/private'] };
   const initial = await history.ensure('a', scope, root);
   await rm(join(root, 'a/switch'));

@@ -44,7 +44,7 @@ Four actions work on the workspace folder for an agent: list, read, write, and e
 
 Requests follow the context base's rules for fields, bodies, and errors.
 
-Agent file actions have no HTTP form; the harness's tools call them inside the backend. Workspace members use these common actions through harness rules in their separate worktrees; design edits remain pending until user acceptance. Raw original-context external edits are recorded on observation. Member file actions operate private harness worktrees and do not automatically create original-context versions.
+Agent file actions have no HTTP form; the harness's tools call them inside the backend. Workspace members use common actions in the shared project directory under harness rules; design edits remain pending until user acceptance. ContextBase observes those same context files and records filesystem changes, which do not themselves grant design authority.
 
 ## Failure behavior
 
@@ -76,7 +76,7 @@ Agent file actions have no HTTP form; the harness's tools call them inside the b
 4. **Edit a project file.** The user reads `README.md`, edits it, and saves with its revision. The response has a new revision. Saving again with the old revision returns 409 `stale_revision`.
 5. **Binary file.** Reading `frontend/public/icon.png` returns 415 `unsupported_file`.
 6. **Find.** Finding `app.tsx` returns `frontend/src/ui/App.tsx`.
-7. **Agent writes.** A member assigned an accepted working design mapping `src/backend` writes `src/backend/api.ts` in its managed worktree. Common tools can read/follow its working design. Only the lead edits designs, and design commits require user acceptance. The member may also edit its working-design implementation context, while dependency context remains read-only.
+7. **Agent writes.** A member assigned an accepted working design mapping `src/backend` writes `src/backend/api.ts` in the shared workspace. Common tools can read/follow its working design. Only the lead edits designs, and design commits require user acceptance. The member may also edit its working-design implementation context, while dependency context remains read-only.
 8. **Hidden from an agent.** A worker whose implementation scope does not include `frontend` cannot list or read its implementation; a dependency file can be read but not edited.
 9. **Edit.** Editing `src/a.ts` with text that is not in the file is reported to the agent and leaves the file unchanged. A path like `../outside/secret.txt`, or one through a link, is refused.
 
@@ -89,7 +89,7 @@ GET /workspaces/:workspaceId/models returns {revision, value, issues}; value is 
 
 ## Fresh workspace bootstrap
 
-Create and adopt initialize a reserved `.rsi/` root before returning success. It owns backend-maintained workspace filesystem state: `.rsi/context/design/` for design nodes and `.rsi/context/implement/` for mirrored implementation context, `.rsi/members/` for member JSON/Markdown bundles, and `.rsi/harness/` for private scoped Git history and member worktrees. Durable chat/configuration records remain in the backend database. The project implementation and its own Git checkout remain separate.
+Create and adopt initialize a reserved `.rsi/` root before returning success. It owns backend-maintained workspace filesystem state: `.rsi/context/design/` for design nodes and `.rsi/context/implement/` for mirrored implementation context, `.rsi/members/` for member JSON/Markdown bundles, and `.rsi/harness/` for private scoped Git checkpoints and approval history. Durable chat/configuration records remain in the backend database. Members edit the project implementation directly; semantic implementation commits use the project repository.
 
 The backend creates `.rsi/context/design/metadata.json` containing only an empty implementation mapping and `.rsi/context/design/design.md` with purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. The initial lead selects `metadata.json` as its working design, has no dependencies or execution allowances, and uses the workspace default model. Its exact JSON/prompt bundle is present under `.rsi/members/<lead-id>/` before success. Backend bootstrap establishes the initial active source and member-config history baseline; later design/member edits still require normal user commit and separate member activation. Root-design assignment does not grant whole-project implementation authority.
 

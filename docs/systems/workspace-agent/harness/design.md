@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-A harness defines permitted scope, capabilities and maintenance rules for one purpose. Tools are reusable across agents. Runtime runs an agent using the tools and prompts assembled from its harnesses. Each member has a separate worktree and independently staged scope history.
+A harness defines permitted scope, capabilities and maintenance rules for one purpose. Tools are reusable across agents. Runtime runs an agent using the tools and prompts assembled from its harnesses. All members use the registered workspace directory directly. The team executes one member at a time through finalization. Implementation uses the project Git repository and one shared index; protected scopes retain independent harness history.
 
 Three fixed bases provide management, implementation and execute authority. The agent configures working/dependency designs; the backend derives implementation paths from accepted designs. Member changes follow file validation, user commit and a separate idle user activation.
 
@@ -28,9 +28,9 @@ Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Li
 | implementation | Writable implementation from accepted working mappings and paired working-design context; read-only dependency implementation/context; common file tools and scoped Git Bash | Agent may commit code and implementation context independently |
 | execute | General Bash under existing allowances and applicable filesystem restrictions; reusable web_search/web_fetch through backend-managed DeepSeek credentials | Cannot override protected scopes or Git acceptance |
 
-Base harness rule prompts are maintained as backend-owned Markdown files, including shared rules, per-scope maintenance instructions and initial Markdown templates. Runtime and inspection use those same file contents. Templates receive backend-owned worktree/command values; files cannot grant permissions or replace enforced policy. They load when the backend starts; changing source prompts requires restarting development mode or rebuilding/restarting the compiled backend. Missing or empty required prompt files fail startup rather than using hardcoded fallback rules.
+Base harness rule prompts are maintained as backend-owned Markdown files, including shared rules, per-scope maintenance instructions and initial Markdown templates. Runtime and inspection use those same file contents. Templates receive backend-owned workspace/command values; files cannot grant permissions or replace enforced policy. They load when the backend starts; changing source prompts requires restarting development mode or rebuilding/restarting the compiled backend. Missing or empty required prompt files fail startup rather than using hardcoded fallback rules.
 
-Tools are assembled once and all base/member prompts form the system prompt. Member files cannot override base policy. Working mappings yield writable implementation; dependency mappings yield read-only use paths. Read-only wins overlaps. Git metadata, .rsi/context and .rsi are excluded from implementation even for root mappings. Pending design edits grant no authority. Accepted designs are resolved at inspection, tool and request preparation; no new active-run update protocol is introduced.
+Tools are assembled once and all base/member prompts form the system prompt. Member files cannot override base policy. Working mappings yield writable implementation; dependency mappings yield read-only use paths. Read-only wins overlaps. Git metadata, .rsi/context and .rsi are excluded from implementation even for root mappings. Pending design edits grant no authority. Accepted designs are resolved at inspection, tool and request preparation. Pending design filesystem changes do not grant implementation authority; accepted harness snapshots and explicit user context saves supply semantic reads.
 
 ### System context authority and rules
 
@@ -38,7 +38,7 @@ A node reference is design-root-relative metadata.json (root) or backend/metadat
 
 Design content lives under .rsi/context/design and implementation context under .rsi/context/implement, with matching relative node paths. Only the lead can edit design/metadata globally. Both roles can edit exact working implementation context and accepted mapped source paths, while dependency implementation/context stays read-only. Global design management also covers designs used as dependencies without expanding implementation authority. Private state/member policy remains unchanged. File and directory forms have the same authority.
 
-Each working node has an impl-context-<hash> part, with ID derived from the first 16 SHA-256 hex characters of lower-case metadata reference. It covers both impl.md and impl/ and permits agent semantic commits independently of code/design/member history. Existing shared refs give newly opened member scopes committed context across assignment changes; current peers and original raw context are not overwritten.
+Each working node has an impl-context-<hash> part, with ID derived from the first 16 SHA-256 hex characters of lower-case metadata reference. It covers both impl.md and impl/ and permits agent semantic commits independently of code/design/member history. Context files are shared directly across assignments, including pending edits. Opening a scope never materializes or restores older snapshots over current files.
 
 Management design parts have a design context selector: only metadata and design documents belong to their snapshots/staging, including future nodes. Implementation-context parts use an impl selector. These selectors participate in scope identity, filter native Git operations and keep purpose-root parts disjoint. Metadata cannot override them. User acceptance validates immutable reviewed metadata/Markdown; implementation-context semantic commits validate the selected snapshot/staged structural form. Choose one representation, with README.md for directory form, 1–100 nonempty Markdown documents and 1 MiB total. Checkpoints may retain pending invalid forms for repair; semantic refusals preserve pending/staged state.
 
@@ -103,19 +103,19 @@ Agents use ordinary git status, diff, add, log, show, restore and commit syntax 
 - git add [-A|--all] -- <paths> (an omitted path selects the scope)
 - git rm [-r] [-f|--force] -- <paths>
 - git log [--all] [--oneline] [--max-count=N|-N|-nN]
-- git show [HEAD|full-scope-revision]
-- git restore [--staged] [--worktree] [--source=full-scope-revision] -- <paths>
+- git show [HEAD|full-project-or-scope-revision]
+- git restore [--staged] [--worktree] [--source=full-project-or-scope-revision] -- <paths>
 - git commit -m "meaningful intent"
 
-Paths are literal relative paths, scoped to the selected part; "." narrows to that part rather than the whole workspace. HEAD represents that member's accepted base. git log --all includes that scope's checkpoints and accepted commits; default log follows its accepted base. Working-file restore first checkpoints pending bytes, then retains Git's tracked-file semantics. A full latest-accepted restore of both index and files refreshes a stale base when both exactly match that accepted tree. The backend review/restore API also provides complete snapshot restoration.
+Paths are literal relative paths, scoped to the selected part; "." narrows to that part rather than the whole workspace. For implementation HEAD is the project branch and log shows project commits. For protected/context scopes HEAD is the scope accepted base and log --all also includes checkpoints. Working-file restore first checkpoints pending bytes, then retains Git's tracked-file semantics. A full latest-accepted restore of both index and files refreshes a stale base when both exactly match that accepted tree. The backend review/restore API also provides scoped recovery snapshot restoration. Implementation semantic commits use project Git through Bash; the user acceptance endpoint is for protected/context scopes.
 
-Scopes have independent staging, accepted bases and references; objects are shared. Context scope identity includes its enforced content selector and normalized paths/exclusions. Implementation-code and implementation-context commits accept staged bytes only. Unstaged changes and other scopes remain pending. Design/member-config Git commits return approval_required without accepting or resetting staged changes. User review names exact checkpoint revision and expected accepted base; changed bytes or stale bases refuse acceptance.
+Protected and implementation-context scopes have independent staging, accepted bases and references. Implementation uses one shared native project index. Context scope identity includes its enforced content selector and normalized paths/exclusions. Implementation-code and implementation-context commits accept staged bytes only. Unstaged changes and other scopes remain pending. Design/member-config Git commits return approval_required without accepting or resetting staged changes. User review names exact checkpoint revision and expected accepted base; changed bytes or stale bases refuse acceptance.
 
 Automatic checkpoints occur at run end, including failure/cancellation and interruption recovery, and before successful final group publication after tool effects settle. They use separate temporary indexes, preserve staging and do not imply approval. Checkpoint failure prevents a success claim. History and restored snapshots remain scoped.
 
 ### Accepted files and member settings
 
-User-approved design snapshots feed semantic design reads/discovery and implementation permission resolution. Pending design bytes do not. Raw original-workspace context files/history remain their existing separate review surface; accepted Git snapshots are not automatically copied into the original checkout or existing peer worktrees.
+The registered project directory is the shared working copy. Pending changes are immediately visible to members with read permission and to the user. There is no copying or merging between member directories. Automatic checkpoints do not modify project Git staging or create project commits.
 
 Member JSON holds name, role, responsibility, settings, ordered prompt references, designScope and execute: {allowedCommands}. Backend retains identity/path association, format version, revisions and exact active source bytes separately. The lead edits and validates create/update/delete changes in files. Updates may change only responsibility, supplementary prompts and execution rules, preserving name, role, model/run settings and assignments. validate_member_config({path: ".rsi/members"}) reports pending create/update/delete and issues without acceptance or activation. Deliberately deleted seeded member files remain pending across materialization/restart. Delete retires and preserves history/files; lead deletion is refused. User commit accepts file bytes only. Separate user activation applies the reviewed committed change set atomically when the whole workspace team is idle. Busy/invalid/stale activation leaves all active settings unchanged; no automatic activation or activation by an agent is allowed. Uncommitted edits stay pending.
 
@@ -123,7 +123,7 @@ Member JSON holds name, role, responsibility, settings, ordered prompt reference
 
 Scoped Git Bash can read authorized context/implementation and use the trusted Git bridge; direct shell writes are disabled. General Bash can write authorized implementation only. Management files and Git metadata are protected from direct Bash and descendant processes. File tools provide pending management editing and working implementation-context editing. Git without scope metadata cannot use the bridge; absolute native Git cannot access protected harness repositories. Read-only dependency restrictions apply to descendants as well.
 
-Commands start in the member worktree. A script may need cd to an assigned directory: directory contents outside read scope are unavailable even when scoped Git can operate from the root. Minimal runtime/system files and temporary scratch are available; provider credentials and the backend environment are not inherited. Bash network access is disabled. Output is capped at 64 KiB and execution at 60 seconds; cancellation/timeout terminates the process group before checkpointing and outstanding broker operations settle first.
+Commands start in the registered shared workspace. A script may need cd to an assigned directory: directory contents outside read scope are unavailable even when scoped Git can operate from the root. Minimal runtime/system files and temporary scratch are available; provider credentials and the backend environment are not inherited. Bash network access is disabled. Output is capped at 64 KiB and execution at 60 seconds; cancellation/timeout terminates the process group before checkpointing and outstanding broker operations settle first.
 
 ## Failure behavior
 
@@ -133,7 +133,7 @@ Unapproved protected commits preserve pending files and staging. Stale reviews/b
 
 ## Guarantees and limits
 
-Each member retains its private worktree. Scope acceptance and checkpoint history are independent of group publication and active member configuration. The original checkout's Git branch/index remain untouched. No automatic merge, implementation-worktree refresh, new approval UI, Bash network allowance or automatic context-maintenance algorithm is provided.
+The registered project directory is the shared working copy. Pending changes are immediately visible to members with read permission and to the user. There is no copying or merging between member directories. Automatic checkpoints do not modify project Git staging or create project commits.
 
 Startup converts active legacy member records to backend-owned metadata and design-only assignments, preserving identity/settings/commands, exact prior source and pending drafts. Old Git references remain reachable; matching scopes retain their history. When a scope shape changes, existing pending files are preserved and a new scope reference is initialized; old references are retained. Stale or legacy drafts are not rewritten automatically. Member execution configuration may update allowances within the fixed command schema; non-Bash allowances do not independently authorize a shell. Linux isolation requires its external dependencies; verification in this task uses macOS.
 
@@ -154,7 +154,7 @@ Private harness storage is .rsi/harness inside the managed workspace root. It is
 
 Safe unresolvable stored assignments remain visible in member source/readiness inspection but provide no derived implementation-context authority and cannot run. New member validation and run admission resolve real nodes; no old-layout content fallback or automatic migration is introduced.
 
-Ordinary members read currently accepted designs. On the next environment assembly their read-only design views hydrate that accepted revision, including new files, changed text and document deletions/form transitions. This does not refresh their implementation context/code or grant design-edit authority.
+Prompt assembly and permission resolution use accepted design revisions. File tools read shared pending bytes under existing read permissions; pending design differences are not accepted authority. No read-only file copies are hydrated.
 
 ## Web capabilities
 
@@ -164,4 +164,14 @@ Each tool returns one Markdown text content block, followed by a distinct <metad
 
 ## Scoped file review
 
-`GET /workspaces/:workspaceId/team/members/:memberId/harness/:part/review` returns `{memberId,partId,revision,base,changes}` for an active member's writable part. changes is a flat array `{path,action,patch,truncated}` of committed-to-current pending file differences. The immutable reviewed snapshot and committed base are the exact tokens for existing user commit controls. Review does not commit, activate, edit worktree files or change staged content; it may persist a harness checkpoint. Missing/cross-workspace member or unknown part is 404. Large/binary patches retain existing snapshot-diff limitations and truncation indication.
+`GET /workspaces/:workspaceId/team/members/:memberId/harness/:part/review` returns `{memberId,partId,revision,base,changes}` for an active member's writable part. changes is a flat array `{path,action,patch,truncated}` of committed-to-current pending file differences. The immutable reviewed snapshot and committed base are the exact tokens for existing user commit controls. Review does not commit, activate, edit workspace files or change staged content; it may persist a harness checkpoint. Missing/cross-workspace member or unknown part is 404. Large/binary patches retain existing snapshot-diff limitations and truncation indication.
+
+### Shared project execution and Git
+
+Every member file/Bash environment is the registered project directory. Existing working/dependency read/write authority stays enforced. Pending edits, including incomplete changes after failure/cancellation, remain visible in that directory. Existing private member worktree artifacts are preserved but unused; no automatic import, deletion or reconciliation of those old files occurs.
+
+Scoped implementation Git operates on the project repository's current branch and one shared index. If no .git directory exists at the workspace root, first implementation Git use initializes it without an initial commit or changing project files. Existing repository history/branch are preserved. Linked external .git metadata is not supported by this prototype boundary. Supported syntax remains status/diff/add/rm/log/show/restore/commit with the documented restricted options. Implementation log/show/restore use project revisions; protected and implementation-context scopes use their harness revisions.
+
+Stage only authorized implementation files. A commit accepts staged bytes only, preserving unstaged edits. If any staged change belongs outside the current implementation authority, refuse without committing or discarding unrelated staging. No automatic implementation semantic commit occurs at run completion. Git-ignored untracked dependencies/build artifacts are excluded from implementation checkpoints and ordinary staging; already tracked files remain eligible. Checkpoints and protected approval records stay in private harness storage, separate from project Git versions. Scope checkpoints record the actor/run without duplicating project working directories.
+
+The user reviews/runs the same directory. Stable review requires an idle or stopped team; concurrent user edits remain the user's responsibility. Design/member acceptance still requires exact reviewed tokens, and member activation remains separate and workspace-idle. Opening an environment never writes accepted dependency snapshots into the workspace.

@@ -22,6 +22,7 @@ export function parseMemberResponse(text: string): MemberResponse {
       const key = name.toLowerCase();
       if (!seen.has(key)) { seen.add(key); names.push(name); }
     }
+    if (names.length > 1) throw new AppError('invalid_mentions', 'Mention at most one member per response; revise the leading mention header.');
     const after = end + '</mentions>'.length;
     const separator = /^(?:[ \t]*\r?\n)+/u.exec(text.slice(after))?.[0].length ?? 0;
     bodyOffset = after + separator;

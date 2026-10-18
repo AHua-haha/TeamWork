@@ -107,7 +107,7 @@ export class HarnessService {
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const source = (await this.workspaces.record(member.workspaceId)).directory;
     try { if (!(await lstat(source)).isDirectory()) throw new Error('not a directory'); }
-    catch { throw new AppError('workspace_unavailable', 'The original workspace directory is missing or unreadable', 503); }
+    catch { throw new AppError('workspace_unavailable', 'The shared workspace directory is missing or unreadable', 503); }
     let opening = this.histories.get(member.workspaceId);
     if (!opening) {
       const history = new HarnessHistory(harnessStorage(source), source);
@@ -116,26 +116,18 @@ export class HarnessService {
       void opening.catch(() => { if (this.histories.get(member.workspaceId) === opening) this.histories.delete(member.workspaceId); });
     }
     const history = await opening;
-    const root = await history.worktree(id);
+    const root = source;
     const definitions = purposeHarnesses(member, { paths: resolved.writable, usePaths: resolved.readonly }, { working: resolved.working.map(d=>d.path), dependencies: resolved.dependencies.map(d=>d.path) });
     const parts = definitions.flatMap(d => d.parts);
     validateParts(parts);
     for (const part of parts) await history.ensure(id, part, root);
-    // A dependency is an independent read-only view. Hydrate it once when first assigned,
-    // without granting its paths to a writable part or refreshing another agent's edits.
-    const dependencies: HarnessPart[] = [
-      ...(member.value.lead ? resolved.dependencies : [...resolved.working,...resolved.dependencies]).map(p => ({ id: `view-${p.revision.slice(0, 32)}`, viewRevision:p.revision, paths: designContextPaths(p.path).map(path=>`${contextRoot}/${path}`), exclude: [], context: 'design' as const, commit: 'user' as const, prompt: '' })),
-      ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.rsi'], commit: 'user' as const, prompt: '' }] : []),
-    ];
-    for (const design of resolved.dependencies) {
-      const part = implementationContextPart(design.path);
-      dependencies.push({ ...part, id: `dep-${part.id}` });
-    }
-    for (const part of dependencies) await history.ensure(id, part, root);
     return { root, history, definitions, parts };
   }
-  /** Serializes tools and user review/restore against the same member's working files. */
-  operation<T>(id: string, action: () => Promise<T>): Promise<T> { return this.operations.run(id, action); }
+  /** Serializes tools and user review/restore against shared workspace files. */
+  async operation<T>(id: string, action: () => Promise<T>): Promise<T> {
+    const member = await this.member(id);
+    return this.operations.run(member?.workspaceId ?? id, action);
+  }
   async files(id: string): Promise<MemberFiles> {
     const member = await this.active(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
@@ -190,6 +182,7 @@ export class HarnessService {
     return this.operation(id, async () => {
       const env = await this.environment(id);
       const part = this.part(env, partId);
+      if (partId === 'implementation') throw new AppError('invalid_input', 'Implementation semantic commits use project Git through bash; this endpoint accepts protected/context scopes only');
       if (actor.memberId !== id || (actor.type !== 'agent' && actor.type !== 'user')) throw new AppError('access_denied', 'Invalid commit actor', 403);
       if (part.commit === 'user' && actor.type !== 'user') throw new AppError('approval_required', 'Design commit requires user approval; leave it pending for review', 403);
       if (actor.type === 'user' && (!revision || !base)) throw new AppError('invalid_input', 'User acceptance names the exact reviewed revision and committed base');
@@ -242,7 +235,7 @@ export class HarnessService {
     const tools = available.filter(tool => selected.has(tool.definition.name));
     const parts = [
       '## Your harness',
-      harnessPrompt('common', { worktree: env.root }),
+      harnessPrompt('common', { workspace: env.root }),
       `## Resolved permissions\n${JSON.stringify(harnessPermissions(member,resolved),null,2)}`,
       ...env.definitions.map(d => `## ${d.id} harness\n${d.prompt}\n${d.parts.map(p => `Part ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
       '## Accepted working designs', await this.designView(resolved.working),

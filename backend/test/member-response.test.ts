@@ -13,9 +13,9 @@ test('omitted and empty headers select nobody while all body @ text stays ordina
 
 test('only the first leading header routes, using exact case-insensitively unique names', () => {
   const body = 'Report @Nobody\n<mentions>["Ignored"]</mentions>';
-  const raw = ' \n<mentions>\r\n["Backend", "backend", "Frontend Worker", "设计"]\r\n</mentions>\r\n\r\n' + body;
+  const raw = ' \n<mentions>\r\n["Backend", "backend"]\r\n</mentions>\r\n\r\n' + body;
   const parsed = parseMemberResponse(raw);
-  assert.deepEqual(parsed.names, ['Backend', 'Frontend Worker', '设计']);
+  assert.deepEqual(parsed.names, ['Backend']);
   assert.equal(parsed.body, body);
   assert.equal(raw.slice(parsed.bodyOffset), body);
 });
@@ -29,6 +29,7 @@ test('header separator removal preserves body indentation and trailing bytes', (
 
 test('malformed leading headers and invalid names fail explicitly without scanning the body', () => {
   for (const raw of [
+    '<mentions>["Backend","Frontend"]</mentions>\nBody',
     '<mentions', '<mentions >[]</mentions>\nBody', '<mentions>["Backend"]\nBody',
     '<mentions>Backend</mentions>\nBody', '<mentions>{"members":[]}</mentions>\nBody',
     '<mentions>null</mentions>\nBody', '<mentions>[1]</mentions>\nBody',

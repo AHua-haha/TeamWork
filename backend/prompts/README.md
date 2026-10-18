@@ -4,14 +4,14 @@ Fixed team response/routing rules live in `team/group-chat.md`. MemberContext lo
 
 Maintain harness rule text in the Markdown files under `harness/`:
 
-- `common.md`: shared worktree, checkpoint and acceptance instructions.
+- `common.md`: shared workspace, checkpoint and acceptance instructions.
 - `management.md`: design and member maintenance rules.
 - `management-design.md` and `management-members.md`: per-scope maintenance instructions.
 - `implementation.md`, `implementation-scope.md` and `implementation-context.md`: implementation-code/context maintenance and independent history rules.
 - `design-template.md` and `implementation-context-template.md`: initial root context content rendered at workspace bootstrap.
 - `execute.md`: Bash execution rules, allowed-command information, and reusable web-search/fetch usage rules.
 
-`{{worktree}}` in common and `{{allowedCommands}}` in execute are replaced with backend-owned values. `{{design}}` and `{{context}}` render each implementation-context scope; `{{project}}` renders the initial design title and `{{design}}` also renders the initial implementation-context reference. Other text is delivered as written to runtime/inspection. Unknown template values fail assembly. Required files are loaded once; missing/empty files fail backend startup. There are no hardcoded fallback rules.
+`{{workspace}}` in common and `{{allowedCommands}}` in execute are replaced with backend-owned values. `{{design}}` and `{{context}}` render each implementation-context scope; `{{project}}` renders the initial design title and `{{design}}` also renders the initial implementation-context reference. Other text is delivered as written to runtime/inspection. Unknown template values fail assembly. Required files are loaded once; missing/empty files fail backend startup. There are no hardcoded fallback rules.
 
 Restart development mode after editing prompts. For compiled use, run the backend build and restart: the build copies the files into `dist/prompts/harness/`. Loading is relative to the module, independent of the shell's working directory. Deploy the complete `dist/` directory.
 

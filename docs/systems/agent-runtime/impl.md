@@ -78,3 +78,7 @@ A dedicated bounded progress store owns per-agent FIFO events, active message st
 Progress uses the same block frame semantics as Pi's compact encoder. The start frame renames its empty-content partial header to message on the wire; no mutable accumulator is retained. ProgressStore.begin records the cutover returned by SQL beginMessage; changed increments a durable generation, while append only wakes memory readers. Follow snapshots durable history/run state only on generation changes and rechecks generation/FIFO availability after each yielded event. Each member has one FIFO across recent messages; reader cursors never pin entries. settle checks run/message identity so earlier finalization cannot clear a successor. ProgressReducer in the frontend is incremental because Pi's exported reducer replays an entire iterable; equivalence tests compare its results against Pi replay for interleaved blocks/signatures/tool checkpoints.
 
 Verification additionally covers FIFO wrap/zero capacity, startup loss, eviction during paused SQL synchronization, next-start recovery, durable message replacement, reset cleanup and a 100-delta run whose followers perform zero extra SQL snapshot reads until completion.
+
+## Execution authority
+
+RuntimePolicy.acquireRun optionally supplies an abortable run execution lease. It is acquired before model/request/tool work and released after terminal finalization. A cancelled waiting run records cancellation without calling afterRun. Team composition provides a workspace lock; solo agents remain unchanged.

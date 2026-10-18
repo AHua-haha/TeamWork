@@ -40,7 +40,7 @@ The lead calls validate_member_config({path: ".rsi/members"}) for the whole pend
 
 ### Work and cooperation
 
-The user posts `{text}` to `POST /workspaces/:workspaceId/team/chat/messages`. Text is 1–20,000 characters. A user message without mentions triggers the lead. Explicit mentions select recipients using `@Name` or `@{Name With Spaces}`, matching active names ignoring case. An agent response routes only through an optional leading <mentions> JSON-array block. Missing/empty header triggers nobody, and @ text in its body is ordinary content. The shared response contains the body without the header. Duplicate mentions select one recipient. All selected members may work in parallel, with at most one run per member.
+The user posts `{text}` to `POST /workspaces/:workspaceId/team/chat/messages`. Text is 1–20,000 characters. A user message without mentions triggers the lead. Explicit mentions select recipients using `@Name` or `@{Name With Spaces}`, matching active names ignoring case. An agent response routes only through an optional leading <mentions> JSON-array block. Missing/empty header triggers nobody, and @ text in its body is ordinary content. The shared response contains the body without the header. Duplicate mentions select one recipient. Selected user recipients retain their admission order but execute one at a time per workspace. Agent responses may mention at most one distinct member. Busy mentions are still refused, with no automatic retry.
 
 Every accepted shared message is delivered to every active member, including the sender. Idle members append it to their continuing context immediately. Working members buffer incoming shared messages and append them in group order after their private work ends, without waiting for or triggering another activation. Each member context interleaves shared messages and its private work. Its previous private history remains available, but no other member receives it. Tool calls, results, intermediate responses and rejected publication candidates stay private. Only an accepted final response is published in the group transcript.
 
@@ -58,7 +58,7 @@ Every model call receives current role, roster/readiness/running information, st
 
 Pending member/design files are checkpointed without acceptance. User commit pins exact scope bytes and accepted base. User activation separately changes the stable active member source/projection in one atomic batch. Member identity, revisions, content attribution and exact prompt bytes remain backend-managed and durable.
 
-Read-only team/member inspection continues returning active configuration, readiness/running state and the three effective harnesses with backend-derived implementation paths. GET /workspaces/:workspaceId/team returns active members; GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}. Configuration contains exact active JSON/Markdown source, path, digest, attribution/time and backend format metadata. Member POST/PUT/DELETE and member /config mutation routes remain absent. It does not activate drafts or create worktrees. User activation is a dedicated control operation; agent authority remains file editing and validation, not activation.
+Read-only team/member inspection continues returning active configuration, readiness/running state and the three effective harnesses with backend-derived implementation paths. GET /workspaces/:workspaceId/team returns active members; GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}. Configuration contains exact active JSON/Markdown source, path, digest, attribution/time and backend format metadata. Member POST/PUT/DELETE and member /config mutation routes remain absent. It does not activate drafts or create additional checkouts. User activation is a dedicated control operation; agent authority remains file editing and validation, not activation.
 
 Group publication and selected run admission remain atomic and database-backed. Execution failure becomes status without fabricated shared output. Shared final messages and private histories remain independent of context compaction. File commit, member activation and shared final publication are separate effects.
 
@@ -70,11 +70,11 @@ Busy, stale or failed activation leaves the entire active team unchanged and ret
 
 ## Guarantees and limits
 
-One lead, unique active names, ordered shared messages, retained private histories, parallel independent activation and accepted shared final responses remain guaranteed. Configuration activation is user-only, workspace-idle and atomic. Its separate user commit prerequisite cannot be inferred from a run completion or an agent statement.
+One lead, unique active names, ordered shared messages, retained private histories, sequential workspace execution and accepted shared final responses remain guaranteed. Configuration activation is user-only, workspace-idle and atomic. Its separate user commit prerequisite cannot be inferred from a run completion or an agent statement.
 
 Schema/version/identity bookkeeping stays outside editable manifests. Migration preserves identities/settings, exact prior source, pending drafts and historical Git references. An accepted file update cannot change assignment/name/role/manifest model settings; user-owned model preferences are configured separately. Execute changes cannot override protected filesystem/Git authority.
 
-No automatic configuration activation, automatic stop/retry, new trigger queue, multiple-chat model, durable run resume, automatic context-maintenance algorithm or original/peer-worktree merge is introduced. Frontend activation presentation is separate from this backend contract. Accepted design-mapping refresh continues its existing authority semantics.
+No automatic configuration activation, automatic stop/retry, new trigger queue, multiple-chat model, durable run resume, automatic context-maintenance algorithm or workspace synchronization is introduced. Frontend activation presentation is separate from this backend contract. Accepted design-mapping refresh continues its existing authority semantics.
 
 ## Acceptance examples
 
@@ -134,8 +134,8 @@ The [frontend design](../../frontend/design.md#member-tree-active-details-and-co
 ### HTTP inspection and operation contract
 
 - `GET /workspaces/:workspaceId/team` returns the active roster with readiness/activity and derived harness scope.
-- `GET /workspaces/:workspaceId/team/members/:memberId` returns `{member, configuration, harnesses}` with complete active source and effective rules. This read does not materialize worktrees.
-- `GET /workspaces/:workspaceId/team/configuration/current` takes no query parameters and returns the fields below. It may initialize the lead worktree and capture a checkpoint; it does not commit files, change active settings or trigger work.
+- `GET /workspaces/:workspaceId/team/members/:memberId` returns `{member, configuration, harnesses}` with complete active source and effective rules. This read does not create additional checkouts.
+- `GET /workspaces/:workspaceId/team/configuration/current` takes no query parameters and returns the fields below. It may initialize the shared workspace and capture a checkpoint; it does not commit files, change active settings or trigger work.
 - `POST /workspaces/:workspaceId/team/configuration/commit` accepts only `{revision, base, message}` from the returned `commit` object plus user intent. It returns the harness commit result. The lead must be idle. Invalid pending configuration can be accepted as files, but cannot activate until a valid configuration is committed.
 - `POST /workspaces/:workspaceId/team/configuration/activate` accepts only `{revision, digest}` from the returned `activation` object. It returns `{revision, changes, memberIds}` and requires the entire workspace idle.
 

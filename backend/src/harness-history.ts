@@ -1,3 +1,4 @@
+import { ProjectGit } from './project-git.js';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
@@ -96,7 +97,7 @@ export class HarnessHistory {
   private refs(memberId: string, part: HarnessPart) {
     identity(memberId, 'memberId');
     const key = this.key(part);
-    const area = `refs/harness/areas/${memberId}/${part.id}/${key}`;
+    const area = `refs/harness/areas/workspace/${part.id}/${key}`;
     return { checkpoint: `${area}/checkpoint`, base: `${area}/base`, committed: `refs/harness/scopes/${key}/committed` };
   }
   private async update(ref: string, next: string, previous: string | null) {
@@ -111,25 +112,6 @@ export class HarnessHistory {
         if (!missing(error)) throw error;
         await this.text(['init', '--bare', this.repository]);
       }
-      if (await this.ref('refs/harness/workspace')) return;
-      const actor: HistoryActor = { type: 'harness', memberId: 'workspace' };
-      const seed: HarnessPart = { id: 'seed', paths: ['.'], exclude: [], commit: 'user', prompt: '' };
-      const tree = await this.snapshot(this.source, seed, true);
-      const initial = await this.record(tree, null, 'baseline', actor, 'Initial workspace files');
-      await this.update('refs/harness/workspace', initial, null);
-    });
-  }
-
-  async worktree(memberId: string): Promise<string> {
-    identity(memberId, 'memberId');
-    await this.open();
-    return this.queue.run(`worktree:${memberId}`, async () => {
-      const directory = join(this.storage, 'worktrees', memberId);
-      try { await lstat(join(directory, '.git')); return directory; }
-      catch (error) { if (!missing(error)) throw error; }
-      await mkdir(dirname(directory), { recursive: true });
-      await this.text(['worktree', 'add', '--detach', directory, 'refs/harness/workspace']);
-      return directory;
     });
   }
 
@@ -144,14 +126,15 @@ export class HarnessHistory {
   }
 
   /** Only scope-owned regular files are included; symlinks in managed state are refused. */
-  private async files(root: string, part: HarnessPart, seed = false): Promise<{ path: string; mode: string; bytes: Buffer }[]> {
+  private async files(root: string, part: HarnessPart): Promise<{ path: string; mode: string; bytes: Buffer }[]> {
     const result = new Map<string, { path: string; mode: string; bytes: Buffer }>();
     let total = 0;
     let allowed: Set<string> | undefined;
-    if (seed) {
+    if (part.id === 'implementation') {
       const index = join(this.storage, `index-${randomUUID()}`);
       try {
-        const list = await this.git(['--work-tree', root, 'ls-files', '--others', '--exclude-standard', '-z'], undefined, index);
+        const projectPaths = part.id === 'implementation' ? await new ProjectGit(root).candidates() : null;
+        const list = projectPaths ? Buffer.from(projectPaths.join('\0')) : await this.git(['--work-tree', root, 'ls-files', '--others', '--exclude-standard', '-z'], undefined, index);
         allowed = new Set<string>();
         for (const path of list.toString('utf8').split('\0').filter(Boolean)) {
           const segments = path.split('/');
@@ -161,6 +144,7 @@ export class HarnessHistory {
     }
     const visit = async (path: string): Promise<void> => {
       if (path && path !== '.') safePath(path);
+      if (part.id === 'implementation' && path && path !== '.' && allowed && !allowed.has(path)) return;
       if (path === '.rsi/harness' || path.startsWith('.rsi/harness/') || part.exclude.some(p => coversPath(p, path)) || path.split('/').some(p => p.toLowerCase() === '.git')) return;
       if (part.context && path.startsWith(contextRoot+'/')) { const kind=contextLocation(path.slice(contextRoot.length+1))?.kind; if (kind && kind!=='node' && (part.context==='design' ? !['design','metadata'].includes(kind) : kind!=='impl')) return; }
       const absolute = join(root, path === '.' ? '' : path);
@@ -168,14 +152,12 @@ export class HarnessHistory {
       try { info = await lstat(absolute); }
       catch (error) { if (missing(error)) return; throw error; }
       if (info.isSymbolicLink()) {
-        if (seed) return;
         throw new AppError('invalid_path', `${path} is a link`);
       }
       if (info.isDirectory()) {
         for (const name of (await readdir(absolute)).sort()) {
           if (name.toLowerCase() === '.git') continue;
           const child = path === '.' ? name : `${path}/${name}`;
-          if (seed && allowed && child !== '.rsi' && !child.startsWith('.rsi/context') && !child.startsWith('.rsi/members') && !allowed.has(child)) continue;
           await visit(child);
         }
       } else if (info.isFile() && partOwns(part, path)) {
@@ -194,8 +176,8 @@ export class HarnessHistory {
     }
     return [...result.values()].sort((a, b) => a.path.localeCompare(b.path));
   }
-  private async snapshot(root: string, part: HarnessPart, seed = false): Promise<string> {
-    const files = await this.files(root, part, seed);
+  private async snapshot(root: string, part: HarnessPart): Promise<string> {
+    const files = await this.files(root, part);
     const entries: Entry[] = [];
     for (const file of files) entries.push({ path: file.path, mode: file.mode, object: await this.text(['hash-object', '-w', '--stdin'], file.bytes) });
     return this.tree(entries);
@@ -311,11 +293,9 @@ export class HarnessHistory {
       }
       let checkpoint = await this.ref(refs.checkpoint);
       if (!checkpoint) {
-        // A scope definition can change during migration. Preserve pending work in
-        // an existing member area; immutable old scope references remain reachable.
-        const prior = await this.text(['for-each-ref', '--format=%(refname)', `refs/harness/areas/${memberId}/${part.id}/`]);
-        if (!prior) await this.materialize(root, part, committed);
-        const initial = prior ? await this.record(await this.snapshot(root, part), committed, 'checkpoint', { type: 'harness', memberId }, 'Preserve existing files under the derived scope') : committed;
+        // Shared files are pending truth; environment assembly must never restore them.
+        const tree = await this.snapshot(root, part);
+        const initial = tree === (await this.revision(committed)).tree ? committed : await this.record(tree, committed, 'checkpoint', { type: 'harness', memberId }, 'Capture shared workspace files');
         await this.text(['update-ref', '--stdin'], `start\ncreate ${refs.base} ${committed}\ncreate ${refs.checkpoint} ${initial}\nprepare\ncommit\n`);
         checkpoint = initial;
       }
@@ -410,7 +390,12 @@ export class HarnessHistory {
     return updates;
   }
   async acceptedDesign(path: string): Promise<{ content: string | null; state: ScopeRevision } | null> {
-    const revision = await this.ref(this.designRef(path));
+    let revision = await this.ref(this.designRef(path));
+    if (!revision) {
+      const scope = { id: 'design', paths: ['.rsi/context/design'], exclude: [], context: 'design' as const, commit: 'user' as const, prompt: '' };
+      revision = await this.ref(this.refs('workspace', scope).committed);
+      if (revision) return { content: await this.readSnapshot(revision, path), state: await this.revision(revision) };
+    }
     return revision ? { content: await this.readSnapshot(revision, path), state: await this.revision(revision) } : null;
   }
   async acceptedDesignPaths(): Promise<string[]> {
@@ -419,7 +404,7 @@ export class HarnessHistory {
     for (const revision of new Set(revisions)) for (const path of await this.paths(revision)) if (path.startsWith(contextRoot+'/design/')) paths.add(path.slice(contextRoot.length+1));
     return [...paths];
   }
-  private scopeRepository(memberId: string, part: HarnessPart) { return join(this.storage, 'staging', memberId, part.id, this.key(part)); }
+  private scopeRepository(memberId: string, part: HarnessPart) { return join(this.storage, 'staging', 'workspace', part.id, this.key(part)); }
   private async staging(memberId: string, part: HarnessPart, root: string) {
     const state = await this.ensure(memberId, part, root), repository = this.scopeRepository(memberId, part);
     try { await lstat(join(repository, 'HEAD')); }
@@ -440,7 +425,20 @@ export class HarnessHistory {
   }
   /** Trusted backend Git boundary. Shell children have no direct access to these repositories. */
   async scopedGit(memberId: string, part: HarnessPart, root: string, argv: string[], cwd: string, actor: HistoryActor): Promise<string> {
-    return this.queue.run(`git:${memberId}:${part.id}`, async () => {
+    if (part.id === 'implementation') return this.queue.run('project-git', async () => {
+      await this.files(root, part);
+      return new ProjectGit(root).execute(part, argv, cwd,
+        message => this.checkpoint(memberId, part, root, actor, message),
+        async (files, message, projectRevision) => {
+          const state = await this.ensure(memberId, part, root);
+          const entries: Entry[] = [];
+          for (const file of files) entries.push({ path: file.path, mode: file.mode, object: await this.text(['hash-object','-w','--stdin'],file.bytes) });
+          const next = await this.record(await this.tree(entries), state.committed, 'commit', actor, `${message} (project ${projectRevision})`);
+          const refs = this.refs(memberId,part);
+          await this.text(['update-ref','--stdin'],`start\nupdate ${refs.committed} ${next} ${state.committed}\nupdate ${refs.base} ${next} ${state.base}\nprepare\ncommit\n`);
+        });
+    });
+    return this.queue.run(`git:${part.id}`, async () => {
       const { state, repository } = await this.staging(memberId, part, root);
       const run = async (args: string[]) => (await this.git(args, undefined, undefined, repository, root, cwd)).toString('utf8');
       const [command, ...args] = argv;

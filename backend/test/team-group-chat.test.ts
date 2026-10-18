@@ -46,12 +46,13 @@ test('agent bodies never trigger members and an empty header is removed from the
   assert.deepEqual(empty.recipients, []);
 }));
 
-test('header validation refuses atomically and a revised header admits parallel recipients', () => withTeam(async f => {
+test('header validation refuses multiple recipients atomically and a revised header admits one recipient', () => withTeam(async f => {
   const backend = await worker(f, 'Backend'), frontend = await worker(f, 'Frontend Worker');
   const start = await f.team.runner.postUser(f.workspaceId, 'Delegate');
   for (const [text, expected] of [
     ['<mentions>bad</mentions>\nBody', 'invalid_mentions'],
-    ['<mentions>["Backend", "Missing"]</mentions>\nBody', 'not_found'],
+    ['<mentions>["Missing"]</mentions>\nBody', 'not_found'],
+    ['<mentions>["Backend","Frontend Worker"]</mentions>\nBody', 'invalid_mentions'],
     ['<mentions>["Lead"]</mentions>\nBody', 'self_mention'],
   ]) {
     await assert.rejects(f.team.runner.publishFinal(f.lead.memberId, start.runs[0]!.runId, text, 'final'), code(expected!));
@@ -59,13 +60,14 @@ test('header validation refuses atomically and a revised header admits parallel 
     assert.equal(f.runtime.active(backend.memberId), undefined);
     assert.equal(f.runtime.active(frontend.memberId), undefined);
   }
-  const result = await f.team.runner.publishFinal(f.lead.memberId, start.runs[0]!.runId, '<mentions>["Backend", "backend", "Frontend Worker"]</mentions>\n\nWork. @Nobody is ordinary content.', 'final');
+  const result = await f.team.runner.publishFinal(f.lead.memberId, start.runs[0]!.runId, '<mentions>["Backend", "backend"]</mentions>\n\nWork. @Nobody is ordinary content.', 'final');
   assert.equal(result.text, 'Work. @Nobody is ordinary content.');
-  assert.deepEqual(result.recipients, [backend.memberId, frontend.memberId]);
-  assert.ok(f.runtime.active(backend.memberId) && f.runtime.active(frontend.memberId));
+  assert.deepEqual(result.recipients, [backend.memberId]);
+  assert.ok(f.runtime.active(backend.memberId));
+  assert.equal(f.runtime.active(frontend.memberId), undefined);
 }));
 
-test('all members receive messages but only mentioned members activate, in parallel', () => withTeam(async f => {
+test('all members receive messages and user mentions preserve multi-recipient admission', () => withTeam(async f => {
   const backend = await worker(f, 'Backend'); const frontend = await worker(f, 'Frontend');
   const result = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');
   assert.equal(result.runs.length, 2);
@@ -130,7 +132,7 @@ test('storage refusal publishes nothing and starts no member', () => withTeam(as
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 0);
 }));
 
-test('stop cancels parallel work; retiring a worker cancels it and preserves shared history', () => withTeam(async f => {
+test('stop cancels admitted work; retiring a worker cancels it and preserves shared history', () => withTeam(async f => {
   const backend = await worker(f, 'Backend'); const frontend = await worker(f, 'Frontend');
   await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend work');
   await f.team.runner.retire(f.workspaceId, backend.memberId, backend.revision);
@@ -266,4 +268,19 @@ test('an already connected idle timeline observes reset and synchronizes at its 
   assert.deepEqual((await waiting).value, { version: 1, workspaceId: f.workspaceId, type: 'reset', cursor: result.resetCursor });
   assert.deepEqual((await stream.next()).value, { version: 1, workspaceId: f.workspaceId, type: 'sync', cursor: result.resetCursor });
   controller.abort(); await stream.return();
+}));
+
+
+test('workspace execution lock waits for release, cancels waiting acquisition, and remains reusable',()=>withTeam(async f=>{
+  const backend=await worker(f,'Backend');
+  const first=await f.team.runner.acquireExecution(f.lead.memberId,new AbortController().signal);
+  let entered=false;
+  const abort=new AbortController();
+  const waiting=f.team.runner.acquireExecution(backend.memberId,abort.signal).then(release=>{entered=true;return release;});
+  await settle();assert.equal(entered,false);
+  abort.abort();await assert.rejects(waiting,code('cancelled'));
+  let nextEntered=false;
+  const next=f.team.runner.acquireExecution(backend.memberId,new AbortController().signal).then(release=>{nextEntered=true;return release;});
+  await settle();assert.equal(nextEntered,false);
+  first();const release=await next;assert.equal(nextEntered,true);release();
 }));
