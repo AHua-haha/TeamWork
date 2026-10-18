@@ -7,7 +7,7 @@ import type { WorkspaceService } from './workspace.js';
 import { join } from 'node:path';
 import { lstat } from 'node:fs/promises';
 import { HarnessHistory, harnessStorage } from './harness-history.js';
-import { contextPaths, contextRoot, nodeReference } from './workspace-layout.js';
+import { contextPaths, contextRoot, nodeReference, metadataPath } from './workspace-layout.js';
 
 export interface DesignMetadata { implementation: string[] }
 export interface DesignDocument { path: string; content: string }
@@ -34,7 +34,7 @@ export function designMetadata(value: unknown): DesignMetadata {
 /** Resolve one complete design from metadata plus exactly one Markdown representation. */
 export function resolveDesign(path: string, files: ReadonlyMap<string,string>): DesignPart {
   const get=(name:string)=>files.get(name.toLowerCase());
-  const metadata=get(path);
+  const metadata=get(metadataPath(path));
   if(metadata===undefined)throw new AppError('invalid_design',`${path} is missing`);
   let value:unknown;
   try{value=JSON.parse(metadata);}catch{throw new AppError('invalid_design',`${path} is not valid JSON metadata`);}
@@ -62,14 +62,14 @@ export class DesignService {
     const paths=new Set([...listing.entries.filter(e=>e.type==='file').map(e=>e.path),...await history?.acceptedDesignPaths()??[]]);
     const designs:Omit<ResolvedDesign,'content'|'documents'>[]=[];
     for(const path of paths){
-      if(path.split('/').at(-1)?.toLowerCase()!=='metadata.json')continue;
+      if(!path.toLowerCase().startsWith('design/')||path.split('/').at(-1)?.toLowerCase()!=='metadata.json')continue;
       try{const {content:_content,documents:_documents,...summary}=await this.read(workspaceId,path);designs.push(summary);}
       catch(error){if(!(error instanceof AppError)||error.status>=500)throw error;}
     }
     return {designs:designs.sort((a,b)=>a.path.localeCompare(b.path)),truncated:listing.truncated};
   }
   async inspect(workspaceId:string,input:unknown):Promise<ContextFile & {design:DesignPart|null;designIssue:string|null}>{
-    const path=designPath(input),history=await this.history(workspaceId),metadata=await this.file(workspaceId,path,history);
+    const path=designPath(input),history=await this.history(workspaceId),metadata=await this.file(workspaceId,metadataPath(path),history);
     try{
       const base=await this.workspaces.context(workspaceId),[single,directory]=contextPaths(metadata.path,'design');
       const overview=await base.overview();
@@ -78,7 +78,7 @@ export class DesignService {
       let raw:string[]=[];
       try{const listing=await base.tree(directory!,16);if(listing.truncated)throw new AppError('invalid_design','Design document listing exceeds the context listing limit');raw=listing.entries.filter(e=>e.type==='file').map(e=>e.path);}catch(error){if(!(error instanceof AppError)||error.code!=='not_found')throw error;}
       const candidates=new Set([single!,...raw,...(await history?.acceptedDesignPaths()??[]).filter(p=>p.toLowerCase().startsWith(directory!.toLowerCase()+'/'))]);
-      const versions=[metadata],files=new Map([[path.toLowerCase(),metadata.content]]);
+      const versions=[metadata],files=new Map([[metadata.path.toLowerCase(),metadata.content]]);
       for(const candidate of candidates){try{const file=await this.file(workspaceId,candidate,history);versions.push(file);files.set(file.path.toLowerCase(),file.content);}catch(error){if(!(error instanceof AppError)||error.code!=='not_found')throw error;}}
       const design=resolveDesign(metadata.path,files);
       design.documents=design.documents.map(document=>({...document,path:versions.find(file=>file.path.toLowerCase()===document.path)?.path??document.path}));
@@ -89,6 +89,6 @@ export class DesignService {
   async read(workspaceId:string,input:unknown):Promise<ResolvedDesign>{
     const file=await this.inspect(workspaceId,input);
     if(!file.design)throw new AppError('invalid_design',file.designIssue??'Invalid system design');
-    return {...file.design,path:file.path,revision:file.revision};
+    return {...file.design,path:nodeReference(file.path),revision:file.revision};
   }
 }

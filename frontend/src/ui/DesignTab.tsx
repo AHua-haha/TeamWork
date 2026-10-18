@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CurrentDesign, Member, WorkspaceClient } from '../client/workspace-client.js';
-import { designMembers, designName, designTitle, sameDesign } from './design-state.js';
+import { designMembers, designName, designTitle, sameDesign, designReference } from './design-state.js';
 import { Markdown } from './Markdown.js';
 import { resolveLink } from './markdown-parser.js';
 import type { DesignsState } from './useDesigns.js';
@@ -54,7 +54,7 @@ export function DesignTab({ client, workspaceId, catalog, members, selected, onS
           </div>
           {!current && <p className="sidebar-muted">Reading current design…</p>}
           {(error || file?.designIssue) && <div className="design-notice" role="alert">This design is unavailable: {error || file?.designIssue}
-            <button type="button" className="text-button" onClick={() => onContextFile(selected)}>Open source file</button>
+            <button type="button" className="text-button" onClick={() => onContextFile(file?.path ?? `design/${designReference(selected)}`)}>Open source file</button>
           </div>}
           {file?.design && <>
             <div className="design-content">{file.design.documents.map(document => <section key={document.path} aria-label={document.path}>{file.design!.documents.length > 1 && <h4>{document.path}</h4>}<Markdown source={document.content} onLink={href => openLink(document.path,href)} /></section>)}</div>

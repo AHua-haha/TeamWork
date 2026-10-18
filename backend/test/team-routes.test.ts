@@ -8,7 +8,7 @@ import { stat } from 'node:fs/promises';
 import { createAgentServer } from '../src/http.js';
 import type { AgentRuntime } from '../src/runtime.js';
 import { emptyHarness } from '../src/harness-config.js';
-import { stubConfig, withTeam, worker, type Fixture } from './team-fixture.js';
+import { stubConfig, withTeam, worker, configureHarness, type Fixture } from './team-fixture.js';
 
 type Body = Record<string, any>;
 
@@ -48,7 +48,8 @@ test('member inspection is read-only, returns accepted configuration and three h
   assert.equal(view.member.name, 'Backend');
   assert.equal(JSON.parse(view.configuration.files['member.json']).name, 'Backend');
   assert.deepEqual(view.harnesses.map((h: Body) => h.id), ['management', 'implementation', 'execute']);
-  assert.equal(view.harnesses[0].parts.find((p: Body) => p.id === 'design').commit, 'user');
+  assert.ok(!view.harnesses[0].parts.some((p: Body) => p.id === 'design'));
+  assert.deepEqual(view.harnesses[0].tools,['ls','read']);
   await assert.rejects(stat(root), 'inspection creates no harness Git storage');
   const before = await fixture.team.service.find(created.memberId);
   for (const [method, path, data] of [
@@ -94,10 +95,12 @@ test('group timeline endpoints expose persisted reservations and paged changes',
 }));
 
 test('harness review and user commit endpoints pin the reviewed revision and enforce member boundaries', () => withServer(async (call, fixture) => {
-  const member = await worker(fixture, 'Backend', ['src']);
+  const backend = await worker(fixture, 'Backend', ['src']);
+  await configureHarness(fixture,'Lead',{designScope:{working:backend.harness.designScope.working,dependencies:[]},allowedCommands:[]});
+  const member = fixture.lead;
   const endpoint = `/workspaces/${fixture.workspaceId}/team/members/${member.memberId}/harness`;
   const files = await fixture.team.harness.files(member.memberId);
-  const path = join(files.root, '.rsi/context/systems/backend/design.md');
+  const path = join(files.root, '.rsi/context/design/design.md');
   await files.write.writeFile(path, 'Pending');
   const review = await call(endpoint);
   const design = review.parts.find((p: Body) => p.state.part.id === 'design');
@@ -111,7 +114,7 @@ test('harness review and user commit endpoints pin the reviewed revision and enf
   assert.equal(stale.error.code, 'stale_revision');
   const updated = (await call(endpoint)).parts.find((p: Body) => p.state.part.id === 'design');
   const approval = { ...input, revision: updated.revision };
-  const run = await fixture.team.runner.postUser(fixture.workspaceId, '@Backend work');
+  const run = await fixture.team.runner.postUser(fixture.workspaceId, '@Lead work');
   assert.equal((await call(endpoint + '/design/commit', { method: 'POST', data: approval, status: 409 })).error.code, 'member_busy');
   fixture.runtime.end(member.memberId);
   await fixture.runtime.finished(member.memberId, run.runs[0]!.runId);

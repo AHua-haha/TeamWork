@@ -24,7 +24,7 @@ test('creating a workspace makes its folder and context base', () => withService
   assert.equal(workspace.directory, directory);
   assert.equal(workspace.context.files, 3);
   assert.equal(workspace.context.seq, 1);
-  assert.deepEqual((await readdir(join(directory, '.rsi/context'))).sort(), ['design.md', 'impl.md', 'metadata.json']);
+  assert.deepEqual((await readdir(join(directory, '.rsi/context'))).sort(), ['design', 'implement']);
   assert.deepEqual((await service.list()).map(item => item.workspaceId), ['alpha']);
   await assert.rejects(service.create({ workspaceId: 'alpha', name: 'Again', directory: join(folder, 'other'), models: testModels(), adopt: false }), code('workspace_exists'));
   await assert.rejects(service.get('missing'), code('not_found'));
@@ -36,7 +36,7 @@ test('adopting initializes managed state while preserving project files', () => 
   assert.match(workspace.workspaceId, /^[0-9a-f-]{36}$/);
   assert.equal(workspace.context.files, 3);
   assert.equal((await (await service.files(workspace.workspaceId)).read('README.md')).content, 'readme');
-  assert.deepEqual(JSON.parse((await (await service.context(workspace.workspaceId)).read({ path: 'metadata.json' })).content).implementation, []);
+  assert.deepEqual(JSON.parse((await (await service.context(workspace.workspaceId)).read({ path: 'design/metadata.json' })).content).implementation, []);
 }));
 
 test('folders must not overlap, and a new folder must be empty', () => withService(async (service, folder) => {

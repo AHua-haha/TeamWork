@@ -34,7 +34,7 @@ test('the lead receives design maintenance, choices and management tools with sh
   assert.match(request.context.systemPrompt!, /offer concrete choices with their tradeoffs and your recommendation/);
   assert.match(request.context.systemPrompt!, /wait for the user's answer/);
   assert.match(request.context.systemPrompt!, /Assign work in your final group response/);
-  assert.match(request.context.systemPrompt!, /Design and member-config semantic commits require user review/);
+  assert.match(request.context.systemPrompt!, /Design\/member semantic commits require user acceptance/);
   await seedDesign(fixture.workspaces, fixture.workspaceId, 'metadata.json', { content: 'Project', implementation: ['.'] });
   await configureHarness(fixture, 'Lead', { designScope: { working: ['metadata.json'], dependencies: [] }, allowedCommands: [{ kind: 'executable', executable: 'bash' }] });
   const configured = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });

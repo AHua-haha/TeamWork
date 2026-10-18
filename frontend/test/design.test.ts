@@ -33,7 +33,7 @@ test('dependency mappings take precedence on equal, ancestor, and whole-project 
 test('discussion references add only a named reference to user input and never include stored design content', () => {
   const ref = { kind: 'design' as const, path: design.path };
   assert.equal(referenceLabel(ref), 'Design · systems/api/metadata.json');
-  assert.equal(discussionInput('Please clarify the API.', ref), 'Regarding design .rsi/context/systems/api/metadata.json:\n\nPlease clarify the API.');
+  assert.equal(discussionInput('Please clarify the API.', ref), 'Regarding design .rsi/context/design/systems/api/metadata.json:\n\nPlease clarify the API.');
   assert.equal(discussionInput('My draft', null), 'My draft');
   assert.equal(discussionInput('Change responsibility', { kind: 'member', memberId: 'm1', name: 'Backend' }), 'Regarding team member Backend (member ID m1):\n\nChange responsibility');
 });
@@ -42,7 +42,7 @@ test('design client uses read-only current semantic endpoints with encoded paths
   const calls: string[] = [];
   const client = new WorkspaceClient((async input => {
     calls.push(String(input));
-    return new Response(JSON.stringify(String(input).includes('/file?') ? { path: design.path, design: { content: '# API', implementation: design.implementation, documents:[{path:'systems/api/design.md',content:'# API'}] }, designIssue: null } : { designs: [design], truncated: false }));
+    return new Response(JSON.stringify(String(input).includes('/file?') ? { path: design.path, design: { content: '# API', implementation: design.implementation, documents:[{path:'design/systems/api/design.md',content:'# API'}] }, designIssue: null } : { designs: [design], truncated: false }));
   }) as typeof fetch);
   assert.deepEqual((await client.designs('w 1')).designs, [design]);
   assert.equal((await client.readDesign('w 1', 'systems/api/metadata.json')).design?.content, '# API');
@@ -50,10 +50,10 @@ test('design client uses read-only current semantic endpoints with encoded paths
 });
 
 
-test('unified context file controls distinguish design documents from implementation context at the first boundary',()=>{
-  assert.equal(writableContextPath('backend/metadata.json'),true);
-  assert.equal(writableContextPath('backend/design/request-flow.md'),true);
-  assert.equal(writableContextPath('backend/design/impl/topic.md'),true);
-  assert.equal(writableContextPath('backend/impl/contracts.md'),false);
-  assert.equal(writableContextPath('impl.md'),false);
+test('purpose roots determine context file controls regardless of topic folder names',()=>{
+  assert.equal(writableContextPath('design/backend/metadata.json'),true);
+  assert.equal(writableContextPath('design/backend/design/request-flow.md'),true);
+  assert.equal(writableContextPath('design/backend/design/impl/topic.md'),true);
+  assert.equal(writableContextPath('implement/backend/impl/contracts.md'),false);
+  assert.equal(writableContextPath('implement/impl.md'),false);
 });

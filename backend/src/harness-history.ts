@@ -14,6 +14,8 @@ export interface HarnessPart {
   commit: 'agent' | 'user';
   prompt: string;
   context?: 'design' | 'impl';
+  /** Backend-only identity for a read-only accepted design view. */
+  viewRevision?: string;
 }
 export interface HarnessDefinition { id: string; parts: HarnessPart[]; prompt: string; tools: string[] }
 export interface HistoryActor { type: 'agent' | 'user' | 'harness'; memberId: string; runId?: string }
@@ -90,7 +92,7 @@ export class HarnessHistory {
     if (!objectId(value)) throw new AppError('corrupt_data', 'Invalid scoped reference', 500);
     return value;
   }
-  private key(part: HarnessPart) { return sha256(JSON.stringify({ paths: part.paths.map(p=>p.toLowerCase()).sort(), exclude: part.exclude.map(p=>p.toLowerCase()).sort(), context: part.context })); }
+  private key(part: HarnessPart) { return sha256(JSON.stringify({ paths: part.paths.map(p=>p.toLowerCase()).sort(), exclude: part.exclude.map(p=>p.toLowerCase()).sort(), context: part.context, viewRevision: part.viewRevision })); }
   private refs(memberId: string, part: HarnessPart) {
     identity(memberId, 'memberId');
     const key = this.key(part);
@@ -282,12 +284,28 @@ export class HarnessHistory {
     }
   }
 
+  /** Seed read-only node views from accepted design pointers, including additions and tombstones. */
+  private async designBaseline(part: HarnessPart): Promise<string> {
+    const initial=await this.snapshot(this.source,part);
+    const entries=new Map((await this.entries(initial)).map(entry=>[entry.path.toLowerCase(),entry]));
+    const paths=new Set([...entries.values()].map(entry=>entry.path));
+    for(const path of await this.acceptedDesignPaths())paths.add(`${contextRoot}/${path}`);
+    for(const path of paths){
+      if(!partOwns(part,path))continue;
+      const accepted=await this.acceptedDesign(path);
+      if(!accepted)continue;
+      entries.delete(path.toLowerCase());
+      if(accepted.content!==null)entries.set(path.toLowerCase(),{path,mode:'100644',object:await this.text(['hash-object','-w','--stdin'],accepted.content)});
+    }
+    return this.tree([...entries.values()]);
+  }
+
   async ensure(memberId: string, part: HarnessPart, root: string): Promise<PartState> {
     const refs = this.refs(memberId, part);
     return this.queue.run(`scope:${this.key(part)}`, async () => {
       let committed = await this.ref(refs.committed);
       if (!committed) {
-        const tree = await this.snapshot(this.source, part);
+        const tree = part.context==='design' ? await this.designBaseline(part) : await this.snapshot(this.source, part);
         committed = await this.record(tree, null, 'baseline', { type: 'harness', memberId }, 'Initial accepted files');
         await this.update(refs.committed, committed, null);
       }
@@ -398,7 +416,7 @@ export class HarnessHistory {
   async acceptedDesignPaths(): Promise<string[]> {
     const revisions = (await this.text(['for-each-ref', '--format=%(objectname)', 'refs/harness/designs/'])).split('\n').filter(Boolean);
     const paths = new Set<string>();
-    for (const revision of new Set(revisions)) for (const path of await this.paths(revision)) if (path.startsWith(contextRoot+'/')) paths.add(path.slice('.rsi/context/'.length));
+    for (const revision of new Set(revisions)) for (const path of await this.paths(revision)) if (path.startsWith(contextRoot+'/design/')) paths.add(path.slice(contextRoot.length+1));
     return [...paths];
   }
   private scopeRepository(memberId: string, part: HarnessPart) { return join(this.storage, 'staging', memberId, part.id, this.key(part)); }

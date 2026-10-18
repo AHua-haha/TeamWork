@@ -1053,8 +1053,8 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     assert.ok(!firstStep.request.tools.some(tool => tool.definition.name === 'save_design'));
     assert.match(firstStep.request.context.systemPrompt!, /user approval/);
     answer(firstStep.events,fauxAssistantMessage([
-      {type:'toolCall',id:randomUUID(),name:'write',arguments:{path:'.rsi/context/metadata.json',content:JSON.stringify({implementation:design.implementation})}},
-      {type:'toolCall',id:randomUUID(),name:'write',arguments:{path:'.rsi/context/design.md',content:'Pending design refinement'}},
+      {type:'toolCall',id:randomUUID(),name:'write',arguments:{path:'.rsi/context/design/metadata.json',content:JSON.stringify({implementation:design.implementation})}},
+      {type:'toolCall',id:randomUUID(),name:'write',arguments:{path:'.rsi/context/design/design.md',content:'Pending design refinement'}},
     ],{stopReason:'toolUse'}));
     const secondStep = await requests.next();
     answer(secondStep.events, call('bash', { command: 'git add . && git commit -m "Cannot self-approve"', metadata: { git: { scope: 'design' } } }));
@@ -1145,7 +1145,7 @@ test('workspace registry refuses duplicates; context commits reload with history
     await context.move('user/a.md', 'user/b.md', saved.revision, 'rename');
     const loaded = await reopened.loadContext(workspaceId);
     assert.equal(loaded.seq, 3);
-    assert.deepEqual(loaded.files.filter(file=>!['metadata.json','design.md','impl.md'].includes(file.path)).map(file => [file.path, file.size, file.author, file.reason]), [['user/b.md', 5, { type: 'user' }, 'rename']]);
+    assert.deepEqual(loaded.files.filter(file=>!['design/metadata.json','design/design.md','implement/impl.md'].includes(file.path)).map(file => [file.path, file.size, file.author, file.reason]), [['user/b.md', 5, { type: 'user' }, 'rename']]);
     const file = loaded.files.find(file=>file.path==='user/b.md')!;
     assert.deepEqual((await reopened.history(workspaceId, file.fileId, null, 10)).map(version => [version.seq, version.action, version.path, version.fromPath]), [[3, 'move', 'user/b.md', 'user/a.md'], [2, 'create', 'user/a.md', null]]);
     assert.deepEqual((await reopened.history(workspaceId, file.fileId, 3, 10)).map(version => version.revision), [saved.revision]);
@@ -1183,7 +1183,7 @@ test('workspace registry refuses duplicates; context commits reload with history
     await assert.rejects(stat(join(directory, '.rsi/context', 'user', 'd.md')), code('ENOENT'));
     await assert.rejects(reopened.commitContext(workspaceId, 3, { ...other, versions: [], files: [], removeKeys: [] }), code('backend_error'));
     assert.deepEqual((await reopened.records(workspaceId, 0, 10)).map(item => item.seq), [1, 2, 3, 4]);
-    assert.deepEqual((await reopened.loadContext(workspaceId)).files.map(item => item.path).sort(), ['design.md','impl.md','metadata.json','user/b.md','user/c.md']);
+    assert.deepEqual((await reopened.loadContext(workspaceId)).files.map(item => item.path).sort(), ['design/design.md','design/metadata.json','implement/impl.md','user/b.md','user/c.md']);
   } finally {
     await reopened.close();
     await rm(folder, { recursive: true, force: true });
@@ -1665,11 +1665,11 @@ test('fresh bootstrap and administrative reset persist atomic baselines, preserv
     assert.deepEqual(lead.value.harness.designScope.working,['metadata.json']);
     assert.equal((await isolated.getMemberActivation('fresh'))!.revision,lead.value.configuration!.acceptedRevision);
     const reopened = new MySqlStore(url.toString());
-    try { assert.deepEqual(await reopened.getMemberActivation('fresh'),await isolated.getMemberActivation('fresh')); assert.deepEqual((await reopened.loadContext('fresh')).files.map(f=>f.path).sort(),['design.md','impl.md','metadata.json']);
+    try { assert.deepEqual(await reopened.getMemberActivation('fresh'),await isolated.getMemberActivation('fresh')); assert.deepEqual((await reopened.loadContext('fresh')).files.map(f=>f.path).sort(),['design/design.md','design/metadata.json','implement/impl.md']);
       const changes = await reopened.records('fresh',0,10);
       assert.equal(changes.length,1); assert.equal(changes[0]!.files.length,3);
       const context = await service.context('fresh');
-      assert.match((await context.read({path:'impl.md'})).content,/### Usage examples/); }
+      assert.match((await context.read({path:'implement/impl.md'})).content,/### Usage examples/); }
     finally {await reopened.close();}
     const original = isolated.createWorkspace.bind(isolated);
     isolated.createWorkspace = async (record,key,member,models,bootstrap) => { bootstrap!.context.files.push(bootstrap!.context.files[0]!); return original(record,key,member,models,bootstrap); };

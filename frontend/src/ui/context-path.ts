@@ -1,8 +1,5 @@
-/** Match the first content boundary; nested topic folders do not change ownership. */
+/** Purpose roots determine raw-file editability; nested topic names do not change it. */
 export function writableContextPath(path:string):boolean {
-  for(const segment of path.toLowerCase().split('/')){
-    if(segment==='design'||segment==='design.md'||segment==='metadata.json')return true;
-    if(segment==='impl'||segment==='impl.md')return false;
-  }
-  return true;
+  const key=path.toLowerCase();
+  return key==='design'||key.startsWith('design/');
 }

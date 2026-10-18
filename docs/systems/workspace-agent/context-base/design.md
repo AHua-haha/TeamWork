@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-The context base stores a project's design and implementation context in one tree following its systems and subdesigns. Each system node owns both kinds of context. The tree is independent of member identity; there are no user/agent ownership categories.
+The context base stores a project's design and implementation context in parallel design and implement roots following the same systems and subdesigns. Each system's implementation context mirrors its design-node path. The tree is independent of member identity; there are no user/agent ownership categories.
 
 A system's design may occupy one Markdown file or multiple Markdown documents within design/. Its implementation context independently uses one file or impl/. Multiple documents remain the same system. Creating a child system with its own boundary, design, implementation context and metadata is a separate decomposition decision.
 
@@ -59,23 +59,24 @@ A real subdesign node represents a distinct subsystem boundary. It states what t
 
 ### Node layout and references
 
-The physical root is .rsi/context. A node is identified by its context-relative metadata.json path: metadata.json for the project root, backend/metadata.json for a child. Parent folders express the hierarchy. Node folder names must satisfy context path rules and cannot be reserved design/impl content names or end in .md/.json. References may include the physical .rsi/context/ prefix; stored assignments use context-relative paths.
+The context container is .rsi/context, with design/ and implement/ roots. A node is identified by its design-root-relative metadata.json path: metadata.json for the project root, backend/metadata.json for a child. Parent folders express the hierarchy. Node folder names must satisfy context path rules and cannot be reserved design/impl content names or end in .md/.json. References may include the physical .rsi/context/design/ or raw design/ prefix; stored assignments use context-relative paths.
 
 ```text
 .rsi/context/
-  metadata.json
-  design.md
-  impl.md
-  backend/
+  design/
     metadata.json
-    design/
-      README.md
-      request-flow.md
-      configuration.md
-    impl/
-      README.md
-      contracts.md
-      runtime.md
+    design.md
+    backend/
+      metadata.json
+      design/
+        README.md
+        request-flow.md
+  implement/
+    impl.md
+    backend/
+      impl/
+        README.md
+        contracts.md
 ```
 
 Backend here is one system with several documents, without implied child systems. A true child such as backend/storage has its own metadata and both contexts. Working/dependency assignments cover exact nodes, not descendants.
@@ -88,7 +89,7 @@ The complete design context, across its documents, retains purpose/responsibilit
 
 ### Raw file storage
 
-- Paths are relative to .rsi/context, with no category segment required. Segments have 1–128 ASCII letters, digits, spaces, dashes, underscores or dots, starting/ending with a letter, digit, dash or underscore. A path has at most 16 segments and 512 characters. Dot entries are reserved and ignored; unsafe names are problems.
+- Raw paths are relative to .rsi/context and name design/ or implement/ for the two maintained purpose roots. Safe other text paths remain raw storage only and do not create semantic nodes. Segments have 1–128 ASCII letters, digits, spaces, dashes, underscores or dots, starting/ending with a letter, digit, dash or underscore. A path has at most 16 segments and 512 characters. Dot entries are reserved and ignored; unsafe names are problems.
 - Paths differing only in case identify the same file. New folders keep existing disk spelling. Folders appear in listings while containing files; moving/deleting a folder affects every contained file, subject to write restrictions.
 - Files are UTF-8 text without NUL, at most 1 MiB. Raw storage preserves text bytes exactly, including a byte-order mark, and does not parse node contents. Invalid node metadata/documents remain available for repair where text/path safety permits.
 - Raw user file saves and backend-attributed file saves retain per-file revision protection, durability and ordered change records. The in-process saveDesign primitive is an attributed file save, not a multi-document semantic design-save tool. It receives lead/run author, nonempty reason and prior file revision, returns before/after bytes, and uses the same queue/rollback as user saves. No runtime tool can forge that author.
@@ -96,19 +97,19 @@ The complete design context, across its documents, retains purpose/responsibilit
 
 ### Harness maintenance and accepted state
 
-Agents edit their separate worktrees through common tools. Working-node implementation context can be read/edited/agent-committed; dependencies are read-only. Metadata/design commits require user acceptance. A directory representation does not create extra assignments or permissions. Lead management can create design nodes across the tree, excluding dependency design content, without gaining unrelated implementation-context authority.
+Agents edit their separate worktrees through common tools. Working-node implementation context can be read/edited/agent-committed; dependencies are read-only. Metadata/design commits require user acceptance. A directory representation does not create extra assignments or permissions. Lead management can create design nodes across the tree, including designs used as dependencies, without gaining unrelated implementation-context authority. Ordinary members read/follow working and dependency designs but cannot edit metadata or design prose.
 
 Each working node has a stable impl-context-<hash> Git part (first 16 SHA-256 hex characters of lower-case metadata reference), covering both impl.md and impl/. Inspection and assembled prompts give the exact ID/paths. Staging/checkpoints/semantic commits remain independent of code and design/member history. General Bash cannot write .rsi; scoped Bash Git and file tools supply permitted edits. New members opening a scope inherit its committed context; current peers are not overwritten, and stale-base commits refuse.
 
 User-accepted design Git snapshots feed semantic catalog/inspection and implementation permission resolution; pending bytes do not. Raw context APIs/history observe original-workspace files. Worktree commits are not copied into that original tree or existing peers. Design inspection returns separate Markdown documents with correct source paths, plus aggregate content and metadata; its revision covers all design files. Current multi-file inspection is an observation, not a transaction spanning concurrent edits. Reusable knowledge and automatic publication/merge/maintenance scheduling remain deferred.
 
-New workspaces initialize metadata.json, design.md and impl.md in one sequence-1 change. Old user/agent layout is not a compatibility content format. Safe but unresolvable active references remain inspectable/unready; execution and member-file validation cannot derive authority from them. Existing workspace files/history are not automatically reset or converted.
+New workspaces initialize design/metadata.json, design/design.md and implement/impl.md in one sequence-1 change. Old user/agent layout is not a compatibility content format. Safe but unresolvable active references remain inspectable/unready; execution and member-file validation cannot derive authority from them. Existing workspace files/history are not automatically reset or converted.
 
 ## Outputs and observable effects
 
 ### What the user may do
 
-Read all current context files, versions and changes. The raw file API can create/edit/move/delete design and metadata files. Implementation context (impl.md and files under impl/) is read-only through this API. A folder operation containing implementation-context files is refused as a whole. Agents maintain their working implementation context through harness tools and independent Git history.
+Read all current context files, versions and changes. The raw file API can create/edit/move/delete design and metadata files. The implement/ root is read-only through this API, including unsupported intermediate files. Folder mutation touching that root is refused as a whole. Design-folder operations affect the design tree only; they do not implicitly move corresponding implementation context or update assignments. Agents maintain their working implementation context through harness tools and independent Git history.
 
 ### Versions and change records
 
@@ -211,20 +212,20 @@ Invalid metadata, missing/empty design documents, mixed forms, a missing README.
 - One tree groups design and implementation context by system identity, independently of agents.
 - Markdown is the source of document content; JSON holds metadata only. File splitting and system decomposition are independent.
 - Storage preserves immutable per-file history and ordered workspace change records with unchanged raw file atomicity/rollback.
-- Access and semantic commit boundaries remain separate despite co-location; dependencies and private metadata cannot be made writable through another document form.
+- Access and semantic commit boundaries remain separate across purpose roots; dependencies and private metadata cannot be made writable through another document form.
 - Content-maintenance prompts instruct reading/updating actual contracts and surfacing inconsistencies. There is no semantic prose validator or new runtime maintenance loop.
 - Limits: 1 MiB per raw file; 100 documents/1 MiB per context representation; 2,000 listing entries, 200 find results and 100 search matches. One backend process owns the database. Context remains text-only.
 - No automatic old-layout migration, original-workspace/peer refresh, merge, knowledge system or retention policy is introduced.
 
 ## Acceptance examples
 
-1. Fresh create/adopt returns seq 1 with metadata.json, design.md and impl.md, and a ready lead assigned to metadata.json; implementation mappings start empty.
+1. Fresh create/adopt returns seq 1 with design/metadata.json, design/design.md and implement/impl.md, and a ready lead assigned to metadata.json; implementation mappings start empty.
 2. Backend changes design.md into design/README.md and design/request-flow.md. Catalog still has one backend node; document paths and the combined revision update.
 3. Backend independently uses design.md with an impl/ directory. Its metadata identity and context Git scope remain stable through the transition.
 4. Adding backend/storage/metadata.json and complete child contexts creates a real subdesign. Reading backend/design/flow.md alone never creates a child system.
 5. A member can read/edit/commit its working node's implementation context, read dependency context and access no child merely because it owns the parent.
 6. Design Git cannot stage or restore impl.md/impl/ content, including content beside newly created nodes. Design acceptance validates the exact immutable reviewed metadata/Markdown tree.
-7. A user raw save to backend/impl.md, or a move/delete of backend containing implementation context, returns read_only without partial changes.
+7. A user raw save/move/delete under implement/ returns read_only. Moving design/backend leaves implement/backend untouched and keeps design-file history.
 8. Invalid JSON-embedded design content, mixed forms or missing directory README makes the node unavailable; current raw files explain the issue.
 9. A replacement member inherits committed multi-document context with the same metadata reference. Pending writer edits stay private and stale semantic commits refuse.
 10. A backend-attributed file import records exact before/after content and author; the existing revision-based raw save/history/reconnect behavior remains applicable at category-free paths.

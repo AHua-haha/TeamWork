@@ -8,9 +8,9 @@ import { code, configureHarness, withTeam, worker } from './team-fixture.js';
 const signal = () => new AbortController().signal;
 
 test('implementation context paths preserve design identity/extensions with stable scope IDs',()=>{
-  assert.equal(implementationContextPath('backend/api/metadata.json'),'backend/api/impl.md');
-  assert.equal(implementationContextPath('backend/metadata.json'),'backend/impl.md');
-  assert.equal(implementationContextPath('Backend/API/metadata.json'),'Backend/API/impl.md');
+  assert.equal(implementationContextPath('backend/api/metadata.json'),'implement/backend/api/impl.md');
+  assert.equal(implementationContextPath('backend/metadata.json'),'implement/backend/impl.md');
+  assert.equal(implementationContextPath('Backend/API/metadata.json'),'implement/Backend/API/impl.md');
   assert.equal(implementationContextPart('A/metadata.json').id,implementationContextPart('a/metadata.json').id);
   assert.throws(()=>implementationContextPath('agent/internal.md'),code('invalid_path'));
   assert.throws(()=>implementationContextPath('user/../escape'),code('invalid_path'));
@@ -18,12 +18,12 @@ test('implementation context paths preserve design identity/extensions with stab
 
 test('root bootstrap supplies design and implemented-contract templates and agent context authority without implementation code rights',()=>withTeam(async f=>{
   const base=await f.workspaces.context(f.workspaceId);
-  const design=await base.read({path:'design.md'});
+  const design=await base.read({path:'design/design.md'});
   for(const title of ['Purpose, responsibilities and boundaries','Interface contract','Constraints, specifications and requirements'])assert.ok(design.content.includes(title));
-  const context=await base.read({path:'impl.md'});
+  const context=await base.read({path:'implement/impl.md'});
   for(const title of ['Implemented contract','Input','Output','Effect','Usage examples'])assert.ok(context.content.includes(title));
   assert.match(context.content,/No implemented interfaces have been documented/);
-  const files=await f.team.harness.files(f.lead.memberId),path=join(files.root,'.rsi/context/impl.md');
+  const files=await f.team.harness.files(f.lead.memberId),path=join(files.root,'.rsi/context/implement/impl.md');
   await files.edit.writeFile(path,context.content+'\nCurrent implementation notes.\n');
   await assert.rejects(files.write.writeFile(join(files.root,'code.ts'),'outside'),code('not_found'));
   const prepared=await f.team.harness.prepare(f.lead.memberId,[]);
@@ -35,7 +35,7 @@ test('root bootstrap supplies design and implemented-contract templates and agen
   assert.equal(committed.exitCode,0,committed.stderr);
   const after=(await f.team.harness.inspect(f.lead.memberId)).parts.find(p=>p.state.part.id==='design')!;
   assert.equal(after.state.committed,before.state.committed);
-  assert.equal((await base.read({path:'impl.md'})).content,context.content,'raw context remains its existing original-workspace view');
+  assert.equal((await base.read({path:'implement/impl.md'})).content,context.content,'raw context remains its existing original-workspace view');
 }));
 
 test('working context is writable/searchable while dependencies, unrelated context, member and private state stay protected',()=>withTeam(async f=>{
@@ -52,7 +52,7 @@ test('working context is writable/searchable while dependencies, unrelated conte
 
   assert.match((await files.read.readFile(join(files.root,dep.paths[0]!))).toString(),/Dependency/);
   await assert.rejects(files.edit.writeFile(join(files.root,dep.paths[0]!),'forbidden'),code('access_denied'));
-  await assert.rejects(files.read.readFile(join(files.root,'.rsi/context/agent/unrelated.md')),code('not_found'));
+  await assert.rejects(files.read.readFile(join(files.root,'.rsi/context/design/agent/unrelated.md')),code('not_found'));
   await assert.rejects(files.write.writeFile(join(files.root,'.rsi/members/other/member.json'),'{}'),code('not_found'));
   await assert.rejects(files.read.readFile(join(files.root,'.rsi/harness/repository.git/HEAD')),code('not_found'));
   const searched=await f.team.harness.bash(a.memberId,{command:`grep -n 'Implemented contract' ${own.paths[0]}`,metadata:{git:{scope:own.id}}},signal());

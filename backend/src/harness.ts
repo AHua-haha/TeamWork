@@ -13,7 +13,7 @@ import type { RuntimeTool } from './runtime.js';
 import type { StoredMember } from './team.js';
 import { AppError } from './types.js';
 import type { WorkspaceService } from './workspace.js';
-import { contextRoot, implementationContextPath, contextPaths, contextLocation } from './workspace-layout.js';
+import { contextRoot, designRoot, implementationContextPath, contextPaths, contextLocation, designContextPaths } from './workspace-layout.js';
 import { decodeText } from './text.js';
 
 export const viewBudget = 64 * 1024;
@@ -29,41 +29,56 @@ export async function resolveHarness(designs: DesignService, workspaceId: string
   return { working, dependencies, readable: [...new Set([...writable, ...readonly])], writable, readonly };
 }
 
-/** Purpose assignments define authority; read-only use paths take precedence over writes. */
+export interface PermissionScope { designContext: string[]; implementationContext: string[]; implementation: string[] }
+export interface HarnessPermissions { working: PermissionScope; dependencies: PermissionScope }
+/** Resolve the three resource components independently in working and dependency scope. */
+export function harnessPermissions(member: StoredMember, resolved: ResolvedHarness): HarnessPermissions {
+  const physical = (paths: string[]) => paths.map(path => `${contextRoot}/${path}`);
+  const scope = (designs: ResolvedDesign[], implementation: string[]): PermissionScope => ({
+    designContext: designs.flatMap(d => physical(designContextPaths(d.path))),
+    implementationContext: designs.flatMap(d => physical(contextPaths(d.path,'impl'))),
+    implementation,
+  });
+  const working = scope(resolved.working,resolved.writable), dependencies = scope(resolved.dependencies,resolved.readonly);
+  if(member.value.lead) working.designContext = [designRoot];
+  return {working,dependencies};
+}
+
+/** A working design can be read-only; dependency implementation wins overlapping source mappings. */
 export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): FileAccess {
-  const designPaths = (designs: ResolvedDesign[]) => designs.flatMap(d => [d.path,...contextPaths(d.path,'design')].map(p=>`${contextRoot}/${p}`));
-  const workingDesign=designPaths(resolved.working), dependencyDesign=designPaths(resolved.dependencies);
-  const workingContext=resolved.working.flatMap(d=>contextPaths(d.path,'impl').map(p=>`${contextRoot}/${p}`));
-  const dependencyContext=resolved.dependencies.flatMap(d=>contextPaths(d.path,'impl').map(p=>`${contextRoot}/${p}`));
-  const readable=[...workingDesign,...dependencyDesign,...workingContext,...dependencyContext];
+  const {working,dependencies}=harnessPermissions(member,resolved);
+  const designs=[...working.designContext,...dependencies.designContext];
+  const contexts=[...working.implementationContext,...dependencies.implementationContext];
+  const readable=[...designs,...contexts];
   return { deny(path, mode) {
-    const key = path.toLowerCase(), write=mode==='write'||mode==='mkdir';
-    const allowed=(scopes:string[])=>scopes.some(p=>covers(p,path)||(mode==='mkdir'&&ancestor(path,p)));
-    if (key === '.rsi' && mode === 'see') return null;
-    if (key === '.rsi/members' || key.startsWith('.rsi/members/')) return member.value.lead ? null : 'Member configuration is outside your scope';
-    if(key===contextRoot)return (mode==='see'||mode==='mkdir')&&(member.value.lead||resolved.working.length>0||(!write&&resolved.dependencies.length>0)) ? null : 'Context root is not a file';
+    const key=path.toLowerCase(), write=mode==='write'||mode==='mkdir';
+    const within=(scopes:string[])=>scopes.some(p=>covers(p,path));
+    const visible=(scopes:string[])=>within(scopes)||(mode==='see'&&scopes.some(p=>ancestor(path,p)));
+    const creatable=(scopes:string[])=>within(scopes)||(mode==='mkdir'&&scopes.some(p=>ancestor(path,p)));
+    if(key==='.rsi'&&mode==='see')return null;
+    if(key==='.rsi/members'||key.startsWith('.rsi/members/'))return member.value.lead ? null : 'Member configuration is outside your scope';
+    if(key===contextRoot)return (mode==='see'||mode==='mkdir')&&readable.length ? null : 'Context root is not a file';
     if(key.startsWith(contextRoot+'/')){
       const location=contextLocation(key.slice(contextRoot.length+1));
       if(!location)return 'Not a system context path';
-      if(location.kind==='node'){
-        return (mode==='see'||mode==='mkdir')&&(member.value.lead||readable.some(p=>ancestor(path,p))) ? null : 'This system is outside your scope';
+      if(location.area==='design'){
+        if(write)return member.value.lead ? null : 'Design context is read-only; follow it and report changes to the lead';
+        return visible(designs) ? null : 'This design is outside your working/dependency scope';
       }
-      if(location.kind==='impl'){
-        if(write&&dependencyContext.some(p=>covers(p,path)))return 'Dependency implementation context is read-only';
-        return allowed(write?workingContext:[...workingContext,...dependencyContext]) ? null : 'This implementation context is outside your working/dependency systems';
+      if(write){
+        if(within(dependencies.implementationContext))return 'Dependency implementation context is read-only';
+        return creatable(working.implementationContext) ? null : 'This implementation context is outside your working designs';
       }
-      if(write&&dependencyDesign.some(p=>covers(p,path)))return 'Dependency design is read-only';
-      return member.value.lead||allowed(write?workingDesign:[...workingDesign,...dependencyDesign]) ? null : 'This design is outside your working/dependency systems';
+      return visible(contexts) ? null : 'This implementation context is outside your working/dependency scope';
     }
-    if (key === '.rsi' || key.startsWith('.rsi/')) return 'Private workspace state is outside your scope';
-    if (!path && mode === 'see') return null;
-    if (mode === 'write' || mode === 'mkdir') {
-      if (resolved.readonly.some(scope => covers(scope, path))) return 'Dependency implementation is read-only';
-      return resolved.writable.some(scope => covers(scope, path) || (mode === 'mkdir' && ancestor(path, scope))) ? null : 'This implementation is outside your configured implementation scope';
+    if(key==='.rsi'||key.startsWith('.rsi/'))return 'Private workspace state is outside your scope';
+    if(!path&&mode==='see')return null;
+    if(write){
+      if(within(dependencies.implementation))return 'Dependency implementation is read-only';
+      return creatable(working.implementation) ? null : 'This implementation is outside your configured implementation scope';
     }
-    if (resolved.readable.some(scope => covers(scope, path) || (mode === 'see' && ancestor(path, scope)))) return null;
-    return 'This implementation is outside your design scope';
-  } };
+    return visible([...working.implementation,...dependencies.implementation]) ? null : 'This implementation is outside your design scope';
+  }};
 }
 
 export interface HarnessEnvironment {
@@ -108,7 +123,7 @@ export class HarnessService {
     // A dependency is an independent read-only view. Hydrate it once when first assigned,
     // without granting its paths to a writable part or refreshing another agent's edits.
     const dependencies: HarnessPart[] = [
-      ...resolved.dependencies.map(p => ({ id: `dep-${p.revision.slice(0, 32)}`, paths: [p.path,...contextPaths(p.path,'design')].map(path=>`${contextRoot}/${path}`), exclude: [], context: 'design' as const, commit: 'user' as const, prompt: '' })),
+      ...(member.value.lead ? resolved.dependencies : [...resolved.working,...resolved.dependencies]).map(p => ({ id: `view-${p.revision.slice(0, 32)}`, viewRevision:p.revision, paths: designContextPaths(p.path).map(path=>`${contextRoot}/${path}`), exclude: [], context: 'design' as const, commit: 'user' as const, prompt: '' })),
       ...(resolved.readonly.length ? [{ id: 'dependency-implementation', paths: [...new Set(resolved.readonly)], exclude: ['.rsi'], commit: 'user' as const, prompt: '' }] : []),
     ];
     for (const design of resolved.dependencies) {
@@ -141,13 +156,8 @@ export class HarnessService {
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const part = request.metadata?.git ? this.part(env, request.metadata.git.scope) : null;
     if (!part && !commandAllowed(member.value.harness.allowedCommands, ['bash', '-c', request.command])) throw new AppError('command_denied', 'General Bash requires an allowed ["bash", "-c", command] rule; scoped Git uses metadata.git.scope', 403);
-    let designRead=[...resolved.working,...resolved.dependencies].flatMap(d=>[d.path,...contextPaths(d.path,'design')].map(p=>`${contextRoot}/${p}`));
-    if(member.value.lead){
-      const listing=await new ProjectFiles(join(env.root,contextRoot)).tree('',16);
-      if(listing.truncated)throw new AppError('input_too_large','Context listing is too large for a safe Bash read scope',413);
-      designRead=[...designRead,'.rsi/members',...listing.entries.filter(e=>e.type==='file'&&['design','metadata'].includes(contextLocation(e.path)?.kind??'')).map(e=>`${contextRoot}/${e.path}`)];
-    }
-    const readable=[...resolved.readable,...designRead,...[...resolved.working,...resolved.dependencies].flatMap(d=>contextPaths(d.path,'impl').map(p=>`${contextRoot}/${p}`))];
+    const permissions=harnessPermissions(member,resolved);
+    const readable=[...Object.values(permissions.working).flat(),...Object.values(permissions.dependencies).flat(),...(member.value.lead ? ['.rsi/members'] : [])];
     // Management Git Bash is read-only except for operations mediated by Git.
     // General execution may write implementation only; it cannot edit management files.
     const writable = part ? [] : resolved.writable;
@@ -224,6 +234,7 @@ export class HarnessService {
     const parts = [
       '## Your harness',
       harnessPrompt('common', { worktree: env.root }),
+      `## Resolved permissions\n${JSON.stringify(harnessPermissions(member,resolved),null,2)}`,
       ...env.definitions.map(d => `## ${d.id} harness\n${d.prompt}\n${d.parts.map(p => `Part ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
       '## Accepted working designs', await this.designView(resolved.working),
       '## Dependency designs', await this.designView(resolved.dependencies),
@@ -235,7 +246,7 @@ export class HarnessService {
     let used = 0;
     return parts.map(part => {
       const size = Buffer.byteLength(part.content);
-      const heading = `### .rsi/context/${part.path} (revision ${part.revision})\nImplementation: ${part.implementation.join(', ') || '(none)'}`;
+      const heading = `### .rsi/context/design/${part.path} (revision ${part.revision})\nImplementation: ${part.implementation.join(', ') || '(none)'}`;
       if (used + size > viewBudget) return heading + '\nContent not loaded; read this design file with your tools.';
       used += size;
       return heading + '\n' + part.content;

@@ -17,4 +17,6 @@ These are backend-maintained base rules, separate from member Markdown prompts. 
 
 Design uses purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. Implementation context documents exact Input, Output, Effect and Usage examples for actual interfaces. These content requirements are instructions to the agent; storage accepts ordinary text without a semantic heading validator. Reusable knowledge is outside context and deferred.
 
-Context templates now initialize separate metadata.json, design.md and impl.md. Rule Markdown describes complete system designs represented by one file or multiple documents, independently of real child-system decomposition. No Markdown content is embedded in JSON metadata.
+Context templates now initialize design/metadata.json, design/design.md and implement/impl.md under the context container. Rule Markdown describes complete system designs represented by one file or multiple documents, independently of real child-system decomposition. No Markdown content is embedded in JSON metadata.
+
+Management/implementation prompts describe working and dependency permissions, each with design context, implementation context and project implementation. Only the lead edits designs; implementation context/code for every member follows accepted assignments.

@@ -28,3 +28,5 @@ One metadata reference survives document representation changes and member repla
 ## Verification
 
 [Catalog tests](../../../../../backend/test/design-catalog.test.ts) verify discovery independent of membership, metadata issues and retirement. [Context tree tests](../../../../../backend/test/context-tree.test.ts) verify multi-document identity, revision changes, explicit children, missing/ambiguous forms, exact-node permissions, acceptance, context transition history and case-sensitive disk spelling. HTTP and disposable MySQL tests cover current inspection, accepted mappings, durable bootstrap/history and rollback.
+
+metadataPath resolves a semantic node reference to its raw design/ metadata path. contextPaths includes the purpose prefix. Catalog summaries keep design-root-relative references; inspect results return raw metadata/document paths for file opening and relative links. Catalog ignores metadata outside design/.

@@ -18,7 +18,7 @@ test('new workspace has a ready root-design lead, exact active files and clean b
   assert.equal(view.activation.valid,true); assert.equal(view.activation.hasChanges,false); assert.deepEqual(view.changes,[]);
   assert.equal(view.active.revision,source.acceptedRevision); assert.equal(f.runtime.runs.length,0);
   const files = await f.team.harness.files(lead.memberId);
-  assert.match((await files.read.readFile(join(files.root,'.rsi/context/metadata.json'))).toString(),/implementation/);
+  assert.match((await files.read.readFile(join(files.root,'.rsi/context/design/metadata.json'))).toString(),/implementation/);
   await assert.rejects(files.read.readFile(join(files.root,'.rsi/harness/objects')),code('not_found'));
   assert.equal((await f.workspaces.files(f.workspaceId)).constructor.name,'ProjectFiles');
   assert.ok(!(await (await f.workspaces.files(f.workspaceId)).tree('',1)).entries.some(entry=>entry.path==='.rsi'));

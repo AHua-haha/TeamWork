@@ -1,5 +1,5 @@
 import { sha256 } from './text.js';
-import { contextRoot, implementationContextPath, contextPaths, nodeReference } from './workspace-layout.js';
+import { contextRoot, designRoot, implementationContextPath, contextPaths, nodeReference } from './workspace-layout.js';
 import { harnessPrompt } from './harness-prompts.js';
 import type { HarnessDefinition, HarnessPart } from './harness-history.js';
 import type { StoredMember } from './team.js';
@@ -14,14 +14,14 @@ export function implementationContextPart(design: string): HarnessPart {
 /** Fixed purpose policy; an assignment supplies design references, never permissions or tool definitions. */
 export function purposeHarnesses(member: StoredMember, implementation: ImplementationScope = { paths: [], usePaths: [] }, scope = member.value.harness.designScope): HarnessDefinition[] {
   const config = member.value.harness;
-  const designPaths = member.value.lead ? [contextRoot] : scope.working.flatMap(path => [path,...contextPaths(path,'design')].map(p=>`${contextRoot}/${p}`));
+  const designPaths = member.value.lead ? [designRoot] : [];
   return [
     {
       id: 'management',
       prompt: harnessPrompt('management'),
-      tools: [...files, 'bash', ...(member.value.lead ? ['list_models', 'validate_member_config'] : [])],
+      tools: member.value.lead ? [...files, 'bash', 'list_models', 'validate_member_config'] : ['ls','read'],
       parts: [
-        ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: scope.dependencies.flatMap(path => [path,...contextPaths(path,'design')].map(p=>`${contextRoot}/${p}`)), context: 'design' as const, commit: 'user' as const, prompt: harnessPrompt('management-design') }] : []),
+        ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: [], context: 'design' as const, commit: 'user' as const, prompt: harnessPrompt('management-design') }] : []),
         ...(member.value.lead ? [{ id: 'member-config', paths: ['.rsi/members'], exclude: [], commit: 'user' as const, prompt: harnessPrompt('management-members') }] : []),
       ],
     },

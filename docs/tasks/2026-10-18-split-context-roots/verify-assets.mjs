@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { harnessPrompt } from '../../../backend/dist/src/harness-prompts.js';
+import { contextPaths, nodeReference } from '../../../backend/dist/src/workspace-layout.js';
+import { implementationContextPart } from '../../../backend/dist/src/harness-bases.js';
+process.chdir('/tmp');
+assert.match(harnessPrompt('design-template',{project:'Packaged project'}), /# Packaged project/);
+assert.match(harnessPrompt('implementation-context-template',{design:'metadata.json'}), /### Usage examples/);
+assert.match(harnessPrompt('implementation-context',{design:'backend/metadata.json',context:'.rsi/context/backend/impl.md or impl/'}), /backend\/metadata.json/);
+assert.deepEqual(contextPaths('backend/metadata.json','impl'),['implement/backend/impl.md','implement/backend/impl']);
+assert.equal(nodeReference('.rsi/context/design/backend/metadata.json'),'backend/metadata.json');
+const part=implementationContextPart('backend/metadata.json');
+assert.equal(part.id,implementationContextPart('BACKEND/metadata.json').id);
+assert.deepEqual(part.paths,['.rsi/context/implement/backend/impl.md','.rsi/context/implement/backend/impl']);
+assert.equal(part.context,'impl');
+assert.equal(part.commit,'agent');
+assert.throws(()=>harnessPrompt('implementation-context'), /Missing harness prompt value/);
+console.log('Packaged rules/templates, metadata identity and dual-form context scope load independently of cwd.');
+
+assert.match(harnessPrompt('implementation'),/working scope and dependencies/);
+assert.match(harnessPrompt('management'),/Only the lead may edit the design tree/);
+assert.match(harnessPrompt('management-design'),/parallel .rsi\/context\/implement tree/);

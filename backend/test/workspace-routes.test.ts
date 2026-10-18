@@ -84,7 +84,7 @@ test('workspace endpoints register workspaces and serve project files', () => wi
   assert.equal((await call('/workspaces/demo/files/file?path=src/main.ts', { method: 'PUT', data: { content: 'x' }, status: 400 })).error.code, 'invalid_input');
   await writeFile(join(directory, 'image.bin'), Buffer.from([0xff, 0xfe, 0x00]));
   assert.equal((await call('/workspaces/demo/files/file?path=image.bin', { status: 415 })).error.code, 'unsupported_file');
-  assert.equal((await call('/workspaces/demo/files/file?path=.rsi/context/user', { status: 400 })).error.code, 'invalid_path');
+  assert.equal((await call('/workspaces/demo/files/file?path=.rsi/context/design/user', { status: 400 })).error.code, 'invalid_path');
   assert.deepEqual((await call('/workspaces/demo/files/tree?depth=2')).entries.map((entry: Body) => entry.path), ['image.bin', 'src', 'src/main.ts']);
   assert.equal((await call('/workspaces/demo/files/tree?depth=0', { status: 400 })).error.code, 'invalid_input');
   assert.equal((await call('/workspaces/demo/files/tree?deep=1', { status: 400 })).error.code, 'invalid_input');
@@ -95,7 +95,7 @@ test('workspace endpoints edit the context base and stream its changes', () => w
   await call('/workspaces', { method: 'POST', data: { workspaceId: 'demo', name: 'Demo', directory: join(folder, 'project'), models: testModels(), adopt: false }, status: 201 });
   const created = await call('/workspaces/demo/context/file?path=user/notes/a.md', { method: 'PUT', data: { content: '# A\nalpha', baseRevision: null, reason: 'start' }, status: 201 });
   assert.equal(created.seq, 2);
-  assert.equal((await call('/workspaces/demo/context/file?path=impl/plan.md', { method: 'PUT', data: { content: 'x', baseRevision: null }, status: 403 })).error.code, 'read_only');
+  assert.equal((await call('/workspaces/demo/context/file?path=implement/plan.md', { method: 'PUT', data: { content: 'x', baseRevision: null }, status: 403 })).error.code, 'read_only');
   assert.equal((await call('/workspaces/demo/context/file?path=user/notes/a.md', { method: 'PUT', data: { content: 'late', baseRevision: null }, status: 409 })).error.code, 'file_exists');
   const read = await call('/workspaces/demo/context/file?path=user/notes/a.md');
   assert.deepEqual([read.content, read.revision, read.current, read.reason], ['# A\nalpha', created.revision, true, 'start']);
@@ -138,15 +138,15 @@ test('workspace model endpoints support validated revision-checked settings and 
 test('read-only design endpoints discover current designs and explain invalid member references', () => withServer(async (call, _server, folder) => {
   await call('/workspaces', { method: 'POST', data: { workspaceId: 'designs', name: 'Designs', directory: join(folder, 'designs'), models: testModels(), adopt: false }, status: 201 });
   const record = { content: '# Backend', implementation: ['backend/src'] };
-  await call('/workspaces/designs/context/file?path=systems/backend/metadata.json', { method: 'PUT', status: 201, data: { content: JSON.stringify({implementation:record.implementation}), baseRevision: null } });
-  await call('/workspaces/designs/context/file?path=systems/backend/design.md', { method: 'PUT', status: 201, data: { content: record.content, baseRevision: null } });
+  await call('/workspaces/designs/context/file?path=design/systems/backend/metadata.json', { method: 'PUT', status: 201, data: { content: JSON.stringify({implementation:record.implementation}), baseRevision: null } });
+  await call('/workspaces/designs/context/file?path=design/systems/backend/design.md', { method: 'PUT', status: 201, data: { content: record.content, baseRevision: null } });
   await call('/workspaces/designs/context/file?path=user/notes.md', { method: 'PUT', status: 201, data: { content: '# Notes', baseRevision: null } });
-  await call('/workspaces/designs/context/file?path=bad/metadata.json', { method: 'PUT', status: 201, data: { content: '{"content":"Bad"}', baseRevision: null } });
+  await call('/workspaces/designs/context/file?path=design/bad/metadata.json', { method: 'PUT', status: 201, data: { content: '{"content":"Bad"}', baseRevision: null } });
   const catalog = await call('/workspaces/designs/designs');
   assert.equal(catalog.truncated, false);
   assert.deepEqual(catalog.designs.map((item: Body) => [item.path, item.implementation]), [['metadata.json', []], ['systems/backend/metadata.json', ['backend/src']]]);
   const selected = await call('/workspaces/designs/designs/file?path=systems/backend/metadata.json');
-  assert.deepEqual(selected.design, {...record,documents:[{path:'systems/backend/design.md',content:record.content}]});
+  assert.deepEqual(selected.design, {...record,documents:[{path:'design/systems/backend/design.md',content:record.content}]});
   assert.equal(selected.designIssue, null);
   assert.equal((await call('/workspaces/designs/designs/file?path=bad/metadata.json')).design, null);
   assert.ok((await call('/workspaces/designs/designs/file?path=bad/metadata.json')).designIssue);

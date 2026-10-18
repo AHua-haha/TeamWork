@@ -111,13 +111,15 @@ A busy, invalid, unavailable or self recipient refuses the entire publication wi
 A system node has metadata.json containing only implementation paths, and Markdown document content:
 
 ```text
-.rsi/context/backend/
-  metadata.json       # {"implementation":["backend/src"]}
-  design.md           # OR design/README.md plus Markdown documents
-  impl.md             # OR impl/README.md plus Markdown documents
+.rsi/context/
+  design/backend/
+    metadata.json     # {"implementation":["backend/src"]}
+    design.md         # OR design/README.md plus Markdown documents
+  implement/backend/
+    impl.md           # OR impl/README.md plus Markdown documents
 ```
 
-The metadata path identifies the node. Root uses metadata.json; backend uses backend/metadata.json. Large context can use multiple documents without creating child systems; actual child nodes have their own metadata and paired contexts. Each representation allows 1–100 nonempty Markdown documents/1 MiB total, requires README.md in directory form and forbids simultaneous file/directory forms. Semantic prose sections remain harness instructions.
+The metadata path identifies the node. References are relative to the design root: metadata.json for root, backend/metadata.json for backend. Raw file paths include design/ or implement/. Large context can use multiple documents without creating child systems; actual child nodes have their own metadata and paired contexts. Each representation allows 1–100 nonempty Markdown documents/1 MiB total, requires README.md in directory form and forbids simultaneous file/directory forms. Semantic prose sections remain harness instructions.
 
 Member configuration uses JSON plus Markdown prompts in the lead's private worktree:
 
@@ -149,7 +151,7 @@ Base rule text is maintained in [backend/prompts/harness](prompts/README.md), in
 
 Three fixed bases assemble common tools and maintenance prompts:
 
-- **management:** working-design editing, read-only dependencies, lead bootstrap .rsi/context and .rsi/members, user-approved design/member commits;
+- **management:** lead-only global design editing and member management at .rsi/context/design and .rsi/members; other members read/follow assigned designs, user-approved design/member commits;
 - **implementation:** writable paths derived from accepted working designs, dependency mappings/context read-only with overlap precedence; paired working-design implementation context is editable; code/context commits allowed independently for the agent;
 - **execute:** general Bash under backend command allowances and the same protected filesystem boundary.
 
@@ -303,16 +305,16 @@ Private `/agents/:id/follow` reads stored message history and retained chunks an
 
 ### Fresh workspace initialization and local reset
 
-Create/adopt prepares .rsi/context/metadata.json, design.md and impl.md, exact lead JSON/Markdown under .rsi/members/<lead-id>/, and private .rsi/harness Git/worktree state. The lead works on root metadata.json, uses the workspace model default and starts without dependencies, command allowances or project-code mappings. All three initial context files share sequence 1. Source/history is clean and active; later design/member changes still require normal user commit/activation. Existing .rsi entries are refused and project implementation/Git is preserved. Old layout is not silently migrated; safe unresolved active references remain inspectable but cannot run.
+Create/adopt prepares .rsi/context/design/metadata.json, .rsi/context/design/design.md and .rsi/context/implement/impl.md, exact lead JSON/Markdown under .rsi/members/<lead-id>/, and private .rsi/harness Git/worktree state. The lead works on root metadata.json, uses the workspace model default and starts without dependencies, command allowances or project-code mappings. All three initial context files share sequence 1. Source/history is clean and active; later design/member changes still require normal user commit/activation. Existing .rsi entries are refused and project implementation/Git is preserved. Old layout is not silently migrated; safe unresolved active references remain inspectable but cannot run.
 
 For a deliberate local clean slate, stop the backend and run `npm --prefix backend run reset:workspace-data -- --apply`. The script uses backend/.env and refuses a database owned by a running backend. It removes all workspace/agent/chat/runtime/context records, agent configs and registered-workspace managed directories (new .rsi, legacy .context/.team and exact legacy harness stores). It retains provider connections/encrypted credentials, app settings, catalogs/model caches and project implementation/Git checkouts. It does not unregister provider connections or drop the database. Paths are quarantined during the transaction and restored if deletion fails; committed cleanup removes the quarantines. Start the backend afterward and create/adopt workspaces afresh. Keep `/.rsi/` out of your project's own version control; initialization does not edit its Git settings or ignore files.
 
 ## Design and implementation-context maintenance
 
-One context tree follows project systems independently of member identity. Each node groups metadata-only JSON with design.md/design/ and impl.md/impl/. Metadata references remain stable when documents change form. Root starts with three files; no user/agent category directories are created. The raw context overview is {workspaceId,seq,files,bytes,problems}, and file paths are relative to the single root.
+Parallel design/implement roots follow the same project-system hierarchy independently of member identity. Design nodes have metadata-only JSON and design.md/design/; mirrored implementation nodes have impl.md/impl/. Metadata references remain stable when documents change form. Root starts with three files; no user/agent category directories are created. The raw context overview is {workspaceId,seq,files,bytes,problems}, and raw file paths are relative to the context container and include their purpose root.
 
 Complete design context describes purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. Implementation context documents exact Input, Output, Effect and Usage examples for actual interfaces. Directory documents stay within one system; do not impose a fixed interfaces/requirements file split. Base Markdown rules instruct reading applicable context, updating facts/examples and continuation information, and surfacing mismatches. Reusable knowledge and automatic maintenance remain deferred.
 
-Working nodes grant exact context authority without descendants; dependency context is read-only. Design/metadata acceptance is user-only. Each working node has an agent-committable impl-context-<hash> scope covering both impl.md and impl/, with ID derived from its lower-case metadata path. Use existing Bash metadata.git.scope and ordinary Git commands; histories/staging stay independent of code/design/member state. Management Git's context selector excludes implementation documents even in new nodes. Semantic commits validate structural form on immutable selected/staged bytes; checkpoints preserve unfinished edits. General Bash cannot write .rsi.
+Permissions have working and dependencies, each with designContext, implementationContext and implementation. Only the lead edits all design context. Both roles edit exact working-node implementation context and accepted mapped code; dependency implementation/context is read-only. The lead role grants no extra implementation rights. Design/metadata acceptance is user-only. Each working node has an agent-committable impl-context-<hash> scope covering both impl.md and impl/, with ID derived from its lower-case metadata path. Use existing Bash metadata.git.scope and ordinary Git commands; histories/staging stay independent of code/design/member state. Only the lead has design Git scope. New read-only member views inherit accepted design files, including user-committed additions, updates and deleted-document tombstones. Semantic commits validate structural form on immutable selected/staged bytes; checkpoints preserve unfinished edits. General Bash cannot write .rsi.
 
-Raw user context mutation can edit design/metadata, but refuses implementation context and mixed folder moves/deletes. Semantic design inspection returns metadata plus ordered Markdown documents, aggregate content and a revision covering all design bytes. New members inherit committed context through shared scope refs; existing peers/original raw context are not automatically refreshed. Prompt changes require restart (and rebuild for compiled deployments). Existing old-layout data needs explicit repair/reset before new node assignments can run.
+Raw user context mutation can edit design/metadata, but refuses implementation context and mutations under implement/. Semantic design inspection returns metadata plus ordered Markdown documents, aggregate content and a revision covering all design bytes. New members inherit committed implementation context through shared scope refs; existing implementation worktrees/original raw context are not automatically refreshed. Read-only member design views follow the current accepted design revision on the next environment assembly. Prompt changes require restart (and rebuild for compiled deployments). Existing old-layout data needs explicit repair/reset before new node assignments can run.

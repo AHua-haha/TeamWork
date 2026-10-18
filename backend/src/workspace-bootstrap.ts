@@ -8,7 +8,7 @@ import { HarnessHistory, harnessStorage } from './harness-history.js';
 import type { NewMember, MemberActivationState } from './team.js';
 import { sha256 } from './text.js';
 import { AppError } from './types.js';
-import { contextRoot, designRoot, managedRoot, rootDesignPath, implementationContextPath } from './workspace-layout.js';
+import { contextRoot, designRoot, managedRoot, rootDesignPath, implementationContextPath, metadataPath, contextPaths } from './workspace-layout.js';
 
 export interface WorkspaceBootstrap { activation: MemberActivationState; context: ContextCommit }
 /** Prepare all initial files/history before the registry can expose the workspace. */
@@ -19,11 +19,11 @@ export async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMe
   try {
     await mkdir(join(workspace.directory, designRoot), { recursive: true });
     const initial = [
-      { path: rootDesignPath, content: JSON.stringify({ implementation: [] }, null, 2) + '\n' },
-      { path: 'design.md', content: harnessPrompt('design-template', { project: workspace.name }) + '\n' },
+      { path: metadataPath(rootDesignPath), content: JSON.stringify({ implementation: [] }, null, 2) + '\n' },
+      { path: contextPaths(rootDesignPath,'design')[0]!, content: harnessPrompt('design-template', { project: workspace.name }) + '\n' },
       { path: implementationContextPath(rootDesignPath), content: harnessPrompt('implementation-context-template', { design: rootDesignPath }) + '\n' },
     ];
-    for (const file of initial) await writeFile(join(workspace.directory, contextRoot, file.path), file.content, { flag: 'wx' });
+    for (const file of initial) { const absolute=join(workspace.directory,contextRoot,file.path); await mkdir(dirname(absolute),{recursive:true}); await writeFile(absolute,file.content,{flag:'wx'}); }
     for (const [path, content] of Object.entries(lead.value.configuration!.files)) {
       const absolute = join(workspace.directory, dirname(lead.value.configuration!.path), path);
       await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, content, { flag: 'wx' });

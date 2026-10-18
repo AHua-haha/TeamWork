@@ -1,12 +1,12 @@
 import type { DesignSummary, Member } from '../client/workspace-client.js';
-import { sameDesign } from './design-state.js';
+import { sameDesign, designReference } from './design-state.js';
 export interface MemberTreeNode { path: string; name: string; folder: boolean; children: MemberTreeNode[]; members: Member[]; unavailable: boolean }
 /** System-node folders provide hierarchy; document directories never create nodes. Root is rendered by MemberTree. */
 export function memberTree(designs:readonly DesignSummary[],members:readonly Member[]):MemberTreeNode[]{
  const nodes=new Map<string,MemberTreeNode>(),roots:MemberTreeNode[]=[];
  const paths=new Set([...designs.map(d=>d.path),...members.flatMap(m=>m.harness.designScope.working)]);
  for(const path of paths){
-  const reference=path.replace(/^\.rsi\/context\//,'');
+  const reference=designReference(path);
   if(reference.toLowerCase()==='metadata.json')continue;
   const parts=reference.replace(/\/metadata\.json$/i,'').split('/');
   let parent=roots,prefix='';

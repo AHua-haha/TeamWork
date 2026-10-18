@@ -51,7 +51,7 @@ test('saves create, update, and refuse stale or conflicting writes', () => withB
   await assert.rejects(base.save('user/goals/PLAN.md', 'x', null, null), code('file_exists'));
   await assert.rejects(base.save('user/goals/plan.md', 'x', 'not-the-revision', null), code('stale_revision'));
   await assert.rejects(base.save('user/missing.md', 'x', created.revision, null), code('stale_revision'));
-  await assert.rejects(base.save('impl/notes.md', 'x', null, null), code('read_only'));
+  await assert.rejects(base.save('implement/notes.md', 'x', null, null), code('read_only'));
   await assert.rejects(base.save('user/a.md', 'x', null, 'r'.repeat(1001)), code('invalid_input'));
 
   const same = await base.save('user/goals/plan.md', '# Plan\n', created.revision, null);
@@ -85,7 +85,7 @@ test('a folder move keeps file identity and history and prunes the old folder', 
   await assert.rejects(base.move('user/a', 'user/a/inner', undefined, null), code('invalid_input'));
   await assert.rejects(base.move('user/a/x.md', 'user/b/z.md', undefined, null), code('file_exists'));
   await assert.rejects(base.move('user/a', 'user/c', x.revision, null), code('invalid_input'));
-  await assert.rejects(base.move('user/a/x.md', 'impl/x.md', undefined, null), code('read_only'));
+  await assert.rejects(base.move('user/a/x.md', 'implement/x.md', undefined, null), code('read_only'));
 
   const moved = await base.move('user/a', 'user/c', undefined, 'reorganize');
   assert.deepEqual(moved.moved.map(({ from, to }) => [from, to]), [['user/a/deep/y.md', 'user/c/deep/y.md'], ['user/a/x.md', 'user/c/x.md']]);

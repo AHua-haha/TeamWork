@@ -10,7 +10,7 @@ Three fixed bases provide management, implementation and execute authority. The 
 
 A member assignment contains designScope: {working: [node metadata paths], dependencies: [node metadata paths]}. The lists must be disjoint, valid and resolvable. It contains no independently configurable implementationScope. Member execution rules can be configured through member files and validated under the fixed execute base policy.
 
-The lead can maintain .rsi/context/ and .rsi/members/ immediately; new workspace bootstrap already supplies the root design. Dependencies remain read-only. Other members can edit their working designs and read dependency designs; member files are lead-only among agents. Implementation-code authority starts empty until accepted design mappings grant paths. Working-design implementation context is independently writable even with no code mappings.
+The lead can read/edit all .rsi/context/design and lead-only .rsi/members immediately. Other members can only read/follow exact working/dependency designs. Both roles derive implementation context from assigned nodes under .rsi/context/implement and source code from accepted mappings; dependency implementation/context is read-only. Implementation-code authority starts empty until accepted design mappings grant paths. Working-design implementation context is independently writable even with no code mappings.
 
 Common ls/read/write/edit tools operate on pending files. One bash tool takes {command, metadata?: {git: {scope}}}; scope is design, member-config, implementation or a listed impl-context-<hash> part when that member owns the part. No identity, revision, approval, repository, index or reference may be supplied through metadata.
 
@@ -24,7 +24,7 @@ Bash requires Git, Node.js and a supported OS sandbox: macOS sandbox-exec, or Li
 
 | Base | Scope and capabilities | Semantic commit policy |
 | --- | --- | --- |
-| management | Pending working design, read-only dependencies, lead-only member files, common file tools and scoped Git Bash; lead model discovery and file validation | User acceptance for design and member-config |
+| management | Lead-only design editing and member files; other members read working/dependency designs, common file tools and scoped Git Bash; lead model discovery and file validation | User acceptance for design and member-config |
 | implementation | Writable implementation from accepted working mappings and paired working-design context; read-only dependency implementation/context; common file tools and scoped Git Bash | Agent may commit code and implementation context independently |
 | execute | General Bash under existing allowances and applicable filesystem restrictions | Cannot override protected scopes or Git acceptance |
 
@@ -34,15 +34,65 @@ Tools are assembled once and all base/member prompts form the system prompt. Mem
 
 ### System context authority and rules
 
-A node reference is context-relative metadata.json (root) or backend/metadata.json. metadata.json stores only accepted implementation mappings. Design content is design.md or design/README.md plus Markdown documents; implementation context independently uses impl.md or impl/README.md plus Markdown documents. Multiple documents remain one node/assignment; actual child systems have separate metadata and assignments. Exact working/dependency nodes do not inherit descendants.
+A node reference is design-root-relative metadata.json (root) or backend/metadata.json. metadata.json stores only accepted implementation mappings. Design content is design.md or design/README.md plus Markdown documents; implementation context independently uses impl.md or impl/README.md plus Markdown documents. Multiple documents remain one node/assignment; actual child systems have separate metadata and assignments. Exact working/dependency nodes do not inherit descendants.
 
-Working designs grant editing their own metadata/design context and implementation context. Dependency metadata/design/implementation context are read-only. Lead management can maintain design nodes throughout .rsi/context, excluding dependency designs, without granting unrelated implementation-context access. Private state/member policy remains unchanged. File and directory forms have the same authority.
+Design content lives under .rsi/context/design and implementation context under .rsi/context/implement, with matching relative node paths. Only the lead can edit design/metadata globally. Both roles can edit exact working implementation context and accepted mapped source paths, while dependency implementation/context stays read-only. Global design management also covers designs used as dependencies without expanding implementation authority. Private state/member policy remains unchanged. File and directory forms have the same authority.
 
 Each working node has an impl-context-<hash> part, with ID derived from the first 16 SHA-256 hex characters of lower-case metadata reference. It covers both impl.md and impl/ and permits agent semantic commits independently of code/design/member history. Existing shared refs give newly opened member scopes committed context across assignment changes; current peers and original raw context are not overwritten.
 
-Management design parts have a design context selector: only metadata and design documents belong to their snapshots/staging, including future nodes. Implementation-context parts use an impl selector. These selectors participate in scope identity, filter native Git operations and keep co-located parts disjoint. Metadata cannot override them. User acceptance validates immutable reviewed metadata/Markdown; implementation-context semantic commits validate the selected snapshot/staged structural form. Choose one representation, with README.md for directory form, 1–100 nonempty Markdown documents and 1 MiB total. Checkpoints may retain pending invalid forms for repair; semantic refusals preserve pending/staged state.
+Management design parts have a design context selector: only metadata and design documents belong to their snapshots/staging, including future nodes. Implementation-context parts use an impl selector. These selectors participate in scope identity, filter native Git operations and keep purpose-root parts disjoint. Metadata cannot override them. User acceptance validates immutable reviewed metadata/Markdown; implementation-context semantic commits validate the selected snapshot/staged structural form. Choose one representation, with README.md for directory form, 1–100 nonempty Markdown documents and 1 MiB total. Checkpoints may retain pending invalid forms for repair; semantic refusals preserve pending/staged state.
 
 Base prompts prescribe complete design context (purpose/boundaries, Interface contract, requirements), independently of document count, and actual implemented contracts with Input, Output, Effect and Usage examples. Reading relevant context, updating examples/facts and surfacing inconsistencies are prompt instructions. No fixed per-section file split, semantic prose parser, new agent tool or maintenance loop is added. Reusable knowledge remains deferred outside context.
+
+### Permission structure
+
+Organize the resolved permission view into two parts: working scope and dependency scope. Each has three resource components: design context, implementation context and implementation (the actual project source/files). This is the permission model; it does not introduce independent agent-configurable implementation assignments. The backend still derives the scopes from role, assigned design nodes and accepted source-code mappings.
+
+```text
+Harness permissions
+  Working scope
+    Design context
+    Implementation context
+    Implementation (project source/files)
+  Dependencies
+    Design context
+    Implementation context
+    Implementation (project source/files)
+```
+
+### Working scope
+
+Working scope identifies the resources available for carrying out the assigned work. Permission is explicit per component: being in working scope does not necessarily make design context editable.
+
+| Component | Lead | Other member |
+| --- | --- | --- |
+| Design context | Read/edit the entire design tree, including metadata/mappings | Read/follow exact working design nodes; no edits |
+| Implementation context | Read/edit exact working nodes under implement/ | Read/edit exact working nodes under implement/ |
+| Implementation | Read/edit project paths from accepted working-design mappings | Read/edit project paths from accepted working-design mappings |
+
+The lead's global design-management permission belongs to the design-context component of its working scope. It grants no additional implementation-context or source-code access. An ordinary member follows its accepted design and reports required design changes to the lead.
+
+### Dependencies
+
+Dependency scope supplies resources used by the work. It grants read-only access and no mutation or semantic commit capability.
+
+| Component | Lead | Other member |
+| --- | --- | --- |
+| Design context | Already covered by its global working design-context permission; dependency use adds no edit authority | Read/follow exact dependency design nodes |
+| Implementation context | Read exact dependency nodes; no edits | Read exact dependency nodes; no edits |
+| Implementation | Read accepted dependency source mappings; no edits | Read accepted dependency source mappings; no edits |
+
+The lead's design management still covers a system whose implementation it uses as a dependency. Its design context is already in the lead's global working design-context scope; that does not permit editing the system's dependency implementation context or source code. Read-only dependency restrictions win overlapping implementation/source mappings. Ordinary members' design context remains read-only in both working and dependency scope.
+
+### Derivation, commits and purpose harnesses
+
+Implementation context follows exact working/dependency design nodes. Project implementation follows the accepted metadata mappings of those nodes. A working node with an empty source-code mapping can still have writable implementation context. Context directories do not grant descendant-node ownership; mapped source directories cover their source descendants subject to protected paths and dependency restrictions.
+
+The management harness provides design/member capabilities and maintenance rules. Only the lead receives a writable design Git scope. It can create/move/delete design nodes/documents, edit metadata/mappings and stage/restore design within that scope, while semantic design commit requires user acceptance. Other members receive read-only working/dependency designs through the common read tools and no writable design scope.
+
+The implementation harness provides implementation-context and project-file capabilities within the resolved working/dependency components. Both roles can stage/restore/commit their writable implementation context and source code through their separate scopes. Private .rsi/.git state remains excluded from project-code access. File tools, Bash and Git operations cannot make another component writable merely because an agent can edit implementation.
+
+Member management remains lead-only: read/edit configuration and prompts within its existing member scope, user commit, then separate user activation while the whole workspace is idle. Pending design/mapping edits cannot expand implementation authority before user acceptance. Design, implementation context, source-code and member histories remain independently controlled.
 
 ### Scoped Git and stable history
 
@@ -83,7 +133,7 @@ Unapproved protected commits preserve pending files and staging. Stale reviews/b
 
 ## Guarantees and limits
 
-Each member retains its private worktree. Scope acceptance and checkpoint history are independent of group publication and active member configuration. The original checkout's Git branch/index remain untouched. No automatic merge, peer-worktree refresh, new approval UI, network allowance or automatic context-maintenance algorithm is provided.
+Each member retains its private worktree. Scope acceptance and checkpoint history are independent of group publication and active member configuration. The original checkout's Git branch/index remain untouched. No automatic merge, implementation-worktree refresh, new approval UI, network allowance or automatic context-maintenance algorithm is provided.
 
 Startup converts active legacy member records to backend-owned metadata and design-only assignments, preserving identity/settings/commands, exact prior source and pending drafts. Old Git references remain reachable; matching scopes retain their history. When a scope shape changes, existing pending files are preserved and a new scope reference is initialized; old references are retained. Stale or legacy drafts are not rewritten automatically. Member execution configuration may update allowances within the fixed command schema; non-Bash allowances do not independently authorize a shell. Linux isolation requires its external dependencies; verification in this task uses macOS.
 
@@ -103,3 +153,5 @@ Private harness storage is .rsi/harness inside the managed workspace root. It is
 9. A root lead with empty implementation mappings edits its root implementation context and commits it through its listed context scope; it still cannot edit project code. A dependency context is readable/searchable but not writable or selectable as a commit scope.
 
 Safe unresolvable stored assignments remain visible in member source/readiness inspection but provide no derived implementation-context authority and cannot run. New member validation and run admission resolve real nodes; no old-layout content fallback or automatic migration is introduced.
+
+Ordinary members read currently accepted designs. On the next environment assembly their read-only design views hydrate that accepted revision, including new files, changed text and document deletions/form transitions. This does not refresh their implementation context/code or grant design-edit authority.

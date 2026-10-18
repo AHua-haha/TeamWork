@@ -12,8 +12,8 @@ test('lead bootstraps pending designs and member files through common tools; des
     return output.content.map(p => p.type === 'text' ? p.text : '').join('');
   };
   assert.deepEqual(prepared.tools.map(t => t.definition.name).sort(), ['bash', 'edit', 'ls', 'read', 'write']);
-  await call('write', { path: '.rsi/context/new/metadata.json', content: JSON.stringify({ implementation: ['src'] }) });
-  await call('write', { path: '.rsi/context/new/design.md', content: 'Pending project' });
+  await call('write', { path: '.rsi/context/design/new/metadata.json', content: JSON.stringify({ implementation: ['src'] }) });
+  await call('write', { path: '.rsi/context/design/new/design.md', content: 'Pending project' });
   await call('write', { path: '.rsi/members/example/member.json', content: '{"name":"Example"}' });
   assert.match(await call('bash', { command: 'git add . && git commit -m "Define project"', metadata: { git: { scope: 'design' } } }), /approval_required/);
   const review = (await f.team.harness.inspect(f.lead.memberId)).parts.find(p => p.state.part.id === 'design')!;

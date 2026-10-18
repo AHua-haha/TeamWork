@@ -93,6 +93,7 @@ export class MemberFiles {
     if (segments.some(segment => segment.length > 255 || badCharacter.test(segment))) throw new AppError('invalid_path', `${path} has a name that is not allowed`);
     if (this.hidden(segments)) throw new AppError('not_found', `${path} not found`, 404);
     if(segments[0]?.toLowerCase()==='.rsi' && (segments[0]!=='.rsi'||(segments[1]&&segments[1]!==segments[1].toLowerCase())))throw new AppError('invalid_path','Use the canonical .rsi/context and .rsi/members roots');
+    if(segments[0]==='.rsi'&&segments[1]==='context'&&segments[2]&&segments[2]!==segments[2].toLowerCase())throw new AppError('invalid_path','Use the canonical design and implement purpose roots');
     const label = segments.join('/');
     if (segments.length && this.access.deny(label, 'see') !== null) throw new AppError('not_found', `${label} not found`, 404);
     if (mode !== 'see') {

@@ -17,7 +17,7 @@ function paths(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > 50) throw new AppError('invalid_config', 'A design scope lists at most 50 design files');
   const result = value.map(path => {
     if(typeof path !== 'string')throw new AppError('invalid_config','A design reference must be a context-relative path');
-    return contextPath(path.replace(/^\.rsi\/context\//,''));
+    return contextPath(path.replace(/^\.rsi\/context\/design\//i,'').replace(/^design\//i,''));
   });
   if (new Set(result.map(path => path.toLowerCase())).size !== result.length) throw new AppError('invalid_config', 'Duplicate design scope paths');
   return result;
