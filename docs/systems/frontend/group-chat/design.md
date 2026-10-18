@@ -126,3 +126,7 @@ Settings belong to that member, persist through reload and apply to its next run
 ## Repeated publication attempts
 
 Expanded Work may contain distinct unpublished response attempts followed by refusal feedback. Similar wording does not make these duplicate records. Exclude only the exact accepted final source from Work and render that accepted report once outside it. Do not hide or merge genuinely different attempts by comparing their text. Collapsing Work leaves only the accepted report visible.
+
+## Agent routing-header presentation
+
+Agent routing metadata is an optional leading <mentions> block; user input retains its existing mention/composer behavior. Display only agent body Markdown in active activity and accepted final reports. Hide a possible partial opening, header contents and tag while it streams; reveal the body progressively after the closing tag. A non-header text prefix appears normally as soon as it is distinguishable. Preserve subsequent literal mention-like text in the body. Never infer recipients from @ text or use frontend parsing as publication authority. Private stored records retain the raw response. New final references carry backend-owned bodyOffset with their selected source blocks; older references keep their historical meaning. Acceptance still renders the final once and folds only preceding work.

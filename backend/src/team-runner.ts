@@ -2,7 +2,8 @@ import { HarnessQueue } from './harness-history.js';
 import type { AgentRuntime } from './runtime.js';
 import type { TeamService } from './team.js';
 import { Changes } from './changes.js';
-import { chatText, mentions, mentionLimit, type ChatStore, type ChatMessage, type ChatAcceptance } from './group-chat.js';
+import { chatText, userMentions, mentionLimit, type ChatStore, type ChatMessage, type ChatAcceptance } from './group-chat.js';
+import { parseMemberResponse } from './member-response.js';
 import { AppError, type RunState } from './types.js';
 
 export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback'>;
@@ -32,17 +33,18 @@ export class TeamRunner {
     const member = await this.team.find(memberId);
     const active = this.active.get(memberId);
     if (!member || member.value.retiredAt !== null || active?.runId !== runId) throw new AppError('member_unavailable', 'The sending member is no longer working', 409);
-    const result = await this.publish(member.workspaceId, chatText(value), { memberId, name: member.value.name, runId, exchangeId: active.exchangeId, finalMessageId });
+    const response = parseMemberResponse(chatText(value));
+    const result = await this.publish(member.workspaceId, response.body, { memberId, name: member.value.name, runId, exchangeId: active.exchangeId, finalMessageId, names: response.names });
     return result.message;
   }
 
-  private publish(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string }) {
+  private publish(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string; names: string[] }) {
     return this.workspaceOperation(workspaceId, () => this.acceptPublication(workspaceId, text, sender));
   }
 
-  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string }) {
+  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string; names: string[] }) {
     const roster = await this.team.active(workspaceId);
-    const names = mentions(text);
+    const names = sender ? sender.names : userMentions(text);
     const recipients = names.map(name => {
       const member = roster.find(item => item.value.name.toLowerCase() === name.toLowerCase());
       if (!member) throw new AppError('not_found', `No active member named "${name}"`, 404);

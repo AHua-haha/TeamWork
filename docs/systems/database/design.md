@@ -135,3 +135,5 @@ The store retains the workspace's latest activated member-config revision/time i
 ## Fresh workspace baseline persistence
 
 Normal workspace creation supplies a prepared bootstrap context change and member activation marker. createWorkspace stores them in the same transaction as workspace, models and lead. The initial context sequence is 1 with the root design; source metadata pins the lead's member-config baseline. A failure rolls back all database effects. Low-level storage imports may omit bootstrap, but the application create/adopt endpoint always supplies it. Administrative reset requires exclusive runtime ownership and removes runtime/workspace records and agent config records while retaining provider, app, catalog and model-cache records.
+
+Accepted group final references may include a backend-owned bodyOffset into the selected final text. Reads return the accepted body slice while keeping the raw assistant source immutable. Older references without an offset retain their prior accepted text. Invalid offsets/selection metadata fail explicitly.

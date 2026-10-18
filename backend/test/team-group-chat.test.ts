@@ -1,21 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mentions } from '../src/group-chat.js';
+import { userMentions } from '../src/group-chat.js';
 import { code, settle, withTeam, worker } from './team-fixture.js';
 
 const textOf = (entries: { message: { content: unknown } }[]) => entries.map(entry => String(entry.message.content));
 
 test('mentions use exact names, braces and case-insensitive deduplication; emails are ordinary text', () => {
-  assert.deepEqual(mentions('@Backend @backend @{Frontend Worker} user@example.com'), ['backend', 'Frontend Worker']);
-  assert.deepEqual(mentions('foo@Backend x@domain.test'), []);
-  for (const text of ['@{Backend Worker', '@{}', '@{Backend\nWorker}']) assert.throws(() => mentions(text), code('invalid_input'));
+  assert.deepEqual(userMentions('@Backend @backend @{Frontend Worker} user@example.com'), ['backend', 'Frontend Worker']);
+  assert.deepEqual(userMentions('foo@Backend x@domain.test'), []);
+  for (const text of ['@{Backend Worker', '@{}', '@{Backend\nWorker}']) assert.throws(() => userMentions(text), code('invalid_input'));
 });
 
 test('scoped package and path identifiers are not member mentions', () => {
-  assert.deepEqual(mentions('Use `@joplin/lib`, @types/node and @anthropic-ai/sdk.'), []);
-  assert.deepEqual(mentions('@scope/package@1.0.0 https://registry.npmjs.org/@scope/package'), []);
-  assert.deepEqual(mentions('@joplin/lib @Backend review this with @{Frontend Worker} and @types/node'), ['Backend', 'Frontend Worker']);
-  assert.deepEqual(mentions('@Backend/path @Backend @{Backend}'), ['Backend']);
+  assert.deepEqual(userMentions('Use `@joplin/lib`, @types/node and @anthropic-ai/sdk.'), []);
+  assert.deepEqual(userMentions('@scope/package@1.0.0 https://registry.npmjs.org/@scope/package'), []);
+  assert.deepEqual(userMentions('@joplin/lib @Backend review this with @{Frontend Worker} and @types/node'), ['Backend', 'Frontend Worker']);
+  assert.deepEqual(userMentions('@Backend/path @Backend @{Backend}'), ['Backend']);
 });
 
 test('reports with scoped packages publish once without activating matching member names', () => withTeam(async f => {
@@ -30,6 +30,39 @@ test('reports with scoped packages publish once without activating matching memb
   assert.equal(f.runtime.active(namedLikePackage.memberId), undefined);
   const chat = await f.team.runner.snapshot(f.workspaceId);
   assert.equal(chat.messages.filter(message => message.author.type === 'member').length, 1);
+}));
+
+test('agent bodies never trigger members and an empty header is removed from the shared body', () => withTeam(async f => {
+  const backend = await worker(f, 'Backend');
+  const first = await f.team.runner.postUser(f.workspaceId, 'Report');
+  const body = '@Backend @Nobody @joplin/lib @{unfinished\n<mentions>["Ignored"]</mentions>';
+  const report = await f.team.runner.publishFinal(f.lead.memberId, first.runs[0]!.runId, body, 'final');
+  assert.deepEqual(report.recipients, []);
+  assert.equal(report.text, body);
+  assert.equal(f.runtime.active(backend.memberId), undefined);
+  const second = await f.team.runner.postUser(f.workspaceId, 'Another report');
+  const empty = await f.team.runner.publishFinal(f.lead.memberId, second.runs[0]!.runId, '<mentions>\n</mentions>\n\nDone @Nobody', 'final');
+  assert.equal(empty.text, 'Done @Nobody');
+  assert.deepEqual(empty.recipients, []);
+}));
+
+test('header validation refuses atomically and a revised header admits parallel recipients', () => withTeam(async f => {
+  const backend = await worker(f, 'Backend'), frontend = await worker(f, 'Frontend Worker');
+  const start = await f.team.runner.postUser(f.workspaceId, 'Delegate');
+  for (const [text, expected] of [
+    ['<mentions>bad</mentions>\nBody', 'invalid_mentions'],
+    ['<mentions>["Backend", "Missing"]</mentions>\nBody', 'not_found'],
+    ['<mentions>["Lead"]</mentions>\nBody', 'self_mention'],
+  ]) {
+    await assert.rejects(f.team.runner.publishFinal(f.lead.memberId, start.runs[0]!.runId, text, 'final'), code(expected!));
+    assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 1);
+    assert.equal(f.runtime.active(backend.memberId), undefined);
+    assert.equal(f.runtime.active(frontend.memberId), undefined);
+  }
+  const result = await f.team.runner.publishFinal(f.lead.memberId, start.runs[0]!.runId, '<mentions>["Backend", "backend", "Frontend Worker"]</mentions>\n\nWork. @Nobody is ordinary content.', 'final');
+  assert.equal(result.text, 'Work. @Nobody is ordinary content.');
+  assert.deepEqual(result.recipients, [backend.memberId, frontend.memberId]);
+  assert.ok(f.runtime.active(backend.memberId) && f.runtime.active(frontend.memberId));
 }));
 
 test('all members receive messages but only mentioned members activate, in parallel', () => withTeam(async f => {
@@ -68,7 +101,7 @@ test('busy, unknown, self and unready recipients refuse entire publications with
   await f.team.service.create(f.workspaceId, { name: 'Unready', role: 'developer' });
   const first = await f.team.runner.postUser(f.workspaceId, '@Backend start');
   for (const [text, error] of [['@Backend @Frontend work', 'member_busy'], ['@Nobody work', 'not_found'], ['@Unready work', 'member_unavailable']] as const) await assert.rejects(f.team.runner.postUser(f.workspaceId, text), code(error));
-  await assert.rejects(f.team.runner.publishFinal(backend.memberId, first.runs[0]!.runId, '@Backend again', 'final'), code('self_mention'));
+  await assert.rejects(f.team.runner.publishFinal(backend.memberId, first.runs[0]!.runId, '<mentions>["Backend"]</mentions>\nAgain', 'final'), code('self_mention'));
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 1);
   assert.equal(f.runtime.active(frontend.memberId), undefined);
   assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 1);
@@ -79,10 +112,10 @@ test('default lead routing, return mentions, and limit count accepted activation
   await f.team.runner.configure(f.workspaceId, 2);
   const user = await f.team.runner.postUser(f.workspaceId, 'implement');
   assert.equal(user.runs[0]!.agentId, f.lead.memberId);
-  const assignment = await f.team.runner.publishFinal(f.lead.memberId, user.runs[0]!.runId, '@Backend @backend work', 'final');
+  const assignment = await f.team.runner.publishFinal(f.lead.memberId, user.runs[0]!.runId, '<mentions>["Backend","backend"]</mentions>\nWork', 'final');
   assert.deepEqual(assignment.recipients, [backend.memberId]);
   const run = f.runtime.active(backend.memberId)!;
-  await assert.rejects(f.team.runner.publishFinal(backend.memberId, run.runId, '@Lead review', 'final'), code('mention_limit'));
+  await assert.rejects(f.team.runner.publishFinal(backend.memberId, run.runId, '<mentions>["Lead"]</mentions>\nReview', 'final'), code('mention_limit'));
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 2);
   await f.team.runner.publishFinal(backend.memberId, run.runId, 'Finished.', 'final');
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 3);

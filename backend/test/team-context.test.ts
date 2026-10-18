@@ -31,6 +31,9 @@ test('member requests get team rules and only their harness design and implement
   assert.deepEqual(inspected.harnesses.find(h => h.id === 'execute')!.tools, ['web_search', 'web_fetch']);
   assert.match(request.context.systemPrompt!, /Bash remains network-isolated/);
   assert.match(request.context.systemPrompt!, /<metadata>/);
+  assert.match(request.context.systemPrompt!, /<mentions>/);
+  assert.match(request.context.systemPrompt!, /omit the entire block/);
+  assert.doesNotMatch(request.context.systemPrompt!, /Mention tokens are routing instructions even inside/);
 }));
 test('the lead receives design maintenance, choices and management tools with shared assignment instructions', () => withTeam(async fixture => {
   const request = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });

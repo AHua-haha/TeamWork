@@ -1,6 +1,7 @@
 import type { Message } from '@earendil-works/pi-ai';
 import type { ClientSnapshot } from '../client/protocol.js';
 import type { GroupEntry } from '../client/group-client.js';
+import { responseTextBlocks } from './response-text.js';
 
 export interface ToolActivity { id: string; kind: 'tool'; text: string; args?: string; result?: string; failed?: boolean }
 export type ActivityItem = { id: string; kind: 'text'; text: string } | { id: string; kind: 'tools'; tools: ToolActivity[] };
@@ -37,11 +38,13 @@ export function runActivity(snapshot: ClientSnapshot, entry: Extract<GroupEntry,
       if (text.trim()) items.push({ id: record.id, kind: 'text', text });
       continue;
     }
+    const visible = !final || final.bodyOffset !== undefined ? responseTextBlocks(message) : new Map<number, string>();
     for (const [index, part] of message.content.entries()) {
       const id = `${record.id}-${index}`;
       if (part.type === 'text' && part.text.trim()) {
         const accepted = record.id === final?.messageId && !final.toolCallId && (final.contentIndices === undefined || final.contentIndices.includes(index));
-        if (!accepted) items.push({ id, kind: 'text', text: part.text });
+        const text = visible.get(index) ?? part.text;
+        if (!accepted && text.trim()) items.push({ id, kind: 'text', text });
       } else if (part.type === 'toolCall') {
         if (record.id === final?.messageId && part.id === final.toolCallId) continue;
         const item: ToolActivity = { id, kind: 'tool', text: part.name, args: JSON.stringify(part.arguments, null, 2) };

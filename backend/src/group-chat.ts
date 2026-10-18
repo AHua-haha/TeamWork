@@ -9,7 +9,7 @@ export interface ChatMessage {
   workspaceId: string; messageId: string; position: number; exchangeId: string;
   author: ChatAuthor; text: string; recipients: string[]; time: number;
 }
-export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; /** Historical accepted response-tool records only. */ toolCallId?: string }
+export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; /** UTF-16 offset in the joined selected text; backend-owned. */ bodyOffset?: number; /** Historical accepted response-tool records only. */ toolCallId?: string }
 export interface TimelineBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
 export type TimelineEntry = TimelineBase & (
   | { kind: 'user'; text: string; messageId: string }
@@ -37,6 +37,7 @@ export function validateTimelineEntry(value: unknown): asserts value is Timeline
     identity(entry.finalRef.messageId); position(entry.finalRef.position);
     const indices = entry.finalRef.contentIndices;
     if (indices !== undefined && (!Array.isArray(indices) || !indices.length || indices.some((value, index) => !Number.isSafeInteger(value) || value < 0 || (index > 0 && value <= indices[index - 1]!)) || entry.finalRef.toolCallId !== undefined)) throw new AppError('invalid_data', 'Invalid final text selection');
+    if (entry.finalRef.bodyOffset !== undefined && (!Number.isSafeInteger(entry.finalRef.bodyOffset) || entry.finalRef.bodyOffset < 0 || indices === undefined || entry.finalRef.toolCallId !== undefined)) throw new AppError('invalid_data', 'Invalid final body offset');
     if (entry.finalRef.toolCallId !== undefined && (typeof entry.finalRef.toolCallId !== 'string' || !entry.finalRef.toolCallId || entry.finalRef.toolCallId.length > 1024)) throw new AppError('invalid_data', 'Invalid final response action');
     if (entry.run.status !== 'completed' || entry.finalRef.agentId !== entry.memberId || entry.finalRef.runId !== entry.run.runId || entry.finalRef.position + (entry.finalRef.toolCallId ? 1 : 0) !== entry.working.through || entry.finalRef.position <= entry.working.after) throw new AppError('invalid_data', 'Invalid timeline final reference');
   }
@@ -81,7 +82,7 @@ export function chatText(value: unknown): string {
 }
 
 /** Explicit routing tokens; an @ inside an email or identifier is ordinary text. */
-export function mentions(text: string): string[] {
+export function userMentions(text: string): string[] {
   for (const match of text.matchAll(/(^|[^\p{L}\p{N}_.@-])@\{/gu)) {
     const tail = text.slice(match.index! + match[1]!.length + 2);
     const end = tail.indexOf('}');

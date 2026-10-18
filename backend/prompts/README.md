@@ -1,5 +1,7 @@
 # Base harness prompts
 
+Fixed team response/routing rules live in `team/group-chat.md`. MemberContext loads this required file at startup and the backend build packages `team/` alongside the harness assets. Agent final responses use an optional leading `<mentions>` JSON-array block; body @ text has no routing meaning. User composer mentions retain their existing behavior.
+
 Maintain harness rule text in the Markdown files under `harness/`:
 
 - `common.md`: shared worktree, checkpoint and acceptance instructions.

@@ -1128,7 +1128,7 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     const fourthStep = await requests.next();
     assert.equal((await team.team(workspaceId)).members.length, 2, 'file changes do not activate members');
     assert.ok(!fourthStep.request.tools.some(t => t.definition.name === 'submit_member_config'));
-    answer(fourthStep.events, message('@Backend Implement the accepted design.'));
+    answer(fourthStep.events, message('<mentions>["Backend"]</mentions>\n\nImplement the accepted design.'));
     const workerStep = await requests.next();
     assert.match(workerStep.request.context.systemPrompt!, /You are Backend/);
     assert.match(workerStep.request.context.systemPrompt!, /Keep the result concise/);
@@ -1154,7 +1154,7 @@ test('member harnesses edit in isolated worktrees, checkpoint runs and separate 
     const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'bash');
     assert.ok(commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text');
     if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.equal(JSON.parse(commandResult.content[0].text).stdout, 'Done');
-    answer(workerFinish.events, message('@Lead Implemented src/result.txt and committed implementation.'));
+    answer(workerFinish.events, message('<mentions>["Lead"]</mentions>\n\nImplemented src/result.txt and committed implementation.'));
     const leadFinish = await requests.next();
     const secondLeadRun = (await runtime.getState(lead.memberId)).run!;
     answer(leadFinish.events, message('Implementation is committed; design refinement awaits user approval.'));
@@ -1347,6 +1347,56 @@ test('scoped package references produce one accepted report without private publ
   } finally { await f.close(); }
 });
 
+test('agent headers route atomically and persist only the referenced body while raw private replies survive reload', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    await f.team.runner.configure(f.workspaceId, 3);
+    const accepted = await f.team.runner.postUser(f.workspaceId, 'Delegate with a structured header');
+    const first = await f.requests.next();
+    assert.match(first.request.context.systemPrompt!, /When nobody should run, omit the entire block/);
+    answer(first.events, message('<mentions>["Backend",]</mentions>\n\nUnpublished candidate.'));
+    const retry = await f.requests.next();
+    assert.ok(retry.request.context.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('invalid_mentions')));
+    assert.equal((await store.chatSnapshot(f.workspaceId)).position, 1);
+    assert.equal((await f.runtime.getState(f.backend.memberId)).run, null);
+    answer(retry.events, message('<mentions>["Backend", "Missing"]</mentions>\n\nAnother private candidate.'));
+    const corrected = await f.requests.next();
+    assert.ok(corrected.request.context.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('No active member named "Missing"')));
+    const body = '# Work\n\n@Lead @Nobody @joplin/lib @{unfinished\n<mentions>ordinary body example</mentions>';
+    const raw = '<mentions>\n["Backend", "backend", "Frontend"]\n</mentions>\n\n' + body;
+    answer(corrected.events, message(raw));
+    const left = await f.requests.next(), right = await f.requests.next();
+    assert.equal((await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId)).status, 'completed');
+    const shared = (await store.chatSnapshot(f.workspaceId)).messages.at(-1)!;
+    assert.equal(shared.text, body);
+    assert.deepEqual(shared.recipients, [f.backend.memberId, f.frontend.memberId]);
+    const entry = (await store.chatTimeline(f.workspaceId)).changes.filter(change => change.entry.entryId === accepted.runs[0]!.runId).at(-1)!.entry;
+    assert.ok(entry.kind === 'member');
+    if (entry.kind !== 'member') return;
+    assert.equal(entry.text, body);
+    assert.equal(entry.finalRef!.bodyOffset, raw.length - body.length);
+    assert.deepEqual(entry.finalRef!.contentIndices, [0]);
+    const history = await store.runMessages(f.lead.memberId, accepted.runs[0]!.runId);
+    assert.ok(history.some(record => record.message.role === 'assistant' && record.message.content.some(part => part.type === 'text' && part.text === raw)));
+    assert.equal(history.filter(record => record.metadata.source === 'publication-feedback').length, 2);
+    for (const step of [left, right]) assert.ok(step.request.context.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.endsWith(body) && !m.content.includes('["Backend"')));
+    const context = await store.getContext(f.lead.memberId);
+    await store.replaceContext(f.lead.memberId, context.revision, [{ messageId: 'header-summary', message: { role: 'user', content: 'Compacted context.', timestamp: 1 }, metadata: {} }]);
+    assert.deepEqual(await store.runMessages(f.lead.memberId, accepted.runs[0]!.runId), history);
+    const reopened = new MySqlStore(databaseUrl!);
+    try { assert.equal((await reopened.chatSnapshot(f.workspaceId)).messages.at(-1)!.text, body); }
+    finally { await reopened.close(); }
+    answer(left.events, message('<mentions>\n</mentions>\n\nFinished @Lead @Nobody'));
+    answer(right.events, message('Finished @Lead @Nobody'));
+    for (const member of [f.backend, f.frontend]) {
+      const run = (await f.runtime.getState(member.memberId)).run!;
+      assert.equal((await f.runtime.finished(member.memberId, run.runId)).status, 'completed');
+    }
+    assert.equal((await store.chatSnapshot(f.workspaceId)).position, 4);
+    assert.equal((await f.runtime.getState(f.lead.memberId)).run!.runId, accepted.runs[0]!.runId, 'body mentions trigger no successor');
+  } finally { await f.close(); }
+});
+
 test('native commentary continues; stored ordinary final text streams and pins exact final blocks', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
@@ -1361,6 +1411,7 @@ test('native commentary continues; stored ordinary final text streams and pins e
     const final = fauxAssistantMessage([
       { type: 'text', text: 'I checked the configuration.', textSignature: signature('commentary') },
       { type: 'thinking', thinking: 'Hidden model reasoning' },
+      { type: 'text', text: '<mentions>\n[]\n</mentions>', textSignature: signature('final_answer') },
       { type: 'text', text: 'Model answer', textSignature: signature('final_answer') },
     ]);
     second.events.push({ type: 'start', partial: { ...final, content: [], stopReason: 'pending' } });
@@ -1378,7 +1429,8 @@ test('native commentary continues; stored ordinary final text streams and pins e
     const entry = (await store.chatTimeline(f.workspaceId)).changes.at(-1)!.entry;
     if (entry.kind !== 'member') throw new Error('Missing member entry');
     assert.equal(entry.text, 'Model answer');
-    assert.deepEqual(entry.finalRef?.contentIndices, [2]);
+    assert.deepEqual(entry.finalRef?.contentIndices, [2, 3]);
+    assert.equal(entry.finalRef?.bodyOffset, '<mentions>\n[]\n</mentions>\n'.length);
     assert.equal(entry.finalRef!.position, entry.working.through);
     assert.equal(entry.finalRef?.toolCallId, undefined);
     assert.deepEqual((await store.chatSnapshot(f.workspaceId)).messages.map(m => m.text), ['Inspect model', 'Model answer']);
@@ -1434,7 +1486,7 @@ test('group chat SQL/runtime: parallel work, private refusal feedback, deferred 
     const leadStep = await f.requests.next();
     assert.match(leadStep.request.context.systemPrompt!, /You are Lead,/);
     assert.equal((await store.getContext(f.backend.memberId)).entries.length, 1, 'busy member receives no mid-work insertion');
-    answer(backendStep.events, message('@Lead PRIVATE CANDIDATE: please review'));
+    answer(backendStep.events, message('<mentions>["Lead"]</mentions>\n\nPRIVATE CANDIDATE: please review'));
     const revision = await f.requests.next();
     assert.match(revision.request.context.systemPrompt!, /You are Backend,/);
     assert.ok(revision.request.context.messages.some(item => item.role === 'user' && typeof item.content === 'string' && item.content.includes('Group publication refused (member_busy)')));

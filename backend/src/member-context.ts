@@ -1,5 +1,10 @@
 import type { TeamService } from './team.js';
 import type { WorkspaceService } from './workspace.js';
+import { readFileSync } from 'node:fs';
+import { AppError } from './types.js';
+
+const responseRules = readFileSync(new URL('../prompts/team/group-chat.md', import.meta.url), 'utf8').trim();
+if (!responseRules) throw new AppError('invalid_config', 'Required team group-chat prompt is empty', 500);
 
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 200);
 
@@ -18,7 +23,7 @@ export class MemberContext {
       `Your responsibility: ${responsibility || '(none given yet)'}`,
       '## How the team works',
       '- The user design is the shared agreement. Read and follow it. Implementation context belongs to the design and subdesigns, independently of member identity. Follow your harness maintenance rules.',
-      '- Work in the shared group chat. Use ordinary assistant text to explain progress while using tools. Finish your work with a complete Markdown reply; a natural model completion without tools offers its answer for shared publication. Only accepted final answers are shared with everyone. Do promised work before finishing. Address recipients using @Name or @{Name With Spaces}. Mention tokens are routing instructions even inside quotes or code. Do not mention yourself. A response without mentions triggers no member.',
+      responseRules,
       '- Mentioned members work independently and may run in parallel. Publication is refused as a whole if any recipient is busy, missing or unready, or the exchange mention limit would be exceeded. Private refusal feedback lets you revise or retry within your current run. A refused attempt delivered no task. There is no queue or automatic retry.',
       '- All accepted shared messages enter every member context. Messages received during your work are appended after you finish. Your retained private work and tool results are yours alone; they are not shared with colleagues.',
       '- End with what was done, which files changed, and what is still open. Automatic harness-context maintenance is deferred.',
@@ -28,9 +33,9 @@ export class MemberContext {
             '- Keep user-owned design decisions in the system tree described by your harness.',
             '- When a design choice is unsettled, offer concrete choices with their tradeoffs and your recommendation, then end your reply and wait for the user\'s answer. Do not commit your recommendation as the user\'s choice or assign dependent work before it is settled.',
             '- Decompose based on accepted designs. Follow the management harness rules for maintaining and validating member files. Use list_models for workspace choices and assign only active members; pending or merely committed files do not activate a member.',
-            '- Assign work in your final group response by mentioning the worker and stating the objective and expected result. Its designs come from its harness. Bring proposed design changes from a worker to the user.',
+            '- Assign work in your final group response by listing the worker in its leading <mentions> header and stating the objective and expected result in the body. Its designs come from its harness. Bring proposed design changes from a worker to the user.',
           ].join('\n')
-        : '- The lead maintains the design and changes the team. If a design change or user decision is needed, mention the lead in your final response with the question and choices; working designs may be edited under the harness, but committing them requires user approval. Never edit dependency designs.',
+        : '- The lead maintains the design and changes the team. If a design change or user decision is needed, list the lead in the leading <mentions> header and put the question and choices in your final body. Follow your harness design permissions and never edit dependency implementation.',
       '## Team',
       ...roster.map((entry, index) => `- ${entry.value.name} (${entry.value.role})${entry.id === agentId ? ', you' : ''}${this.isRunning(entry.id) ? ', working' : ', idle'}: ${oneLine(entry.value.responsibility) || 'no responsibility given'}${issues[index]!.length ? ` [cannot run yet: ${issues[index]!.join('; ')}]` : ''}`),
     ];

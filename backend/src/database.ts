@@ -1,4 +1,5 @@
 import { finalAnswer } from './final-answer.js';
+import { parseMemberResponse } from './member-response.js';
 import { createHash, randomUUID } from 'node:crypto';
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
@@ -634,7 +635,8 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
         const candidate = decode<ContextEntry>(record.entry, value => validateEntries([value]));
         const answer = finalAnswer(candidate.message);
         if (!answer) throw new AppError('invalid_input', 'Final reference must identify naturally completed answer text');
-        finalRef = { agentId: sender.id, runId: record.run_id, messageId: record.id, position: record.position, contentIndices: answer.contentIndices };
+        const response = parseMemberResponse(answer.text);
+        finalRef = { agentId: sender.id, runId: record.run_id, messageId: record.id, position: record.position, contentIndices: answer.contentIndices, bodyOffset: response.bodyOffset };
         if (await this.finalText(db, finalRef) !== input.text) throw new AppError('invalid_input', 'Final response text does not match its committed reference');
       }
       const entries: TimelineEntry[] = [];
@@ -711,6 +713,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
 
   private async finalText(db: Db, ref: FinalReference): Promise<string> {
     identity(ref.agentId); identity(ref.runId); identity(ref.messageId); position(ref.position);
+    if (ref.bodyOffset !== undefined && (!ref.contentIndices || ref.toolCallId !== undefined)) throw new AppError('corrupt_data', 'Final body offset requires selected text blocks', 500);
     const [row] = await rows(db, 'SELECT id, run_id, entry FROM messages WHERE agent_id = ? AND position = ?', [ref.agentId, ref.position]);
     if (!row || row.id !== ref.messageId || row.run_id !== ref.runId) throw new AppError('corrupt_data', 'Referenced final message is unavailable', 500);
     const entry = decode<ContextEntry>(row.entry, value => validateEntries([value]));
@@ -724,7 +727,9 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     if (ref.contentIndices) {
       const answer = finalAnswer(entry.message);
       if (!answer || JSON.stringify(answer.contentIndices) !== JSON.stringify(ref.contentIndices)) throw new AppError('corrupt_data', 'Final text selection does not match its stored response', 500);
-      return answer.text;
+      if (ref.bodyOffset === undefined) return answer.text;
+      if (!Number.isSafeInteger(ref.bodyOffset) || ref.bodyOffset < 0 || ref.bodyOffset >= answer.text.length) throw new AppError('corrupt_data', 'Invalid final body offset', 500);
+      return answer.text.slice(ref.bodyOffset);
     }
     if (entry.message.content.some(part => part.type === 'toolCall')) throw new AppError('corrupt_data', 'Historical final reference contains tool calls', 500);
     return entry.message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');

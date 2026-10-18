@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GroupClient, type GroupEntry } from '../src/client/group-client.js';
+import { GroupClient, validateEntry, type GroupEntry } from '../src/client/group-client.js';
 import { runActivity, mentionAt, mentionToken, toolSetSummary, workToolSummary, type ActivityItem } from '../src/ui/group-work.js';
 import { assistant, record, run, streamResponse, until, agentId, runId } from './fixtures.js';
 const workspaceId = 'w1';
@@ -76,6 +76,41 @@ test('ordinary text streams immediately in one flow while thinking remains hidde
   const extended = {...partial,content:[...partial.content.slice(0,1),{type:'text' as const,text:'Let me check the files.'}]};
   assert.equal(runActivity(snapshot([], [{...live,message:extended}]), member)[0]?.kind, 'text');
   assert.equal((runActivity(snapshot([], [{...live,message:extended}]), member)[0] as {text:string}).text,'Let me check the files.');
+});
+
+test('a leading routing envelope stays hidden while streaming and only its body appears', () => {
+  const header = ' \n<mentions>\n["Backend"]\n</mentions>\n\n';
+  for (let index = 1; index <= header.length; index++) {
+    const partial = assistant(header.slice(0, index));
+    const live = { messageId: 'header', runId, message: partial, nextSequence: 1, lastEvent: { type: 'start' as const, partial } };
+    assert.deepEqual(runActivity(snapshot([], [live]), member), [], `header prefix ${index}`);
+  }
+  const body = '# Report\n\n@Nobody and @joplin/lib are ordinary content.\n<mentions>not routing</mentions>';
+  const raw = record(1, 'header', header + body);
+  assert.deepEqual(runActivity(snapshot([raw]), member), [{ id: 'header-0', kind: 'text', text: body }]);
+  assert.equal((raw.message.content[0] as { text: string }).text, header + body, 'raw history is preserved');
+  assert.deepEqual(runActivity(snapshot([record(1, 'plain', '<other>Literal text')]), member), [{ id: 'plain-0', kind: 'text', text: '<other>Literal text' }]);
+});
+
+test('routing-header presentation preserves source blocks and native commentary before final text', () => {
+  const signature = (phase: string) => JSON.stringify({ v: 1, id: phase, phase });
+  const message = { ...record(1, 'phased', ''), message: { ...assistant(''), content: [
+    { type: 'text' as const, text: 'Earlier work.', textSignature: signature('commentary') },
+    { type: 'text' as const, text: '<mentions>\n[]\n', textSignature: signature('final_answer') },
+    { type: 'text' as const, text: '</mentions>\n\nFinal @Nobody', textSignature: signature('final_answer') },
+  ] } };
+  const state = snapshot([message]);
+  assert.deepEqual(runActivity(state, member), [{ id: 'phased-0', kind: 'text', text: 'Earlier work.' }, { id: 'phased-2', kind: 'text', text: 'Final @Nobody' }]);
+  const entry = { ...member, run: run('completed'), working: { after: 0, through: 1 }, finalRef: { agentId, runId, messageId: 'phased', position: 1, contentIndices: [1, 2], bodyOffset: 29 }, text: 'Final @Nobody' };
+  assert.deepEqual(runActivity(state, entry), [{ id: 'phased-0', kind: 'text', text: 'Earlier work.' }]);
+});
+
+test('group entries validate backend-owned body offsets without changing historical references', () => {
+  const entry = { ...member, run: run('completed'), finalRef: { agentId, runId, messageId: 'final', position: 1, contentIndices: [0], bodyOffset: 0 }, text: 'Answer' };
+  assert.doesNotThrow(() => validateEntry(entry, workspaceId));
+  for (const value of [-1, 1.5, null, '1']) assert.throws(() => validateEntry({ ...entry, finalRef: { ...entry.finalRef, bodyOffset: value } }, workspaceId));
+  assert.throws(() => validateEntry({ ...entry, finalRef: { ...entry.finalRef, contentIndices: undefined } }, workspaceId));
+  assert.doesNotThrow(() => validateEntry({ ...entry, finalRef: { ...entry.finalRef, bodyOffset: undefined } }, workspaceId));
 });
 
 test('consecutive tools merge across assistant messages and hidden thinking or empty text', () => {

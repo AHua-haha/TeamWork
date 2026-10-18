@@ -11,12 +11,12 @@ This is the agreed group-chat behavior with the prototype conventions recorded d
 - The user posts messages into the chat.
 - The prototype has one group chat per workspace, containing the user and all active team members. Creating or retiring a member changes participation; previous shared messages retain their historical authors.
 - A member submits a candidate final response for publication before ending its activation. Successful publication completes its response; a busy-recipient refusal returns private feedback and allows the member to continue its activation.
-- The first triggering rule selects members explicitly mentioned with `@` in a newly published message.
+- User messages select members through existing @ mention syntax; agent responses select recipients only through their optional leading structured mention header.
 - A user message without mentions triggers the lead. With explicit mentions, it triggers the mentioned members; the lead is not additionally triggered by default.
 - A member response without mentions triggers no member.
 - Multiple mentioned members may execute in parallel. Each member has at most one active run. A busy recipient's mention is refused, with no queue or deferred activation; the sender must try again when it is free.
 - Eligible recipients belong to the chat and have runnable configuration and harness scope.
-- Mentions use `@Name` or `@{Name With Spaces}`, matching active names ignoring case. Duplicate mentions select one recipient. Unknown, retired, unready, or self recipients refuse the whole publication with private feedback. Mentions are explicit routing syntax even inside quoted text or code; ordinary email addresses are not mentions.
+- User mentions use `@Name` or `@{Name With Spaces}`. Agent header names are exact active member names, compared ignoring case; duplicates select one recipient. Unknown, retired, unready, self or busy recipients refuse the whole publication with private feedback. Agent body text is never scanned for mentions.
 - Automatic exchange continues while messages activate members, ending when there are no remaining active members or when the mention limit prevents further activation. Counting and exhaustion semantics are defined below.
 
 ## Outputs and observable effects
@@ -98,3 +98,23 @@ Ordinary assistant text and tools stream to the user as one private activity flo
 ## Scoped package identifiers
 
 A bare @name immediately followed by / is part of a scoped package/path identifier, such as @joplin/lib or @types/node, and is not a routing mention. This applies in both user and member publications and even when an active member has that scope's name. Explicit @Name and @{Name With Spaces} mentions retain their behavior. Real unknown member mentions still refuse the whole publication; technical package identifiers do not consume mention budget or trigger a member. This does not introduce general Markdown parsing or change how otherwise explicit routing tokens are written.
+
+## Agent response format
+
+An agent may start its selected final response text with this optional routing header:
+
+```text
+<mentions>
+["Backend", "Frontend Worker"]
+</mentions>
+
+# Report
+
+Message body, including ordinary @ references.
+```
+
+The entire block may be omitted when nobody should be triggered. Empty or whitespace-only block contents and [] also mean no recipients. Allow leading whitespace before the opening tag. The first opening/tag spelling is case-sensitive and has no attributes; malformed leading reserved <mentions syntax, missing closing tag, invalid JSON, non-array data or empty/non-string/whitespace-padded member names refuse publication. Only this initial block is interpreted; all later content, including @Name, @{...}, package identifiers and later mention-like blocks, is ordinary body text. Explicit recipient names are deduplicated ignoring case in first-mentioned order. Existing eligibility, parallel launch, busy/self/unknown refusal and exchange-budget rules remain atomic.
+
+Remove the routing block and following blank-line separator from the published body. A nonempty body is required. No-header responses retain their text exactly. Member contexts and chat APIs receive the body and resolved recipient IDs; the immutable private assistant message retains its original blocks including the header. Backend-owned final references add bodyOffset (a UTF-16 string offset) into the joined selected text; source contentIndices still identify every selected final block. Older references without bodyOffset retain their original accepted content unchanged.
+
+Malformed-header refusals produce private feedback and allow the same activation to revise. They create no shared message, recipient reservation or budget consumption. No absent-header fallback scans the report body. Native phase selection and natural completion still identify when a candidate can be submitted; a streamed header never triggers publication by itself.

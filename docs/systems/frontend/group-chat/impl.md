@@ -56,6 +56,7 @@ Keep reservation order independent of completion order. Auto-follow streamed gro
 The single group-chat flow is implemented by:
 
 - [GroupChat](../../../../frontend/src/ui/GroupChat.tsx): active flow, accepted-final partition and disclosure components.
+- [Routing-header text projection](../../../../frontend/src/ui/response-text.ts): hides partial envelopes and preserves text-block identities.
 - [Group work projection](../../../../frontend/src/ui/group-work.ts): block order, hidden thinking, tool/result matching, tool sets and final deduplication.
 - [Agent client](../../../../frontend/src/client/agent-client.ts) and [group client](../../../../frontend/src/client/group-client.ts): stored history, partial reconciliation and authoritative entry changes.
 - [Group styles](../../../../frontend/src/ui/styles.css): compact tool sets and active/completed spacing within the accepted layout.
@@ -85,3 +86,5 @@ ComposerSettings and ModelSettingsPanel share ModelSettingsPicker, model discove
 ## Refused candidates and final identity
 
 runActivity partitions by exact accepted message/block identity. Separate assistant candidates followed by publication-feedback remain private work even when their text resembles the accepted final. A three-attempt regression checks that Work contains two real candidates and feedback while the final source is excluded. Root mention parsing belongs to the team group-chat system; the UI neither guesses routing nor deduplicates prose.
+
+The group work projection strips only the optional leading routing envelope from assistant text presentation, buffering partial prefixes and applying the prefix offset across text blocks without merging their stable identities. Native commentary remains separate from the selected final text flow. GroupClient validates optional bodyOffset metadata; the accepted body remains backend-authoritative. Raw agent history/chunks are never rewritten.

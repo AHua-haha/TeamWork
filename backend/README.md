@@ -126,6 +126,18 @@ curl -s -X POST http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/stop
 
 Every accepted message is shared with all active members. Idle members append it immediately; working members append buffered messages after their private work finishes. Receiving messages alone does not activate a member. Mentioned members run in parallel. Each retains private execution history, with shared messages interleaved individually. Only accepted final responses enter the shared transcript.
 
+Agent final responses use an optional leading routing header; the report body is never scanned for @ mentions:
+
+```text
+<mentions>
+["Backend", "Frontend Worker"]
+</mentions>
+
+Please implement the accepted design. @joplin/lib and @Nobody here are ordinary text.
+```
+
+Omit the block when nobody should run; an empty block or `[]` is also valid. Names are matched ignoring case and duplicates count once. Invalid header syntax or recipients refuse the whole publication with private feedback. Only the body is displayed and delivered as the shared message. Raw private history retains the original response. New final references include backend-owned `bodyOffset` alongside `contentIndices`; old accepted references remain unchanged. User composer `@Name` / `@{Name With Spaces}` input keeps its existing routing/default-lead behavior.
+
 A busy, invalid, unavailable or self recipient refuses the entire publication with no partial delivery or queue. Agents receive private feedback to revise or retry. Each user message starts an exchange with an activation budget (default 32); duplicate mentions count once, refused attempts consume nothing, and subsequent response activations share the exchange budget. Stop cancels all active branches. Restart interrupts abandoned work, delivers buffered messages and never replays triggers. Private agent `/follow` APIs remain available for inspection; direct `/agents/:memberId/runs` refuses all members. Existing private history is preserved and is not converted into shared chat history.
 
 A system node has metadata.json containing only implementation paths, and Markdown document content:
@@ -318,7 +330,7 @@ Old prototype history imports once in publication order. New admissions reserve 
 
 ## Unified activity streaming and final acceptance
 
-Workspace members finish with ordinary assistant text. Tool calls continue execution. At natural model completion (`stop`), native `final_answer` text blocks are selected when present; otherwise unphased text blocks are selected, excluding native `commentary`. Commentary-only output continues, and token truncation fails without publication. The team checkpoints and offers the selected text for atomic group acceptance. Busy/invalid mentions refuse the whole publication and return private feedback so the same run can continue.
+Workspace members finish with ordinary assistant text. Tool calls continue execution. At natural model completion (`stop`), native `final_answer` text blocks are selected when present; otherwise unphased text blocks are selected, excluding native `commentary`. Commentary-only output continues, and token truncation fails without publication. The team checkpoints, parses the optional leading mention header and offers its body for atomic group acceptance. Busy/invalid mentions refuse the whole publication and return private feedback so the same run can continue.
 
 Private `/agents/:id/follow` reads stored message history and retained chunks and returns their Pi payloads unchanged, preserving native signatures. The frontend streams visible text and tools in one activity flow, hiding thinking. Successful group publication pins the latest committed assistant record and exact ordered text-block `contentIndices`; only then does the frontend fold earlier work and keep the complete final visible. Historical plain-message and retired response-tool references remain readable as immutable accepted history. New runs use no completion tool or response-action annotation. Restart the backend and reload the frontend together to use this contract.
 
