@@ -61,3 +61,7 @@ The follow API returns stored Pi messages and chunks without a separate response
 TeamRunner retains separate per-run jobs until runtime.finished settles, in addition to mention-slot tracking. User configuration activation checks these jobs so publication's early sender release does not make finalizing file/policy work appear idle. Runtime itself does not implement member approval/activation or a second loop.
 
 Group routing remains a team publication concern. The runtime persists raw assistant output, including any routing header, and the team publishes only its parsed body. Private refusal feedback continues the same run on malformed headers; no new completion tool or runtime-specific header parser is introduced.
+
+## Workspace conversation reset boundary
+
+TeamRunner only resets an idle workspace after all tracked jobs, including afterRun finalization, have settled. MySqlStore.resetChat owns deletion; the runtime has no retained conversation cache to clear because requests/history read canonical storage. Old member response views unmount on the group reset event, closing their private follows. No reset tool or alternate run loop is added.

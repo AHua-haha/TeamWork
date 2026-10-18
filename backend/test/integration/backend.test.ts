@@ -1862,3 +1862,108 @@ test('member model preferences persist in MySQL, drive prepared runs and survive
     await rm(folder,{recursive:true,force:true});
   }
 });
+
+test('reset boundary migration upgrades existing chat settings without changing history or settings', { timeout: 15_000 }, async () => {
+  const [before] = await store.pool.query('SELECT workspace_id, position, mention_limit FROM chat_settings ORDER BY workspace_id');
+  await store.pool.query('ALTER TABLE chat_settings DROP COLUMN reset_cursor, DROP COLUMN reset_position');
+  await store.migrate();
+  const [after] = await store.pool.query('SELECT workspace_id, position, mention_limit FROM chat_settings ORDER BY workspace_id');
+  assert.deepEqual(after, before);
+  const [boundaries] = await store.pool.query<any[]>('SELECT reset_cursor, reset_position FROM chat_settings');
+  assert.ok(boundaries.every(row => row.reset_cursor === 0 && row.reset_position === 0));
+  await store.migrate();
+  assert.deepEqual((await store.pool.query('SELECT workspace_id, position, mention_limit FROM chat_settings ORDER BY workspace_id'))[0], before);
+});
+
+test('workspace chat reset atomically clears member conversation storage and starts fresh while preserving files and configuration', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  const otherId = `other-${randomUUID()}`;
+  try {
+    const workspace = (await store.getWorkspace(f.workspaceId))!;
+    const file = join(workspace.directory, 'keep-source.txt');
+    await writeFile(file, 'Keep project implementation');
+    const solo = await store.createAgent();
+    const soloRun = await store.startRun(solo.agentId, user);
+    await store.finishRun(solo.agentId, soloRun.runId, 'completed');
+    const soloBefore = await store.followSnapshot(solo.agentId, undefined, 0);
+    await store.createWorkspace({ workspaceId: otherId, name: 'Other', directory: '/tmp/' + otherId, createdAt: 1 }, sha256(otherId), newLead(otherId));
+    const other = await store.publishChat({ workspaceId: otherId, author: { type: 'user' }, text: 'Other conversation', recipients: [] });
+    await f.team.runner.configure(f.workspaceId, 7);
+    const accepted = await f.team.runner.postUser(f.workspaceId, '@Lead @Backend original conversation');
+    for (let index = 0; index < 2; index++) answer((await f.requests.next()).events, message('Original final'));
+    for (const run of accepted.runs) await f.runtime.finished(run.agentId, run.runId);
+    // Include retired members, not only the current active roster.
+    const backend = (await f.team.service.find(f.backend.memberId))!;
+    await f.team.service.retire(f.workspaceId, backend.id, backend.revision);
+    await new Promise(resolve => setImmediate(resolve));
+    const members = await store.listMembers(f.workspaceId);
+    const contextBase = await store.loadContext(f.workspaceId);
+    const configBefore = await store.configBundle(null);
+    const harnessBefore = await f.team.harness.inspect(f.lead.memberId);
+    const contextBefore = await store.getContext(f.lead.memberId);
+    const before = await store.chatTimeline(f.workspaceId);
+    const oldCursor = before.cursor;
+    const result = await f.team.runner.reset(f.workspaceId);
+    assert.ok(result.resetCursor > oldCursor);
+    const timeline = await store.chatTimeline(f.workspaceId, oldCursor);
+    assert.deepEqual(timeline.changes, []); assert.equal(timeline.more, false);
+    assert.equal(timeline.resetCursor, result.resetCursor);
+    assert.equal(timeline.mentionLimit, 7);
+    const chat = await store.chatSnapshot(f.workspaceId);
+    assert.deepEqual(chat.messages, []); assert.deepEqual(chat.runs, []); assert.equal(chat.more, false);
+    for (const member of members) {
+      const context = await store.getContext(member.id), state = await f.runtime.getState(member.id);
+      assert.deepEqual(context.entries, []); assert.equal(state.historyPosition, 0); assert.equal(state.run, null);
+      assert.deepEqual((await store.followSnapshot(member.id, undefined, 0)).history, []);
+    }
+    await assert.rejects(store.followSnapshot(accepted.runs[0]!.agentId, accepted.runs[0]!.runId, 0), (e: any) => e.code === 'not_found');
+    await assert.rejects(store.replaceContext(f.lead.memberId, contextBefore.revision, contextBefore.entries), (e: any) => e.code === 'context_conflict');
+    assert.deepEqual(await store.listMembers(f.workspaceId), members);
+    assert.deepEqual(await store.loadContext(f.workspaceId), contextBase);
+    assert.deepEqual(await store.configBundle(null), configBefore);
+    assert.deepEqual(await f.team.harness.inspect(f.lead.memberId), harnessBefore);
+    assert.equal(await readFile(file, 'utf8'), 'Keep project implementation');
+    assert.deepEqual(await store.followSnapshot(solo.agentId, undefined, 0), soloBefore);
+    assert.equal((await store.chatSnapshot(otherId)).messages[0]!.messageId, other.message.messageId);
+    const reopened = new MySqlStore(databaseUrl!);
+    try { await reopened.migrate(); assert.deepEqual(await reopened.chatTimeline(f.workspaceId), timeline); assert.deepEqual((await reopened.getContext(f.lead.memberId)).entries, []); }
+    finally { await reopened.close(); }
+    const fresh = await f.team.runner.postUser(f.workspaceId, 'Fresh conversation');
+    assert.ok(fresh.message.position > result.resetPosition);
+    assert.ok(fresh.entries[0]!.revision > result.resetCursor);
+    assert.equal(fresh.entries[1]!.kind === 'member' && fresh.entries[1]!.working.after, 0);
+    const request = await f.requests.next();
+    assert.equal(request.request.context.messages.length, 1);
+    assert.ok(JSON.stringify(request.request.context.messages).includes('Fresh conversation'));
+    assert.ok(!JSON.stringify(request.request.context.messages).includes('original conversation'));
+    answer(request.events, message('Fresh answer'));
+    await f.runtime.finished(fresh.runs[0]!.agentId, fresh.runs[0]!.runId);
+    assert.deepEqual((await store.getContext(f.backend.memberId)).entries, [], 'retired members remain outside later delivery');
+  } finally { await f.close(); }
+});
+
+test('workspace chat reset refuses live runs and rolls back all deletions on persistence failure', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  const trigger = 'reset_failure_' + randomUUID().replaceAll('-', '');
+  let installed = false;
+  try {
+    const accepted = await f.team.runner.postUser(f.workspaceId, 'Preserve on refusal');
+    const request = await f.requests.next();
+    const before = await store.chatTimeline(f.workspaceId);
+    await assert.rejects(store.resetChat(f.workspaceId), (e: any) => e.code === 'workspace_busy');
+    assert.deepEqual(await store.chatTimeline(f.workspaceId), before);
+    answer(request.events, message('Preserve this final'));
+    await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    await new Promise(resolve => setImmediate(resolve));
+    const stable = await store.chatTimeline(f.workspaceId), context = await store.getContext(f.lead.memberId), history = await store.followSnapshot(f.lead.memberId, undefined, 0);
+    await store.pool.query(`CREATE TRIGGER ${trigger} BEFORE DELETE ON messages FOR EACH ROW BEGIN IF OLD.agent_id = '${f.lead.memberId}' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Injected reset failure'; END IF; END`);
+    installed = true;
+    await assert.rejects(f.team.runner.reset(f.workspaceId), /Injected reset failure/);
+    assert.deepEqual(await store.chatTimeline(f.workspaceId), stable);
+    assert.deepEqual(await store.getContext(f.lead.memberId), context);
+    assert.deepEqual(await store.followSnapshot(f.lead.memberId, undefined, 0), history);
+    await store.pool.query(`DROP TRIGGER ${trigger}`); installed = false;
+    await f.team.runner.reset(f.workspaceId);
+    assert.deepEqual((await store.chatTimeline(f.workspaceId)).changes, []);
+  } finally { if (installed) await store.pool.query(`DROP TRIGGER ${trigger}`); await f.close(); }
+});

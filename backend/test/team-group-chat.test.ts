@@ -191,3 +191,79 @@ test('timeline follow delivers terminal updates for earlier reserved sections wh
   assert.equal(update && 'change' in update ? update.change?.entry.position : undefined, 2);
   controller.abort(); await stream.return();
 }));
+
+test('reset requires idle work, clears the workspace conversation and wakes both durable followers', () => withTeam(async f => {
+  const backend = await worker(f, 'Backend');
+  const members = await f.team.service.team(f.workspaceId);
+  await f.team.runner.configure(f.workspaceId, 7);
+  const accepted = await f.team.runner.postUser(f.workspaceId, 'Old conversation');
+  const before = await f.team.runner.timeline(f.workspaceId);
+  await assert.rejects(f.team.runner.reset(f.workspaceId), code('workspace_busy'));
+  assert.deepEqual(await f.team.runner.timeline(f.workspaceId), before);
+  f.runtime.end(f.lead.memberId); await settle();
+  const reset = await f.team.runner.reset(f.workspaceId);
+  assert.ok(reset.resetCursor > before.cursor);
+  assert.equal((await f.team.runner.timeline(f.workspaceId)).changes.length, 0);
+  assert.equal((await f.team.runner.timeline(f.workspaceId)).more, false);
+  assert.deepEqual((await f.team.runner.snapshot(f.workspaceId)).messages, []);
+  assert.deepEqual((await f.team.runner.snapshot(f.workspaceId)).runs, []);
+  for (const member of [f.lead, backend]) assert.deepEqual(f.store.agentContexts.get(member.memberId), []);
+  assert.deepEqual(await f.team.service.team(f.workspaceId), members);
+  assert.equal((await f.team.runner.snapshot(f.workspaceId)).mentionLimit, 7);
+  const controller = new AbortController();
+  const timeline = f.team.runner.followTimeline(f.workspaceId, before.cursor, controller.signal);
+  const legacy = f.team.runner.follow(f.workspaceId, accepted.message.position, controller.signal);
+  assert.deepEqual((await timeline.next()).value, { version: 1, type: 'reset', workspaceId: f.workspaceId, cursor: reset.resetCursor });
+  assert.deepEqual((await legacy.next()).value, { version: 1, type: 'reset', workspaceId: f.workspaceId, position: reset.resetPosition });
+  assert.equal((await timeline.next()).value?.type, 'sync');
+  assert.equal((await timeline.next()).value?.type, 'settings');
+  const waiting = timeline.next();
+  const fresh = await f.team.runner.postUser(f.workspaceId, 'New conversation');
+  assert.equal((await waiting).value?.type, 'entry');
+  assert.ok(fresh.entries[0]!.revision > reset.resetCursor);
+  assert.ok(fresh.message.position > reset.resetPosition);
+  assert.deepEqual(textOf(f.store.agentContexts.get(f.lead.memberId)!), [`[Group message ${fresh.message.position} from User]\nNew conversation`]);
+  controller.abort(); await timeline.return(); await legacy.return();
+}));
+
+test('reset refuses a completed publication whose runtime is still finalizing', () => withTeam(async f => {
+  let release!: () => void;
+  const finalization = new Promise<void>(resolve => { release = resolve; });
+  const finished = f.runtime.finished.bind(f.runtime);
+  f.runtime.finished = async (...args) => { const run = await finished(...args); await finalization; return run; };
+  const accepted = await f.team.runner.postUser(f.workspaceId, 'Work');
+  await f.team.runner.publishFinal(f.lead.memberId, accepted.runs[0]!.runId, 'Complete', 'final');
+  assert.equal(f.team.runner.isRunning(f.lead.memberId), false);
+  await assert.rejects(f.team.runner.reset(f.workspaceId), code('workspace_busy'));
+  release(); await settle();
+  await f.team.runner.reset(f.workspaceId);
+  assert.deepEqual((await f.team.runner.snapshot(f.workspaceId)).messages, []);
+}));
+
+test('reset and new publication serialize so new input cannot enter the cleared conversation', () => withTeam(async f => {
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const reset = f.store.resetChat.bind(f.store);
+  f.store.resetChat = async workspaceId => { entered(); await hold; return reset(workspaceId); };
+  const resetting = f.team.runner.reset(f.workspaceId);
+  await started;
+  let posted = false;
+  const sending = f.team.runner.postUser(f.workspaceId, 'Fresh input').then(result => { posted = true; return result; });
+  await settle(); assert.equal(posted, false);
+  release(); const boundary = await resetting; const fresh = await sending;
+  assert.ok(fresh.entries[0]!.revision > boundary.resetCursor);
+  assert.deepEqual((await f.team.runner.snapshot(f.workspaceId)).messages.map(item => item.text), ['Fresh input']);
+}));
+
+test('an already connected idle timeline observes reset and synchronizes at its new durable boundary', () => withTeam(async f => {
+  const controller = new AbortController();
+  const stream = f.team.runner.followTimeline(f.workspaceId, 0, controller.signal);
+  assert.equal((await stream.next()).value?.type, 'sync');
+  assert.equal((await stream.next()).value?.type, 'settings');
+  const waiting = stream.next();
+  const result = await f.team.runner.reset(f.workspaceId);
+  assert.deepEqual((await waiting).value, { version: 1, workspaceId: f.workspaceId, type: 'reset', cursor: result.resetCursor });
+  assert.deepEqual((await stream.next()).value, { version: 1, workspaceId: f.workspaceId, type: 'sync', cursor: result.resetCursor });
+  controller.abort(); await stream.return();
+}));

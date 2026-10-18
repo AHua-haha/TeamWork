@@ -28,12 +28,15 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   failNextCommit = false;
 
   readonly timelineChanges = new Map<string, { cursor: number; entry: TimelineEntry }[]>();
+  private resets = new Map<string, { resetCursor: number; resetPosition: number }>();
+  private timelinePositions = new Map<string, number>();
   private timelineEntries = new Map<string, TimelineEntry>();
   private writeEntry(entry: TimelineEntry) {
     const changes = this.timelineChanges.get(entry.workspaceId) ?? [];
     const entries = [...this.timelineEntries.values()].filter(item => item.workspaceId === entry.workspaceId);
-    entry.position ||= Math.max(0, ...entries.map(item => item.position)) + 1;
-    entry.revision = changes.length + 1;
+    entry.position ||= Math.max(this.timelinePositions.get(entry.workspaceId) ?? 0, ...entries.map(item => item.position)) + 1;
+    this.timelinePositions.set(entry.workspaceId, Math.max(this.timelinePositions.get(entry.workspaceId) ?? 0, entry.position));
+    entry.revision = (changes.at(-1)?.cursor ?? this.resets.get(entry.workspaceId)?.resetCursor ?? 0) + 1;
     this.timelineEntries.set(entry.entryId, structuredClone(entry));
     changes.push({ cursor: entry.revision, entry: structuredClone(entry) });
     this.timelineChanges.set(entry.workspaceId, changes);
@@ -46,7 +49,8 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   async chatTimeline(workspaceId: string, after = 0, limit = 100): Promise<TimelineSnapshot> {
     this.stored(workspaceId);
     const all = this.timelineChanges.get(workspaceId) ?? [];
-    return { workspaceId, cursor: all.length, changes: structuredClone(all.slice(after, after + limit)), more: after + limit < all.length, mentionLimit: this.limits.get(workspaceId) ?? 32 };
+    const changes = all.filter(item => item.cursor > after).slice(0, limit);
+    return { workspaceId, resetCursor: this.resets.get(workspaceId)?.resetCursor ?? 0, cursor: all.at(-1)?.cursor ?? this.resets.get(workspaceId)?.resetCursor ?? 0, changes: structuredClone(changes), more: all.some(item => item.cursor > (changes.at(-1)?.cursor ?? after)), mentionLimit: this.limits.get(workspaceId) ?? 32 };
   }
   readonly chatMessages = new Map<string, ChatMessage[]>();
   readonly chatRuns = new Map<string, { exchangeId: string; run: RunState }>();
@@ -68,7 +72,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     if (exchange.used + input.recipients.length > exchange.limit) throw new AppError('mention_limit', 'Mention limit reached', 409);
     if (this.failNextPublication) { this.failNextPublication = false; throw new Error('injected publication failure'); }
     const messages = this.chatMessages.get(input.workspaceId) ?? [];
-    const message: ChatMessage = { ...input, exchangeId, messageId: randomUUID(), position: messages.length + 1, time: Date.now() };
+    const message: ChatMessage = { ...input, exchangeId, messageId: randomUUID(), position: (messages.at(-1)?.position ?? this.resets.get(input.workspaceId)?.resetPosition ?? 0) + 1, time: Date.now() };
     messages.push(structuredClone(message)); this.chatMessages.set(input.workspaceId, messages);
     exchange.used += input.recipients.length; this.exchanges.set(exchangeId, exchange);
     const entries: TimelineEntry[] = [];
@@ -101,9 +105,10 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     this.stored(workspaceId);
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new AppError('invalid_input', 'Invalid cursor or limit');
     const all = this.chatMessages.get(workspaceId) ?? [];
-    if (after > all.length) throw new AppError('invalid_cursor', 'Cursor ahead', 409);
-    const messages = all.slice(after, after + limit);
-    return { workspaceId, position: all.length, mentionLimit: this.limits.get(workspaceId) ?? 32, messages: structuredClone(messages), more: after + messages.length < all.length, runs: [...this.chatRuns.values()].filter(item => this.members.get(item.run.agentId)?.member.workspaceId === workspaceId).map(item => structuredClone(item)) };
+    const upper = all.at(-1)?.position ?? this.resets.get(workspaceId)?.resetPosition ?? 0;
+    if (after > upper) throw new AppError('invalid_cursor', 'Cursor ahead', 409);
+    const messages = all.filter(item => item.position > after).slice(0, limit);
+    return { workspaceId, resetPosition: this.resets.get(workspaceId)?.resetPosition ?? 0, position: upper, mentionLimit: this.limits.get(workspaceId) ?? 32, messages: structuredClone(messages), more: all.some(item => item.position > (messages.at(-1)?.position ?? after)), runs: [...this.chatRuns.values()].filter(item => this.members.get(item.run.agentId)?.member.workspaceId === workspaceId).map(item => structuredClone(item)) };
   }
 
   async configureChat(workspaceId: string, value: number) { this.stored(workspaceId); this.limits.set(workspaceId, value); }
@@ -112,6 +117,21 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     const runs = [...this.chatRuns.values()].filter(item => item.run.status === 'running' && this.members.get(item.run.agentId)?.member.workspaceId === workspaceId);
     for (const item of runs) this.exchanges.get(item.exchangeId)!.stopped = true;
     return runs.map(item => item.run);
+  }
+
+  async resetChat(workspaceId: string) {
+    this.stored(workspaceId);
+    const members = await this.listMembers(workspaceId);
+    const runs = [...this.chatRuns.values()].filter(item => members.some(member => member.id === item.run.agentId));
+    if (runs.some(item => item.run.status === 'running')) throw new AppError('workspace_busy', 'Workspace busy', 409);
+    const resetCursor = (await this.chatTimeline(workspaceId)).cursor + 1;
+    const resetPosition = (await this.chatSnapshot(workspaceId)).position + 1;
+    this.resets.set(workspaceId, { resetCursor, resetPosition });
+    this.chatMessages.delete(workspaceId); this.timelineChanges.delete(workspaceId);
+    for (const [id, entry] of this.timelineEntries) if (entry.workspaceId === workspaceId) this.timelineEntries.delete(id);
+    for (const item of runs) { this.chatRuns.delete(item.run.runId); this.exchanges.delete(item.exchangeId); }
+    for (const member of members) { this.agentContexts.set(member.id, []); this.delivery.set(member.id, resetPosition); }
+    return { workspaceId, resetCursor, resetPosition };
   }
 
   async listWorkspaces(): Promise<WorkspaceRecord[]> {

@@ -69,3 +69,7 @@ MemberRecord.modelSettings optionally stores connectionId, modelId and modelOpti
 A single effectiveMemberSettings projection overlays the user fields on activated settings for readiness, inspection and teamRunConfig preparation. Prepared configs remain immutable snapshots. File validation continues freezing original manifest model fields, validates effective settings for updated members, and activation carries forward modelSettings on the current record. Restart normalization preserves preferences. Existing administrative reset removes them with the member records. HTTP tests check restricted payloads, conflicts, foreign/retired members and busy saves; member-file tests check activation preservation; real MySQL tests verify durable preferences, capability validation and independent prepared snapshots.
 
 Agent cooperation uses the optional leading mention-header contract owned by [group chat](group-chat/design.md). MemberContext loads its fixed rules from backend/prompts/team/group-chat.md; TeamRunner separates header recipients from the body, and storage pins the body slice of immutable final source. User composer mention routing remains separate.
+
+## Conversation reset
+
+The group-chat child owns the reset contract; teamRoutes exposes POST team/chat/reset and TeamRunner coordinates workspace-idle admission with publication and member activation. MySqlStore owns atomic conversation deletion and persistent shared cursor boundaries. Runtime/harness execution logic and files remain unchanged.

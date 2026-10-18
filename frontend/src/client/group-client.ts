@@ -10,9 +10,9 @@ export type GroupEntry = EntryBase & (
 );
 export interface GroupChange { cursor: number; entry: GroupEntry }
 export interface GroupSnapshot {
-  entries: readonly GroupEntry[]; cursor: number; synchronized: boolean;
+  entries: readonly GroupEntry[]; cursor: number; resetCursor: number; synchronized: boolean;
   connection: 'syncing' | 'following' | 'disconnected' | 'error';
-  sending: boolean; stopping: boolean; error: string | null; commandError: string | null;
+  sending: boolean; stopping: boolean; resetting: boolean; error: string | null; commandError: string | null;
 }
 const id = /^[A-Za-z0-9_-]{1,64}$/;
 const positive = (value: unknown) => Number.isSafeInteger(value) && (value as number) > 0;
@@ -50,7 +50,7 @@ export class GroupClient {
   private controller?: AbortController;
   private generation = 0;
   private disposed = false;
-  private snapshot: GroupSnapshot = { entries: [], cursor: 0, synchronized: false, connection: 'syncing', sending: false, stopping: false, error: null, commandError: null };
+  private snapshot: GroupSnapshot = { entries: [], cursor: 0, resetCursor: 0, synchronized: false, connection: 'syncing', sending: false, stopping: false, resetting: false, error: null, commandError: null };
   private readonly fetcher: typeof fetch;
   private readonly retryDelay: (attempt: number) => number;
   private readonly path: string;
@@ -68,10 +68,18 @@ export class GroupClient {
   }
   private merge(entry: GroupEntry) {
     validateEntry(entry, this.workspaceId);
+    if (entry.revision <= this.snapshot.resetCursor) return;
     if ([...this.entries.values()].some(item => item.position === entry.position && item.entryId !== entry.entryId)) throw new ProtocolError('Group position has conflicting entries');
     const previous = this.entries.get(entry.entryId);
     if (previous && (previous.position !== entry.position || previous.kind !== entry.kind)) throw new ProtocolError('Group entry identity changed');
     if (!previous || previous.revision < entry.revision) this.entries.set(entry.entryId, entry);
+  }
+  private applyReset(cursor: unknown) {
+    if (!positive(cursor)) throw new ProtocolError('Invalid group reset cursor');
+    const boundary = cursor as number;
+    if (boundary <= this.snapshot.resetCursor) return;
+    for (const [id, entry] of this.entries) if (entry.revision <= boundary) this.entries.delete(id);
+    this.publish({ resetCursor: boundary, cursor: Math.max(this.snapshot.cursor, boundary), commandError: null });
   }
   follow() {
     if (this.disposed) return;
@@ -101,7 +109,10 @@ export class GroupClient {
             if (change.cursor <= this.snapshot.cursor) continue;
             if (change.cursor !== this.snapshot.cursor + 1) throw new ProtocolError('Group changes have a gap');
             this.merge(change.entry); this.publish({ cursor: change.cursor });
+          } else if (event.type === 'reset') {
+            this.applyReset(event.cursor);
           } else if (event.type === 'sync') {
+            if (Number.isSafeInteger(event.cursor) && event.cursor < this.snapshot.resetCursor) continue;
             if (event.cursor !== this.snapshot.cursor) throw new ProtocolError('Group history did not reach synchronization cursor');
             attempt = 0; this.publish({ synchronized: true, connection: 'following', error: null });
           } else if (event.type !== 'settings') throw new ProtocolError('Unsupported group event');
@@ -117,7 +128,7 @@ export class GroupClient {
     }
   }
   async send(text: string) {
-    if (this.disposed || this.snapshot.sending) throw new Error('Group submission is unavailable');
+    if (this.disposed || this.snapshot.sending || this.snapshot.resetting) throw new Error('Group submission is unavailable');
     if (!text.trim()) throw new Error('Enter a message');
     this.publish({ sending: true, commandError: null });
     try {
@@ -127,6 +138,16 @@ export class GroupClient {
       this.publish();
     } catch (error) { this.publish({ commandError: error instanceof Error ? error.message : 'Message refused' }); throw error; }
     finally { this.publish({ sending: false }); }
+  }
+  async reset() {
+    if (this.disposed || this.snapshot.resetting || this.snapshot.sending || this.snapshot.stopping) throw new Error('Chat reset is unavailable');
+    this.publish({ resetting: true, commandError: null });
+    try {
+      const result = await json(await this.fetcher(`${this.path}/reset`, { method: 'POST' })) as { workspaceId?: string; resetCursor?: number };
+      if (result?.workspaceId !== this.workspaceId) throw new ProtocolError('Invalid group reset response');
+      this.applyReset(result.resetCursor);
+    } catch (error) { this.publish({ commandError: error instanceof Error ? error.message : 'Reset failed' }); throw error; }
+    finally { this.publish({ resetting: false }); }
   }
   async stop() {
     if (this.snapshot.stopping) return;

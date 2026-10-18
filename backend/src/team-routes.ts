@@ -87,6 +87,9 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
         query(url, []);
         const input = await body(request, maxBodyBytes); fields(input, ['text']);
         json(response, 202, await team.runner.postUser(workspaceId, input.text));
+      } else if (method === 'POST' && memberId === 'reset') {
+        query(url, []);
+        json(response, 200, await team.runner.reset(workspaceId));
       } else if (method === 'POST' && memberId === 'stop') {
         query(url, []);
         await team.runner.stop(workspaceId); json(response, 202, { stopped: true });

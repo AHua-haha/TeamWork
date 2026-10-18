@@ -90,9 +90,9 @@ export class TeamRunner {
     void operation.finally(() => this.publications.delete(operation)).catch(() => undefined);
     return operation;
   }
-  idleWorkspace<T>(workspaceId: string, action: () => Promise<T>): Promise<T> {
+  idleWorkspace<T>(workspaceId: string, action: () => Promise<T>, reason = 'All workspace members must finish before activating configuration'): Promise<T> {
     return this.workspaceOperation(workspaceId, async () => {
-      if ([...this.jobs.values()].includes(workspaceId) || [...this.active.values()].some(run => run.workspaceId === workspaceId)) throw new AppError('workspace_busy', 'All workspace members must finish before activating configuration', 409);
+      if ([...this.jobs.values()].includes(workspaceId) || [...this.active.values()].some(run => run.workspaceId === workspaceId)) throw new AppError('workspace_busy', reason, 409);
       const result = await action(); this.changes.publish(); return result;
     });
   }
@@ -106,6 +106,10 @@ export class TeamRunner {
     while (!signal?.aborted && !this.closed) {
       const version = this.changes.version;
       const snapshot = await this.timeline(workspaceId, after, 500);
+      if (after < snapshot.resetCursor) {
+        after = snapshot.resetCursor; first = true;
+        yield { version: 1, type: 'reset', workspaceId, cursor: after };
+      }
       for (const change of snapshot.changes) {
         after = change.cursor;
         yield { version: 1, type: 'entry', workspaceId, change };
@@ -132,6 +136,10 @@ export class TeamRunner {
     while (!signal?.aborted && !this.closed) {
       const version = this.changes.version;
       const snapshot = await this.snapshot(workspaceId, after, 500);
+      if (after < snapshot.resetPosition) {
+        after = snapshot.resetPosition; first = true;
+        yield { version: 1, type: 'reset', workspaceId, position: after };
+      }
       for (const message of snapshot.messages) {
         after = message.position;
         yield { version: 1, type: 'message', workspaceId, message };
@@ -145,6 +153,10 @@ export class TeamRunner {
       }
       await this.changes.wait(version, signal);
     }
+  }
+
+  reset(workspaceId: string) {
+    return this.idleWorkspace(workspaceId, () => this.store.resetChat(workspaceId), 'Stop team work and wait for every member to finish before resetting the chat');
   }
 
   async stop(workspaceId: string): Promise<void> {

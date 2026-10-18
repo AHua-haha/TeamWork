@@ -16,7 +16,8 @@ export type TimelineEntry = TimelineBase & (
   | { kind: 'member'; memberId: string; name: string; run: RunState; working: { after: number; through: number | null }; finalRef: FinalReference | null; text: string | null }
 );
 export interface TimelineChange { cursor: number; entry: TimelineEntry }
-export interface TimelineSnapshot { workspaceId: string; cursor: number; changes: TimelineChange[]; more: boolean; mentionLimit: number }
+export interface ChatReset { workspaceId: string; resetCursor: number; resetPosition: number }
+export interface TimelineSnapshot { resetCursor: number; workspaceId: string; cursor: number; changes: TimelineChange[]; more: boolean; mentionLimit: number }
 export interface ChatAcceptance { message: ChatMessage; runs: RunState[]; entries: TimelineEntry[] }
 /** Stored member publications contain a reference, never a duplicate final body. */
 export type StoredChatMessage = Omit<ChatMessage, 'text'> & { text?: string; finalRef?: FinalReference };
@@ -44,7 +45,7 @@ export function validateTimelineEntry(value: unknown): asserts value is Timeline
   if (entry.text !== null && typeof entry.text !== 'string') throw new AppError('invalid_data', 'Invalid timeline text');
 }
 export interface ChatSnapshot {
-  workspaceId: string; position: number; mentionLimit: number; messages: ChatMessage[]; more: boolean;
+  workspaceId: string; position: number; resetPosition: number; mentionLimit: number; messages: ChatMessage[]; more: boolean;
   runs: { exchangeId: string; run: RunState }[];
 }
 export interface ChatPublication {
@@ -58,6 +59,7 @@ export interface ChatStore {
   syncChatMember(memberId: string): Promise<void>;
   configureChat(workspaceId: string, mentionLimit: number): Promise<void>;
   stopChat(workspaceId: string): Promise<RunState[]>;
+  resetChat(workspaceId: string): Promise<ChatReset>;
 }
 
 export function validateChatMessage(value: unknown): asserts value is ChatMessage {

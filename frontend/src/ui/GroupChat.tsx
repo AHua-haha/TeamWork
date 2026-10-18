@@ -4,6 +4,7 @@ import { AgentClient } from '../client/agent-client.js';
 import { discussionInput, referenceLabel, type Discussion } from '../client/discussion-reference.js';
 import type { ClientSnapshot } from '../client/protocol.js';
 import type { TeamState } from './useTeam.js';
+import { ConfirmDialog } from './WorkspaceDialogs.js';
 import { MemberModelPopover } from './MemberModelPopover.js';
 import { Glyph } from './Glyph.js';
 import { Markdown } from './Markdown.js';
@@ -33,6 +34,8 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
   }, []);
   useEffect(() => { closeModel(); return keepModelOpen; }, [workspaceId, closeModel, keepModelOpen]);
   const modelMember = team.team?.members.find(member => member.memberId === modelTarget?.memberId);
+  const [resetOpen, setResetOpen] = useState(false);
+  useEffect(() => { closeModel(); }, [snapshot.resetCursor, closeModel]);
   const [draft, setDraft] = useState('');
   const [caret, setCaret] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -58,7 +61,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
   const suggestions = mention ? (team.team?.members ?? []).filter(member => member.name.toLowerCase().includes(mention.query.toLowerCase())) : [];
   const status = snapshot.connection === 'following' ? active ? `${runningIds.length} working` : 'Ready' : snapshot.connection === 'syncing' ? 'Syncing' : snapshot.connection === 'disconnected' ? 'Reconnecting' : 'Updates stopped';
   async function send() {
-    if (!draft.trim() || snapshot.sending || !snapshot.synchronized) return;
+    if (!draft.trim() || snapshot.sending || snapshot.resetting || !snapshot.synchronized) return;
     const sent = draft; const ref = discussion.reference;
     try {
       await client.send(discussionInput(sent, ref));
@@ -70,10 +73,15 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
   return <div className="conversation group-conversation">
     <div className="conversation-head"><div><div className="eyebrow">WORKSPACE GROUP</div><h2>{title}</h2></div>
       <div className="conversation-actions"><span className={`status-pill ${active ? 'status-active' : ''}`}>{status}</span>
+        <button type="button" className="icon-button" aria-label="Reset group chat and member context" title={active ? 'Stop team work before resetting' : 'Reset chat and member context'}
+          disabled={active || snapshot.sending || snapshot.stopping || snapshot.resetting || !snapshot.synchronized} onClick={() => { closeModel(); setResetOpen(true); }}><Glyph name="trash" /></button>
         <button type="button" className="icon-button" aria-label="Refresh group chat" onClick={client.refresh}>↻</button>
         {!filesOpen && <button type="button" className="icon-button" aria-label="Show design, team and files" onClick={() => onFiles(true)}><Glyph name="panel" /></button>}
       </div>
     </div>
+    {resetOpen && <ConfirmDialog eyebrow="WORKSPACE GROUP" title="Reset chat and member context?" action="Reset chat"
+      message="Permanently clear this group chat and every member’s private conversation context and message history. Project files, designs, member settings and harness history will be kept. Stop team work before resetting."
+      onClose={() => setResetOpen(false)} onConfirm={async () => { await client.reset(); setResetOpen(false); pinned.current = true; }} />}
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={client.refresh}>Retry</button></div>}
     <div className="group-viewport" ref={viewport} onScroll={() => { const view = viewport.current!; pinned.current = view.scrollHeight - view.scrollTop - view.clientHeight < 80; }}>
       {!snapshot.entries.length && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open design and team</button></div>}
@@ -110,7 +118,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
       </div>}
       <div className="composer-actions"><span className="group-composer-hint">No mention → Lead · Shift+Enter for a new line</span>
         {active && <button type="button" className="cancel-button" disabled={snapshot.stopping} onClick={() => void client.stop()}>{snapshot.stopping ? 'Stopping…' : 'Stop team'}</button>}
-        <button type="submit" className="send-button" disabled={!draft.trim() || snapshot.sending || !snapshot.synchronized}>{snapshot.sending ? 'Sending…' : 'Send ↗'}</button>
+        <button type="submit" className="send-button" disabled={!draft.trim() || snapshot.sending || snapshot.resetting || !snapshot.synchronized}>{snapshot.sending ? 'Sending…' : 'Send ↗'}</button>
       </div>
     </form></div>
   </div>;

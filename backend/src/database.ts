@@ -11,7 +11,7 @@ import type { WorkspaceBootstrap } from './workspace-bootstrap.js';
 import { generatedSource } from './member-config-format.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type LiveRange, type Retention, type RunState, type RunStatus } from './types.js';
 
-import { defaultMentionLimit, groupEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance } from './group-chat.js';
+import { defaultMentionLimit, groupEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset } from './group-chat.js';
 
 type Db = Pool | PoolConnection;
 export type ConfigScope = 'app' | 'catalog' | 'connection' | 'model_cache' | 'agent';
@@ -173,6 +173,7 @@ const schema = [
   `CREATE TABLE IF NOT EXISTS chat_settings (
     workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     position BIGINT UNSIGNED NOT NULL DEFAULT 0, mention_limit INT UNSIGNED NOT NULL DEFAULT 32,
+    reset_cursor BIGINT UNSIGNED NOT NULL DEFAULT 0, reset_position BIGINT UNSIGNED NOT NULL DEFAULT 0,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS chat_exchanges (
@@ -234,6 +235,11 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
 
   async migrate(): Promise<void> {
     for (const statement of schema) await this.pool.query(statement);
+    // Add the reset boundary to existing prototype databases as well as fresh schemas.
+    const columns = await rows(this.pool, 'SHOW COLUMNS FROM chat_settings');
+    for (const column of ['reset_cursor', 'reset_position']) {
+      if (!columns.some(row => row.Field === column)) await this.pool.query(`ALTER TABLE chat_settings ADD COLUMN ${column} BIGINT UNSIGNED NOT NULL DEFAULT 0`);
+    }
     await this.importChatHistory();
   }
 
@@ -682,10 +688,11 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       const [settings] = await rows(db, 'SELECT * FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
       const upper = settings?.position ?? 0;
       if (after > upper) throw new AppError('invalid_cursor', 'Chat cursor is ahead of history', 409);
-      const records = await rows(db, 'SELECT entry FROM chat_messages WHERE workspace_id = ? AND position > ? ORDER BY position' + limitClause(limit), [workspaceId, after]);
+      const resetPosition = settings?.reset_position ?? 0;
+      const records = await rows(db, 'SELECT entry FROM chat_messages WHERE workspace_id = ? AND position > ? ORDER BY position' + limitClause(limit), [workspaceId, Math.max(after, resetPosition)]);
       const messages = await Promise.all(records.map(row => this.resolveChatMessage(db, decode<StoredChatMessage>(row.entry, () => undefined))));
       const activity = await rows(db, `SELECT r.state, cr.exchange_id FROM chat_runs cr JOIN runs r ON r.id = cr.run_id JOIN chat_exchanges e ON e.id = cr.exchange_id WHERE e.workspace_id = ? ORDER BY r.id`, [workspaceId]);
-      return { workspaceId, position: upper, mentionLimit: settings?.mention_limit ?? defaultMentionLimit, messages, more: (messages.at(-1)?.position ?? after) < upper, runs: activity.map(row => ({ exchangeId: row.exchange_id, run: decode<RunState>(row.state, validateRun) })) };
+      return { workspaceId, position: upper, resetPosition, mentionLimit: settings?.mention_limit ?? defaultMentionLimit, messages, more: (messages.at(-1)?.position ?? Math.max(after, resetPosition)) < upper, runs: activity.map(row => ({ exchangeId: row.exchange_id, run: decode<RunState>(row.state, validateRun) })) };
     });
   }
 
@@ -755,10 +762,11 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       const [clock] = await rows(db, 'SELECT seq FROM chat_clock WHERE workspace_id = ?', [workspaceId]);
       const cursor = clock?.seq ?? 0;
       if (after > cursor) throw new AppError('invalid_cursor', 'Timeline cursor is ahead of history', 409);
-      const records = await rows(db, 'SELECT seq, data FROM chat_changes WHERE workspace_id = ? AND seq > ? ORDER BY seq' + limitClause(limit), [workspaceId, after]);
+      const [settings] = await rows(db, 'SELECT mention_limit, reset_cursor FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+      const resetCursor = settings?.reset_cursor ?? 0;
+      const records = await rows(db, 'SELECT seq, data FROM chat_changes WHERE workspace_id = ? AND seq > ? ORDER BY seq' + limitClause(limit), [workspaceId, Math.max(after, resetCursor)]);
       const changes = await Promise.all(records.map(async row => ({ cursor: row.seq as number, entry: await this.resolveTimelineEntry(db, decode<TimelineEntry>(row.data, validateTimelineEntry)) })));
-      const [settings] = await rows(db, 'SELECT mention_limit FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
-      return { workspaceId, cursor, changes, more: (changes.at(-1)?.cursor ?? after) < cursor, mentionLimit: settings?.mention_limit ?? defaultMentionLimit };
+      return { workspaceId, cursor, resetCursor, changes, more: (changes.at(-1)?.cursor ?? Math.max(after, resetCursor)) < cursor, mentionLimit: settings?.mention_limit ?? defaultMentionLimit };
     });
   }
 
@@ -804,6 +812,40 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       await db.execute('UPDATE chat_exchanges SET stopped = 1 WHERE workspace_id = ?', [workspaceId]);
       const active = await rows(db, 'SELECT r.state FROM chat_runs cr JOIN runs r ON r.id = cr.run_id JOIN agents a ON a.active_run_id = r.id JOIN chat_exchanges e ON e.id = cr.exchange_id WHERE e.workspace_id = ?', [workspaceId]);
       return active.map(row => decode<RunState>(row.state, validateRun));
+    });
+  }
+
+  /** Explicit user reset is the only operation that removes stable conversation history. */
+  async resetChat(workspaceId: string): Promise<ChatReset> {
+    identity(workspaceId, 'workspaceId');
+    return this.transaction(async db => {
+      if (!(await rows(db, 'SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [workspaceId])).length) throw new AppError('not_found', 'Workspace not found', 404);
+      const members = await rows(db, 'SELECT id, data FROM members WHERE workspace_id = ? ORDER BY id', [workspaceId]);
+      for (const member of members) {
+        const agent = await this.agent(db, member.id, true);
+        if (agent.active_run_id) throw new AppError('workspace_busy', 'Stop team work and wait for every member to finish before resetting the chat', 409);
+      }
+      await db.execute('INSERT IGNORE INTO chat_settings (workspace_id) VALUES (?)', [workspaceId]);
+      await db.execute('INSERT IGNORE INTO chat_clock (workspace_id) VALUES (?)', [workspaceId]);
+      const [settings] = await rows(db, 'SELECT position FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+      const [clock] = await rows(db, 'SELECT seq FROM chat_clock WHERE workspace_id = ? FOR UPDATE', [workspaceId]);
+      const resetCursor = clock!.seq + 1;
+      const resetPosition = settings!.position + 1;
+      for (const table of ['chat_changes', 'chat_entries', 'chat_messages']) await db.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [workspaceId]);
+      // Include all member runs, even ones not linked to an exchange, but never solo agents.
+      await db.execute('DELETE cr FROM chat_runs cr JOIN runs r ON r.id = cr.run_id JOIN members m ON m.id = r.agent_id WHERE m.workspace_id = ?', [workspaceId]);
+      await db.execute('DELETE FROM chat_exchanges WHERE workspace_id = ?', [workspaceId]);
+      for (const member of members) {
+        const value = decode<MemberRecord>(member.data, () => undefined);
+        await db.execute('DELETE l FROM live_messages l JOIN runs r ON r.id = l.run_id WHERE r.agent_id = ?', [member.id]);
+        await db.execute('DELETE FROM messages WHERE agent_id = ?', [member.id]);
+        await db.execute('DELETE FROM runs WHERE agent_id = ?', [member.id]);
+        await db.execute('UPDATE agents SET context = ?, context_revision = context_revision + 1, history_position = 0, active_run_id = NULL, latest_run_id = NULL WHERE id = ?', [encode([]), member.id]);
+        await db.execute('INSERT INTO chat_delivery (member_id, position, end_position) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE position = VALUES(position), end_position = VALUES(end_position)', [member.id, resetPosition, value.retiredAt === null ? null : resetPosition]);
+      }
+      await db.execute('UPDATE chat_clock SET seq = ? WHERE workspace_id = ?', [resetCursor, workspaceId]);
+      await db.execute('UPDATE chat_settings SET position = ?, reset_cursor = ?, reset_position = ? WHERE workspace_id = ?', [resetPosition, resetCursor, resetPosition, workspaceId]);
+      return { workspaceId, resetCursor, resetPosition };
     });
   }
 

@@ -130,3 +130,9 @@ Expanded Work may contain distinct unpublished response attempts followed by ref
 ## Agent routing-header presentation
 
 Agent routing metadata is an optional leading <mentions> block; user input retains its existing mention/composer behavior. Display only agent body Markdown in active activity and accepted final reports. Hide a possible partial opening, header contents and tag while it streams; reveal the body progressively after the closing tag. A non-header text prefix appears normally as soon as it is distinguishable. Preserve subsequent literal mention-like text in the body. Never infer recipients from @ text or use frontend parsing as publication authority. Private stored records retain the raw response. New final references carry backend-owned bodyOffset with their selected source blocks; older references keep their historical meaning. Acceptance still renders the final once and folds only preceding work.
+
+## Reset chat and member context
+
+The workspace chat header has a Reset chat control. It opens a confirmation explaining that shared messages and every member's private conversation context/history will be permanently cleared while files and member settings remain. Cancel changes nothing. Confirm waits for the backend result, clears the visible conversation only on success and returns to the empty-chat state. Errors are shown explicitly; no optimistic history deletion occurs.
+
+Reset is disabled while members are working, sending/stopping/resetting or the chat is unsynchronized. Stop team can be used first; the backend remains authoritative for finalization/races. New input is disabled while reset is in progress. Other clients and reconnects consume durable reset events and discard pre-reset entries, including delayed POST acknowledgements. Reset closes stale avatar popovers/working observers; message history is reconstructed from stable storage. The unsent composer draft may remain.

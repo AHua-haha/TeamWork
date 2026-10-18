@@ -196,3 +196,21 @@ test('user model settings persist independently of member files, reject stale/fo
   await call(path+'/model-settings',{status:404});
   await call(path+'/model-settings',{method:'PUT',status:404,data:{revision:current.revision,value}});
 }));
+
+test('user reset endpoint clears idle conversations and rejects busy, unknown and invalid routes', () => withServer(async (call, f) => {
+  const base = `/workspaces/${f.workspaceId}/team/chat`;
+  await call(`${base}/messages`, { method: 'POST', status: 202, data: { text: 'Old chat' } });
+  assert.equal((await call(`${base}/reset`, { method: 'POST', status: 409 })).error.code, 'workspace_busy');
+  assert.equal((await call(base)).messages.length, 1);
+  await call(`${base}/stop`, { method: 'POST', status: 202 });
+  await new Promise(resolve => setImmediate(resolve));
+  const result = await call(`${base}/reset`, { method: 'POST' });
+  assert.equal(result.workspaceId, f.workspaceId);
+  assert.ok(result.resetCursor > 0 && result.resetPosition > 0);
+  assert.deepEqual((await call(`${base}/timeline`)).changes, []);
+  assert.deepEqual((await call(base)).messages, []);
+  await call(`${base}/reset`, { status: 404 });
+  await call(`${base}/reset?unexpected=1`, { method: 'POST', status: 400 });
+  await call('/workspaces/missing/team/chat/reset', { method: 'POST', status: 404 });
+  assert.equal((await call(`/workspaces/${f.workspaceId}/team`)).members.length, 1);
+}));

@@ -196,3 +196,60 @@ test('mention insertion and compact tool summaries retain their existing behavio
   assert.deepEqual(workToolSummary({id:'bash',kind:'tool',text:'bash',args:'{"command":"git status","metadata":{"git":{"scope":"design"}}}',result:'clean'}),{icon:'terminal',label:'Ran git status'});
   assert.equal(workToolSummary({id:'partial',kind:'tool',text:'edit',args:'null'}).label,'Updating file');
 });
+
+test('reset feed clears old entries, ignores delayed acknowledgements and follows a fresh conversation', async () => {
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(value) { stream = value; } });
+  let accept!: (response: Response) => void;
+  const ack = new Promise<Response>(resolve => { accept = resolve; });
+  const client = new GroupClient(workspaceId, { fetcher: async (_url, init) => init?.method === 'POST' ? ack : streamResponse(body) });
+  client.follow(); const pending = client.send('old');
+  stream.enqueue(new TextEncoder().encode(change(1, user) + change(2, member) + frame('sync', { cursor: 2 })));
+  await until(() => client.getSnapshot().synchronized);
+  stream.enqueue(new TextEncoder().encode(frame('reset', { cursor: 3 })));
+  await until(() => client.getSnapshot().resetCursor === 3);
+  assert.deepEqual(client.getSnapshot().entries, []);
+  accept(new Response(JSON.stringify({ entries: [user, member] }), { status: 202 })); await pending;
+  assert.deepEqual(client.getSnapshot().entries, [], 'old POST acknowledgement cannot resurrect deleted history');
+  const fresh = { ...user, entryId: 'fresh', messageId: 'fresh', revision: 4, position: 3, text: 'Fresh input' };
+  stream.enqueue(new TextEncoder().encode(change(4, fresh)));
+  await until(() => client.getSnapshot().cursor === 4);
+  assert.deepEqual(client.getSnapshot().entries, [fresh]);
+  client.dispose(); stream.close();
+});
+
+test('reset acknowledgement preserves newer entries and old feed synchronization cannot undo a reset', async () => {
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(value) { stream = value; } });
+  let accept!: (response: Response) => void;
+  const ack = new Promise<Response>(resolve => { accept = resolve; });
+  const client = new GroupClient(workspaceId, { fetcher: async (url, init) => init?.method === 'POST' ? (assert.match(String(url), /\/reset$/), ack) : streamResponse(body) });
+  client.follow();
+  stream.enqueue(new TextEncoder().encode(change(1, user) + frame('sync', { cursor: 1 })));
+  await until(() => client.getSnapshot().synchronized);
+  const pending = client.reset(); assert.equal(client.getSnapshot().resetting, true);
+  assert.equal(client.getSnapshot().entries.length, 1, 'no optimistic deletion');
+  const fresh = { ...user, entryId: 'fresh', messageId: 'fresh', revision: 3, position: 2, text: 'Fresh input' };
+  stream.enqueue(new TextEncoder().encode(frame('reset', { cursor: 2 }) + change(3, fresh)));
+  await until(() => client.getSnapshot().cursor === 3);
+  accept(new Response(JSON.stringify({ workspaceId, resetCursor: 2, resetPosition: 2 })));
+  await pending;
+  assert.deepEqual(client.getSnapshot().entries, [fresh]);
+  assert.equal(client.getSnapshot().resetting, false);
+  stream.enqueue(new TextEncoder().encode(frame('sync', { cursor: 1 })));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(client.getSnapshot().connection, 'following');
+  client.dispose(); stream.close();
+});
+
+test('reset refusal preserves history, reports the reason and clears busy state', async () => {
+  const client = new GroupClient(workspaceId, { fetcher: async (url) => String(url).endsWith('/messages')
+    ? new Response(JSON.stringify({ entries: [user] }), { status: 202 })
+    : new Response(JSON.stringify({ error: { code: 'workspace_busy', message: 'Wait for finalization' } }), { status: 409 }) });
+  await client.send('old');
+  await assert.rejects(client.reset(), /Wait for finalization/);
+  assert.deepEqual(client.getSnapshot().entries, [user]);
+  assert.equal(client.getSnapshot().resetting, false);
+  assert.equal(client.getSnapshot().commandError, 'Wait for finalization');
+  client.dispose();
+});

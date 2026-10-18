@@ -125,3 +125,7 @@ Team coordination resolves configurations using `prepareRun`, persists run creat
 ## Unified streaming and model completion
 
 The follow API returns stored Pi messages and chunks without a separate response-action annotation. Text, thinking, tool blocks and native signatures are preserved for callers. The team policy uses completed model output for continuation and publication; the generic loop does not classify partial text for the UI.
+
+## Workspace conversation reset exception
+
+The workspace team may explicitly reset all its members' conversation state when the entire team is idle. This user operation deletes private display history/runs/chunks and model context, leaving the agents/configuration and durable project files intact. Subsequent state has no current/latest run, history position zero and a newer context revision. Old explicit run IDs return not_found. Normal context edits and compaction still never rewrite display history. Solo agents are unaffected by workspace reset.

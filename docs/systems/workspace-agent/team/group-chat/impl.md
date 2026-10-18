@@ -59,3 +59,7 @@ member-response.ts owns strict optional-header parsing. TeamRunner parses each c
 MemberContext loads backend/prompts/team/group-chat.md once for fixed response/routing instructions; build packages this required asset. Dynamic member/role/roster instructions remain backend-owned. Invalid header syntax is an AppError caught by the normal private publication-feedback path. No completion tool or second runtime loop is introduced.
 
 Frontend projection hides a leading routing header, including incomplete prefixes while streaming, without deciding recipient validity or final acceptance. It preserves text block identity/order, tools, native commentary and accepted-final exclusion. Private records remain raw; group APIs and shared contexts contain body text only.
+
+## Conversation reset coordination
+
+TeamRunner.reset serializes with publication and configuration activation through the workspace operation gate, rejects any active/admitted/finalizing job and invokes one database reset transaction. SQL rechecks all workspace member active-run markers while holding workspace then agent locks. Clearing durable history follows dependency order; no filesystem operation is involved. Successful reset wakes timeline and legacy followers. Both follow loops emit a reset boundary before post-reset data and continue using monotonic positions. A reset cannot race with a new run inside the gate.
