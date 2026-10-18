@@ -1,0 +1,330 @@
+[
+  {
+    "spec": {
+      "label": "ui-visible-normal",
+      "duration": 20,
+      "rate": 45,
+      "chunkSize": 16,
+      "workers": 1
+    },
+    "startedAt": 1792323946621,
+    "seconds": 21.621380957999964,
+    "backendCpuPercent": 4.295345435169227,
+    "rssStartMiB": 162.96875,
+    "rssPeakMiB": 173.34375,
+    "rssEndMiB": 173.34375,
+    "heapStartMiB": 80.3960189819336,
+    "heapPeakMiB": 86.13495635986328,
+    "heapEndMiB": 82.82254791259766,
+    "sqlDelta": {
+      "Bytes_received": 106135,
+      "Bytes_sent": 677368,
+      "Com_commit": 16,
+      "Com_delete": 0,
+      "Com_insert": 27,
+      "Com_select": 450,
+      "Com_update": 23,
+      "Innodb_data_written": 2219008,
+      "Innodb_os_log_written": 126464,
+      "Questions": 548
+    },
+    "progress": [
+      {
+        "memberId": "230a53bb-d3bf-40ee-83da-13e62d6d3f8b",
+        "retainedEvents": 906
+      },
+      {
+        "memberId": "c1de33eb-2399-4ccb-b261-02e0aa975b50",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "00f1c0dd-0ed2-466f-a84d-45bea4cd2a97",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "b8e45532-7d95-4f11-abb4-8567e981a1b4",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "f98dad57-c399-4666-9fd1-c7f0ce0e138d",
+        "retainedEvents": 0
+      }
+    ],
+    "generatedEvents": 900,
+    "browser": {
+      "beganAt": 1792323946592,
+      "endedAt": 1792323968254,
+      "frameCount": 1301,
+      "frameGapP95Ms": 16.799999999995634,
+      "longestFrameGapMs": 16.80000000000291,
+      "framesOver50Ms": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0,
+      "longestTaskMs": 0,
+      "domElements": 945
+    },
+    "hostMeasurement": {
+      "sampleSeconds": 21.55635791015625,
+      "cpuPercent": {
+        "browser-other": 5.149292865827883,
+        "renderer": 16.004558907302886,
+        "docker-host": 4.128712297823259,
+        "docker-vm": 12.200576790192649
+      },
+      "peakRssMiB": {
+        "browser-other": 502.234375,
+        "renderer": 652.734375,
+        "docker-host": 171.671875,
+        "docker-vm": 1962.8125
+      },
+      "activeRendererPeakRssMiB": 423.40625
+    },
+    "variant": "production"
+  },
+  {
+    "spec": {
+      "label": "ui-folded-normal",
+      "duration": 20,
+      "rate": 45,
+      "chunkSize": 16,
+      "workers": 1
+    },
+    "startedAt": 1792323968309,
+    "seconds": 21.610169709000036,
+    "backendCpuPercent": 4.844644970853608,
+    "rssStartMiB": 173.375,
+    "rssPeakMiB": 186.15625,
+    "rssEndMiB": 186.15625,
+    "heapStartMiB": 85.03829956054688,
+    "heapPeakMiB": 92.94660949707031,
+    "heapEndMiB": 87.45486450195312,
+    "sqlDelta": {
+      "Bytes_received": 105985,
+      "Bytes_sent": 679920,
+      "Com_commit": 16,
+      "Com_delete": 0,
+      "Com_insert": 27,
+      "Com_select": 451,
+      "Com_update": 23,
+      "Innodb_data_written": 1319424,
+      "Innodb_os_log_written": 110592,
+      "Questions": 549
+    },
+    "progress": [
+      {
+        "memberId": "230a53bb-d3bf-40ee-83da-13e62d6d3f8b",
+        "retainedEvents": 906
+      },
+      {
+        "memberId": "c1de33eb-2399-4ccb-b261-02e0aa975b50",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "00f1c0dd-0ed2-466f-a84d-45bea4cd2a97",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "b8e45532-7d95-4f11-abb4-8567e981a1b4",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "f98dad57-c399-4666-9fd1-c7f0ce0e138d",
+        "retainedEvents": 0
+      }
+    ],
+    "generatedEvents": 900,
+    "browser": {
+      "beganAt": 1792323968282,
+      "endedAt": 1792323989926,
+      "frameCount": 1299,
+      "frameGapP95Ms": 16.79999999998836,
+      "longestFrameGapMs": 16.80000000000291,
+      "framesOver50Ms": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0,
+      "longestTaskMs": 0,
+      "domElements": 945
+    },
+    "hostMeasurement": {
+      "sampleSeconds": 21.72418896484375,
+      "cpuPercent": {
+        "browser-other": 2.623803360035352,
+        "renderer": 10.126960336978541,
+        "docker-host": 4.649195427440445,
+        "docker-vm": 12.98092188648936
+      },
+      "peakRssMiB": {
+        "browser-other": 508.90625,
+        "renderer": 658.0,
+        "docker-host": 171.140625,
+        "docker-vm": 1972.265625
+      },
+      "activeRendererPeakRssMiB": 428.609375
+    },
+    "variant": "production"
+  },
+  {
+    "spec": {
+      "label": "ui-visible-large-fast",
+      "duration": 15,
+      "rate": 100,
+      "chunkSize": 32,
+      "workers": 1
+    },
+    "startedAt": 1792323989962,
+    "seconds": 16.616727000000015,
+    "backendCpuPercent": 5.288117208641625,
+    "rssStartMiB": 186.171875,
+    "rssPeakMiB": 211.96875,
+    "rssEndMiB": 211.890625,
+    "heapStartMiB": 88.30260467529297,
+    "heapPeakMiB": 103.99015808105469,
+    "heapEndMiB": 103.88993835449219,
+    "sqlDelta": {
+      "Bytes_received": 207555,
+      "Bytes_sent": 1046865,
+      "Com_commit": 16,
+      "Com_delete": 0,
+      "Com_insert": 27,
+      "Com_select": 413,
+      "Com_update": 23,
+      "Innodb_data_written": 1715200,
+      "Innodb_os_log_written": 224256,
+      "Questions": 511
+    },
+    "progress": [
+      {
+        "memberId": "230a53bb-d3bf-40ee-83da-13e62d6d3f8b",
+        "retainedEvents": 1024
+      },
+      {
+        "memberId": "c1de33eb-2399-4ccb-b261-02e0aa975b50",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "00f1c0dd-0ed2-466f-a84d-45bea4cd2a97",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "b8e45532-7d95-4f11-abb4-8567e981a1b4",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "f98dad57-c399-4666-9fd1-c7f0ce0e138d",
+        "retainedEvents": 0
+      }
+    ],
+    "generatedEvents": 1500,
+    "browser": {
+      "beganAt": 1792323989948,
+      "endedAt": 1792324006585,
+      "frameCount": 999,
+      "frameGapP95Ms": 16.70000000001164,
+      "longestFrameGapMs": 16.80000000000291,
+      "framesOver50Ms": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0,
+      "longestTaskMs": 0,
+      "domElements": 2923
+    },
+    "hostMeasurement": {
+      "sampleSeconds": 16.536362060546875,
+      "cpuPercent": {
+        "browser-other": 3.0236396504217846,
+        "renderer": 28.543158299981673,
+        "docker-host": 4.535459475632676,
+        "docker-vm": 11.429357878590823
+      },
+      "peakRssMiB": {
+        "browser-other": 510.0,
+        "renderer": 682.5,
+        "docker-host": 171.265625,
+        "docker-vm": 1996.234375
+      },
+      "activeRendererPeakRssMiB": 453.109375
+    },
+    "variant": "production"
+  },
+  {
+    "spec": {
+      "label": "ui-four-parallel",
+      "duration": 15,
+      "rate": 45,
+      "chunkSize": 16,
+      "workers": 4
+    },
+    "startedAt": 1792324006639,
+    "seconds": 16.319153666,
+    "backendCpuPercent": 5.982601916630546,
+    "rssStartMiB": 212.015625,
+    "rssPeakMiB": 216.609375,
+    "rssEndMiB": 216.609375,
+    "heapStartMiB": 81.22416687011719,
+    "heapPeakMiB": 109.15026092529297,
+    "heapEndMiB": 100.15762329101562,
+    "sqlDelta": {
+      "Bytes_received": 328121,
+      "Bytes_sent": 1339104,
+      "Com_commit": 55,
+      "Com_delete": 0,
+      "Com_insert": 69,
+      "Com_select": 670,
+      "Com_update": 62,
+      "Innodb_data_written": 2657792,
+      "Innodb_os_log_written": 416768,
+      "Questions": 966
+    },
+    "progress": [
+      {
+        "memberId": "230a53bb-d3bf-40ee-83da-13e62d6d3f8b",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "c1de33eb-2399-4ccb-b261-02e0aa975b50",
+        "retainedEvents": 681
+      },
+      {
+        "memberId": "00f1c0dd-0ed2-466f-a84d-45bea4cd2a97",
+        "retainedEvents": 681
+      },
+      {
+        "memberId": "b8e45532-7d95-4f11-abb4-8567e981a1b4",
+        "retainedEvents": 681
+      },
+      {
+        "memberId": "f98dad57-c399-4666-9fd1-c7f0ce0e138d",
+        "retainedEvents": 681
+      }
+    ],
+    "generatedEvents": 2700,
+    "browser": {
+      "beganAt": 1792324006614,
+      "endedAt": 1792324022969,
+      "frameCount": 982,
+      "frameGapP95Ms": 16.70000000001164,
+      "longestFrameGapMs": 16.80000000000291,
+      "framesOver50Ms": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0,
+      "longestTaskMs": 0,
+      "domElements": 2702
+    },
+    "hostMeasurement": {
+      "sampleSeconds": 16.584222900390625,
+      "cpuPercent": {
+        "browser-other": 5.065054932300835,
+        "renderer": 26.048853937547157,
+        "docker-host": 4.823861840282122,
+        "docker-vm": 12.96412869577877
+      },
+      "peakRssMiB": {
+        "browser-other": 509.578125,
+        "renderer": 627.828125,
+        "docker-host": 170.703125,
+        "docker-vm": 1981.90625
+      },
+      "activeRendererPeakRssMiB": 398.4375
+    },
+    "variant": "production"
+  }
+]

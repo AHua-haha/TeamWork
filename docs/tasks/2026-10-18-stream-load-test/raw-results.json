@@ -1,0 +1,226 @@
+[
+  {
+    "spec": {
+      "label": "idle",
+      "duration": 10,
+      "rate": 45,
+      "chunkSize": 16,
+      "workers": 0
+    },
+    "startedAt": 1792323552733,
+    "seconds": 10.302247375000006,
+    "backendCpuPercent": 0.9437552454422591,
+    "rssStartMiB": 246.875,
+    "rssPeakMiB": 246.875,
+    "rssEndMiB": 246.390625,
+    "heapStartMiB": 95.56892395019531,
+    "heapPeakMiB": 95.56892395019531,
+    "heapEndMiB": 77.61528015136719,
+    "sqlDelta": {
+      "Bytes_received": 3214,
+      "Bytes_sent": 30834,
+      "Com_commit": 0,
+      "Com_delete": 0,
+      "Com_insert": 0,
+      "Com_select": 25,
+      "Com_update": 0,
+      "Innodb_data_written": 1481728,
+      "Innodb_os_log_written": 6144,
+      "Questions": 26
+    },
+    "progress": [
+      {
+        "memberId": "230a53bb-d3bf-40ee-83da-13e62d6d3f8b",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "c1de33eb-2399-4ccb-b261-02e0aa975b50",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "00f1c0dd-0ed2-466f-a84d-45bea4cd2a97",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "b8e45532-7d95-4f11-abb4-8567e981a1b4",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "f98dad57-c399-4666-9fd1-c7f0ce0e138d",
+        "retainedEvents": 0
+      }
+    ],
+    "clients": [],
+    "latencyMs": {
+      "max": null
+    },
+    "hostCpuPercent": {
+      "6168": 0,
+      "74245": 3.479058966334851,
+      "74305": 10.147255318590911
+    }
+  },
+  {
+    "spec": {
+      "label": "single-member",
+      "duration": 20,
+      "rate": 45,
+      "chunkSize": 16,
+      "workers": 1
+    },
+    "startedAt": 1792323563102,
+    "seconds": 21.627959583999996,
+    "backendCpuPercent": 4.13865208376931,
+    "rssStartMiB": 246.390625,
+    "rssPeakMiB": 246.96875,
+    "rssEndMiB": 221.734375,
+    "heapStartMiB": 78.25102233886719,
+    "heapPeakMiB": 92.97898864746094,
+    "heapEndMiB": 90.2555923461914,
+    "sqlDelta": {
+      "Bytes_received": 81378,
+      "Bytes_sent": 349723,
+      "Com_commit": 12,
+      "Com_delete": 0,
+      "Com_insert": 27,
+      "Com_select": 171,
+      "Com_update": 23,
+      "Innodb_data_written": 1577472,
+      "Innodb_os_log_written": 120320,
+      "Questions": 258
+    },
+    "progress": [
+      {
+        "memberId": "230a53bb-d3bf-40ee-83da-13e62d6d3f8b",
+        "retainedEvents": 906
+      },
+      {
+        "memberId": "c1de33eb-2399-4ccb-b261-02e0aa975b50",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "00f1c0dd-0ed2-466f-a84d-45bea4cd2a97",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "b8e45532-7d95-4f11-abb4-8567e981a1b4",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "f98dad57-c399-4666-9fd1-c7f0ce0e138d",
+        "retainedEvents": 0
+      }
+    ],
+    "clients": [
+      {
+        "agentId": "230a53bb-d3bf-40ee-83da-13e62d6d3f8b",
+        "name": "Lead",
+        "bytes": 273307,
+        "gaps": 0,
+        "deltaCount": 900
+      }
+    ],
+    "latencyMs": {
+      "p50": 1,
+      "p95": 2,
+      "max": 4
+    },
+    "hostCpuPercent": {
+      "6168": 0,
+      "74245": 4.155137930428742,
+      "74305": 10.203172029143383
+    }
+  },
+  {
+    "spec": {
+      "label": "four-parallel-members",
+      "duration": 20,
+      "rate": 45,
+      "chunkSize": 16,
+      "workers": 4
+    },
+    "startedAt": 1792323584801,
+    "seconds": 21.553475332999994,
+    "backendCpuPercent": 9.095605092504274,
+    "rssStartMiB": 221.78125,
+    "rssPeakMiB": 248.640625,
+    "rssEndMiB": 248.640625,
+    "heapStartMiB": 90.92430877685547,
+    "heapPeakMiB": 108.68048858642578,
+    "heapEndMiB": 108.68048858642578,
+    "sqlDelta": {
+      "Bytes_received": 383995,
+      "Bytes_sent": 1310548,
+      "Com_commit": 45,
+      "Com_delete": 0,
+      "Com_insert": 69,
+      "Com_select": 460,
+      "Com_update": 62,
+      "Innodb_data_written": 2254336,
+      "Innodb_os_log_written": 510464,
+      "Questions": 727
+    },
+    "progress": [
+      {
+        "memberId": "230a53bb-d3bf-40ee-83da-13e62d6d3f8b",
+        "retainedEvents": 0
+      },
+      {
+        "memberId": "c1de33eb-2399-4ccb-b261-02e0aa975b50",
+        "retainedEvents": 906
+      },
+      {
+        "memberId": "00f1c0dd-0ed2-466f-a84d-45bea4cd2a97",
+        "retainedEvents": 906
+      },
+      {
+        "memberId": "b8e45532-7d95-4f11-abb4-8567e981a1b4",
+        "retainedEvents": 906
+      },
+      {
+        "memberId": "f98dad57-c399-4666-9fd1-c7f0ce0e138d",
+        "retainedEvents": 906
+      }
+    ],
+    "clients": [
+      {
+        "agentId": "c1de33eb-2399-4ccb-b261-02e0aa975b50",
+        "name": "Worker1",
+        "bytes": 273307,
+        "gaps": 0,
+        "deltaCount": 900
+      },
+      {
+        "agentId": "00f1c0dd-0ed2-466f-a84d-45bea4cd2a97",
+        "name": "Worker2",
+        "bytes": 273307,
+        "gaps": 0,
+        "deltaCount": 900
+      },
+      {
+        "agentId": "b8e45532-7d95-4f11-abb4-8567e981a1b4",
+        "name": "Worker3",
+        "bytes": 273307,
+        "gaps": 0,
+        "deltaCount": 900
+      },
+      {
+        "agentId": "f98dad57-c399-4666-9fd1-c7f0ce0e138d",
+        "name": "Worker4",
+        "bytes": 273307,
+        "gaps": 0,
+        "deltaCount": 900
+      }
+    ],
+    "latencyMs": {
+      "p50": 1,
+      "p95": 1,
+      "max": 3
+    },
+    "hostCpuPercent": {
+      "6168": 0,
+      "74245": 4.168591198506099,
+      "74305": 12.227867515595422
+    }
+  }
+]

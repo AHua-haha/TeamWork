@@ -1,0 +1,33 @@
+{
+  "time": "2026-10-18 18:13 Asia/Shanghai",
+  "kind": "earlier observational sample; different response and frontend activity, not matched A/B",
+  "sqlMeasurementSeconds": 10.003,
+  "sqlRates": {
+    "Bytes_received": 898827.75,
+    "Bytes_sent": 126951344.9,
+    "Com_begin": 69.38,
+    "Com_commit": 69.28,
+    "Com_delete": 45.29,
+    "Com_insert": 45.29,
+    "Com_select": 310.01,
+    "Com_update": 45.19,
+    "Innodb_data_fsyncs": 231.53,
+    "Innodb_data_written": 5786628.81,
+    "Innodb_os_log_written": 1117104.87,
+    "Questions": 654.4,
+    "Threads_connected": 0,
+    "Threads_running": -0.1
+  },
+  "backendCpuObservedPercent": [
+    41,
+    70
+  ],
+  "dockerHostCpuObservedPercent": [
+    100,
+    300
+  ],
+  "dockerVmCpuObservedPercent": [
+    90,
+    155
+  ]
+}

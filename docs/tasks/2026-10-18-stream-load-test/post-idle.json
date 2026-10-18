@@ -1,0 +1,31 @@
+{
+  "seconds": 10.027456625000001,
+  "phase": "idle after production streaming with completed transcript retained",
+  "processes": {
+    "51564": {
+      "cpuPercent": 0.0,
+      "rssStartMiB": 215.984375,
+      "rssEndMiB": 215.640625
+    },
+    "56814": {
+      "cpuPercent": 0.0,
+      "rssStartMiB": 272.953125,
+      "rssEndMiB": 272.75
+    },
+    "74245": {
+      "cpuPercent": 4.188499793205455,
+      "rssStartMiB": 172.125,
+      "rssEndMiB": 172.125
+    },
+    "74305": {
+      "cpuPercent": 13.463035049513811,
+      "rssStartMiB": 1843.515625,
+      "rssEndMiB": 1759.21875
+    },
+    "6168": {
+      "cpuPercent": 0.0,
+      "rssStartMiB": 62.640625,
+      "rssEndMiB": 62.65625
+    }
+  }
+}
