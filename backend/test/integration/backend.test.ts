@@ -256,7 +256,7 @@ test('cancellation interrupts waiting provider, drops partial, and disconnect do
   } finally { await f.runtime.close(); }
 });
 
-test('model errors and tool validation failures become run failures without fabricated success', { timeout: 15_000 }, async () => {
+test('model errors fail runs while invalid tool arguments return results for the model to handle', { timeout: 15_000 }, async () => {
   const echo: RuntimeTool = { definition: { name: 'echo', description: '', parameters: Type.Object({ value: Type.String() }) }, execute: async () => { throw new Error('must not execute'); } };
   const f = await fixture({ policy: fixedPolicy(model, [echo]) });
   try {
@@ -267,8 +267,12 @@ test('model errors and tool validation failures become run failures without fabr
     assert.equal((await f.runtime.getState(f.agentId)).run?.status, 'failed');
     const second = await f.runtime.start(f.agentId, 'tool failure');
     answer((await f.requests.next()).events, fauxAssistantMessage([{ type: 'toolCall', id: 'bad-call', name: 'echo', arguments: {} }], { stopReason: 'toolUse' }));
+    const recovery = await f.requests.next();
+    const invalid = recovery.request.context.messages.find(m => m.role === 'toolResult' && m.toolCallId === 'bad-call');
+    assert.ok(invalid?.role === 'toolResult' && invalid.isError);
+    answer(recovery.events, message('The request needs a value; please provide it.'));
     const result = await collect(f.runtime.follow(f.agentId, { runId: second.runId }));
-    assert.equal((await f.runtime.getState(f.agentId)).run?.status, 'failed');
+    assert.equal((await f.runtime.getState(f.agentId)).run?.status, 'completed');
     const tool = result.find(event => event.type === 'message' && event.record.message.role === 'toolResult');
     assert.ok(tool && tool.type === 'message' && tool.record.message.role === 'toolResult' && tool.record.message.isError);
   } finally { await f.runtime.close(); }
@@ -320,7 +324,12 @@ test('web tool Markdown and metadata persist independently of context and replay
     unavailable = true;
     const failure = await f.runtime.start(f.agentId, 'Try unavailable web provider');
     answer((await f.requests.next()).events, call('web_fetch', { url: 'https://example.com' }));
-    assert.equal((await f.runtime.finished(f.agentId, failure.runId)).status, 'failed');
+    const recovery = await f.requests.next();
+    const errorResult = recovery.request.context.messages.find(m => m.role === 'toolResult' && m.toolName === 'web_fetch');
+    assert.ok(errorResult?.role === 'toolResult' && errorResult.isError);
+    assert.match(JSON.stringify(errorResult), /web_rate_limited/);
+    answer(recovery.events, message('The provider is rate limited; here is what I can conclude without that page.'));
+    assert.equal((await f.runtime.finished(f.agentId, failure.runId)).status, 'completed');
     const events = await follow(failure.runId);
     const failed = events.find(event => event.type === 'message' && event.record.runId === failure.runId && event.record.message.role === 'toolResult');
     assert.ok(failed && failed.type === 'message' && failed.record.message.role === 'toolResult' && failed.record.message.isError);
@@ -1966,4 +1975,69 @@ test('workspace chat reset refuses live runs and rolls back all deletions on per
     await f.team.runner.reset(f.workspaceId);
     assert.deepEqual((await store.chatTimeline(f.workspaceId)).changes, []);
   } finally { if (installed) await store.pool.query(`DROP TRIGGER ${trigger}`); await f.close(); }
+});
+
+test('tool error results, thrown errors and unknown tools preserve call identity and let later batch calls finish', { timeout: 15_000 }, async () => {
+  const executed: string[] = [];
+  const failure = { content: [{ type: 'text' as const, text: 'Timed out reading one source; choose another source.' }], isError: true, details: { error_code: 'web_timeout', retryable: true } };
+  const tools: RuntimeTool[] = [
+    { definition: { name: 'timeout', description: '', parameters: Type.Object({}) }, execute: async () => { executed.push('timeout'); return failure; } },
+    { definition: { name: 'throws', description: '', parameters: Type.Object({}) }, execute: async () => { executed.push('throws'); throw new Error('Requested file is unavailable'); } },
+    { definition: { name: 'working', description: '', parameters: Type.Object({}) }, execute: async () => { executed.push('working'); return { content: [{ type: 'text', text: 'Usable source' }], isError: false }; } },
+  ];
+  const f = await fixture({ policy: fixedPolicy(model, tools) });
+  try {
+    const run = await f.runtime.start(f.agentId, 'Use available sources');
+    answer((await f.requests.next()).events, fauxAssistantMessage(['timeout', 'throws', 'missing', 'working'].map(name => ({ type: 'toolCall' as const, id: `call-${name}`, name, arguments: {} })), { stopReason: 'toolUse' }));
+    const recovery = await f.requests.next();
+    const results = recovery.request.context.messages.filter(m => m.role === 'toolResult');
+    assert.deepEqual(results.map(result => [result.toolCallId, result.toolName, result.isError]), [
+      ['call-timeout', 'timeout', true], ['call-throws', 'throws', true], ['call-missing', 'missing', true], ['call-working', 'working', false],
+    ]);
+    assert.deepEqual(results[0]!.content, failure.content);
+    assert.deepEqual(results[0]!.details, failure.details);
+    assert.match(JSON.stringify(results[1]), /Requested file is unavailable/);
+    assert.match(JSON.stringify(results[2]), /Tool is unavailable: missing/);
+    assert.deepEqual(executed, ['timeout', 'throws', 'working'], 'no implicit retry; later calls still execute');
+    answer(recovery.events, message('Completed using the usable source.'));
+    const terminal = await f.runtime.finished(f.agentId, run.runId);
+    assert.equal(terminal.status, 'completed'); assert.equal(terminal.error, null);
+    const history = await store.runMessages(f.agentId, run.runId);
+    assert.equal(history.filter(record => record.message.role === 'toolResult').length, 4);
+    assert.equal(history.at(-1)!.message.role, 'assistant');
+  } finally { await f.runtime.close(); }
+});
+
+test('failure to persist an error tool result remains terminal and never reaches a new model step', { timeout: 15_000 }, async () => {
+  const tool: RuntimeTool = { definition: { name: 'error_result', description: '', parameters: Type.Object({}) }, execute: async () => ({ content: [{ type: 'text', text: 'A recoverable tool error' }], isError: true }) };
+  const f = await fixture({ policy: fixedPolicy(model, [tool]) });
+  const commit = store.commitMessage.bind(store);
+  try {
+    const run = await f.runtime.start(f.agentId, 'Try a tool');
+    store.commitMessage = async (...args) => { if (args[2].message.role === 'toolResult') throw new Error('Cannot persist tool result'); return commit(...args); };
+    answer((await f.requests.next()).events, fauxAssistantMessage([{ type: 'toolCall', id: 'error-call', name: 'error_result', arguments: {} }], { stopReason: 'toolUse' }));
+    const terminal = await f.runtime.finished(f.agentId, run.runId);
+    assert.equal(terminal.status, 'failed'); assert.match(terminal.error!.message, /Cannot persist tool result/);
+    assert.equal((await store.runMessages(f.agentId, run.runId)).filter(record => record.message.role === 'toolResult').length, 0);
+  } finally { store.commitMessage = commit; await f.runtime.close(); }
+});
+
+test('member can publish a final response after a private web tool error in the same activation', { timeout: 30_000 }, async () => {
+  const f = await groupFixture();
+  try {
+    const accepted = await f.team.runner.postUser(f.workspaceId, 'Use the available information if search is unavailable');
+    answer((await f.requests.next()).events, fauxAssistantMessage([{ type: 'toolCall', id: 'web-unavailable', name: 'web_fetch', arguments: { url: 'https://example.com' } }], { stopReason: 'toolUse' }));
+    const recovery = await f.requests.next();
+    const result = recovery.request.context.messages.find(m => m.role === 'toolResult' && m.toolCallId === 'web-unavailable');
+    assert.ok(result?.role === 'toolResult' && result.isError);
+    assert.match(JSON.stringify(result), /web_not_configured/);
+    assert.equal((await store.chatSnapshot(f.workspaceId)).messages.length, 1, 'tool failure is private');
+    answer(recovery.events, message('The page could not be retrieved; here is the answer from available context.'));
+    const terminal = await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    assert.equal(terminal.status, 'completed'); assert.equal(terminal.error, null);
+    const chat = await store.chatSnapshot(f.workspaceId);
+    assert.equal(chat.messages.length, 2); assert.match(chat.messages[1]!.text, /available context/);
+    const entry = (await store.chatTimeline(f.workspaceId)).changes.at(-1)!.entry;
+    assert.ok(entry.kind === 'member' && entry.finalRef && entry.run.status === 'completed');
+  } finally { await f.close(); }
 });

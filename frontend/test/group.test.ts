@@ -253,3 +253,15 @@ test('reset refusal preserves history, reports the reason and clears busy state'
   assert.equal(client.getSnapshot().commandError, 'Wait for finalization');
   client.dispose();
 });
+
+test('mixed tool results mark only their failed call and remain visible after a successful final', () => {
+  const first = call(1, 'web_fetch', 'good-1');
+  const next = call(2, 'web_fetch', 'bad');
+  const last = call(3, 'web_fetch', 'good-2');
+  const failed = { ...result(5, 'bad', 'web_timeout: request exceeded deadline'), message: { ...result(5, 'bad', 'web_timeout: request exceeded deadline').message, isError: true } };
+  const state = snapshot([first, next, last, result(4, 'good-1', 'Source one'), failed, result(6, 'good-2', 'Source two'), record(7, 'final', 'Recovered answer')]);
+  const accepted = { ...member, run: run('completed'), working: { after: 0, through: 7 }, finalRef: { agentId, runId, messageId: 'final', position: 7, contentIndices: [0], bodyOffset: 0 }, text: 'Recovered answer' };
+  const calls = tools(runActivity(state, accepted));
+  assert.deepEqual(calls.map(tool => [tool.result, tool.failed]), [['Source one', false], ['web_timeout: request exceeded deadline', true], ['Source two', false]]);
+  assert.equal(accepted.run.status, 'completed');
+});

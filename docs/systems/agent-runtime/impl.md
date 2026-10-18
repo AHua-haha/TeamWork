@@ -65,3 +65,7 @@ Group routing remains a team publication concern. The runtime persists raw assis
 ## Workspace conversation reset boundary
 
 TeamRunner only resets an idle workspace after all tracked jobs, including afterRun finalization, have settled. MySqlStore.resetChat owns deletion; the runtime has no retained conversation cache to clear because requests/history read canonical storage. Old member response views unmount on the group reset event, closing their private follows. No reset tool or alternate run loop is added.
+
+## Recoverable tool execution boundary
+
+The sequential tool loop owns lookup, argument validation and execution. Returned isError results and converted exceptions are committed through the same result path, appended to the results array and passed to normal continuation policy after the batch. It no longer throws solely because a tool result failed. Abort and database ownership are checked before converting an exception; message persistence stays outside that catch. Model/protocol checks, per-run limits and afterRun finalization keep their existing terminal behavior. No retry loop or tool-specific runtime branch is added. Integration tests cover schema repair, missing tools, thrown and returned errors, later batch calls, preserved details and final answer publication alongside existing fatal/cancellation cases.

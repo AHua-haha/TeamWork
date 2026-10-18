@@ -89,11 +89,11 @@ The default buffer retains up to 256 events and 8 MiB of serialized event data f
 
 ## Failure behavior
 
-- A model, tool, or persistence failure is observable as a run failure or interrupted state; the runtime does not announce a completed message before its stable record is stored.
+- A model or persistence failure is observable as a run failure or interrupted state; the runtime does not announce a completed message before its stable record is stored.
 - A follow connection may disconnect without stopping the run. The frontend reconnects through the same sync-then-live operation.
 - When chunks have been pruned, the runtime reports a gap. It does not hold the buffer for a slow follower or wait for follower acknowledgements.
 - If the complete message has not yet been committed when a gap occurs, the frontend waits for completion rather than showing an incomplete tail as a whole message.
-- Model errors, invalid tool calls, tool failures and step-limit exhaustion fail the run. A tool failure is persisted as an error tool-result message when storage is available. Completed records already committed are preserved. Uncommitted model partials are discarded on failure/cancellation; a committed tool-call record may remain without a result if execution was cancelled.
+- Model errors, malformed response protocol (including duplicate call identities), request/continuation/finalization hook failures and step-limit exhaustion fail the run. Tool lookup, argument validation and execution errors are instead persisted as isError tool-result messages when storage is available. Finish remaining calls in that response, then continue through normal policy to the next model step with all results in canonical context. Returned tool error content/details are preserved; thrown tool errors become readable error results. The model decides how to recover, report a limitation or stop. No tool retry is automatic. Cancellation, runtime ownership loss and persistence failures are not recoverable tool results. Completed records already committed are preserved. Uncommitted model partials are discarded on failure/cancellation; a committed tool-call record may remain without a result if execution was cancelled.
 - Cancellation aborts ongoing model/tool operations and eventually marks the run cancelled. Custom tools/hooks must honor the abort signal; external effects already performed cannot be rolled back. Losing a frontend connection never requests cancellation.
 - Submission is not idempotent: the caller must not blindly retry an input whose acceptance is uncertain. Concurrent input for an active agent returns 409. No automatic application retries or durable run resumption are provided.
 - Direct input from the user to any team member is refused with 409 `member_conversation` before anything is stored.
@@ -129,3 +129,7 @@ The follow API returns stored Pi messages and chunks without a separate response
 ## Workspace conversation reset exception
 
 The workspace team may explicitly reset all its members' conversation state when the entire team is idle. This user operation deletes private display history/runs/chunks and model context, leaving the agents/configuration and durable project files intact. Subsequent state has no current/latest run, history position zero and a newer context revision. Old explicit run IDs return not_found. Normal context edits and compaction still never rewrite display history. Solo agents are unaffected by workspace reset.
+
+## Recoverable tool failure examples
+
+A response requests three fetches. The second returns a timeout error result. Persist successful first/third results and the second error in call order, then let the model see all three and produce an answer or request another source in the same run. An invalid argument or unavailable tool produces a call-matched error result without executing that call; a later model turn may correct it. A failed tool-result database write still fails the run and cannot be reported as a stored success. Cancellation during a tool never becomes a retryable tool failure.

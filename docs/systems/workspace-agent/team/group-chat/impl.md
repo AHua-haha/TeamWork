@@ -63,3 +63,5 @@ Frontend projection hides a leading routing header, including incomplete prefixe
 ## Conversation reset coordination
 
 TeamRunner.reset serializes with publication and configuration activation through the workspace operation gate, rejects any active/admitted/finalizing job and invokes one database reset transaction. SQL rechecks all workspace member active-run markers while holding workspace then agent locks. Clearing durable history follows dependency order; no filesystem operation is involved. Successful reset wakes timeline and legacy followers. Both follow loops emit a reset boundary before post-reset data and continue using monotonic positions. A reset cannot race with a new run inside the gate.
+
+AgentRuntime persists recoverable tool errors and completes the call batch before invoking team continuation policy. TeamSystem already continues any response with tool calls; the next step reads the full canonical context including error results. Final publication/checkpoint/mentions stay on the same natural-completion path. No team retry scheduler or provider-specific exception is added.

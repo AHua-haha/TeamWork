@@ -20,7 +20,7 @@ Fetch core content contains the page title and provider Markdown body. Metadata 
 
 ## Failure behavior
 
-Tool-execution failures (invalid input, missing credential, HTTP error, network error, timeout, oversized response and malformed provider content) return a readable failure plus metadata status error and a stable error code. Runtime schema validation can reject malformed calls before invoking the tool; those retain the normal runtime argument-error format. HTTP failures include status and whether retrying is appropriate. Provider error bodies and credentials are not exposed. Failures use the runtime's normal tool-error history and termination behavior. There is no automatic retry. A caller may initiate another run after addressing the failure.
+Tool-execution failures (invalid input, missing credential, HTTP error, network error, timeout, oversized response and malformed provider content) return a readable failure plus metadata status error and a stable error code. Runtime schema validation can reject malformed calls before invoking the tool; those retain the normal runtime argument-error format. HTTP failures include status and whether retrying is appropriate. Provider error bodies and credentials are not exposed. Failures use the runtime's normal error tool-result history and remain available to the next model step in the same run. The agent can choose another source, retry with a new call when appropriate, or report the limitation. There is no automatic retry. retryable is advice about the failed request, not an instruction to repeat it.
 
 Cancellation propagates to in-flight HTTP/body reading and remains run cancellation rather than an ordinary failure result. Both operations may cause provider billing. They do not modify workspace files.
 

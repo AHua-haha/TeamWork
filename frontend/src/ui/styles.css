@@ -550,7 +550,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .work-disclosure svg { width: 12px; height: 12px; }
 .work-tool[open] > summary > .work-disclosure, .work-tool-set[open] > summary > .work-disclosure { transform: rotate(90deg); }
 .work-tool pre { background: transparent; border: 0; border-radius: 0; margin: 4px 0 8px 23px; padding: 3px 0; overflow: auto; max-height: 350px; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.work-tool.failed, .group-command-error, .group-work-error { color: #a14e40; }
+.work-tool.failed > summary, .group-command-error, .group-work-error { color: #a14e40; }
 .group-work-error button { margin-left: 8px; }
 .group-terminal { margin-top: 0; color: #967261; font-size: 13px; }
 .group-work:not([hidden]) + .group-terminal { margin-top: 14px; }
@@ -603,7 +603,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .work-tool-list { padding: 0; }
 .work-tool-set { margin: 6px 0 12px; }
-.work-tool-set.failed { color: #a14e40; }
 
 .work-tool-set > summary { width: fit-content; max-width: 100%; }
 .work-tool-set > summary > .work-disclosure { margin-left: 0; }

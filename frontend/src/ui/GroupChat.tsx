@@ -206,7 +206,7 @@ function ToolSet({ item, running }: { item: Extract<ActivityItem, { kind: 'tools
   const pending = item.tools.filter(tool => tool.result === undefined).length;
   const status = failed ? `${failed} failed` : pending ? running ? `${pending} running` : `${pending} without result` : '';
   const label = toolSetSummary(item.tools);
-  return <details className={`work-tool-set ${failed ? 'failed' : ''}`}><summary aria-label={`Tool group: ${label}`}>
+  return <details className="work-tool-set"><summary aria-label={`Tool group: ${label}`}>
     <span className="work-icon"><Glyph name={workToolSummary(item.tools[0]!).icon} /></span>
     <span className="work-line-label">{label}</span>
     {status && <span className="work-line-status">{status}</span>}

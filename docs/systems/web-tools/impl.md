@@ -26,3 +26,7 @@ Use built-in Node fetch without an extra provider SDK. Inject fetch for determin
 ## Verification
 
 [Web-tool tests](../../../backend/test/web-tools.test.ts) check exact endpoint/auth/body, filters/defaults, Unicode validation, Markdown+metadata, empty results, long/empty snippets, ignored verbose summaries, Unicode/ellipsis bounds, combined truncation metadata, malformed responses, provider failures, cancellation, deadline and limits. [Harness assembly tests](../../../backend/test/team-context.test.ts) check lead/worker availability without Bash allowance and inspection consistency. [Disposable MySQL runtime integration](../../../backend/test/integration/backend.test.ts) checks persisted tool output and follow history. Live credential/endpoint probes are recorded without secrets in the task tests.jsonl. Run backend typecheck, unit tests, MySQL integration and build before committing the completed contract.
+
+Web failures already return native isError tool results with Markdown and metadata; runtime continuation now preserves these results for the next model call instead of terminating the run. The provider adapter, deadline, retryable metadata, credentials and absence of automatic retries are unchanged.
+
+The file-backed execute harness prompt explains that tool errors remain available for agent handling, retryable is advice and failed calls may already have effects.

@@ -274,7 +274,6 @@ export class AgentRuntime {
         for (const call of calls) {
           signal.throwIfAborted();
           let result: ToolResultMessage;
-          let toolError: unknown;
           try {
             const definition = declared.find(tool => tool.name === call.name);
             const tool = tools.get(call.name);
@@ -282,17 +281,15 @@ export class AgentRuntime {
             const args = validateToolArguments(definition, call) as JsonObject;
             const output = await abortable(track(this.policy.executeTool ? this.policy.executeTool(tool, args, scope, call) : tool.execute(args, scope, call)), signal);
             result = { ...output, role: 'toolResult', toolCallId: call.id, toolName: call.name, timestamp: Date.now() };
-            if (result.isError) toolError = new AppError('tool_error', `Tool reported failure: ${call.name}`);
           } catch (error) {
             signal.throwIfAborted();
-            toolError = error;
+            this.store.assertRuntime();
             result = { role: 'toolResult', toolCallId: call.id, toolName: call.name, content: [{ type: 'text', text: error instanceof Error ? error.message : 'Tool failed' }], isError: true, timestamp: Date.now() };
           }
           signal.throwIfAborted();
           await this.store.commitMessage(run.agentId, run.runId, { messageId: randomUUID(), message: result, metadata: this.policy.messageMetadata?.(scope, result) ?? {} });
           this.changes.publish();
           results.push(result);
-          if (toolError) throw toolError;
         }
         const again = this.policy.shouldContinue ? await abortable(track(Promise.resolve(this.policy.shouldContinue(scope, response, results, record))), signal) : calls.length > 0;
         signal.throwIfAborted();
