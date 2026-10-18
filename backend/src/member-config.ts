@@ -194,7 +194,7 @@ export class MemberConfigService {
         const source = { ...sourceBundle(path, files, 'user'), acceptedRevision: origin === 'committed' ? revision : undefined, ...(current?.value.configuration?.previous ? { previous: current.value.configuration.previous } : {}) };
         const changed = !current || source.digest !== current.value.configuration?.digest;
         if (changed) {
-          const [issues] = await this.team.settingsIssues([fields.settings]);
+          const [issues] = await this.team.settingsIssues([{ ...fields.settings, ...current?.value.modelSettings }]);
           if (fields.settings.toolOptionIds.length || issues!.length) throw new AppError('invalid_config', issues!.join('; ') || 'Member tools come only from harnesses');
           review.changes.push({ type: current ? 'update' : 'create', path, name: fields.name, memberId: current?.id, before: current?.value.configuration, after: source, fields });
         }

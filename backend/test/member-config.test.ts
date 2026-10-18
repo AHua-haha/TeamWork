@@ -112,3 +112,25 @@ test('version-three sources gain execute assignment from backend policy once wit
   assert.deepEqual(migrated.previous,old);
   assert.equal(await readFile(join(files.root,old.path),'utf8'),old.files['member.json']);
 }));
+
+
+test('user model preferences survive file activation and do not create pending member changes', () => withTeam(async f => {
+  const member = await worker(f, 'Backend', ['src']);
+  await f.team.configuration.materialize(f.lead.memberId);
+  const initial = await f.team.currentConfiguration(f.workspaceId);
+  const preference = { connectionId: 'conn', modelId: 'user-choice', modelOptions: [{ connectionId: 'conn', modelId: 'user-choice', reasoning: 'high' as const }] };
+  await f.team.updateModelSettings(f.workspaceId, member.memberId, member.revision, preference);
+  const current = await f.team.currentConfiguration(f.workspaceId);
+  assert.deepEqual(current.changes,initial.changes);
+  const source = await f.team.configuration.accepted(f.workspaceId,member.memberId);
+  const files = await f.team.harness.files(f.lead.memberId);
+  await files.write.writeFile(join(files.root, source.path),JSON.stringify({...JSON.parse(source.files['member.json']!),responsibility:'Updated responsibility'}));
+  const pending = await f.team.currentConfiguration(f.workspaceId);
+  assert.equal(pending.status.valid,true);
+  await f.team.commitConfiguration(f.workspaceId,pending.commit.revision,pending.commit.base,'Accept responsibility');
+  const review = await f.team.currentConfiguration(f.workspaceId);
+  await f.team.activateConfiguration(f.workspaceId,review.activation.revision,review.activation.digest);
+  const active = await f.team.service.get(f.workspaceId,member.memberId);
+  assert.equal(active.responsibility,'Updated responsibility'); assert.equal(active.settings.modelId,'user-choice');
+  assert.equal((await f.team.service.find(member.memberId))!.value.settings.modelId,'model','manifest model remains unchanged');
+}));

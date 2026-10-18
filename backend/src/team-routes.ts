@@ -34,6 +34,16 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
       } else throw notFound();
       return;
     }
+    if (area === 'members' && memberId && extra.length === 1 && extra[0] === 'model-settings') {
+      identity(memberId, 'memberId'); query(url, []);
+      if (method === 'GET') json(response, 200, await team.modelSettings(workspaceId, memberId));
+      else if (method === 'PUT') {
+        const input = await body(request, maxBodyBytes); fields(input, ['revision', 'value']);
+        position(input.revision);
+        json(response, 200, await team.updateModelSettings(workspaceId, memberId, input.revision as number, input.value));
+      } else throw notFound();
+      return;
+    }
     if (area === 'members' && memberId && extra[0] === 'harness') {
       identity(memberId, 'memberId');
       await team.member(workspaceId, memberId);

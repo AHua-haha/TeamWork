@@ -57,6 +57,11 @@ export class TeamSystem {
     return { ...team, members: team.members.map(member => this.status(member)) };
   }
 
+  modelSettings(workspaceId: string, memberId: string) { return this.service.modelSettings(workspaceId, memberId); }
+  updateModelSettings(workspaceId: string, memberId: string, revision: number, value: unknown) {
+    return this.runner.workspaceOperation(workspaceId, () => this.service.updateModelSettings(workspaceId, memberId, revision, value));
+  }
+
   async member(workspaceId: string, memberId: string): Promise<MemberStatus> {
     return this.status(await this.service.get(workspaceId, memberId));
   }

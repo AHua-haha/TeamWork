@@ -116,3 +116,9 @@ Private inspection failure does not remove or replace shared messages. Failed, c
 13. A member produces only final text. It streams visibly, becomes the accepted report and leaves no work placeholder. Another run fails after some tools: its failure status and activity remain available without a fabricated report or automatic successful-final fold.
 14. Expand a tool set and let another tool finish. Its row updates in place, its siblings retain their order, and the set remains expanded. Finish the run, reopen Work, and the tool set can still be toggled independently.
 15. Two members run concurrently. Each has its own streaming flow, tool sets and final transition; tool groups and activity never cross their reserved sections.
+
+## Group avatar model settings
+
+Hovering over, focusing or clicking an active member avatar in group chat opens an interactive model picker. It remains open while using its controls and closes on Escape, outside click or leaving the avatar/panel. The panel uses the existing composer controls for provider/model selection, per-model reasoning, maximum output tokens, temperature and context budget. Opening it writes nothing. Model and reasoning save on selection; the additional options use Save/Discard. Colors and avatar geometry remain unchanged. Historical retired members cannot be configured.
+
+Settings belong to that member, persist through reload and apply to its next run. In-flight runs retain their prepared configuration. Errors are visible and stale revisions require reviewing the latest values. A single panel is open at a time; it stays within the viewport and supports keyboard and touch interaction. Changes do not alter prompts, responsibility, tools or design assignments.

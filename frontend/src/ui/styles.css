@@ -725,3 +725,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 @container (max-width: 680px) { .team-active-layout.with-detail { grid-template-columns: 1fr; } .team-member-detail { border-left: 0; border-top: 1px solid #e0e7db; margin-top: 20px; padding: 20px 0 0; } .member-design-tree, .with-detail .member-design-tree { --design-label-width: 135px; } .configuration-overview { grid-template-columns: 1fr; gap: 24px; } }
 @container (max-width: 460px) { .member-design-tree, .with-detail .member-design-tree { --design-label-width: 83px; } .member-design-row { grid-template-columns: minmax(0, var(--design-label-width)) 12px minmax(0, 1fr); } .member-design-children { margin-left: 4px; padding-left: 8px; } .member-scope-card { padding: 10px; } .member-card-person { flex-wrap: wrap; gap: 7px; } .member-card-status { margin-left: 0; } .member-design-file { font-size: 10px; } .configuration-diff-layout { grid-template-columns: 1fr; } .configuration-file-list { border-right: 0; border-bottom: 1px solid #e0e7db; border-radius: 8px 8px 0 0; } .configuration-text-diff > header { flex-wrap: wrap; } .configuration-text-diff > header > span { margin-left: 0; } .configuration-diff-line { grid-template-columns: 18px 18px 9px minmax(0, 1fr); gap: 3px; } .configuration-operation { flex-wrap: wrap; } }
 @container (max-width: 680px) { .team-active-layout.with-detail .member-design-tree { display: none; } .team-active-layout.with-detail .team-member-detail { border-top: 0; margin-top: 0; padding-top: 0; } }
+
+/* Avatar controls retain the established avatar box and center. */
+.group-avatar-config { padding: 0; background: transparent; color: inherit; font-family: inherit; cursor: pointer; }
+.group-avatar-config:hover, .group-avatar-config[aria-expanded="true"] { background: color-mix(in srgb, var(--member-color) 7%, transparent); }
+.group-avatar-config:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.group-avatar-config:disabled { cursor: default; opacity: 1; }
+.member-model-popover { position: fixed; z-index: 100; width: min(340px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; border: 1px solid #dce5da; border-radius: 14px; background: #fff; box-shadow: 0 10px 36px #18352724; }
+.member-model-heading { display: flex; gap: 10px; align-items: baseline; padding: 12px 14px 3px; font-size: 13px; font-weight: 650; }
+.member-model-heading span { color: #718077; font-size: 11px; font-weight: 400; }
+.member-model-picker .model-popover { position: static; width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
+.member-model-loading { padding: 16px; font-size: 13px; color: #718077; }

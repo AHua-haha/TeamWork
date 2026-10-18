@@ -18,6 +18,18 @@ export interface MemberRecord {
   workspaceId: string; name: string; role: string; responsibility: string; harness: HarnessConfig;
   lead: boolean; settings: RunSettings; createdAt: number; retiredAt: number | null;
   configuration?: MemberConfigSource;
+  /** User-owned model preferences, independent of the activated member files. */
+  modelSettings?: MemberModelSettings;
+}
+export type MemberModelSettings = Pick<RunSettings, 'connectionId' | 'modelId' | 'modelOptions'>;
+export function memberModelSettings(value: unknown): MemberModelSettings {
+  const data = obj(value, 'Member model settings');
+  keys(data, ['connectionId', 'modelId', 'modelOptions']);
+  const { connectionId, modelId, modelOptions } = validateRunSettings({ ...emptyRunSettings, connectionId: data.connectionId, modelId: data.modelId, modelOptions: data.modelOptions });
+  return { connectionId, modelId, modelOptions };
+}
+export function effectiveMemberSettings(member: StoredMember): RunSettings {
+  return { ...member.value.settings, ...member.value.modelSettings };
 }
 /** The fields a caller may set. */
 export interface MemberFields { name: string; role: string; responsibility: string; harness: HarnessConfig; settings: RunSettings }
@@ -89,7 +101,7 @@ function stored(member: StoredMember): StoredMember {
     const { implementationScope: _legacy, ...assignment } = data.harness as Record<string, unknown>;
     const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, harness: assignment, settings: data.settings });
     if (typeof data.workspaceId !== 'string' || typeof data.lead !== 'boolean' || !Number.isSafeInteger(data.createdAt) || !(data.retiredAt === null || Number.isSafeInteger(data.retiredAt))) throw new Error('shape');
-    return { ...member, value: { ...fields, configuration: data.configuration as MemberConfigSource | undefined, workspaceId: data.workspaceId, lead: data.lead, createdAt: data.createdAt as number, retiredAt: data.retiredAt as number | null } };
+    return { ...member, value: { ...fields, configuration: data.configuration as MemberConfigSource | undefined, ...(data.modelSettings === undefined ? {} : { modelSettings: memberModelSettings(data.modelSettings) }), workspaceId: data.workspaceId, lead: data.lead, createdAt: data.createdAt as number, retiredAt: data.retiredAt as number | null } };
   } catch { throw new AppError('corrupt_data', `Stored member ${member.id} cannot be read`, 500); }
 }
 
@@ -148,6 +160,24 @@ export class TeamService {
     const stored = await this.member(workspaceId, memberId);
     return { stored, member: await this.view(stored) };
   }
+  async modelSettings(workspaceId: string, memberId: string) {
+    return this.modelSettingsView(await this.member(workspaceId, memberId));
+  }
+  async updateModelSettings(workspaceId: string, memberId: string, revision: number, input: unknown) {
+    const member = await this.member(workspaceId, memberId);
+    const modelSettings = memberModelSettings(input);
+    const [issues] = await this.config.issuesFor([{ ...emptyRunSettings, ...modelSettings }]);
+    if (issues!.length) throw new AppError('invalid_config', issues!.join('; '));
+    const saved = await this.store.updateMember(memberId, revision, nameKey(member.value.name), { ...member.value, modelSettings });
+    return this.modelSettingsView(saved);
+  }
+  private async modelSettingsView(member: StoredMember) {
+    const value = memberModelSettings(member.value.modelSettings ?? {
+      connectionId: member.value.settings.connectionId, modelId: member.value.settings.modelId, modelOptions: member.value.settings.modelOptions,
+    });
+    const [issues] = await this.config.issuesFor([{ ...emptyRunSettings, ...value }]);
+    return { id: member.id, revision: member.revision, value, issues: issues! };
+  }
   async all(workspaceId: string) { await this.workspaces.record(workspaceId); return (await this.store.listMembers(workspaceId)).map(stored); }
   async activate(workspaceId: string, input: MemberActivation) { await this.store.activateMembers(workspaceId, input); }
   activation(workspaceId: string) { return this.store.getMemberActivation(workspaceId); }
@@ -200,7 +230,7 @@ export class TeamService {
 
   /** What stops each of these members from running. */
   async issues(members: readonly StoredMember[]): Promise<string[][]> {
-    const issues = await this.config.issuesFor(members.map(member => member.value.settings));
+    const issues = await this.config.issuesFor(members.map(effectiveMemberSettings));
     for (const [index, member] of members.entries()) {
       if (member.value.settings.toolOptionIds.length) issues[index]!.push('Workspace member tools are supplied by the harness; clear catalog tool selections');
       const scope = member.value.harness.designScope;
@@ -239,11 +269,11 @@ export class TeamService {
   private async views(members: StoredMember[]): Promise<MemberView[]> {
     const issues = await this.issues(members);
     return Promise.all(members.map(async (member, index) => {
-      const { name, role, responsibility, harness, settings, lead } = member.value;
+      const { name, role, responsibility, harness, lead } = member.value;
       let implementationScope = { paths: [] as string[], usePaths: [] as string[] };
       try { const resolved = await resolveHarness(this.designs, member.workspaceId, harness); implementationScope = { paths: resolved.writable, usePaths: resolved.readonly }; }
       catch (error) { if (!(error instanceof AppError) || error.status >= 500) throw error; }
-      return { memberId: member.id, workspaceId: member.workspaceId, revision: member.revision, name, role, responsibility, harness: { ...harness, implementationScope }, lead, settings, issues: issues[index]!, ready: issues[index]!.length === 0 };
+      return { memberId: member.id, workspaceId: member.workspaceId, revision: member.revision, name, role, responsibility, harness: { ...harness, implementationScope }, lead, settings: effectiveMemberSettings(member), issues: issues[index]!, ready: issues[index]!.length === 0 };
     }));
   }
 }
@@ -257,7 +287,7 @@ export function teamRunConfig(team: TeamService, config: ConfigService): RunConf
       if (member.value.retiredAt !== null) throw new AppError('invalid_agent_config', 'This member has been retired', 409);
       const [issues] = await team.issues([member]);
       if (issues!.length) throw new AppError('invalid_agent_config', issues!.join('; '), 409);
-      return config.resolveSettings(member.value.settings, member.revision);
+      return config.resolveSettings(effectiveMemberSettings(member), member.revision);
     },
   };
 }

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { GroupClient, type GroupEntry } from '../client/group-client.js';
 import { AgentClient } from '../client/agent-client.js';
 import { discussionInput, referenceLabel, type Discussion } from '../client/discussion-reference.js';
 import type { ClientSnapshot } from '../client/protocol.js';
 import type { TeamState } from './useTeam.js';
+import { MemberModelPopover } from './MemberModelPopover.js';
 import { Glyph } from './Glyph.js';
 import { Markdown } from './Markdown.js';
 import { memberColor, mentionAt, mentionToken, workDuration, runActivity, workToolSummary, toolSetSummary, type ActivityItem, type ToolActivity } from './group-work.js';
@@ -14,6 +15,24 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
 }) {
   const client = useMemo(() => new GroupClient(workspaceId), [workspaceId]);
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
+  const [modelTarget, setModelTarget] = useState<{ memberId: string; anchor: HTMLButtonElement } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const keepModelOpen = useCallback(() => { clearTimeout(hoverTimer.current); clearTimeout(leaveTimer.current); }, []);
+  const closeModel = useCallback(() => { keepModelOpen(); setModelTarget(null); }, [keepModelOpen]);
+  const openModel = useCallback((memberId: string, anchor: HTMLButtonElement, immediate = false) => {
+    keepModelOpen();
+    const open = () => setModelTarget({ memberId, anchor });
+    if (immediate) open(); else hoverTimer.current = setTimeout(open, 350);
+  }, [keepModelOpen]);
+  const leaveModel = useCallback(() => {
+    clearTimeout(hoverTimer.current); clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => {
+      if (!document.activeElement?.closest('.member-model-popover')) setModelTarget(null);
+    }, 250);
+  }, []);
+  useEffect(() => { closeModel(); return keepModelOpen; }, [workspaceId, closeModel, keepModelOpen]);
+  const modelMember = team.team?.members.find(member => member.memberId === modelTarget?.memberId);
   const [draft, setDraft] = useState('');
   const [caret, setCaret] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -60,8 +79,11 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
       {!snapshot.entries.length && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open design and team</button></div>}
       <div className="group-timeline" ref={timeline}>{snapshot.entries.map(entry => entry.kind === 'user'
         ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body"><p>{entry.text}</p></div><div className="group-identity group-user-identity"><span className="group-avatar" aria-hidden="true">Y</span><strong className="group-identity-name">You</strong></div></article>
-        : <MemberResponse key={entry.entryId} entry={entry} />)}</div>
+        : <MemberResponse key={entry.entryId} entry={entry} canConfigure={!!team.team?.members.some(member => member.memberId === entry.memberId)} modelOpen={modelTarget?.memberId === entry.memberId}
+          onModel={openModel} onModelLeave={leaveModel} />)}</div>
     </div>
+    {modelTarget && modelMember && <MemberModelPopover key={modelTarget.memberId} workspaceId={workspaceId} member={modelMember} anchor={modelTarget.anchor}
+      onClose={closeModel} onEnter={keepModelOpen} onLeave={leaveModel} onSaved={refreshTeam} />}
     <div className="group-composer-footer"><form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
       {discussion.reference && <div className="composer-reference"><span>{referenceLabel(discussion.reference)}</span><button type="button" aria-label="Remove discussion reference" onClick={discussion.clear}>×</button></div>}
       {snapshot.commandError && <div className="group-command-error" role="alert">{snapshot.commandError}</div>}
@@ -94,7 +116,10 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
   </div>;
 }
 
-function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member' }> }) {
+function MemberResponse({ entry, canConfigure, modelOpen, onModel, onModelLeave }: {
+  entry: Extract<GroupEntry, { kind: 'member' }>; canConfigure: boolean; modelOpen: boolean;
+  onModel(memberId: string, anchor: HTMLButtonElement, immediate?: boolean): void; onModelLeave(): void;
+}) {
   const [expanded, setExpanded] = useState(entry.finalRef === null);
   const accepted = entry.finalRef !== null;
   const seenFinal = useRef(accepted);
@@ -117,7 +142,11 @@ function MemberResponse({ entry }: { entry: Extract<GroupEntry, { kind: 'member'
     return { iso: date.toISOString(), time: date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), full: date.toLocaleString() };
   }, [entry.run.startedAt]);
   return <article className="group-member" data-entry-id={entry.entryId} style={{ '--member-color': memberColor(entry.memberId) } as CSSProperties}>
-    <div className="group-identity group-member-identity"><span className="group-avatar" aria-hidden="true">{entry.name.slice(0, 1).toUpperCase()}</span><strong className="group-identity-name">{entry.name}</strong></div>
+    <div className="group-identity group-member-identity"><button type="button" className="group-avatar group-avatar-config" disabled={!canConfigure}
+      aria-label={`Configure ${entry.name} model`} aria-haspopup="dialog" aria-expanded={modelOpen}
+      onMouseEnter={event => onModel(entry.memberId, event.currentTarget)} onMouseLeave={onModelLeave}
+      onFocus={event => onModel(entry.memberId, event.currentTarget, true)} onBlur={onModelLeave}
+      onClick={event => onModel(entry.memberId, event.currentTarget, true)}>{entry.name.slice(0, 1).toUpperCase()}</button><strong className="group-identity-name">{entry.name}</strong></div>
     <div className="group-run-area">
       <div className="group-run-pill group-run-info" data-status={entry.run.status}>
         <span className="run-header-status">{status}</span>

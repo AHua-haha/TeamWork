@@ -1,5 +1,5 @@
 import { BackendError, waitForRetry } from './agent-client.js';
-import { json, type RunSettings, type ModelOptions } from './config-client.js';
+import { json, type RunSettings, type ModelOptions, type ConfigRecord } from './config-client.js';
 import { ProtocolError, readSse, type SseFrame } from './sse.js';
 
 export interface WorkspaceRecord { workspaceId: string; name: string; directory: string; createdAt: number }
@@ -35,6 +35,8 @@ export interface Member {
   memberId: string; workspaceId: string; revision: number; name: string; role: string; responsibility: string; harness: HarnessConfig;
   lead: boolean; settings: RunSettings; issues: string[]; ready: boolean; running: boolean;
 }
+export type MemberModelSettings = Pick<RunSettings, 'connectionId' | 'modelId' | 'modelOptions'>;
+export interface MemberModelConfig extends ConfigRecord<MemberModelSettings> { issues: string[] }
 export interface Team { workspaceId: string; members: Member[] }
 export interface HarnessPart { id: string; paths: string[]; exclude: string[]; commit: 'agent' | 'user'; prompt: string; context?: 'design' | 'impl' }
 export interface HarnessDefinition { id: string; tools: string[]; prompt: string; parts: HarnessPart[] }
@@ -78,6 +80,8 @@ export class WorkspaceClient {
 
   team(workspaceId: string): Promise<Team> { return this.get(`${this.base(workspaceId)}/team`); }
   inspectMember(workspaceId: string, memberId: string): Promise<MemberInspection> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}`); }
+  memberModelSettings(workspaceId: string, memberId: string): Promise<MemberModelConfig> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/model-settings`); }
+  updateMemberModelSettings(workspaceId: string, memberId: string, revision: number, value: MemberModelSettings): Promise<MemberModelConfig> { return this.write(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/model-settings`, 'PUT', { revision, value }); }
   currentMemberConfiguration(workspaceId: string): Promise<CurrentMemberConfiguration> { return this.get(`${this.base(workspaceId)}/team/configuration/current`); }
   commitMemberConfiguration(workspaceId: string, input: { revision: string; base: string; message: string }): Promise<ConfigurationCommit> { return this.write(`${this.base(workspaceId)}/team/configuration/commit`, 'POST', input); }
   activateMemberConfiguration(workspaceId: string, input: { revision: string; digest: string }): Promise<{ revision: string; memberIds: string[] }> { return this.write(`${this.base(workspaceId)}/team/configuration/activate`, 'POST', input); }

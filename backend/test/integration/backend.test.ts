@@ -1691,3 +1691,34 @@ test('fresh bootstrap and administrative reset persist atomic baselines, preserv
     assert.deepEqual(remaining,before[0]); assert.equal(await readFile(join(directory,'code.ts'),'utf8'),'implementation'); assert.deepEqual(await readdir(directory),['code.ts']);
   } finally { await service.close(); await isolated.close(); await rm(folder,{recursive:true,force:true}); await store.pool.query(`DROP DATABASE ${database}`); }
 });
+
+test('member model preferences persist in MySQL, drive prepared runs and survive reopening without changing active source', { timeout: 15_000 }, async () => {
+  const models = builtinModels();
+  const service = new ConfigService(store, models);
+  const connectionId = `member-model-${randomUUID()}`;
+  await service.createConnection(connectionId, { label: 'Member model test', provider: 'deepseek', baseUrl: models.getModel('deepseek','deepseek-v4-pro')!.baseUrl, api: 'openai-completions' });
+  const folder = await realpath(await mkdtemp(join(tmpdir(),'rsi-member-model-')));
+  const team = new TeamSystem(store,workspaces,service);
+  let reopened: TeamSystem | undefined;
+  try {
+    const workspace = await workspaces.create({name:'Member model test',directory:join(folder,'project'),models:testModels(),adopt:false});
+    const lead = (await team.service.team(workspace.workspaceId)).members[0]!;
+    const source = (await team.service.find(lead.memberId))!.value.configuration;
+    const value = {connectionId,modelId:'deepseek-v4-pro',modelOptions:[{connectionId,modelId:'deepseek-v4-pro',reasoning:'high',temperature:0.4,maxTokens:128,contextBudget:4000}]};
+    const saved = await team.updateModelSettings(workspace.workspaceId,lead.memberId,lead.revision,value);
+    const prepared = await team.runConfig.resolveForRun(lead.memberId);
+    assert.equal(prepared.options.reasoning,'high'); assert.equal(prepared.options.temperature,0.4); assert.equal(prepared.options.maxTokens,128); assert.equal(prepared.contextBudget,4000);
+    assert.equal(prepared.source.agentRevision,saved.revision);
+    await assert.rejects(team.updateModelSettings(workspace.workspaceId,lead.memberId,saved.revision,{...value,modelId:'nonexistent'}), /Selected model is unavailable/);
+    await assert.rejects(team.updateModelSettings(workspace.workspaceId,lead.memberId,saved.revision,{...value,modelOptions:[{connectionId,modelId:'deepseek-v4-pro',maxTokens:999999999}]}), /exceed/);
+    await team.updateModelSettings(workspace.workspaceId,lead.memberId,saved.revision,{...value,modelOptions:[{connectionId,modelId:'deepseek-v4-pro',reasoning:'xhigh'}]});
+    assert.equal(prepared.options.reasoning,'high','prepared snapshot is unchanged');
+    assert.equal((await team.runConfig.resolveForRun(lead.memberId)).options.reasoning,'max');
+    reopened = new TeamSystem(store,workspaces,service); await reopened.initialize();
+    assert.equal((await reopened.service.get(workspace.workspaceId,lead.memberId)).settings.modelOptions[0]!.reasoning,'xhigh');
+    assert.deepEqual((await reopened.service.find(lead.memberId))!.value.configuration,source);
+  } finally {
+    team.runner.close(); reopened?.runner.close();
+    await rm(folder,{recursive:true,force:true});
+  }
+});

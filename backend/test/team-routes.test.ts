@@ -166,3 +166,33 @@ test('current configuration endpoint supplies file diff and separate commit/acti
   const active = await call(base+'/current'); assert.equal(active.status.commits.length,0); assert.deepEqual(active.changes,[]);
   await call(base+'/current?source=pending',{status:400});
 }));
+
+
+test('user model settings persist independently of member files, reject stale/foreign/extra writes and allow busy saves', () => withServer(async (call, f) => {
+  const member = await worker(f, 'Backend', ['src']);
+  const path = `/workspaces/${f.workspaceId}/team/members/${member.memberId}`;
+  const initial = await call(path + '/model-settings');
+  const source = (await call(path)).configuration;
+  const value = { connectionId: 'conn', modelId: 'other-user-model', modelOptions: [{ connectionId: 'conn', modelId: 'other-user-model', reasoning: 'high', temperature: 0.5, maxTokens: 100, contextBudget: 2000 }] };
+  const saved = await call(path + '/model-settings', { method: 'PUT', data: { revision: initial.revision, value } });
+  assert.deepEqual(saved.value, value); assert.equal(saved.revision, initial.revision + 1);
+  assert.deepEqual((await call(path)).configuration, source);
+  assert.equal((await call(path)).member.settings.modelId, value.modelId);
+  assert.equal((await call(`/workspaces/${f.workspaceId}/team`)).members.find((m: Body) => m.memberId === member.memberId).settings.modelId, value.modelId);
+  const before = await f.team.service.find(member.memberId);
+  await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{connectionId:'conn',modelId:'model'}}});
+  await call(path + '/model-settings', { method:'PUT', status:409, data:{revision:initial.revision,value} });
+  for (const extra of [{ prompt:'bypass' }, { toolOptionIds:['admin'] }, { harness:{} }]) await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{...value,...extra}}});
+  await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{...value,modelOptions:[{connectionId:'conn',modelId:'model',temperature:10}]}}});
+  await call(`/workspaces/wrong/team/members/${member.memberId}/model-settings`,{status:404});
+  assert.deepEqual(await f.team.service.find(member.memberId), before);
+  await f.team.runner.postUser(f.workspaceId,'@Backend work');
+  await call(path+'/model-settings',{method:'PUT',data:{revision:saved.revision,value:{...value,modelId:'third-model'}}});
+  assert.equal(f.runtime.active(member.memberId)?.status,'running');
+  f.runtime.end(member.memberId);
+  const { settle } = await import('./team-fixture.js'); await settle();
+  const current = await f.team.service.get(f.workspaceId,member.memberId);
+  await f.team.service.retire(f.workspaceId,member.memberId,current.revision);
+  await call(path+'/model-settings',{status:404});
+  await call(path+'/model-settings',{method:'PUT',status:404,data:{revision:current.revision,value}});
+}));

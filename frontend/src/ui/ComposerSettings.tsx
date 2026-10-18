@@ -7,10 +7,17 @@ export type AgentConfigControl = SettingsControl;
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed';
 const levelLabel = (level: SentReasoningLevel) => level === 'xhigh' ? 'XHigh' : level[0]!.toUpperCase() + level.slice(1);
 
-export function ComposerSettings({ control, api, active, onGateChange }: {
+interface PickerProps {
   control: AgentConfigControl; api: ConfigClient; active: boolean; onGateChange: (ready: boolean) => void;
-}) {
-  const [open, setOpen] = useState(false);
+}
+export function ComposerSettings(props: PickerProps) { return <ModelSettingsPicker {...props} />; }
+const ignoreGate = () => {};
+export function ModelSettingsPanel({ control, api, active, onClose }: Omit<PickerProps, 'onGateChange'> & { onClose(): void }) {
+  return <ModelSettingsPicker control={control} api={api} active={active} onGateChange={ignoreGate} panel onClose={onClose} />;
+}
+function ModelSettingsPicker({ control, api, active, onGateChange, panel = false, onClose }: PickerProps & { panel?: boolean; onClose?(): void }) {
+  const [open, setOpenState] = useState(panel);
+  function setOpen(value: boolean) { setOpenState(value); if (!value) onClose?.(); }
   const [listExpanded, setListExpanded] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [connections, setConnections] = useState<ConfigRecord<ConnectionView>[]>([]);
@@ -41,7 +48,7 @@ export function ComposerSettings({ control, api, active, onGateChange }: {
   useEffect(() => onGateChange(isReady), [isReady, onGateChange]);
   useEffect(() => { setSliderDraft(null); }, [control.record?.revision]);
   useEffect(() => {
-    if (!open) return;
+    if (!open || panel) return;
     const dismiss = (event: MouseEvent) => {
       if (!container.current?.contains(event.target as Node)) { setOpen(false); setSliderDraft(null); }
     };
@@ -51,7 +58,7 @@ export function ComposerSettings({ control, api, active, onGateChange }: {
     document.addEventListener('mousedown', dismiss);
     document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('mousedown', dismiss); document.removeEventListener('keydown', escape); };
-  }, [open]);
+  }, [open, panel]);
 
   const loadChoices = useCallback(async () => {
     setLoadingChoices(true);
@@ -129,12 +136,14 @@ export function ComposerSettings({ control, api, active, onGateChange }: {
     models: entries.filter(entry => entry.connection.id === connection.id && `${entry.model.label} ${entry.model.modelId} ${connection.value.label} ${connection.value.provider}`.toLowerCase().includes(query.toLowerCase().trim())),
   })).filter(group => group.models.length > 0);
 
+  if (panel && !control.record) return <div className="member-model-loading" role="status">{control.loading ? 'Loading model settings…' : control.error ?? 'Settings unavailable.'}
+    {!control.loading && <button type="button" className="text-button" onClick={() => void control.refresh()}>Retry</button>}</div>;
   if (!control.record && !control.loading) {
     return <div className="composer-config"><button type="button" className="model-trigger" disabled={control.saving} onClick={() => void control.initialize()}>Set up conversation</button></div>;
   }
 
-  return <div className="composer-config" ref={container}>
-    <button type="button" className="model-trigger" aria-expanded={open} aria-label={`Model and reasoning: ${modelLabel}${levelText ? `, ${levelText}` : ''}`} onClick={() => {
+  return <div className={panel ? "member-model-picker" : "composer-config"} ref={container}>
+    {!panel && <button type="button" className="model-trigger" aria-expanded={open} aria-label={`Model and reasoning: ${modelLabel}${levelText ? `, ${levelText}` : ''}`} onClick={() => {
       const next = !open;
       setOpen(next);
       setListExpanded(false);
@@ -144,7 +153,7 @@ export function ComposerSettings({ control, api, active, onGateChange }: {
       if (next) void loadChoices();
     }} disabled={control.loading}>
       <span className="model-trigger-name">{modelLabel}</span>{levelText && <span className="model-trigger-level">{levelText}</span>}<span aria-hidden="true">⌄</span>
-    </button>
+    </button>}
     {open && <div className="model-popover" role="dialog" aria-label="Model and reasoning">
       <div className="popover-top">
         <button type="button" className={`popover-icon ${searchOpen ? 'active' : ''}`} aria-label={searchOpen ? 'Hide model search' : 'Search models'} aria-expanded={searchOpen} onClick={toggleSearch}>

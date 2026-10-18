@@ -72,7 +72,7 @@ Busy, stale or failed activation leaves the entire active team unchanged and ret
 
 One lead, unique active names, ordered shared messages, retained private histories, parallel independent activation and accepted shared final responses remain guaranteed. Configuration activation is user-only, workspace-idle and atomic. Its separate user commit prerequisite cannot be inferred from a run completion or an agent statement.
 
-Schema/version/identity bookkeeping stays outside editable manifests. Migration preserves identities/settings, exact prior source, pending drafts and historical Git references. An accepted update cannot change assignment/name/role/model settings. Execute changes cannot override protected filesystem/Git authority.
+Schema/version/identity bookkeeping stays outside editable manifests. Migration preserves identities/settings, exact prior source, pending drafts and historical Git references. An accepted file update cannot change assignment/name/role/manifest model settings; user-owned model preferences are configured separately. Execute changes cannot override protected filesystem/Git authority.
 
 No automatic configuration activation, automatic stop/retry, new trigger queue, multiple-chat model, durable run resume, automatic context-maintenance algorithm or original/peer-worktree merge is introduced. Frontend activation presentation is separate from this backend contract. Accepted design-mapping refresh continues its existing authority semantics.
 
@@ -97,7 +97,7 @@ The member frontend consumes three API responsibilities: read active member info
 
 ### Read active member information
 
-Expose the complete currently active member information: identity, role, responsibility, selected model and run settings, supplementary instructions/source files, harness rules and effective capabilities, readiness/issues and activity status. Active configuration comes from the stable activated database snapshot, including exact source bytes and their validated projection. It does not require resolving a Git reference to load the configuration. Git/source references are traceability metadata; later file edits and commits do not modify this active snapshot. Backend-owned IDs, revisions and format metadata remain outside agent-editable member manifests.
+Expose the complete currently active member information: identity, role, responsibility, selected model and run settings, supplementary instructions/source files, harness rules and effective capabilities, readiness/issues and activity status. Active file configuration comes from the stable activated database snapshot, including exact source bytes and their validated projection. Effective model settings additionally reflect the latest user-owned preferences saved on that member. It does not require resolving a Git reference to load the configuration. Git/source references are traceability metadata; later file edits and commits do not modify this active snapshot. Backend-owned IDs, revisions and format metadata remain outside agent-editable member manifests.
 
 ### Inspect current configuration and status since activation
 
@@ -165,3 +165,9 @@ A newly created/adopted workspace already has a valid active lead assigned to me
 Working/dependency references identify exact system nodes by metadata.json. Each node contains Markdown design and implementation context in single-file or directory form; document count does not introduce additional assignments. Raw safe references are syntactically parsed before semantic node resolution so unavailable active assignments remain inspectable/unready. Submitted member configuration and run admission must resolve valid node metadata/design before granting code/context scope. No automatic old-layout assignment conversion occurs.
 
 Only the lead edits designs. Other members follow their accepted working/dependency designs. Implementation context for both roles follows assigned nodes under implement/, while source code follows accepted mappings. Working/dependency permission views each contain design context, implementation context and implementation; global lead design management does not grant global implementation rights.
+
+## User member model settings
+
+Users may freely configure active members' provider/model selection and per-model reasoning, temperature, output-token limit and context budget using `GET`/`PUT /workspaces/:workspaceId/team/members/:memberId/model-settings`. GET returns `{id, revision, value, issues}`; value contains only `connectionId`, `modelId`, `modelOptions`. PUT accepts `{revision, value}` with the same complete model-only value. It rejects unknown fields and invalid settings and reports stale revisions with 409. A missing, retired or other-workspace member returns 404. Users may choose any available configured provider model, independently of workspace choices offered to agents.
+
+These user settings are durable member data separate from the activated manifest source. Effective member inspection and readiness use these settings; exact manifest source and configuration diffs continue describing agent-managed files. User model edits do not create pending file changes, require file commit/activation, or grant agents a mutation tool. Later member-file activation preserves user settings. Existing file-update restrictions still apply to the manifest. New runs use the latest saved model settings, while already prepared runs retain their snapshot. Saves serialize with workspace control operations and use member revision protection; they are permitted while work runs.

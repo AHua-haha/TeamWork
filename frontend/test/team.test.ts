@@ -94,3 +94,17 @@ test('a call to a member is headed by its recipient, and other tools keep their 
   assert.deepEqual(toolLabels('save_design'), { input: 'Design change', output: 'Applied change' });
   assert.equal(toolHeading('read_design', '{}'), 'Read design');
 });
+
+
+test('member model client sends only model settings and the reviewed revision', async () => {
+  const calls: {path: string; method: string; body?: unknown}[] = [];
+  const value = {connectionId:'main',modelId:'m1',modelOptions:settings.modelOptions};
+  const record = {id:'lead/1',revision:4,value,issues:[]};
+  const api = new WorkspaceClient((async (input,init) => {
+    calls.push({path:String(input),method:init?.method??'GET',body:init?.body?JSON.parse(String(init.body)):undefined});
+    return new Response(JSON.stringify(record));
+  }) as typeof fetch);
+  assert.deepEqual(await api.memberModelSettings('w 1','lead/1'),record);
+  assert.deepEqual(await api.updateMemberModelSettings('w 1','lead/1',3,value),record);
+  assert.deepEqual(calls,[{path:'/workspaces/w%201/team/members/lead%2F1/model-settings',method:'GET',body:undefined},{path:'/workspaces/w%201/team/members/lead%2F1/model-settings',method:'PUT',body:{revision:3,value}}]);
+});
