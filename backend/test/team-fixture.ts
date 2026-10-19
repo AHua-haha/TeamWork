@@ -149,7 +149,7 @@ export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void
       const lead = (await team.service.team(workspaceId)).members[0]!;
       await run({ folder: root, store, workspaces, team, runtime, workspaceId, directory, lead });
     } finally {
-      team.runner.close();
+      await team.runner.close();
       await workspaces.close();
     }
   });

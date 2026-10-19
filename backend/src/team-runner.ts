@@ -17,7 +17,7 @@ export class TeamRunner {
   private readonly gate = new HarnessQueue();
   private readonly execution = new HarnessQueue();
   private readonly jobs = new Map<string, string>();
-  constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost) {}
+  constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost, private readonly resetShells: (ids?: string[]) => Promise<void> = async () => {}) {}
 
   isRunning(memberId: string): boolean { return this.active.has(memberId); }
 
@@ -177,6 +177,7 @@ export class TeamRunner {
   reset(workspaceId: string) {
     return this.idleWorkspace(workspaceId, async () => {
       const members = await this.store.listMembers(workspaceId);
+      await this.resetShells(members.map(member => member.id));
       const result = await this.store.resetChat(workspaceId);
       for (const member of members) this.runtime().clearProgress(member.id);
       return result;
@@ -193,6 +194,7 @@ export class TeamRunner {
     const member = await this.team.retire(workspaceId, memberId, revision);
     const { run } = await this.runtime().getState(memberId);
     if (run?.status === 'running') await this.runtime().cancel(memberId, run.runId);
+    await this.resetShells([memberId]);
     this.changes.publish();
     return member;
   }
@@ -200,6 +202,7 @@ export class TeamRunner {
   async close(): Promise<void> {
     this.closed = true;
     await Promise.allSettled(this.publications);
+    await this.resetShells();
     this.changes.publish();
   }
 }

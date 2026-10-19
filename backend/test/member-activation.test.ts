@@ -71,7 +71,7 @@ test('scoped Git deletion persists through materialization/restart and activatio
   const member = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
   f.store.agentContexts.set(member.id, [{ messageId: 'retained', message: { role: 'user', content: 'History', timestamp: 0 }, metadata: {} }]);
   const deletion = await f.team.harness.bash(f.lead.memberId, { command: `git rm -r -- ${dirname(path)}`, metadata: { git: { scope: 'member-config' } } }, signal());
-  assert.equal(deletion.exitCode, 0, deletion.stderr);
+  assert.equal(deletion.exitCode, 0, deletion.output);
   await f.team.configuration.materialize(f.lead.memberId);
   const reopened = new TeamSystem(f.store, f.workspaces, stubConfig); reopened.attach(f.runtime);
   try { await reopened.configuration.materialize(f.lead.memberId); } finally { await reopened.runner.close(); }

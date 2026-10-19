@@ -5,7 +5,8 @@ import type { HarnessDefinition, HarnessPart } from './harness-history.js';
 import type { StoredMember } from './team.js';
 
 export interface ImplementationScope { paths: string[]; usePaths: string[] }
-const files = ['ls', 'read', 'write', 'edit'];
+const reads = ['ls', 'read', 'grep', 'find'];
+const files = [...reads, 'write', 'edit'];
 /** One system context scope covers both document forms and survives representation changes. */
 export function implementationContextPart(design: string): HarnessPart {
   const path = `${contextRoot}/${implementationContextPath(design)}`;
@@ -18,7 +19,7 @@ export function purposeHarnesses(member: StoredMember, implementation: Implement
     {
       id: 'management',
       prompt: harnessPrompt('management'),
-      tools: member.value.lead ? [...files, 'bash', 'list_models', 'validate_member_config'] : ['ls','read'],
+      tools: member.value.lead ? [...files, 'bash', 'list_models', 'validate_member_config'] : reads,
       parts: [
         ...(designPaths.length ? [{ id: 'design', paths: designPaths, exclude: [], context: 'design' as const, commit: 'user' as const, prompt: harnessPrompt('management-design') }] : []),
         ...(member.value.lead ? [{ id: 'member-config', paths: ['.rsi/members'], exclude: [], commit: 'user' as const, prompt: harnessPrompt('management-members') }] : []),

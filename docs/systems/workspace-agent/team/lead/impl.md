@@ -24,3 +24,7 @@ No agent activation or implicit acceptance from conversation/run completion. Exi
 ## Verification
 
 Prompt/tool assembly checks cover valid/forbidden update examples, protected lead deletion, user-only commit/activation and preservation of normal group behavior. The implementation must also satisfy the team/harness contract checks. Member activation unit/HTTP and MySQL integration tests verify this workflow.
+
+## Harness tool integration
+
+HarnessService assembles native Pi factories with default operations and input authorization for write/edit, preserving content/details. The custom Bash service owns persistent shells and background process lifetime. TeamRunner invokes shell reset on idle chat reset, retirement and close; configuration activation resets affected members after successful atomic application. afterRun continues checkpointing files without stopping background jobs. These jobs may change files after a checkpoint; the snapshot does not imply filesystem quiescence. Model-visible Bash results are readable combined output plus metadata rather than an outer JSON string.

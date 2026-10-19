@@ -32,7 +32,7 @@ test('root bootstrap supplies design and implemented-contract templates and agen
   const before=(await f.team.harness.inspect(f.lead.memberId)).parts.find(p=>p.state.part.id==='design')!;
   const part=implementationContextPart('metadata.json');
   const committed=await f.team.harness.bash(f.lead.memberId,{command:'git add . && git commit -m "Document current implementation"',metadata:{git:{scope:part.id}}},signal());
-  assert.equal(committed.exitCode,0,committed.stderr);
+  assert.equal(committed.exitCode,0,committed.output);
   const after=(await f.team.harness.inspect(f.lead.memberId)).parts.find(p=>p.state.part.id==='design')!;
   assert.equal(after.state.committed,before.state.committed);
   assert.equal((await base.read({path:'implement/impl.md'})).content,context.content+'\nCurrent implementation notes.\n','raw context observes the same shared workspace');
@@ -46,7 +46,7 @@ test('working context is writable/searchable while dependencies, unrelated conte
   await dependency.write.mkdir(join(dependency.root,dep.paths[0]!.slice(0,dep.paths[0]!.lastIndexOf('/'))));
   await dependency.write.writeFile(join(dependency.root,dep.paths[0]!),'Dependency implementation context');
   const published=await f.team.harness.bash(b.memberId,{command:'git add . && git commit -m "Document dependency"',metadata:{git:{scope:dep.id}}},signal());
-  assert.equal(published.exitCode,0,published.stderr);
+  assert.equal(published.exitCode,0,published.output);
   const files=await f.team.harness.files(a.memberId);
   await files.write.mkdir(join(files.root,own.paths[0]!.slice(0,own.paths[0]!.lastIndexOf('/'))));await files.write.writeFile(join(files.root,own.paths[0]!),'# Implemented contract\nInput Output Effect Usage examples');
 
@@ -56,10 +56,10 @@ test('working context is writable/searchable while dependencies, unrelated conte
   await assert.rejects(files.write.writeFile(join(files.root,'.rsi/members/other/member.json'),'{}'),code('not_found'));
   await assert.rejects(files.read.readFile(join(files.root,'.rsi/harness/repository.git/HEAD')),code('not_found'));
   const searched=await f.team.harness.bash(a.memberId,{command:`grep -n 'Implemented contract' ${own.paths[0]}`,metadata:{git:{scope:own.id}}},signal());
-  assert.equal(searched.exitCode,0,searched.stderr);assert.match(searched.stdout,/Implemented contract/);
+  assert.equal(searched.exitCode,0,searched.output);assert.match(searched.output,/Implemented contract/);
   await assert.rejects(f.team.harness.bash(a.memberId,{command:'git status',metadata:{git:{scope:dep.id}}},signal()),code('not_found'));
   const shell=await f.team.harness.bash(a.memberId,{command:`printf forbidden > ${own.paths[0]}`},signal());
-  assert.notEqual(shell.exitCode,0);assert.match(await readFile(join(files.root,own.paths[0]!), 'utf8'),/Implemented contract/);
+  assert.equal(shell.exitCode,0,shell.output);assert.equal(await readFile(join(files.root,own.paths[0]!), 'utf8'),'forbidden');
 }));
 
 test('a replacement with a different assignment set sees and maintains the same current context',()=>withTeam(async f=>{
@@ -74,6 +74,6 @@ test('a replacement with a different assignment set sees and maintains the same 
   assert.equal((await next.read.readFile(join(next.root,part.paths[0]!))).toString(),'Committed context v1');
   await files.write.writeFile(join(files.root,part.paths[0]!), 'Committed context v2');assert.equal((await commit(a.memberId)).exitCode,0);
   await next.write.writeFile(join(next.root,part.paths[0]!), 'Committed context v3');const committed=await commit(replacement.memberId);
-  assert.equal(committed.exitCode,0,committed.stderr);
+  assert.equal(committed.exitCode,0,committed.output);
   assert.equal((await files.read.readFile(join(files.root,part.paths[0]!))).toString(),'Committed context v3');
 }));

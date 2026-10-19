@@ -9,7 +9,7 @@ Maintain harness rule text in the Markdown files under `harness/`:
 - `management-design.md` and `management-members.md`: per-scope maintenance instructions.
 - `implementation.md`, `implementation-scope.md` and `implementation-context.md`: implementation-code/context maintenance and independent history rules.
 - `design-template.md` and `implementation-context-template.md`: initial root context content rendered at workspace bootstrap.
-- `execute.md`: Bash execution rules, allowed-command information, and reusable web-search/fetch usage rules.
+- `execute.md`: persistent Bash shell/job and broad sandbox resource rules, and reusable web-search/fetch usage rules.
 
 `{{workspace}}` in common is replaced with a backend-owned value. Execute permissions are fixed by the base harness, independently of historical command-rule fields. `{{design}}` and `{{context}}` render each implementation-context scope; `{{project}}` renders the initial design title and `{{design}}` also renders the initial implementation-context reference. Other text is delivered as written to runtime/inspection. Unknown template values fail assembly. Required files are loaded once; missing/empty files fail backend startup. There are no hardcoded fallback rules.
 
@@ -22,3 +22,5 @@ Design uses purpose/responsibilities/boundaries, Interface contract and constrai
 Context templates now initialize design/metadata.json, design/design.md and implement/impl.md under the context container. Rule Markdown describes complete system designs represented by one file or multiple documents, independently of real child-system decomposition. No Markdown content is embedded in JSON metadata.
 
 Management/implementation prompts describe working and dependency permissions, each with design context, implementation context and project implementation. Only the lead edits designs; implementation context/code for every member follows accepted assignments.
+
+Pi read/ls/grep/find use default operations for workspace reads. write/edit retain input-based assignment checks. Pi content, details and native truncation are preserved. Bash has its own per-member persistent shell, native jobs and whole-workspace write sandbox; these broader permissions are distinct from file-tool input checks.

@@ -35,7 +35,7 @@ export function MemberInspector({ workspaceId, member, onDesign, onImplementatio
         <p>{part.commit === 'user' ? 'Commit requires user acceptance.' : 'Agent commits allowed.'}</p><ul>{part.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
         {part.exclude.length > 0 && <p>Excluded: {part.exclude.join(', ')}</p>}
       </div>)}
-      {harness.id === 'execute' && <p>Arbitrary Bash · outbound network · local binding. Writes follow working implementation scope. Docker daemon access is not granted.</p>}
+      {harness.id === 'execute' && <p>Persistent Bash · system reads · whole-workspace and owned-temp writes · outbound network · local binding. File edits still follow working scope. Docker daemon access is not granted.</p>}
       <details><summary>Fixed operating rules</summary><pre>{harness.prompt}{harness.parts.map(p => `\n\n${p.id}: ${p.prompt}`).join('')}</pre></details>
     </section>)}
     <section className="member-config-source"><details><summary>Complete active run settings</summary><pre>{JSON.stringify(selected.settings, null, 2)}</pre></details></section>

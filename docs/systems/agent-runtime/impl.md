@@ -83,4 +83,8 @@ Verification additionally covers FIFO wrap/zero capacity, startup loss, eviction
 
 RuntimePolicy.acquireRun optionally supplies an abortable run execution lease. It is acquired before model/request/tool work and released after terminal finalization. A cancelled waiting run records cancellation without calling afterRun. Team composition provides a workspace lock; solo agents remain unchanged.
 
-Harness Bash permission resolution remains outside the agent loop: the harness supplies fixed broad execution with scoped filesystem writes and brokered Git. Runtime does not parse executable allowlists.
+Harness Bash permission resolution remains outside the agent loop: the harness supplies persistent member shells with whole-workspace writes and optional scoped Git workflows. Runtime does not parse executable allowlists.
+
+## Harness tool integration
+
+HarnessService assembles native Pi factories with default operations and input authorization for write/edit, preserving content/details. The custom Bash service owns persistent shells and background process lifetime. TeamRunner invokes shell reset on idle chat reset, retirement and close; configuration activation resets affected members after successful atomic application. afterRun continues checkpointing files without stopping background jobs. These jobs may change files after a checkpoint; the snapshot does not imply filesystem quiescence. Model-visible Bash results are readable combined output plus metadata rather than an outer JSON string.

@@ -86,8 +86,8 @@ test('model discovery is lead-only; configuration changes use pending management
   const tool = management[0]!;
   const helper = await worker(fixture, 'Helper');
   const call = async (id: string) => JSON.stringify((await tool.execute({} as never, scope(id), {} as never)).content);
-  assert.match(await call(helper.memberId), /access_denied/);
-  assert.match(await call(fixture.lead.memberId), /connectionId/);
+  await assert.rejects(call(helper.memberId), code('access_denied'));
+  assert.match(await call(fixture.lead.memberId), /Workspace models/);
 }));
 
 test('startup replaces legacy scopes with empty harnesses once and preserves the member identity and settings', () => withTeam(async fixture => {

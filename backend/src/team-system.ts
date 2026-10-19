@@ -37,7 +37,7 @@ export class TeamSystem {
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
-    });
+    }, ids => this.harness.closeShells(ids));
     this.configuration = new MemberConfigService(this.service, this.harness);
     this.runConfig = teamRunConfig(this.service, config);
   }
@@ -78,7 +78,7 @@ export class TeamSystem {
   async update(workspaceId: string, memberId: string, revision: number, value: unknown): Promise<MemberStatus> {
     const current = await this.service.get(workspaceId, memberId);
     if (this.runner.isRunning(memberId) && JSON.stringify((value as { harness?: unknown })?.harness) !== JSON.stringify({ designScope: current.harness.designScope, allowedCommands: current.harness.allowedCommands })) throw new AppError('member_busy', 'Wait for the member before changing harness scope', 409);
-    return this.harness.operation(memberId, async () => this.status(await this.service.update(workspaceId, memberId, revision, value)));
+    return this.harness.operation(memberId, async () => { const result = await this.service.update(workspaceId, memberId, revision, value); await this.harness.closeShells([memberId]); return this.status(result); });
   }
 
   async reviewConfiguration(workspaceId: string, origin: 'pending' | 'committed' = 'committed') {

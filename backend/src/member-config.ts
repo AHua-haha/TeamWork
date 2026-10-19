@@ -121,6 +121,7 @@ export class MemberConfigService {
       const environment = await this.harness.environment(lead.id);
       for (const change of review.changes) if (change.type !== 'delete') await environment.history.initializeMemberBundle(lead.id, change.path, async () => {});
       await this.team.activate(workspaceId, { expected: plan.active.map(m => ({ id: m.id, revision: m.revision })), modelsRevision: plan.modelsRevision, create, update, expectedActivation: plan.activation, activation: { revision, time: Math.max(Date.now(), (plan.activation?.time ?? -1) + 1) } });
+      await this.harness.closeShells(update.map(member => member.id));
       return { revision, changes: review.changes.map(change => ({ type: change.type, path: change.path, name: change.name })), memberIds: [...plan.active.filter(member => !update.some(next => next.id === member.id && next.value.retiredAt !== null)).map(member => member.id), ...create.map(member => member.id)] };
     });
   }

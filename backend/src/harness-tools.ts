@@ -1,39 +1,43 @@
-import { Type, type Tool } from '@earendil-works/pi-ai';
-import { createEditTool, createLsTool, createReadTool, createWriteTool } from '@earendil-works/pi-coding-agent';
+import { Type } from '@earendil-works/pi-ai';
+import { createEditTool, createFindTool, createGrepTool, createLsTool, createReadTool, createWriteTool } from '@earendil-works/pi-coding-agent';
 import type { HarnessService } from './harness.js';
 import type { RuntimeTool } from './runtime.js';
-import { refusing, toolText, type ToolOutput } from './tool-result.js';
 
+/** Pi owns schemas, operations and results. Harness checks invocation inputs only. */
 export function harnessFileTools(harness: HarnessService, writable: boolean): RuntimeTool[] {
-  const wrap = (definition: Tool, build: (id: string) => Promise<{ execute(id: string, args: never, signal?: AbortSignal): Promise<{ content: ToolOutput['content'] }> }>): RuntimeTool => ({
-    definition: { name: definition.name, description: definition.description, parameters: definition.parameters },
-    async execute(args, scope, call) {
-      try {
-        const result = await harness.operation(scope.agentId, async () => {
-          scope.signal.throwIfAborted();
-          return (await build(scope.agentId)).execute(call.id, args as never, scope.signal);
-        });
-        return { content: result.content, isError: false };
-      } catch (error) {
+  const factories = [createLsTool, createReadTool, createGrepTool, createFindTool, ...(writable ? [createWriteTool, createEditTool] : [])];
+  return factories.map(factory => {
+    const tool = factory('/');
+    return {
+      definition: { name: tool.name, description: tool.description, parameters: tool.parameters },
+      execute: (args, scope, call) => harness.operation(scope.agentId, async () => {
         scope.signal.throwIfAborted();
-        return toolText(`Error: ${error instanceof Error ? error.message : 'File action failed'}`);
-      }
-    },
+        const { root, path } = await harness.fileInvocation(scope.agentId, tool.name, typeof args.path === 'string' ? args.path : '.');
+        const result = await factory(root).execute(call.id, { ...args, path } as never, scope.signal);
+        return { ...result, isError: false };
+      }),
+    };
   });
-  const result = [
-    wrap(createLsTool('/'), async id => { const files = await harness.files(id); return createLsTool(files.root, { operations: files.ls }); }),
-    wrap(createReadTool('/'), async id => { const files = await harness.files(id); return createReadTool(files.root, { operations: files.read }); }),
-  ];
-  if (writable) result.push(
-    wrap(createWriteTool('/'), async id => { const files = await harness.files(id); return createWriteTool(files.root, { operations: files.write }); }),
-    wrap(createEditTool('/'), async id => { const files = await harness.files(id); return createEditTool(files.root, { operations: files.edit }); }),
-  );
-  return result;
 }
-/** The same Bash capability is reusable across all agents; harness supplies policy. */
 export function harnessBashTool(harness: HarnessService): RuntimeTool {
   return {
-    definition: { name: 'bash', description: 'Execute arbitrary Bash with sandboxed resources, outbound networking and local binding. Read project source; write accepted working implementation only. Scoped Git requires metadata.git.scope (design, member-config, implementation or the listed impl-context-<hash> scope). Git metadata does not change ordinary filesystem permissions. Use git status/diff/add/rm/log/show/restore/commit. Protected management commits require user review. Member-file commits do not activate configuration. Failed commands may leave partial changes. Docker daemon access is not granted.', parameters: Type.Object({ command: Type.String({ minLength: 1, maxLength: 20000 }), metadata: Type.Optional(Type.Object({ git: Type.Object({ scope: Type.String() }, { additionalProperties: false }) }, { additionalProperties: false })) }, { additionalProperties: false }) },
-    execute: (args, scope) => refusing(async () => JSON.stringify(await harness.operation(scope.agentId, () => harness.bash(scope.agentId, args, scope.signal, scope.runId)), null, 2)),
+    definition: {
+      name: 'bash',
+      description: 'Run Bash in this member’s persistent shell. cwd is optional; cd, variables and functions persist. Foreground output combines stdout/stderr. timeout is seconds (foreground default 60; background default unlimited). background starts a native job and returns job_id; manage it using jobs, wait %N and kill %N in later calls. Background output defaults to /dev/null; redirect in command to retain it. Sandbox permits system reads, entire workspace/workspace-temp writes and networking; Bash does not enforce design assignments. metadata.git.scope optionally routes ordinary git through the listed controlled scope; without it Git is native project Git. Scoped design/member commits still require user acceptance. No command is retried automatically. Foreground timeout/cancellation resets the shell and jobs; an explicit background timeout stops only that job. Noninteractive stdin is /dev/null.',
+      parameters: Type.Object({
+        command: Type.String({ minLength: 1, maxLength: 20000 }), cwd: Type.Optional(Type.String({ minLength: 1 })),
+        timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 2_147_483 })), background: Type.Optional(Type.Boolean({ default: false })),
+        metadata: Type.Optional(Type.Object({ git: Type.Optional(Type.Object({ scope: Type.String({ minLength: 1 }) }, { additionalProperties: false })) }, { additionalProperties: false })),
+      }, { additionalProperties: false }),
+    },
+    execute: async (args, scope) => {
+      const result = await harness.operation(scope.agentId, () => harness.bash(scope.agentId, args, scope.signal, scope.runId));
+      const { output, exitCode, durationMs, truncated, timedOut, jobId, shellRestarted, error } = result;
+      const failed = !!error || exitCode !== 0;
+      const metadata = { status: failed ? 'error' : jobId ? 'started' : 'success', ...(jobId ? { job_id: jobId } : { exit_code: exitCode, duration_ms: durationMs, truncated }), ...(timedOut ? { timed_out: true } : {}), ...(shellRestarted ? { shell_restarted: true } : {}) };
+      const notice = truncated ? '\n\n[Output truncated: showing the last 50 KiB. Redirect to a workspace file and read selected ranges to retain more output.]' : '';
+      const text = [shellRestarted ? 'Member shell restarted; previous shell state and job handles are no longer available.' : '', jobId ? 'Started background command.' : output || '(no output)', error ?? ''].filter(Boolean).join('\n');
+      return { content: [{ type: 'text', text: `${text}${notice}\n\n<metadata>\n${Object.entries(metadata).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join('\n')}\n</metadata>` }], details: metadata, isError: failed };
+    },
   };
 }

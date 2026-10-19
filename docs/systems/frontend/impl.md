@@ -178,4 +178,4 @@ WorkspacePanel mounts permanent Design/Team/Changes/Files panels and passes Chan
 
 AgentClient accepts execution envelope version 2 and uses client/progress.ts to apply compact frames incrementally, replacing only the affected message/block. Start metadata has empty content; block starts, deltas/checkpoints and authoritative ends reconstruct content and signatures. Tool JSON buffers are private to each reducer. Completed records remove reducers/partials; gaps and reconnects discard invalid reducers. No whole-frame-log replay or cumulative partial wire payload remains. GroupClient remains on the independent version-1 group timeline.
 
-MemberTree and MemberInspector describe broad Bash, outbound network, local binding and scoped writes; historical source-rule arrays are visible only as original source bytes, not as effective command permissions.
+MemberTree and MemberInspector describe persistent Bash, system reads, whole-workspace/owned-temporary writes, outbound network and local binding, separately from scoped file edits; historical source-rule arrays are visible only as original source bytes, not as effective command permissions.

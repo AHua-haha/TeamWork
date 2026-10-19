@@ -60,7 +60,7 @@ MemberContext keeps design as the shared agreement and delegates implementation-
 
 Assignment syntax validation accepts safe context-relative references; semantic resolution requires metadata.json and valid Markdown design content. This separation preserves stable inspection of unavailable stored assignments without supporting old JSON-embedded designs. Member submission and run admission resolve actual nodes. Harness inspection omits invalid derived context parts; exact active source remains visible. New workspace leads refer to root metadata.json. MemberContext delegates layout and document rules to file-maintained base prompts.
 
-The fixed management base contributes a writable design scope only for the lead. Ordinary members retain common implementation tools but path enforcement makes both working/dependency designs read-only. Assignment parsing normalizes physical design-root references; semantic resolution and readiness reject unavailable layouts.
+The fixed management base contributes a writable design scope only for the lead. Ordinary members retain common implementation tools but write/edit input enforcement makes both working/dependency designs read-only through those tools; broad Bash writes are intentionally separate. Assignment parsing normalizes physical design-root references; semantic resolution and readiness reject unavailable layouts.
 
 ## User-owned member model preferences
 
@@ -72,8 +72,12 @@ Agent cooperation uses the optional leading mention-header contract owned by [gr
 
 ## Conversation reset
 
-The group-chat child owns the reset contract; teamRoutes exposes POST team/chat/reset and TeamRunner coordinates workspace-idle admission with publication and member activation. MySqlStore owns atomic conversation deletion and persistent shared cursor boundaries. Runtime/harness execution logic and files remain unchanged.
+The group-chat child owns the reset contract; teamRoutes exposes POST team/chat/reset and TeamRunner coordinates workspace-idle admission with publication and member activation. MySqlStore owns atomic conversation deletion and persistent shared cursor boundaries. Reset also stops these members' persistent shells/background jobs; project files remain unchanged by the reset operation itself.
 
 The harness child exposes scoped pending file review through teamRoutes for the unified frontend Changes tab. Existing member current inspection, user file commit and separate idle activation contracts stay unchanged. Design acceptance remains its independent user harness commit; subsequent current inspection re-resolves accepted designs and can clear member activation blockers.
 
 The fixed execute base always assembles Bash; source command-rule metadata does not select tools or authorize calls. Source snapshots remain exact and no activation/migration is performed for the broad base-policy change.
+
+## Harness tool integration
+
+HarnessService assembles native Pi factories with default operations and input authorization for write/edit, preserving content/details. The custom Bash service owns persistent shells and background process lifetime. TeamRunner invokes shell reset on idle chat reset, retirement and close; configuration activation resets affected members after successful atomic application. afterRun continues checkpointing files without stopping background jobs. These jobs may change files after a checkpoint; the snapshot does not imply filesystem quiescence. Model-visible Bash results are readable combined output plus metadata rather than an outer JSON string.

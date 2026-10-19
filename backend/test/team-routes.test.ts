@@ -49,7 +49,7 @@ test('member inspection is read-only, returns accepted configuration and three h
   assert.equal(JSON.parse(view.configuration.files['member.json']).name, 'Backend');
   assert.deepEqual(view.harnesses.map((h: Body) => h.id), ['management', 'implementation', 'execute']);
   assert.ok(!view.harnesses[0].parts.some((p: Body) => p.id === 'design'));
-  assert.deepEqual(view.harnesses[0].tools,['ls','read']);
+  assert.deepEqual(view.harnesses[0].tools,['ls','read','grep','find']);
   await assert.rejects(stat(root), 'inspection creates no harness Git storage');
   const before = await fixture.team.service.find(created.memberId);
   for (const [method, path, data] of [

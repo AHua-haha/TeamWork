@@ -1,10 +1,11 @@
 import { harnessPrompt } from './harness-prompts.js';
 import { implementationContextPart, purposeHarnesses } from './harness-bases.js';
-import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { DesignService, resolveDesign, type ResolvedDesign } from './design.js';
 import type { HarnessConfig } from './harness-config.js';
-import { executeBash, parseBashInput, type CommandResult } from './harness-command.js';
+import { executeBash, parseBashInput, resetMemberShell, type CommandResult } from './harness-command.js';
 import { harnessBashTool, harnessFileTools } from './harness-tools.js';
 import { HarnessHistory, HarnessQueue, harnessStorage, partOwns, validateParts, type HarnessDefinition, type HarnessPart, type HistoryActor } from './harness-history.js';
 import { ProjectFiles } from './project-files.js';
@@ -92,6 +93,7 @@ export interface HarnessEnvironment {
 export class HarnessService {
   private readonly histories = new Map<string, Promise<HarnessHistory>>();
   private readonly operations = new HarnessQueue();
+  private readonly shellMembers = new Map<string, string>();
   constructor(private readonly workspaces: WorkspaceService, readonly designs: DesignService, private readonly member: (id: string) => Promise<StoredMember | null>, private readonly web: RuntimeTool[] = webTools()) {}
   private async active(id: string): Promise<StoredMember> {
     const member = await this.member(id);
@@ -143,17 +145,49 @@ export class HarnessService {
       return null;
     } });
   }
+  /** Invocation authorization; Pi still performs its own default filesystem operations. */
+  async fileInvocation(id: string, name: string, input: string): Promise<{ root: string; path: string }> {
+    const member = await this.active(id);
+    const root = await realpath((await this.workspaces.record(member.workspaceId)).directory);
+    let path = input.replace(/^@/, '').replace(/[\u00a0\u2007\u202f]/g, ' ');
+    if (path === '~' || path.startsWith('~/')) path = homedir() + path.slice(1);
+    const absolute = resolve(root, path), local = relative(root, absolute);
+    if (isAbsolute(local) || local === '..' || local.startsWith('../')) throw new AppError('access_denied', 'File tool paths must be inside the workspace', 403);
+    let ancestor = absolute;
+    for (;;) {
+      try {
+        const actual = await realpath(ancestor), r = relative(root, actual);
+        if (isAbsolute(r) || r === '..' || r.startsWith('../')) throw new AppError('access_denied', 'File tool path resolves outside the workspace', 403);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        const parent = dirname(ancestor); if (parent === ancestor) throw error; ancestor = parent;
+      }
+    }
+    if (name === 'write' || name === 'edit') {
+      let cursor = root;
+      for (const segment of local.split('/').filter(Boolean)) {
+        cursor = join(cursor, segment);
+        try { if ((await lstat(cursor)).isSymbolicLink()) throw new AppError('access_denied', 'Write/edit targets cannot traverse symbolic links', 403); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') break; throw error; }
+      }
+      const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
+      const denial = harnessAccess(member, resolved).deny(local, 'write');
+      if (denial !== null) throw new AppError('access_denied', denial, 403);
+      const env = await this.environment(id);
+      if (!env.parts.some(part => partOwns(part, local))) throw new AppError('access_denied', 'Target is outside your writable harness parts', 403);
+    }
+    return { root, path: absolute };
+  }
+  async closeShells(ids = [...this.shellMembers.keys()]) {
+    await Promise.all(ids.map(async id => { await resetMemberShell(id, this.shellMembers.get(id)); this.shellMembers.delete(id); }));
+  }
   async bash(id: string, input: unknown, signal: AbortSignal, runId?: string): Promise<CommandResult> {
     const member = await this.active(id), request = parseBashInput(input);
     const env = await this.environment(id);
-    const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const part = request.metadata?.git ? this.part(env, request.metadata.git.scope) : null;
-    const permissions=harnessPermissions(member,resolved);
-    const readable=[...Object.values(permissions.working).flat(),...Object.values(permissions.dependencies).flat(),...(member.value.lead ? ['.rsi/members'] : [])];
-    // Git metadata selects broker authority only. Ordinary commands retain the
-    // same implementation permissions with or without a selected Git scope.
-    const writable = resolved.writable;
-    return executeBash({ root: env.root, command: request.command, readable, writable, readonly: resolved.readonly, signal,
+    this.shellMembers.set(id, env.root);
+    return executeBash({ memberId: id, root: env.root, request, signal,
       git: part ? (args, cwd) => env.history.scopedGit(id, part, env.root, args, cwd, { type: 'agent', memberId: id, ...(runId ? { runId } : {}) }) : undefined });
   }
   private part(env: HarnessEnvironment, id: string): HarnessPart {

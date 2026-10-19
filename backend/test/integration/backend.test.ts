@@ -1166,7 +1166,8 @@ test('members edit the shared project, checkpoint runs and separate project comm
     const workerFinish = await requests.next();
     const commandResult = workerFinish.request.context.messages.findLast(item => item.role === 'toolResult' && item.toolName === 'bash');
     assert.ok(commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text');
-    if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.equal(JSON.parse(commandResult.content[0].text).stdout, 'Done');
+    // Combined output can include shell diagnostics before the command's stdout.
+    if (commandResult?.role === 'toolResult' && commandResult.content[0]?.type === 'text') assert.match(commandResult.content[0].text, /(?:^|\n)Done\n\n<metadata>[\s\S]*exit_code: 0/);
     answer(workerFinish.events, message('<mentions>["Lead"]</mentions>\n\nImplemented src/result.txt and committed implementation.'));
     const leadFinish = await requests.next();
     const secondLeadRun = (await runtime.getState(lead.memberId)).run!;

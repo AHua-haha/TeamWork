@@ -22,7 +22,7 @@ Four actions work on the workspace folder for an agent: list, read, write, and e
 - **Access.** A path the rule does not let the agent see is not listed and is reported as missing. A path it may see but not read or write is refused with the rule's reason.
 - **Content.** The same text rules as project files: UTF-8 without NUL characters, at most 1 MiB. Reading a larger or non-text file is refused.
 - **Write and edit.** A file is replaced in one step and keeps its permissions. A write creates missing folders the rule lets the agent write in.
-- **Search.** No dedicated grep/find tool is added. Authorized read-only Bash search uses the harness filesystem scope.
+- **Search.** Agents receive native Pi grep/find in addition to read/ls. Read-only tools inspect workspace content freely; Bash has its separate broad resource policy.
 
 ## Outputs and observable effects
 
@@ -76,7 +76,7 @@ Agent file actions have no HTTP form; the harness's tools call them inside the b
 4. **Edit a project file.** The user reads `README.md`, edits it, and saves with its revision. The response has a new revision. Saving again with the old revision returns 409 `stale_revision`.
 5. **Binary file.** Reading `frontend/public/icon.png` returns 415 `unsupported_file`.
 6. **Find.** Finding `app.tsx` returns `frontend/src/ui/App.tsx`.
-7. **Agent writes.** A member assigned an accepted working design mapping `src/backend` writes `src/backend/api.ts` in the shared workspace. Common tools can read/follow its working design. Only the lead edits designs, and design commits require user acceptance. The member may also edit its working-design implementation context, while dependency context remains read-only.
+7. **Agent writes.** A member assigned an accepted working design mapping `src/backend` writes `src/backend/api.ts` in the shared workspace. Common tools can read/follow its working design. Only the lead receives design write/edit tool authority, and controlled design commits require user acceptance. Bash independently permits whole-workspace writes. The member may also edit its working-design implementation context, while dependency context remains read-only.
 8. **Hidden from an agent.** A worker whose implementation scope does not include `frontend` cannot list or read its implementation; a dependency file can be read but not edited.
 9. **Edit.** Editing `src/a.ts` with text that is not in the file is reported to the agent and leaves the file unchanged. A path like `../outside/secret.txt`, or one through a link, is refused.
 

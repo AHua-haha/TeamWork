@@ -22,7 +22,7 @@ Forbidden update fields, unsafe/missing references, duplicate names, lead deleti
 
 ## Guarantees and limits
 
-Only the lead accesses member files among agents. Only the user commits/activates member changes, in separate actions. Existing design acceptance, harness scope, Bash/Git enforcement and group-publication rules remain. Global base rule files are backend-owned. The file validation tool is validate_member_config with path .rsi/members; user review/activation uses the team configuration control API. No frontend activation controls are added in this backend prototype.
+Only the lead receives scoped member-file mutation/validation capabilities. All members can inspect workspace files, and Bash has whole-workspace write authority. Only the user commits/activates member changes, in separate actions. Application design acceptance and group-publication rules remain. File-tool mutations use assignment checks; persistent Bash independently has broad system-read/workspace-write/network authority. Controlled Git checks apply to metadata-selected scope workflows, not all raw filesystem/Git effects. Global base rule files are backend-owned. The file validation tool is validate_member_config with path .rsi/members; user review/activation uses the team configuration control API. The existing Changes view supplies the separate user acceptance and activation actions.
 
 ## Acceptance examples
 
@@ -31,3 +31,7 @@ Only the lead accesses member files among agents. Only the user commits/activate
 3. An accepted change set creates A, updates B and retires C. Any running workspace member prevents activation; when idle all reviewed changes apply together or none do.
 4. The lead's manifest is deleted. Validation refuses deletion of the lead.
 5. User activation succeeds without running any member; later shared mentions use the new configuration.
+
+## Harness tool execution boundary
+
+Workspace members receive native Pi file/search tools. Read-only tools inspect workspace content; write/edit enforce accepted assignment and role grants at invocation. Custom Bash supplies one persistent shell per member with system reads, whole-workspace/workspace-temp writes and networking. This broader Bash authority does not enforce working-design scopes. Pi content/details and native truncation are preserved. Custom results use readable content plus relevant metadata. Shells/jobs survive runs and stop on context reset, retirement, affected configuration activation/update, or shutdown. Foreground timeout/cancellation resets the member shell/jobs; background jobs use native job IDs and default their output to /dev/null unless explicitly redirected. Scoped Git acceptance and activation APIs retain their checks but do not claim to prevent all raw workspace changes.

@@ -51,7 +51,7 @@ test('exact-node authority covers both forms without inheriting children or edit
  const depPrefix=dependency.harness.designScope.working[0]!.slice(0,-'metadata.json'.length);
  await assert.rejects(files.write.mkdir(join(files.root,'.rsi/context/implement',depPrefix,'impl')),code('access_denied'));
  const staged=await f.team.harness.bash(parent.memberId,{command:'git add . && git commit -m "Document runtime"',metadata:{git:{scope:implementationContextPart(reference).id}}},signal());
- assert.equal(staged.exitCode,0,staged.stderr);
+ assert.equal(staged.exitCode,0,staged.output);
 }));
 
 test('lead design Git never captures implementation context, including newly created nodes',()=>withTeam(async f=>{
@@ -63,7 +63,7 @@ test('lead design Git never captures implementation context, including newly cre
  // Simulate independently maintained implementation context beside a newly created design.
  await mkdir(join(files.root,'.rsi/context/implement/new/impl'),{recursive:true});await writeFile(join(files.root,'.rsi/context/implement/new/impl/README.md'),'PRIVATE IMPLEMENTATION FACT');
  const stage=await f.team.harness.bash(f.lead.memberId,{command:'git add . && git diff --cached && git status --porcelain',metadata:{git:{scope:'design'}}},signal());
- assert.equal(stage.exitCode,0,stage.stderr);assert.doesNotMatch(stage.stdout,/PRIVATE IMPLEMENTATION FACT|new\/impl/);
+ assert.equal(stage.exitCode,0,stage.output);assert.doesNotMatch(stage.output,/PRIVATE IMPLEMENTATION FACT|new\/impl/);
  const review=(await f.team.harness.inspect(f.lead.memberId)).parts.find(p=>p.state.part.id==='design')!;
  assert.ok((await env.history.paths(review.revision)).every(path=>!path.includes('/impl/')&&!path.endsWith('/impl.md')));
  await f.team.harness.commit(f.lead.memberId,'design','Accept new system',{type:'user',memberId:f.lead.memberId},review.revision,review.state.committed);
@@ -76,7 +76,7 @@ test('implementation context transitions keep one scope history and refuse ambig
  const git=(command:string)=>f.team.harness.bash(id,{command,metadata:{git:{scope:part.id}}},signal());
  await files.write.mkdir(join(files.root,'.rsi/context/implement/impl'));
  await files.write.writeFile(join(files.root,'.rsi/context/implement/impl/README.md'),'# Current implementation');
- const denied=await git('git add . && git commit -m "Ambiguous"');assert.notEqual(denied.exitCode,0);assert.match(denied.stderr,/never both/);
+ const denied=await git('git add . && git commit -m "Ambiguous"');assert.notEqual(denied.exitCode,0);assert.match(denied.output,/never both/);
  assert.equal((await git('git rm .rsi/context/implement/impl.md && git add . && git commit -m "Expand implementation context"')).exitCode,0);
  const history=await f.team.harness.history(id,part.id);assert.ok(history.some(item=>item.kind==='commit'));
  const peer=await f.team.service.create(f.workspaceId,{name:'Replacement',role:'developer',responsibility:'Continue',settings:{},harness:{designScope:{working:['metadata.json'],dependencies:[]},allowedCommands:[]}});
@@ -106,7 +106,7 @@ test('case-insensitive node references preserve actual node/document spelling in
  await files.write.writeFile(join(files.root,'.rsi/context/implement/Backend/impl.md'),'# Implementation facts');
  const scope=implementationContextPart('Backend/metadata.json');
  const result=await f.team.harness.bash(member.memberId,{command:'git add . && git commit -m "Document Backend"',metadata:{git:{scope:scope.id}}},signal());
- assert.equal(result.exitCode,0,result.stderr);
+ assert.equal(result.exitCode,0,result.output);
  assert.equal((await f.team.designs.read(f.workspaceId,'backend/metadata.json')).documents[0]!.path,'design/Backend/design.md');
 }));
 
@@ -142,7 +142,7 @@ test('working and dependency permissions separate lead design management from im
  await assert.rejects(member.edit.writeFile(join(member.root,depDesign),'no'),code('access_denied'));
  await assert.rejects(f.team.harness.bash(backend.memberId,{command:'git restore .',metadata:{git:{scope:'design'}}},signal()),code('not_found'));
  const escaped=await f.team.harness.bash(backend.memberId,{command:`printf escape > ${ownDesign}`},signal());
- assert.notEqual(escaped.exitCode,0);
+ assert.equal(escaped.exitCode,0,escaped.output);
  const sourceScope=await f.team.harness.bash(backend.memberId,{command:`git add ${ownDesign}`,metadata:{git:{scope:'implementation'}}},signal());
  assert.notEqual(sourceScope.exitCode,0);
  const prepared=await f.team.harness.prepare(backend.memberId,[]);
