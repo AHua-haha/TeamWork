@@ -8,7 +8,7 @@ import { ConfirmDialog } from './WorkspaceDialogs.js';
 import { MemberModelPopover } from './MemberModelPopover.js';
 import { Glyph } from './Glyph.js';
 import { Markdown } from './Markdown.js';
-import { memberColor, mentionAt, mentionToken, workDuration, runActivity, workToolSummary, toolSetSummary, type ActivityItem, type ToolActivity } from './group-work.js';
+import { memberColor, mentionAt, mentionToken, workDuration, runActivity, isRunThinking, workToolSummary, toolSetSummary, type ActivityItem, type ToolActivity } from './group-work.js';
 
 export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion }: {
   workspaceId: string; title: string; team: TeamState; filesOpen: boolean; onFiles(open: boolean): void;
@@ -178,12 +178,17 @@ function ResponseContent({ entry, expanded = false, snapshot, retry }: {
   entry: Extract<GroupEntry, { kind: 'member' }>; expanded?: boolean; snapshot?: ClientSnapshot; retry?(): void;
 }) {
   const items = snapshot ? runActivity(snapshot, entry) : [];
+  const thinking = snapshot ? isRunThinking(snapshot, entry) : false;
   const error = snapshot?.error && <div className="group-work-error" role="alert">{snapshot.error}<button type="button" onClick={retry}>Retry member output</button></div>;
   return <>
-    {(items.length > 0 || (expanded && error)) && <div hidden={!expanded} className="group-work" id={`group-work-${entry.entryId}`} aria-label={`${entry.name} working history`}>
+    {(items.length > 0 || thinking || (expanded && error)) && <div hidden={!expanded} className="group-work" id={`group-work-${entry.entryId}`} aria-label={`${entry.name} working history`}>
       {error}
       {items.map(item => item.kind === 'tools' ? <ToolSet key={item.id} item={item} running={entry.run.status === 'running'} />
         : <div key={item.id} className="work-text"><Markdown source={item.text} onLink={href => window.open(href, '_blank', 'noopener,noreferrer')} /></div>)}
+      {thinking && <div className="work-thinking" role="status" aria-live="polite" aria-atomic="true" aria-label={`${entry.name} is thinking`}>
+        <span>Thinking<span className="sr-only">…</span></span>
+        <span className="work-thinking-dots" aria-hidden="true"><i /><i /><i /></span>
+      </div>}
     </div>}
     {!expanded && error}
     {entry.text !== null && <div className="group-final">

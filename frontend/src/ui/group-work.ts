@@ -6,6 +6,14 @@ import { responseTextBlocks } from './response-text.js';
 export interface ToolActivity { id: string; kind: 'tool'; text: string; args?: string; result?: string; failed?: boolean }
 export type ActivityItem = { id: string; kind: 'text'; text: string } | { id: string; kind: 'tools'; tools: ToolActivity[] };
 
+/** Only live event metadata can indicate thinking; completed reasoning never produces a status row. */
+export function isRunThinking(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): boolean {
+  if (snapshot.agentId !== entry.memberId || entry.run.status !== 'running' || entry.finalRef || !snapshot.synchronized || snapshot.connection !== 'following'
+    || snapshot.run?.runId !== entry.run.runId || snapshot.run.status !== 'running' || snapshot.run.phase !== 'model') return false;
+  const live = snapshot.live.findLast(message => message.runId === entry.run.runId);
+  return live?.lastEvent.type === 'thinking_start' || live?.lastEvent.type === 'thinking_delta';
+}
+
 /** One ordered visible flow; final acceptance partitions it, independently of disclosure. */
 export function runActivity(snapshot: ClientSnapshot, entry: Extract<GroupEntry, { kind: 'member' }>): ActivityItem[] {
   const records = snapshot.completed.filter(record => record.runId === entry.run.runId && record.position > entry.working.after && (entry.working.through === null || record.position <= entry.working.through));

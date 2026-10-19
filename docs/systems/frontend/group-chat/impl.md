@@ -66,7 +66,7 @@ The single group-chat flow is implemented by:
 
 Projection/client tests and browser checks cover:
 
-- Thinking-only output renders no thinking UI; text and tool deltas stream while their final role is unknown.
+- Thinking-only live output shows a transient status row without thinking content; text and tool deltas stream while their final role is unknown.
 - The same text prefix can be followed by tools or a successful turn end without premature final publication.
 - Consecutive tools across tool-only responses merge; visible text separates sets; hidden thinking, empty text and results do not.
 - Parallel result arrival keeps call ordering and disclosure choices. Identical names/call summaries do not merge unrelated runs.
@@ -94,3 +94,11 @@ The group work projection strips only the optional leading routing envelope from
 GroupChat reuses ConfirmDialog for the header Reset chat control. GroupClient owns resetting state and POST /reset. It applies the returned reset boundary only after success, discards entries at or before that boundary and continues following from its current contiguous cursor. Timeline reset events use the same operation; delayed old POST acknowledgements are ignored. resetCursor is independent of the current update cursor so late reset acknowledgements never discard newer entries. Reset unmounts old member responses and their private AgentClients; avatar popovers close on boundary change. Protocol/client tests cover rejection, delayed acknowledgements, replay and new entries; browser checks cover confirmation, empty state, multi-client clearing and narrow layout.
 
 ToolSet retains the numeric failure count without a failure class on its container. CSS applies error color only to the failed WorkTool summary, including hover, keeping successful rows, group summaries and full result bodies in their normal color. runActivity still derives each call's failed flag from its own stored isError result. Projection tests and browser computed-style checks verify mixed success/failure, preserved disclosures and successful final rendering after a tool error.
+
+## Transient thinking presentation
+
+`isRunThinking` in group-work.ts reads the latest matching live message's last compact-frame type. It requires an active matching run in model phase, a synchronized following connection, and no accepted final reference. Only thinking_start/thinking_delta indicate active thinking; stored content is never inspected to infer this state. Existing AgentClient completion, gap and reconnect handling removes discarded partials.
+
+ResponseContent renders one Thinking status after the normal activity items, within the existing Work disclosure. The status is independent of runActivity's immutable text/tool projection, so hidden thinking still does not split tool groups or appear in history. CSS owns the small neutral dot animation and reduced-motion fallback. No timer, polling, extra follow connection, protocol or backend change is added.
+
+Projection tests cover the event and run lifecycle, missing/stale streams, completed history and unrelated members. A controlled compact-SSE browser fixture verifies actual thinking/text/tool transitions, collapse/reopen, terminal/final cleanup, content privacy, animation, reduced motion and narrow-screen layout.

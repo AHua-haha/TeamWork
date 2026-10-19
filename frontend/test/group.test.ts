@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GroupClient, validateEntry, type GroupEntry } from '../src/client/group-client.js';
-import { runActivity, mentionAt, mentionToken, toolSetSummary, workToolSummary, type ActivityItem } from '../src/ui/group-work.js';
+import { isRunThinking, runActivity, mentionAt, mentionToken, toolSetSummary, workToolSummary, type ActivityItem } from '../src/ui/group-work.js';
+import type { ProgressEvent } from '../src/client/progress.js';
 import { assistant, record, run, streamResponse, until, agentId, runId } from './fixtures.js';
 const workspaceId = 'w1';
 const user: GroupEntry = { workspaceId, entryId: 'u1', position: 1, revision: 1, exchangeId: 'e1', time: 1, kind: 'user', messageId: 'u1', text: 'work' };
@@ -76,6 +77,46 @@ test('ordinary text streams immediately in one flow while thinking remains hidde
   const extended = {...partial,content:[...partial.content.slice(0,1),{type:'text' as const,text:'Let me check the files.'}]};
   assert.equal(runActivity(snapshot([], [{...live,message:extended}]), member)[0]?.kind, 'text');
   assert.equal((runActivity(snapshot([], [{...live,message:extended}]), member)[0] as {text:string}).text,'Let me check the files.');
+});
+
+test('thinking status follows only the current live thinking events and never exposes their content', () => {
+  const message = { ...assistant(''), content: [{ type: 'thinking' as const, thinking: 'PRIVATE reasoning', thinkingSignature: 'PRIVATE signature' }] };
+  const live = { messageId: 'thinking-live', runId, message, nextSequence: 2,
+    lastEvent: { type: 'thinking_start' as const, contentIndex: 0, content: { type: 'thinking' as const, thinking: '' } } };
+  const state = snapshot([], [live]);
+  assert.equal(isRunThinking(state, member), true);
+  assert.deepEqual(runActivity(state, member), [], 'thinking content never becomes a visible activity item');
+  const events: [ProgressEvent, boolean][] = [
+    [{ type: 'thinking_delta', contentIndex: 0, delta: 'PRIVATE reasoning' }, true],
+    [{ type: 'thinking_end', contentIndex: 0, content: 'PRIVATE reasoning' }, false],
+    [{ type: 'text_start', contentIndex: 1, content: { type: 'text', text: '' } }, false],
+    [{ type: 'text_delta', contentIndex: 1, delta: 'Visible reply' }, false],
+    [{ type: 'toolcall_start', contentIndex: 1, toolCall: { type: 'toolCall', id: 'read', name: 'read', arguments: {} } }, false],
+  ];
+  for (const [lastEvent, expected] of events) assert.equal(isRunThinking(snapshot([], [{ ...live, lastEvent }]), member), expected, lastEvent.type);
+  const newer = { ...live, messageId: 'newer', lastEvent: events[3]![0] };
+  assert.equal(isRunThinking(snapshot([], [live, newer]), member), false, 'an earlier retained thought cannot override newer visible output');
+  const completed = { ...record(1, live.messageId, ''), message };
+  assert.equal(isRunThinking(snapshot([completed]), member), false, 'history does not restore the indicator');
+  assert.deepEqual(runActivity(snapshot([completed]), member), []);
+});
+
+test('thinking status clears across gaps, reconnects, tool execution, terminal runs and final acceptance', () => {
+  const live = { messageId: 'thinking-live', runId, message: assistant(''), nextSequence: 2,
+    lastEvent: { type: 'thinking_delta' as const, contentIndex: 0, delta: 'PRIVATE reasoning' } };
+  const state = snapshot([], [live]);
+  assert.equal(isRunThinking(state, member), true);
+  for (const connection of ['disconnected', 'syncing', 'error', 'idle'] as const) assert.equal(isRunThinking({ ...state, connection }, member), false, connection);
+  assert.equal(isRunThinking({ ...state, synchronized: false }, member), false);
+  assert.equal(isRunThinking({ ...state, live: [] }, member), false, 'gap discards the partial');
+  assert.equal(isRunThinking({ ...state, agentId: 'another-member' }, member), false);
+  assert.equal(isRunThinking({ ...state, run: run('running', 'another-run') }, member), false);
+  assert.equal(isRunThinking({ ...state, run: { ...run(), phase: 'tools' } }, member), false);
+  for (const status of ['completed', 'failed', 'cancelled', 'interrupted'] as const) {
+    assert.equal(isRunThinking(state, { ...member, run: run(status) }), false);
+    assert.equal(isRunThinking({ ...state, run: run(status) }, member), false, 'private terminal state can arrive before group update');
+  }
+  assert.equal(isRunThinking(state, { ...member, finalRef: { agentId, runId, messageId: 'final', position: 1 } }), false);
 });
 
 test('a leading routing envelope stays hidden while streaming and only its body appears', () => {
