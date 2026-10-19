@@ -7,6 +7,7 @@ import { MySqlStore, type StoredConfig } from './database.js';
 import type { RuntimeTool } from './runtime.js';
 import { ConfigSecrets } from './secrets.js';
 import { AppError, identity } from './types.js';
+import { bindModelflareModel, modelflareSupportsModel } from './providers/modelflare.js';
 
 /** One reasoning scale for every reasoning model; each level is clamped to the model's supported Pi level when sent. */
 export const reasoningScale = ['off', 'low', 'medium', 'high', 'xhigh'] as const;
@@ -280,7 +281,7 @@ export class ConfigService {
     const known = this.models.getModels().filter(model => model.provider === connection.provider).map(model => choiceFromPi(model, connection.api));
     const choices = new Map(known.map(item => [item.modelId, item]));
     if (cacheMatches(connection, cache)) for (const item of cache.models) if (!choices.has(item.modelId)) choices.set(item.modelId, item);
-    return [...choices.values()];
+    return [...choices.values()].filter(item => connection.provider !== 'modelflare' || modelflareSupportsModel(item.modelId, connection.api));
   }
   async modelChoices(connectionId: string, discover = false): Promise<ModelChoice[]> {
     const connection = (await this.store.getConfig<ProviderConnection>('connection', connectionId)).value;
@@ -307,6 +308,7 @@ export class ConfigService {
         if (!Array.isArray(data)) throw new AppError('model_discovery_failed', 'Provider model list has an unsupported format', 502);
         for (const item of data) {
           if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id || item.id.length > 160) continue;
+          if (connection.provider === 'modelflare' && !modelflareSupportsModel(item.id, connection.api)) continue;
           const known = this.models.getModel(connection.provider, item.id);
           const label = anthropic ? item.display_name : item.name;
           discovered.set(item.id, known ? choiceFromPi(known, connection.api) : unknownChoice(item.id, typeof label === 'string' && label && label.length <= 160 ? label : item.id, connection.api));
@@ -441,12 +443,14 @@ export class ConfigService {
     const connection = connectionRecord.value;
     const choice = this.selectedChoice(settings, connection, caches.get(settings.connectionId!)?.value)!;
     const knownModel = choice.source === 'pi' ? this.models.getModel(connection.provider, choice.modelId) : undefined;
-    const model: Model<Api> = knownModel ? { ...structuredClone(knownModel), api: connection.api, baseUrl: connection.baseUrl } : {
+    const model: Model<Api> = knownModel ? (connection.provider === 'modelflare'
+      ? bindModelflareModel(knownModel, connection.api, connection.baseUrl)
+      : { ...structuredClone(knownModel), api: connection.api, baseUrl: connection.baseUrl }) : {
       id: choice.modelId, name: choice.label, api: connection.api, provider: connection.provider,
       baseUrl: connection.baseUrl, reasoning: false, input: ['text'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: choice.contextWindow, maxTokens: choice.maxTokens,
     };
-    if (knownModel && knownModel.api !== connection.api) delete model.compat;
+    if (knownModel && knownModel.api !== connection.api && connection.provider !== 'modelflare') delete model.compat;
     const runModels = createModels();
     const keylessAuth = { apiKey: { name: connection.label, resolve: async () => ({ auth: {} }) } };
     const provider = this.models.getProvider(connection.provider);

@@ -14,7 +14,8 @@ import { after, before, test } from 'node:test';
 import { createModels, fauxAssistantMessage, fauxProvider, Type, type AssistantMessageEvent, type Message } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import { MySqlStore } from '../../src/database.js';
-import { ConfigService } from '../../src/config.js';
+import { ConfigService, emptyRunSettings } from '../../src/config.js';
+import { createBackendModels } from '../../src/providers.js';
 import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/runtime.js';
 import { createAgentServer } from '../../src/http.js';
 import { TeamSystem } from '../../src/team-system.js';
@@ -2147,4 +2148,55 @@ test('stopping shared workspace cancels waiting runs without executing or checkp
     answer((await f.requests.next()).events,message('Ready.'));
     assert.equal((await f.runtime.finished(f.lead.memberId,next.runs[0]!.runId)).status,'completed');
   }finally{await f.close();}
+});
+
+
+test('predefined Modelflare models resolve offline, override stale discovery and respect model API support', async () => {
+  const models = createBackendModels();
+  const service = new ConfigService(store, models, [], testEncryptionKey);
+  const connectionId = `modelflare-${randomUUID()}`;
+  const connection = await service.createConnection(connectionId, { label: 'Gateway', provider: 'modelflare',
+    baseUrl: 'https://modelflare.dev', api: 'anthropic-messages', apiKey: 'gateway-private-key' });
+  const choices = await service.modelChoices(connectionId);
+  const haiku = choices.find(item => item.modelId === 'claude-haiku-5-5')!;
+  assert.equal(haiku.verified, true);
+  assert.equal(haiku.reasoning, true);
+  assert.equal(haiku.contextWindow, 1_000_000);
+  assert.equal(haiku.maxTokens, 128_000);
+  assert.equal(choices.some(item => item.modelId === 'gpt-6.1-sol'), false);
+  assert.equal(service.capabilities().models.filter(item => item.provider === 'modelflare').length, 32);
+  await store.createConfig('model_cache', connectionId, { provider: 'modelflare', baseUrl: 'https://modelflare.dev', api: 'anthropic-messages', checkedAt: new Date().toISOString(),
+    models: [ { ...haiku, verified: false, reasoning: false, contextWindow: 8192 },
+      { ...haiku, modelId: 'gpt-image-2' }, { ...haiku, modelId: 'jev-1.13' },
+      { ...haiku, modelId: 'gpt-6.1-sol' }, { ...haiku, modelId: 'future-discovered-model' } ] });
+  const cached = await service.modelChoices(connectionId);
+  assert.equal(cached.find(item => item.modelId === haiku.modelId)?.contextWindow, 1_000_000);
+  assert.equal(cached.some(item => ['gpt-image-2', 'jev-1.13', 'gpt-6.1-sol'].includes(item.modelId)), false);
+  assert.equal(cached.some(item => item.modelId === 'future-discovered-model'), true);
+  const settings = { ...emptyRunSettings, connectionId, modelId: haiku.modelId,
+    modelOptions: [{ connectionId, modelId: haiku.modelId, reasoning: 'xhigh' as const, maxTokens: 10000 }] };
+  const first = await service.resolveSettings(settings, 3);
+  assert.equal(first.model.provider, 'modelflare');
+  assert.equal(first.model.baseUrl, 'https://modelflare.dev');
+  assert.equal(first.options.apiKey, 'gateway-private-key');
+  assert.equal(first.options.reasoning, 'xhigh');
+  const switched = await service.updateConnection(connectionId, connection.revision, { label: 'Gateway', provider: 'modelflare',
+    baseUrl: 'https://modelflare.dev/v1', api: 'openai-responses' });
+  const responses = await service.modelChoices(connectionId);
+  assert.equal(responses.some(item => item.modelId === haiku.modelId), false);
+  assert.equal(responses.find(item => item.modelId === 'gpt-6.1-sol')?.contextWindow, 1_050_000);
+  assert.ok((await service.issuesFor([settings]))[0]!.some(issue => issue.includes('model')));
+  const next = await service.resolveSettings({ ...emptyRunSettings, connectionId, modelId: 'gpt-6.1-sol' }, 4);
+  assert.equal(next.model.api, 'openai-responses');
+  assert.equal(next.options.reasoning, 'low', 'off is clamped for models that require reasoning');
+  assert.equal(next.options.apiKey, 'gateway-private-key');
+  assert.equal(first.model.api, 'anthropic-messages', 'existing run snapshots stay unchanged');
+  await service.updateConnection(connectionId, switched.revision, { label: 'Gateway', provider: 'modelflare',
+    baseUrl: 'https://modelflare.dev/v1', api: 'openai-completions' });
+  const adapted = await service.resolveSettings(settings, 5);
+  assert.equal(adapted.model.api, 'openai-completions');
+  assert.equal((adapted.model.compat as { supportsStore?: boolean }).supportsStore, false);
+  assert.equal((adapted.model.compat as { forceAdaptiveThinking?: boolean }).forceAdaptiveThinking, undefined);
+  assert.equal(adapted.options.reasoning, 'xhigh');
+  assert.equal(JSON.stringify(await service.listConnections()).includes('gateway-private-key'), false);
 });

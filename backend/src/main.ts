@@ -1,4 +1,4 @@
-import { builtinModels } from '@earendil-works/pi-ai/providers/all';
+import { createBackendModels } from './providers.js';
 import { MySqlStore } from './database.js';
 import { ConfigService } from './config.js';
 import { AgentRuntime, configuredPolicy, piModelStream } from './runtime.js';
@@ -10,7 +10,7 @@ import { closeBashRuntime } from './harness-command.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
-const models = builtinModels();
+const models = createBackendModels();
 const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
 const workspaces = new WorkspaceService(store, config);
