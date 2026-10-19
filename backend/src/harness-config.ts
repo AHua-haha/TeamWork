@@ -4,6 +4,7 @@ import { AppError } from './types.js';
 export type CommandRule = { kind: 'exact'; argv: string[] } | { kind: 'executable'; executable: string };
 export interface HarnessConfig {
   designScope: { working: string[]; dependencies: string[] };
+  /** Historical source-format metadata; the fixed execute base admits all Bash. */
   allowedCommands: CommandRule[];
 }
 export interface EffectiveHarnessConfig extends HarnessConfig { implementationScope: { paths: string[]; usePaths: string[] } }
@@ -46,7 +47,4 @@ export function harnessConfig(value: unknown): HarnessConfig {
   });
   if (new Set(allowedCommands.map(rule => JSON.stringify(rule))).size !== allowedCommands.length) throw new AppError('invalid_config', 'Duplicate command rules');
   return { designScope: { working, dependencies }, allowedCommands };
-}
-export function commandAllowed(rules: readonly CommandRule[], argv: readonly string[]): boolean {
-  return rules.some(rule => rule.kind === 'executable' ? rule.executable === argv[0] : rule.argv.length === argv.length && rule.argv.every((arg, index) => arg === argv[index]));
 }

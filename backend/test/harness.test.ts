@@ -4,9 +4,10 @@ import { seedDesign } from './design-fixture.js';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { test } from 'node:test';
 import { designMetadata } from '../src/design.js';
-import { commandAllowed, commandArgv, emptyHarness, harnessConfig } from '../src/harness-config.js';
+import { commandArgv, emptyHarness, harnessConfig } from '../src/harness-config.js';
 import { executeCommand, parseBashInput } from '../src/harness-command.js';
 import { code, configureHarness, withTeam, worker } from './team-fixture.js';
 
@@ -21,7 +22,6 @@ test('assignment accepts design references only and never agent-owned implementa
   assert.throws(()=>harnessConfig({...value,implementationScope:{paths:['.'],usePaths:[]}}));
   assert.throws(()=>harnessConfig({...value,designScope:{working:['user/a'],dependencies:['user/A']}}));
   assert.throws(()=>commandArgv([]));
-  assert.equal(commandAllowed(harnessConfig(value).allowedCommands,['bash','-c','npm test']),true);
   assert.throws(()=>parseBashInput({command:'git status',metadata:{git:{scope:'design',approved:true}}}));
 });
 
@@ -115,10 +115,57 @@ test('accepted design Git commits become authoritative for permission derivation
   assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.find(d=>d.path===designPath)!.implementation,['new']);
 }));
 
-test('general Bash is denied without execute allowance while scoped Git stays available',()=>withTeam(async f=>{
-  await assert.rejects(f.team.harness.bash(f.lead.memberId,{command:'printf arbitrary'},signal()),code('command_denied'));
+test('every member receives broad Bash independently of historical command rules',()=>withTeam(async f=>{
+  const plain=await f.team.harness.bash(f.lead.memberId,{command:'printf arbitrary'},signal());
+  assert.equal(plain.exitCode,0,plain.stderr);assert.equal(plain.stdout,'arbitrary');
+  const inspection=await f.team.inspect(f.workspaceId,f.lead.memberId);
+  assert.ok(inspection.harnesses.find(h=>h.id==='execute')!.tools.includes('bash'));
   const result=await f.team.harness.bash(f.lead.memberId,git('design','git status --short'),signal());
   assert.equal(result.exitCode,0,result.stderr);
+}));
+
+test('Bash exposes source and toolchains, isolates home/secrets, and preserves session caches',()=>withTeam(async f=>{
+  const member=await worker(f,'Backend',['src']);
+  await writeFile(join(f.directory,'other-source.txt'),'Readable project source');
+  await writeFile(join(f.folder,'personal-secret.txt'),'Not project source');
+  process.env.RSI_TEST_BACKEND_SECRET='must-not-be-inherited';
+  try {
+    const result=await f.team.harness.bash(member.memberId,{command:`node -e 'const fs=require("node:fs"); console.log(JSON.stringify({cwd:process.cwd(),home:process.env.HOME,secret:process.env.RSI_TEST_BACKEND_SECRET??null,source:fs.readFileSync("other-source.txt","utf8")})); fs.writeFileSync(process.env.XDG_CACHE_HOME+"/warm","cached")' && npm --version`},signal());
+    assert.equal(result.exitCode,0,result.stderr);
+    const info=JSON.parse(result.stdout.split('\n')[0]!);
+    assert.equal(info.cwd,f.directory);assert.notEqual(info.home,homedir());assert.equal(info.secret,null);assert.equal(info.source,'Readable project source');
+    const cached=await f.team.harness.bash(member.memberId,{command:'cat "$XDG_CACHE_HOME/warm"'},signal());
+    assert.equal(cached.stdout,'cached');
+    const personal=await f.team.harness.bash(member.memberId,{command:'cat ../personal-secret.txt'},signal());
+    assert.notEqual(personal.exitCode,0);
+    const outsideWrite=await f.team.harness.bash(member.memberId,{command:'printf no > other-source.txt'},signal());
+    assert.notEqual(outsideWrite.exitCode,0);assert.equal(await readFile(join(f.directory,'other-source.txt'),'utf8'),'Readable project source');
+  } finally { delete process.env.RSI_TEST_BACKEND_SECRET; }
+}));
+
+test('Git metadata leaves ordinary implementation writes enabled; denied operations retain earlier effects',()=>withTeam(async f=>{
+  const member=await worker(f,'Backend',['src']);
+  const result=await f.team.harness.bash(member.memberId,git('implementation','mkdir -p src && printf permitted > src/result.txt && printf denied > .rsi/escape'),signal());
+  assert.notEqual(result.exitCode,0);
+  assert.equal(await readFile(join(f.directory,'src/result.txt'),'utf8'),'permitted');
+  await assert.rejects(readFile(join(f.directory,'.rsi/escape')),code('ENOENT'));
+}));
+
+test('Bash permits local binding and resolves localhost for HTTP requests',()=>withTeam(async f=>{
+  const script='const http=require("node:http"); const server=http.createServer((req,res)=>res.end("local-ok")); server.listen(0,"127.0.0.1",async()=>{try{const response=await fetch("http://localhost:"+server.address().port); console.log(await response.text())}catch(error){console.error(error);process.exitCode=1}finally{server.close()}})';
+  const result=await f.team.harness.bash(f.lead.memberId,{command:`node -e '${script}'`},signal());
+  assert.equal(result.exitCode,0,result.stderr);assert.match(result.stdout,/local-ok/);
+}));
+
+test('npm can install a local dependency into working implementation without a command allowance',()=>withTeam(async f=>{
+  const member=await worker(f,'Frontend',['src']);
+  const files=await f.team.harness.files(member.memberId);
+  await files.write.mkdir(join(f.directory,'src/local-package'));
+  await files.write.writeFile(join(f.directory,'src/local-package/package.json'),JSON.stringify({name:'local-package',version:'1.0.0',main:'index.js'}));
+  await files.write.writeFile(join(f.directory,'src/local-package/index.js'),'module.exports = "installed";');
+  await files.write.writeFile(join(f.directory,'src/package.json'),JSON.stringify({name:'sandbox-test',version:'1.0.0',private:true,dependencies:{'local-package':'file:./local-package'}}));
+  const result=await f.team.harness.bash(member.memberId,{command:'cd src && npm install --offline --ignore-scripts --no-audit --no-fund --package-lock=false && node -e \'console.log(require("local-package"))\''},signal());
+  assert.equal(result.exitCode,0,result.stderr);assert.match(result.stdout,/installed/);
 }));
 
 test('output bounds, timeout and cancellation terminate process groups',()=>withTeam(async f=>{

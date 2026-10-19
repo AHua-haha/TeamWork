@@ -82,3 +82,5 @@ Verification additionally covers FIFO wrap/zero capacity, startup loss, eviction
 ## Execution authority
 
 RuntimePolicy.acquireRun optionally supplies an abortable run execution lease. It is acquired before model/request/tool work and released after terminal finalization. A cancelled waiting run records cancellation without calling afterRun. Team composition provides a workspace lock; solo agents remain unchanged.
+
+Harness Bash permission resolution remains outside the agent loop: the harness supplies fixed broad execution with scoped filesystem writes and brokered Git. Runtime does not parse executable allowlists.

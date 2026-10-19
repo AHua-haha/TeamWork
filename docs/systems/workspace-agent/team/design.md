@@ -160,7 +160,7 @@ A changed pending snapshot or committed base refuses commit with `stale_revision
 
 ## Initial lead configuration
 
-A newly created/adopted workspace already has a valid active lead assigned to metadata.json, using the workspace default model, no dependencies and no execution allowances. Its exact JSON/Markdown source is materialized under .rsi/members before success. Bootstrap records the initial activation/history boundary, so initial current inspection has no pending edits, no active-to-current diff and no commits awaiting activation. Backend-owned bootstrap baselines are already active; subsequent changes retain normal user acceptance and idle activation requirements. Reopening does not reset pending files or activate them.
+A newly created/adopted workspace already has a valid active lead assigned to metadata.json, using the workspace default model, no dependencies and the fixed broad execute base. Its exact JSON/Markdown source is materialized under .rsi/members before success. Bootstrap records the initial activation/history boundary, so initial current inspection has no pending edits, no active-to-current diff and no commits awaiting activation. Backend-owned bootstrap baselines are already active; subsequent changes retain normal user acceptance and idle activation requirements. Reopening does not reset pending files or activate them.
 
 Working/dependency references identify exact system nodes by metadata.json. Each node contains Markdown design and implementation context in single-file or directory form; document count does not introduce additional assignments. Raw safe references are syntactically parsed before semantic node resolution so unavailable active assignments remain inspectable/unready. Submitted member configuration and run admission must resolve valid node metadata/design before granting code/context scope. No automatic old-layout assignment conversion occurs.
 
@@ -175,3 +175,5 @@ These user settings are durable member data separate from the activated manifest
 ## Conversation reset
 
 Users may explicitly reset a workspace group chat and every member's runtime conversation history/context while the whole team is idle. This preserves members, configuration, models, project/context documents and harness state. Busy reset changes nothing. Shared observers clear the old conversation and future runs start without prior messages; normal history retention has this explicit destructive exception. Reset is a user HTTP control, never an agent capability.
+
+The execute base admits arbitrary Bash for every active member. Existing execute.allowedCommands values remain validated source-format data for exact source/history continuity; they grant or deny no execution authority. No member-source rewrite, commit or activation is required to receive this fixed policy. Effective inspection tools/prompts describe broad execution and sandbox resource restrictions.

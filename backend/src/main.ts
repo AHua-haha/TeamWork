@@ -6,6 +6,7 @@ import { createAgentServer } from './http.js';
 import { TeamSystem } from './team-system.js';
 import { WorkspaceService } from './workspace.js';
 import { webTools } from './web-tools.js';
+import { closeBashRuntime } from './harness-command.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
@@ -33,6 +34,7 @@ try {
 } catch (error) {
   await team.runner.close();
   await runtime.close().catch(() => undefined);
+  await closeBashRuntime();
   await workspaces.close();
   await store.close();
   throw error;
@@ -47,6 +49,7 @@ async function shutdown() {
   finally {
     server.closeAllConnections();
     await closed;
+    await closeBashRuntime();
     await workspaces.close();
     await store.close();
   }

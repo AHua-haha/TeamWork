@@ -36,8 +36,7 @@ function MemberCard({ member, scope, selected, onSelect }: { member: Member; sco
         <h4>Dependencies</h4><ScopeList paths={member.harness.designScope.dependencies} />
         <h4>Harness configuration</h4><p>Management: {member.lead ? 'Designs and members' : 'Assigned designs'} · user commits</p><p>Implementation: {member.harness.implementationScope.paths.length ? 'Read/edit · agent commits' : 'No edits assigned'}</p><ScopeList paths={member.harness.implementationScope.paths} />
         <p>Read only</p><ScopeList paths={member.harness.implementationScope.usePaths} />
-        <p>Execute: {member.harness.allowedCommands.length ? `${member.harness.allowedCommands.length} command allowances` : 'No general execution'}</p>
-        {member.harness.allowedCommands.map((rule, index) => <code key={index}>{rule.kind === 'exact' ? JSON.stringify(rule.argv) : rule.executable}</code>)}
+        <p>Execute: Bash · outbound network · scoped writes</p>
       </div>
     </div><div className="member-card-identity"><strong>{member.name}</strong><span>{member.role}</span></div><span className={`member-card-status ${status.label.replaceAll(' ', '-').toLowerCase()}`}>{status.label}</span></div>
     <p className="member-card-responsibility">{member.responsibility || 'No responsibility given yet.'}</p>

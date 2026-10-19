@@ -132,7 +132,7 @@ MemberInspector requests the accepted member/configuration/harnesses projection 
 
 Workspace group chat follows each active run from stored history and in-memory progress and displays text plus collapsible tool sets in order, with thinking hidden. After accepted final identity arrives, it folds earlier work once and keeps the complete final report visible in the reserved section. Tool-only responses extend consecutive tool sets; visible text separates them. The child group-chat design owns presentation details.
 
-ChangesTab calls the separate backend user commit/activation APIs. Avatar details remain read-only and generic Design/Files review is retained. Active source may include execute assignment and backend acceptedRevision metadata. Source-file display is generic; effective tools/commands continue to come from backend inspection. Generic working tool cards can display validate_member_config without a new frontend execution path.
+ChangesTab calls the separate backend user commit/activation APIs. Avatar details remain read-only and generic Design/Files review is retained. Active source may include execute assignment and backend acceptedRevision metadata. Source-file display is generic; effective tools/prompts continue to come from backend inspection; historical command allowances are not displayed as authority. Generic working tool cards can display validate_member_config without a new frontend execution path.
 
 ## Member tree and configuration review
 
@@ -177,3 +177,5 @@ WorkspacePanel mounts permanent Design/Team/Changes/Files panels and passes Chan
 ## Compact progress projection
 
 AgentClient accepts execution envelope version 2 and uses client/progress.ts to apply compact frames incrementally, replacing only the affected message/block. Start metadata has empty content; block starts, deltas/checkpoints and authoritative ends reconstruct content and signatures. Tool JSON buffers are private to each reducer. Completed records remove reducers/partials; gaps and reconnects discard invalid reducers. No whole-frame-log replay or cumulative partial wire payload remains. GroupClient remains on the independent version-1 group timeline.
+
+MemberTree and MemberInspector describe broad Bash, outbound network, local binding and scoped writes; historical source-rule arrays are visible only as original source bytes, not as effective command permissions.

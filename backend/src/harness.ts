@@ -3,7 +3,7 @@ import { implementationContextPart, purposeHarnesses } from './harness-bases.js'
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DesignService, resolveDesign, type ResolvedDesign } from './design.js';
-import { commandAllowed, type HarnessConfig } from './harness-config.js';
+import type { HarnessConfig } from './harness-config.js';
 import { executeBash, parseBashInput, type CommandResult } from './harness-command.js';
 import { harnessBashTool, harnessFileTools } from './harness-tools.js';
 import { HarnessHistory, HarnessQueue, harnessStorage, partOwns, validateParts, type HarnessDefinition, type HarnessPart, type HistoryActor } from './harness-history.js';
@@ -148,12 +148,11 @@ export class HarnessService {
     const env = await this.environment(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const part = request.metadata?.git ? this.part(env, request.metadata.git.scope) : null;
-    if (!part && !commandAllowed(member.value.harness.allowedCommands, ['bash', '-c', request.command])) throw new AppError('command_denied', 'General Bash requires an allowed ["bash", "-c", command] rule; scoped Git uses metadata.git.scope', 403);
     const permissions=harnessPermissions(member,resolved);
     const readable=[...Object.values(permissions.working).flat(),...Object.values(permissions.dependencies).flat(),...(member.value.lead ? ['.rsi/members'] : [])];
-    // Management Git Bash is read-only except for operations mediated by Git.
-    // General execution may write implementation only; it cannot edit management files.
-    const writable = part ? [] : resolved.writable;
+    // Git metadata selects broker authority only. Ordinary commands retain the
+    // same implementation permissions with or without a selected Git scope.
+    const writable = resolved.writable;
     return executeBash({ root: env.root, command: request.command, readable, writable, readonly: resolved.readonly, signal,
       git: part ? (args, cwd) => env.history.scopedGit(id, part, env.root, args, cwd, { type: 'agent', memberId: id, ...(runId ? { runId } : {}) }) : undefined });
   }

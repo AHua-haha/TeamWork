@@ -24,7 +24,7 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 - The runtime handles model output, invokes chosen tools itself, records tool outcomes, updates the stored context history, and decides whether the shared loop continues or stops.
 - A context update, including compaction, changes later model requests. It does not change the completed message history presented to the frontend.
 - When a frontend-facing message completes, the runtime persists its whole stable record before announcing that completion to followers.
-- The runtime keeps one resolved config snapshot through the run. The standard policy uses its model, catalog tools, standing instructions and call options; a team policy replaces tools and adds current harness/team instructions for each member model call. Member file authority and command allowances are rechecked at tool execution. It resolves current config again for the next run. This does not freeze canonical message context, which the runtime may reread between calls.
+- The runtime keeps one resolved config snapshot through the run. The standard policy uses its model, catalog tools, standing instructions and call options; a team policy replaces tools and adds current harness/team instructions for each member model call. Member filesystem authority and Git scope permissions are rechecked at tool execution; the fixed execute base admits arbitrary Bash. It resolves current config again for the next run. This does not freeze canonical message context, which the runtime may reread between calls.
 
 ### Harness lifecycle
 

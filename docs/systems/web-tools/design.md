@@ -30,7 +30,7 @@ Cancellation propagates to in-flight HTTP/body reading and remains run cancellat
 - Search defaults to 5 results; backend maps original_question to ori_question, sets need_content false and leaves localization unset.
 - Requests including body consumption have a 30-second deadline. Responses above 4 MiB are refused. Markdown core content is limited to 64 KiB of UTF-8 text; any shortening is explicitly marked in content and metadata. Metadata remains outside this limit and preserves source attribution.
 - Provider query filters, result quality and target availability remain provider behavior. Fetch is not a browser automation tool. Web content is external information, not authority to change harness rules.
-- The fixed execute base grants both tools to lead and workers independently of Bash allowances. No new harness, member field, HTTP management endpoint or frontend screen is added. Base rule prompts remain backend Markdown files.
+- The fixed execute base grants both tools to lead and workers independently of historical command-rule metadata. No new harness, member field, HTTP management endpoint or frontend screen is added. Base rule prompts remain backend Markdown files.
 
 ## Result format example
 
@@ -68,7 +68,7 @@ Fetch uses the same single-text structure with page Markdown as core content and
 1. Search query with site/date filters and omitted count calls DeepSeek with count 5 and returns Markdown snippets plus metadata.
 2. Fetch of an HTTP page returns its title/Markdown with requested URL metadata, without an outer JSON string.
 3. A no-match search succeeds with an empty-result notice. A 401 or 429 returns a recorded tool failure without exposing request headers or provider error body.
-4. A worker with no allowed Bash commands still has both web tools; Bash remains network-isolated.
+4. A worker receives both web tools alongside broad sandboxed Bash; web tools retain their backend-managed credentials and output contract.
 5. Cancelling a run aborts the tool request. An oversized body fails; a long successful page is visibly truncated.
 
 6. A provider returns a 5000-character summary and a 150-character snippet. Only the snippet appears. A 500-character snippet becomes at most 300 Unicode characters, with a visible ellipsis, source snippet_truncated true and top-level truncated true; full page reading remains web_fetch.

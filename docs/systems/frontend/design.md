@@ -18,7 +18,7 @@ The backend owns execution, durable group history and response ordering, private
 ## Inputs and preconditions
 
 - The backend supplies the registered workspaces; for each, a team of members, with the lead first; a list of agents that belong to no workspace; a persisted group timeline with immediate member reservations, immutable final references and working ranges; private history per agent and a sync-then-follow operation for a run; agent config records for solo agents with revisions and validation issues; provider connection records; and model choices for each connection.
-- A team member has a name, role, responsibility, working/dependency design references and command allowances, run settings, a revision, issues that stop it from running, and whether it is running now, as the [Team design](../workspace-agent/team/design.md) defines. Each member ID also identifies its private execution history.
+- A team member has a name, role, responsibility, working/dependency design references and an effective execution policy, run settings, a revision, issues that stop it from running, and whether it is running now, as the [Team design](../workspace-agent/team/design.md) defines. Each member ID also identifies its private execution history.
 - A model selection is identified by both the provider connection ID and model ID. Names and model IDs alone need not be unique across connections.
 - A connection includes its display name, provider, request protocol, endpoint URL, and whether a key is configured. The API key is write-only to the backend; read responses do not contain it.
 - A model choice supplies its display label, its reasoning levels (the shared scale `off, low, medium, high, xhigh` for reasoning models, none otherwise), the level each scale step is actually sent as for that model, its effective default level, maximum output, context window, and whether its metadata is verified. A listed model is an available choice, not proof that a credential can invoke it.
@@ -214,7 +214,7 @@ Each attached member card shows its design scope, avatar, name, role and respons
 
 ### Avatar hover preview
 
-Hovering or keyboard-focusing an avatar opens a compact preview of active member information: activity/readiness, working designs, dependency designs and the Management/Implementation/Execute harness configuration. Scope summaries describe relevant implementation read/write access, command allowances and commit policy. Long path/command lists may be summarized; full rules, supplementary prompts, source files and exact details remain available in full active information. Color is supplementary and does not replace readable member identity or status.
+Hovering or keyboard-focusing an avatar opens a compact preview of active member information: activity/readiness, working designs, dependency designs and the Management/Implementation/Execute harness configuration. Scope summaries describe relevant implementation read/write access, the fixed broad Bash/network policy and commit policy. Long path lists may be summarized; full rules, supplementary prompts, source files and exact details remain available in full active information. Color is supplementary and does not replace readable member identity or status.
 
 ### Avatar click and full active information
 

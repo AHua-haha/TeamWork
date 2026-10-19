@@ -13,7 +13,6 @@ export function implementationContextPart(design: string): HarnessPart {
 }
 /** Fixed purpose policy; an assignment supplies design references, never permissions or tool definitions. */
 export function purposeHarnesses(member: StoredMember, implementation: ImplementationScope = { paths: [], usePaths: [] }, scope = member.value.harness.designScope): HarnessDefinition[] {
-  const config = member.value.harness;
   const designPaths = member.value.lead ? [designRoot] : [];
   return [
     {
@@ -36,8 +35,8 @@ export function purposeHarnesses(member: StoredMember, implementation: Implement
     },
     {
       id: 'execute',
-      prompt: harnessPrompt('execute', { allowedCommands: JSON.stringify(config.allowedCommands) }),
-      tools: ['web_search', 'web_fetch', ...(config.allowedCommands.length ? ['bash'] : [])], parts: [],
+      prompt: harnessPrompt('execute'),
+      tools: ['bash', 'web_search', 'web_fetch'], parts: [],
     },
   ];
 }

@@ -1,4 +1,6 @@
 import { seedDesign } from './design-fixture.js';
+import { after } from 'node:test';
+import { closeBashRuntime } from '../src/harness-command.js';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ResolvedRunConfig } from '../src/config.js';
@@ -11,6 +13,7 @@ import { WorkspaceService } from '../src/workspace.js';
 import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 
 export const ready: Partial<RunSettings> = { connectionId: 'conn', modelId: 'model' };
+after(closeBashRuntime);
 export const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 export const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
 

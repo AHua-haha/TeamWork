@@ -1,6 +1,7 @@
 import { seedDesign } from '../design-fixture.js';
 import { testModels, testModelValidator } from '../memory-store.js';
 import { emptyHarness } from '../../src/harness-config.js';
+import { closeBashRuntime } from '../../src/harness-command.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -34,7 +35,7 @@ before(async () => {
   await store.migrate();
   await config.initialize();
 });
-after(async () => { await workspaces.close(); await store.close(); });
+after(async () => { await closeBashRuntime(); await workspaces.close(); await store.close(); });
 const unconfigured = ['Select a provider and model'];
 /** A team over the store for an HTTP server whose runtime is `runtime`. */
 function teamFor(runtime: AgentRuntime): TeamSystem {

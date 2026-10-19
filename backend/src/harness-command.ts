@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SandboxManager, type SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
 import { HarnessQueue } from './harness-history.js';
 import { AppError } from './types.js';
+import { closeExecutionResources, executionResources } from './harness-execution.js';
 
 export const commandTimeoutMs = 60_000;
 export const commandOutputBytes = 64 * 1024;
@@ -57,6 +58,14 @@ interface BashEnvironment {
   git?: (args: string[], cwd: string) => Promise<string>;
 }
 const wrapping = new HarnessQueue();
+let initialized: Promise<void> | undefined;
+/** Session shutdown, after running agents and their tools have drained. */
+export async function closeBashRuntime() {
+  await wrapping.run('profile', async () => {
+    if (initialized) { await initialized; await SandboxManager.reset(); initialized = undefined; }
+    await closeExecutionResources();
+  });
+}
 const quote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`;
 
 /** Real Bash, OS filesystem/network isolation, and an invocation-bound Git bridge. */
@@ -67,6 +76,7 @@ export async function executeBash(environment: BashEnvironment): Promise<Command
     const deps = await SandboxManager.checkDependenciesAsync();
     if (deps.errors.length) throw new AppError('sandbox_unavailable', deps.errors.join('; '), 503);
   }
+  const resources = await executionResources(root);
   const area = await realpath(await mkdtemp(join(tmpdir(), 'rsi-bash-'))), scratch = join(area, 'tmp'), socketPath = join(area, 'git.sock');
   await mkdir(scratch);
   const pending = new Set<Promise<void>>(), clients = new Set<import('node:net').Socket>();
@@ -105,20 +115,29 @@ export async function executeBash(environment: BashEnvironment): Promise<Command
     const atRoot = (path: string) => path === '.' ? root : join(root, path);
     const protectedPaths = ['.git', '.rsi', ...environment.readonly].map(atRoot);
     const config: SandboxRuntimeConfig = {
-      network: { allowedDomains: [], deniedDomains: [], allowUnixSockets: [socketPath], allowAllUnixSockets: process.platform === 'linux' },
+      network: { allowedDomains: ['*'], deniedDomains: [], allowLocalBinding: true,
+        allowMachLookup: ['com.apple.SystemConfiguration.DNSConfiguration'],
+        allowUnixSockets: [socketPath], allowAllUnixSockets: process.platform === 'linux' },
       filesystem: {
-        denyRead: ['/', ...['.git', '.rsi'].map(atRoot)],
-        allowRead: ['/bin', '/usr', '/sbin', '/System', '/Library', '/private/etc', '/etc', '/dev', dirname(dirname(process.execPath)), area, ...environment.readable.map(atRoot)],
-        allowWrite: [scratch, ...environment.writable.map(atRoot)],
+        // A region glob permits explicit context/member carve-outs even though
+        // project-source reads include root. A literal nested .rsi deny would
+        // override those carve-outs in SRT's deny-within-allow precedence.
+        denyRead: ['/', atRoot('.git'), `${atRoot('.rsi')}/**/*`],
+        allowRead: [...resources.readable, root, area, ...environment.readable.map(atRoot)],
+        allowWrite: [resources.home, scratch, ...environment.writable.map(atRoot)],
         denyWrite: protectedPaths,
       },
     };
     const wrapped = await wrapping.run('profile', async () => {
+      // All invocations share the fixed broad network policy. Proxies live for
+      // the backend session; resetting after a call would disrupt other calls.
+      initialized ??= SandboxManager.initialize(config);
+      try { await initialized; } catch (error) { initialized = undefined; throw error; }
       SandboxManager.updateConfig(config);
       return SandboxManager.wrapWithSandbox(environment.command, '/bin/bash', config, signal);
     });
     return await executeCommand(root, ['/bin/bash', '--noprofile', '--norc', '-c', wrapped], signal, commandTimeoutMs,
-      { PATH: `${area}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`, LANG: 'en_US.UTF-8', TMPDIR: scratch });
+      resources.environment(area, scratch));
   } finally {
     closing = true;
     await Promise.allSettled([...pending]);

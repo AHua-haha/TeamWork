@@ -11,7 +11,7 @@ Maintain harness rule text in the Markdown files under `harness/`:
 - `design-template.md` and `implementation-context-template.md`: initial root context content rendered at workspace bootstrap.
 - `execute.md`: Bash execution rules, allowed-command information, and reusable web-search/fetch usage rules.
 
-`{{workspace}}` in common and `{{allowedCommands}}` in execute are replaced with backend-owned values. `{{design}}` and `{{context}}` render each implementation-context scope; `{{project}}` renders the initial design title and `{{design}}` also renders the initial implementation-context reference. Other text is delivered as written to runtime/inspection. Unknown template values fail assembly. Required files are loaded once; missing/empty files fail backend startup. There are no hardcoded fallback rules.
+`{{workspace}}` in common is replaced with a backend-owned value. Execute permissions are fixed by the base harness, independently of historical command-rule fields. `{{design}}` and `{{context}}` render each implementation-context scope; `{{project}}` renders the initial design title and `{{design}}` also renders the initial implementation-context reference. Other text is delivered as written to runtime/inspection. Unknown template values fail assembly. Required files are loaded once; missing/empty files fail backend startup. There are no hardcoded fallback rules.
 
 Restart development mode after editing prompts. For compiled use, run the backend build and restart: the build copies the files into `dist/prompts/harness/`. Loading is relative to the module, independent of the shell's working directory. Deploy the complete `dist/` directory.
 

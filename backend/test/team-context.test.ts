@@ -28,8 +28,8 @@ test('member requests get team rules and only their harness design and implement
   assert.deepEqual(names(request).sort(), ['bash', 'edit', 'ls', 'read', 'web_fetch', 'web_search', 'write']);
   assert.deepEqual(request.context.tools!.map(tool => tool.name), names(request));
   const inspected = await fixture.team.inspect(fixture.workspaceId, backend.memberId);
-  assert.deepEqual(inspected.harnesses.find(h => h.id === 'execute')!.tools, ['web_search', 'web_fetch']);
-  assert.match(request.context.systemPrompt!, /Bash remains network-isolated/);
+  assert.deepEqual(inspected.harnesses.find(h => h.id === 'execute')!.tools, ['bash', 'web_search', 'web_fetch']);
+  assert.match(request.context.systemPrompt!, /Outbound network and local server binding are allowed/);
   assert.match(request.context.systemPrompt!, /<metadata>/);
   assert.match(request.context.systemPrompt!, /<mentions>/);
   assert.match(request.context.systemPrompt!, /omit the entire block/);

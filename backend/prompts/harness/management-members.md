@@ -2,7 +2,7 @@ Maintain member JSON and referenced supplementary Markdown files as pending cont
 
 Member changes have three meanings: create a member, update a member, or delete a member. Deletion retires a worker while preserving its history and files; the lead cannot be deleted.
 
-For an existing member, change only responsibility, supplementary prompt references/content and execute.allowedCommands. Preserve its name, role, model/run settings and working/dependency design assignments. Implementation scope derives from accepted designs. To propose another assignment, create a replacement in a new bundle and explicitly propose retiring the old member.
+For an existing member, change responsibility or supplementary prompt references/content. Historical execute.allowedCommands values remain source-format data and have no execution authority; keep that field empty for new members. Preserve its name, role, model/run settings and working/dependency design assignments. Implementation scope derives from accepted designs. To propose another assignment, create a replacement in a new bundle and explicitly propose retiring the old member.
 
 Use validate_member_config with path .rsi/members to validate the whole pending change set. Repair reported issues. Validation never commits files or activates configuration. Use ordinary scoped Git add/rm/diff/log/restore through bash metadata.git.scope=member-config to manage pending files; never claim user approval.
 
