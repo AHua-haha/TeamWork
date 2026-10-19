@@ -1,0 +1,39 @@
+{
+  "time": "2026-10-19T01:35:27.223Z",
+  "workspaceId": "3321c080-5f88-42c4-a0ff-754a6b93f085",
+  "directory": "/Users/ahua/workspace/personal-todo",
+  "backup": "/Users/ahua/workspace/rsi-agent/.run/private-migration-backups/personal-todo-2026-10-19",
+  "importedFiles": 23,
+  "conflicts": 0,
+  "implementationHead": "e41dcf1074560f9c44c7c8df6c1ad1c275abb58f",
+  "implementationCommits": "4",
+  "implementationTrackedFiles": 9,
+  "environments": [
+    {
+      "memberId": "3dd91ccd-4096-461b-b60d-fcb7759af862",
+      "name": "Lead",
+      "directory": "/Users/ahua/workspace/personal-todo"
+    },
+    {
+      "memberId": "aa7a0f1c-5fd4-44a7-b070-9f5f8b7cef2d",
+      "name": "Backend",
+      "directory": "/Users/ahua/workspace/personal-todo"
+    },
+    {
+      "memberId": "9d0ca91d-5237-4600-a2ce-5bd0cae467af",
+      "name": "Frontend",
+      "directory": "/Users/ahua/workspace/personal-todo"
+    },
+    {
+      "memberId": "b3ded641-eb94-48f6-8c0e-61be5b13643a",
+      "name": "Ops",
+      "directory": "/Users/ahua/workspace/personal-todo"
+    }
+  ],
+  "frontendPreserved": true,
+  "stableDatabasePreserved": true,
+  "approvalRefsPreserved": true,
+  "legacyFilesPreserved": true,
+  "pendingMembers": false,
+  "activationChanged": false
+}
