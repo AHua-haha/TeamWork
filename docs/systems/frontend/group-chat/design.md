@@ -150,3 +150,9 @@ A tool failure colors only that individual tool row red. Successful or pending s
 - Existing Work behavior applies: manual collapse hides the row while live observation continues. Reopening during thinking shows the row; final acceptance folds earlier work once and removes the indicator.
 
 Acceptance: thinking-only chunks display the animated row without any thinking text; subsequent visible text replaces the row with normal streamed text. Completed/reloaded history contains neither the row nor thinking content.
+
+## Image input and display
+
+The group composer accepts up to four PNG/JPEG/WebP images, each up to 10 MiB, by file picker, clipboard paste or drag/drop. Text and images can be sent together, and image-only input is valid. Before sending show removable thumbnail previews with filenames and clear errors for invalid files. Ordinary text pasting, mentions, discussion references and Enter/Shift+Enter behavior remain. A send in progress freezes attachment controls; accepted sends clear only submitted attachments/text while refusals preserve the draft and previews. Release preview object URLs on removal/unmount.
+
+Sent user messages show their text and ordered image thumbnails, opening the prepared image in a new browser tab. Load images through the workspace-scoped backend binary endpoint; do not embed base64 in history or streaming. Image errors are local and do not hide text. Constrain previews and sent images to the reading width on desktop/mobile. Other message layout and stream/fold behavior remain unchanged.

@@ -288,3 +288,11 @@ test('workspace execution lock waits for release, cancels waiting acquisition, a
   await settle();assert.equal(nextEntered,false);
   first();const release=await next;assert.equal(nextEntered,true);release();
 }));
+
+test('picture publication refuses a text-only recipient without storing or activating anything', () => withTeam(async f => {
+  const { prepareChatImage } = await import('../src/chat-images.js');
+  const { png } = await import('./image-fixture.js');
+  f.runtime.prepareRun = async () => ({ model: { input: ['text'] } }) as any;
+  await assert.rejects(f.team.runner.postUser(f.workspaceId, '', [await prepareChatImage(png(), 'screen.png')]), /without image input/);
+  assert.equal(f.store.chatImages.size, 0); assert.equal(f.runtime.runs.length, 0);
+}));

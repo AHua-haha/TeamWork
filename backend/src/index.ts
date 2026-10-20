@@ -32,3 +32,4 @@ export * from './web-tools.js';
 export * from './member-response.js';
 export * from './progress.js';
 export * from './conversation-context.js';
+export * from './chat-images.js';

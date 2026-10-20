@@ -2337,3 +2337,56 @@ test('member context restart recovery retains abandoned private work, repairs mi
     assert.equal(ranges[0].n, 0);
   } finally { await recovery?.close(); await f.close(); }
 });
+
+test('shared pictures survive reopen, hydrate native model messages, and reset removes all image state', { timeout: 30_000 }, async () => {
+  const { png } = await import('../image-fixture.js');
+  const { prepareChatImage } = await import('../../src/chat-images.js');
+  const f = await groupFixture();
+  try {
+    const image = await prepareChatImage(png(), 'screenshot.png');
+    const first = await f.team.runner.postUser(f.workspaceId, '', [image]);
+    const step = await f.requests.next();
+    const imageMessages = step.request.context.messages.filter(m => Array.isArray(m.content) && m.content.some(part => part.type === 'image'));
+    assert.equal(imageMessages.length, 1);
+    const content = imageMessages[0]!.content;
+    assert.ok(Array.isArray(content));
+    const picture = content.find(part => part.type === 'image'); assert.ok(picture?.type === 'image');
+    assert.deepEqual(Buffer.from(picture.data, 'base64'), image.bytes);
+    assert.deepEqual(first.entries[0]!.kind === 'user' && first.entries[0]!.attachments, [image.metadata]);
+    await assert.rejects(f.team.runner.postUser(f.workspaceId, 'busy', [await prepareChatImage(png(), 'refused.png')]), /working/);
+    const [count] = await store.pool.execute<any[]>('SELECT COUNT(*) AS n FROM chat_images WHERE workspace_id = ?', [f.workspaceId]); assert.equal(count[0].n, 1);
+    answer(step.events, message('Image understood'));
+    await f.runtime.finished(f.lead.memberId, first.runs[0]!.runId);
+    const reopened = new MySqlStore(databaseUrl!);
+    try {
+      const snapshot = await reopened.chatSnapshot(f.workspaceId);
+      assert.deepEqual(snapshot.messages[0]!.attachments, [image.metadata]);
+      assert.equal(JSON.stringify(snapshot).includes(picture.data), false);
+      assert.deepEqual((await reopened.chatImage(f.workspaceId, image.metadata.id)).bytes, image.bytes);
+      await assert.rejects(reopened.chatImage('other', image.metadata.id), /not found/);
+    } finally { await reopened.close(); }
+    const next = await f.team.runner.postUser(f.workspaceId, '@Backend inspect prior image');
+    const other = await f.requests.next();
+    assert.ok(other.request.context.messages.some(m => Array.isArray(m.content) && m.content.some(part => part.type === 'image' && part.data === picture.data)));
+    answer(other.events, message('Same picture received')); await f.runtime.finished(f.backend.memberId, next.runs[0]!.runId);
+    await f.team.runner.reset(f.workspaceId);
+    await assert.rejects(store.chatImage(f.workspaceId, image.metadata.id), /not found/);
+    assert.equal((await store.chatSnapshot(f.workspaceId)).messages.length, 0);
+  } finally { await f.close(); }
+});
+
+test('constructed image context fails explicitly when a later model request cannot accept pictures', { timeout: 30_000 }, async () => {
+  const base = configuredPolicy();
+  const f = await groupFixture({ ...base, buildRequest: async (scope, history) => {
+    const request = await base.buildRequest(scope, history);
+    return { ...request, model: { ...request.model, input: ['text'] } };
+  } });
+  try {
+    const { prepareChatImage } = await import('../../src/chat-images.js');
+    const { png } = await import('../image-fixture.js');
+    const accepted = await f.team.runner.postUser(f.workspaceId, '', [await prepareChatImage(png(), 'picture.png')]);
+    const state = await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    assert.equal(state.status, 'failed'); assert.equal(state.error?.code, 'image_not_supported');
+    assert.match(state.error!.message, /model with image input/);
+  } finally { await f.close(); }
+});

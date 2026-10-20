@@ -187,3 +187,7 @@ Workspace members receive native Pi file/search tools. Read-only tools inspect w
 GET /workspaces/:workspaceId/team/changes returns workspaceId, leadId, design and member scope reviews ({memberId,partId,revision,base,changes}) plus activation {revision,activeRevision,hasChanges}. It reads fixed approved scope refs and current files; no full member validation, active-file materialization, raw configuration dump or commit-history enumeration occurs. activation.revision is the approved member commit; activeRevision is the last activated revision or null. A legacy missing activation marker conservatively reports changes; validation remains authoritative.
 
 GET configuration?source=committed supplies the separate approved-configuration validation/digest. It may run after files display when approved and active differ. Existing commit/activate operations retain exact revision/digest, stale/busy checks and atomic activation; reading changes never approves or activates.
+
+## Shared user pictures
+
+Workspace group input accepts text and ordered image attachments, including image-only messages. Successful publication stores pictures and shared references durably with response admission. Malformed images or a triggered model without image capability refuse the whole publication. Shared images are available to later members through group context, survive restart and are removed by chat reset. Member final publications remain text.

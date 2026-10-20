@@ -44,7 +44,7 @@ export class FakeRuntime implements RunHost {
   constructor(private readonly store?: MemoryStore) {
     if (store) store.onPublicationComplete = runId => this.find(runId).settle('completed');
   }
-  async prepareRun(): Promise<ResolvedRunConfig> { return {} as ResolvedRunConfig; }
+  async prepareRun(): Promise<ResolvedRunConfig> { return { model: { input: ['text', 'image'] } } as ResolvedRunConfig; }
   launch(run: RunState): void { void this.start(run.agentId, undefined, run.runId); }
   clearProgress(): void {}
   async feedback(): Promise<void> {}

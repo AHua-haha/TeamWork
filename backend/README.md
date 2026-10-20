@@ -394,3 +394,18 @@ Changes displays files immediately, coalesces overlapping refreshes and retains 
 Each activation reads the assigned working designs' `.rsi/context/implement/<node>/impl/README.md` files in path order. Use exact `## Result summary`, `## File lookup`, and `## Automatic retrieval` headings. The retrieval section contains one fenced JSON block: `{"commands":[{"command":"git status --short"}]}`. Each entry accepts the full Bash input (`command`, optional `cwd`, `timeout`, `background`, `metadata.git.scope`), using normal member shell/harness rules. An empty commands array disables retrieval. Summary/lookup text is loaded; referenced source files are not automatically read. Missing/invalid documents produce private repair diagnostics, and no commands from those documents run. Existing `impl.md` documents are preserved for explicit conversion rather than silently loaded or moved.
 
 Working context is earlier shared history, document summary/lookup, failed private working ranges, incoming shared history through admission, and fresh retrieval results. SQL boundaries retain failed/cancelled/interrupted working messages across restart; success excludes all private traces from later model context while keeping stable history for inspection. Startup does not replay commands. Temporary uncommitted chunks remain transient. Reset clears conversation boundaries/history while preserving context documents. No frontend endpoint or stream envelope changes.
+
+
+### Workspace group pictures
+
+The workspace composer accepts PNG/JPEG/WebP pictures through picker, clipboard or drop (four images maximum, 10 MiB each), with optional text. The backend uses Pi public image utilities, stores prepared images in SQL and hydrates native image content blocks when constructing each member's working context. Select an image-capable model. Prepared images are bounded to 2000 pixels per edge and a 4.5 MiB base64 budget; WebP is normalized to PNG before resizing. Source originals are not separately retained.
+
+Submit text-only JSON as before, or binary multipart with one text field and repeated images files:
+
+```sh
+curl -X POST http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/messages \
+  -F 'text=Examine this screenshot' \
+  -F 'images=@/absolute/path/screenshot.png'
+```
+
+An image-only multipart submission sets text to an empty string. Accepted user records include optional attachments [{id,name,mimeType,width,height,size}]. GET /workspaces/:id/team/chat/attachments/:imageId serves the prepared binary; history and SSE contain references rather than base64. Invalid images and unsupported triggered models refuse the entire publication. Stored pictures survive restart; resetting group chat removes them with its history. Later model requests that contain shared or tool-read images fail explicitly if their selected model lacks image input.

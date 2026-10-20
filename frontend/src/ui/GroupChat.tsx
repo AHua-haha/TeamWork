@@ -1,5 +1,6 @@
+import { useImageDraft } from './useImageDraft.js';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { GroupClient, type GroupEntry } from '../client/group-client.js';
+import { GroupClient, imageUrl, type ChatImage, type GroupEntry } from '../client/group-client.js';
 import { AgentClient } from '../client/agent-client.js';
 import { discussionInput, referenceLabel, type Discussion } from '../client/discussion-reference.js';
 import type { ClientSnapshot } from '../client/protocol.js';
@@ -37,6 +38,9 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
   const [resetOpen, setResetOpen] = useState(false);
   useEffect(() => { closeModel(); }, [snapshot.resetCursor, closeModel]);
   const [draft, setDraft] = useState('');
+  const pictures = useImageDraft();
+  const picker = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
   const [caret, setCaret] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -61,10 +65,11 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
   const suggestions = mention ? (team.team?.members ?? []).filter(member => member.name.toLowerCase().includes(mention.query.toLowerCase())) : [];
   const status = snapshot.connection === 'following' ? active ? `${runningIds.length} working` : 'Ready' : snapshot.connection === 'syncing' ? 'Syncing' : snapshot.connection === 'disconnected' ? 'Reconnecting' : 'Updates stopped';
   async function send() {
-    if (!draft.trim() || snapshot.sending || snapshot.resetting || !snapshot.synchronized) return;
-    const sent = draft; const ref = discussion.reference;
+    if ((!draft.trim() && !pictures.images.length) || snapshot.sending || snapshot.resetting || !snapshot.synchronized) return;
+    const sent = draft; const ref = discussion.reference; const sentImages = pictures.images;
     try {
-      await client.send(discussionInput(sent, ref));
+      await client.send(discussionInput(sent, ref), sentImages.map(image => image.file));
+      pictures.remove(sentImages.map(image => image.id));
       setDraft(current => current === sent ? '' : current);
       if (ref) discussion.sent(ref);
       pinned.current = true; setDismissed(true);
@@ -86,16 +91,30 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
     <div className="group-viewport" ref={viewport} onScroll={() => { const view = viewport.current!; pinned.current = view.scrollHeight - view.scrollTop - view.clientHeight < 80; }}>
       {!snapshot.entries.length && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open design and team</button></div>}
       <div className="group-timeline" ref={timeline}>{snapshot.entries.map(entry => entry.kind === 'user'
-        ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body"><p>{entry.text}</p></div><div className="group-identity group-user-identity"><span className="group-avatar" aria-hidden="true">Y</span><strong className="group-identity-name">You</strong></div></article>
+        ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body">{entry.text && <p>{entry.text}</p>}{entry.attachments?.length ? <div className="group-message-images">{entry.attachments.map(image => <MessageImage key={image.id} workspaceId={workspaceId} image={image} />)}</div> : null}</div><div className="group-identity group-user-identity"><span className="group-avatar" aria-hidden="true">Y</span><strong className="group-identity-name">You</strong></div></article>
         : <MemberResponse key={entry.entryId} entry={entry} canConfigure={!!team.team?.members.some(member => member.memberId === entry.memberId)} modelOpen={modelTarget?.memberId === entry.memberId}
           onModel={openModel} onModelLeave={leaveModel} />)}</div>
     </div>
     {modelTarget && modelMember && <MemberModelPopover key={modelTarget.memberId} workspaceId={workspaceId} member={modelMember} anchor={modelTarget.anchor}
       onClose={closeModel} onEnter={keepModelOpen} onLeave={leaveModel} onSaved={refreshTeam} />}
-    <div className="group-composer-footer"><form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
+    <div className="group-composer-footer"><form className={`composer ${dragging ? 'composer-dragging' : ''}`}
+      onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (!snapshot.sending) setDragging(true); } }}
+      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
+      onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); setDragging(false); if (!snapshot.sending && !snapshot.resetting) pictures.add([...event.dataTransfer.files]); }}
+      onSubmit={event => { event.preventDefault(); void send(); }}>
       {discussion.reference && <div className="composer-reference"><span>{referenceLabel(discussion.reference)}</span><button type="button" aria-label="Remove discussion reference" onClick={discussion.clear}>×</button></div>}
+      <input ref={picker} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden aria-label="Choose pictures" onChange={event => { if (!snapshot.sending && !snapshot.resetting) pictures.add([...(event.target.files ?? [])]); event.target.value = ''; }} />
+      {pictures.error && <div className="group-command-error" role="alert">{pictures.error}</div>}
+      {pictures.images.length > 0 && <div className="composer-images">{pictures.images.map(image => <div className="composer-image" key={image.id}>
+        <img src={image.url} alt={image.file.name} /><span title={image.file.name}>{image.file.name}</span>
+        <button type="button" disabled={snapshot.sending || snapshot.resetting} aria-label={`Remove ${image.file.name}`} onClick={() => pictures.remove([image.id])}>×</button>
+      </div>)}</div>}
       {snapshot.commandError && <div className="group-command-error" role="alert">{snapshot.commandError}</div>}
       <textarea ref={input} className="composer-input" aria-label="Message the team" placeholder="Message the team… @ to mention a member" value={draft}
+        onPaste={event => {
+          const files = [...event.clipboardData.items].filter(item => item.kind === 'file').flatMap(item => { const file = item.getAsFile(); return file ? [file] : []; });
+          if (files.length) { event.preventDefault(); if (!snapshot.sending && !snapshot.resetting) pictures.add(files); }
+        }}
         onChange={event => { setDraft(event.target.value); setCaret(event.target.selectionStart); setDismissed(false); }}
         onSelect={event => setCaret(event.currentTarget.selectionStart)}
         onKeyDown={event => {
@@ -116,9 +135,9 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
         })}
         {!suggestions.length && <p>No matching members</p>}
       </div>}
-      <div className="composer-actions"><span className="group-composer-hint">No mention → Lead · Shift+Enter for a new line</span>
+      <div className="composer-actions"><button type="button" className="icon-button" aria-label="Attach pictures" title="Attach PNG, JPEG or WebP pictures" disabled={snapshot.sending || snapshot.resetting || pictures.images.length >= 4} onClick={() => picker.current?.click()}><Glyph name="plus" /></button><span className="group-composer-hint">No mention → Lead · Shift+Enter for a new line</span>
         {active && <button type="button" className="cancel-button" disabled={snapshot.stopping} onClick={() => void client.stop()}>{snapshot.stopping ? 'Stopping…' : 'Stop team'}</button>}
-        <button type="submit" className="send-button" disabled={!draft.trim() || snapshot.sending || snapshot.resetting || !snapshot.synchronized}>{snapshot.sending ? 'Sending…' : 'Send ↗'}</button>
+        <button type="submit" className="send-button" disabled={(!draft.trim() && !pictures.images.length) || snapshot.sending || snapshot.resetting || !snapshot.synchronized}>{snapshot.sending ? 'Sending…' : 'Send ↗'}</button>
       </div>
     </form></div>
   </div>;
@@ -217,4 +236,11 @@ function ToolSet({ item, running }: { item: Extract<ActivityItem, { kind: 'tools
     {status && <span className="work-line-status">{status}</span>}
     <span className="work-disclosure"><Glyph name="chevron" /></span>
   </summary><div className="work-tool-list">{item.tools.map(tool => <WorkTool key={tool.id} item={tool} running={running} />)}</div></details>;
+}
+
+function MessageImage({ workspaceId, image }: { workspaceId: string; image: ChatImage }) {
+  const [failed, setFailed] = useState(false);
+  const url = imageUrl(workspaceId, image.id);
+  return failed ? <span className="image-load-error" role="status">Picture unavailable: {image.name}</span>
+    : <a href={url} target="_blank" rel="noreferrer" aria-label={`Open ${image.name}`}><img src={url} alt={image.name} width={image.width} height={image.height} loading="lazy" onError={() => setFailed(true)} /></a>;
 }

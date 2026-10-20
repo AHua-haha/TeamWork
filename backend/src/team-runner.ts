@@ -1,3 +1,4 @@
+import type { PreparedChatImage } from './chat-images.js';
 import { HarnessQueue } from './harness-history.js';
 import type { AgentRuntime } from './runtime.js';
 import type { TeamService, TeamStore } from './team.js';
@@ -44,8 +45,9 @@ export class TeamRunner {
     return this.runtime().start(agentId, input);
   }
 
-  async postUser(workspaceId: string, value: unknown) {
-    return this.publish(workspaceId, chatText(value));
+  async postUser(workspaceId: string, value: unknown, images: PreparedChatImage[] = []) {
+    const text = chatText(value, images.map(image => image.metadata));
+    return this.workspaceOperation(workspaceId, () => this.acceptPublication(workspaceId, text, undefined, images));
   }
 
   async publishFinal(memberId: string, runId: string, value: unknown, finalMessageId: string): Promise<ChatMessage> {
@@ -61,7 +63,7 @@ export class TeamRunner {
     return this.workspaceOperation(workspaceId, () => this.acceptPublication(workspaceId, text, sender));
   }
 
-  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string; names: string[] }) {
+  private async acceptPublication(workspaceId: string, text: string, sender?: { memberId: string; name: string; runId: string; exchangeId: string; finalMessageId: string; names: string[] }, images: PreparedChatImage[] = []) {
     const roster = await this.team.active(workspaceId);
     const names = sender ? sender.names : userMentions(text);
     const recipients = names.map(name => {
@@ -81,8 +83,11 @@ export class TeamRunner {
       if (this.isRunning(member.id)) throw new AppError('member_busy', `${member.value.name} is working; revise or try again when it is free`, 409);
     }
     const configs = await Promise.all(recipients.map(member => this.runtime().prepareRun(member.id)));
+    if (images.length) for (const [index, config] of configs.entries()) {
+      if (!config.model.input.includes('image')) throw new AppError('image_not_supported', `${recipients[index]!.value.name} uses a model without image input; select a vision-capable model`, 409);
+    }
     // The store rechecks busy state and budget with publication and all run records in one transaction.
-    const result = await this.store.publishChat({ workspaceId, text, memberRevisions: Object.fromEntries(recipients.map((member, index) => [member.id, configs[index]!.source?.agentRevision ?? member.revision])), recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId, finalMessageId: sender.finalMessageId } : {}) });
+    const result = await this.store.publishChat({ workspaceId, text, ...(images.length ? { images } : {}), memberRevisions: Object.fromEntries(recipients.map((member, index) => [member.id, configs[index]!.source?.agentRevision ?? member.revision])), recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId, finalMessageId: sender.finalMessageId } : {}) });
     if (sender) this.active.delete(sender.memberId);
     for (const [index, run] of result.runs.entries()) {
       this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });
@@ -115,6 +120,8 @@ export class TeamRunner {
       const result = await action(); this.changes.publish(); return result;
     });
   }
+
+  async image(workspaceId: string, imageId: string) { return this.store.chatImage(workspaceId, imageId); }
 
   async snapshot(workspaceId: string, after = 0, limit = 100) { return this.store.chatSnapshot(workspaceId, after, limit); }
   async timeline(workspaceId: string, after = 0, limit = 100) { return this.store.chatTimeline(workspaceId, after, limit); }

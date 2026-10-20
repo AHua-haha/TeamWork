@@ -1,3 +1,4 @@
+import { readImageSubmission } from './chat-images.js';
 import { body, fields, json, query, count, sse, type Route } from './http-helpers.js';
 import type { TeamSystem } from './team-system.js';
 import { AppError, identity, position } from './types.js';
@@ -86,6 +87,12 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
       return;
     }
     if (area === 'chat') {
+      if (method === 'GET' && memberId === 'attachments' && extra.length === 1) {
+        query(url, []); identity(extra[0], 'imageId');
+        const image = await team.runner.image(workspaceId, extra[0]);
+        response.writeHead(200, { 'Content-Type': image.metadata.mimeType, 'Content-Length': image.bytes.length, 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' });
+        response.end(image.bytes); return;
+      }
       if (extra.length) throw notFound();
       if (method === 'GET' && (memberId === undefined || memberId === 'follow' || memberId === 'timeline' || memberId === 'timeline-follow')) {
         query(url, memberId === 'follow' || memberId === 'timeline-follow' ? ['after'] : ['after', 'limit']);
@@ -96,8 +103,13 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
         else json(response, 200, await team.runner.snapshot(workspaceId, after, count(url, 'limit', 100)));
       } else if (method === 'POST' && memberId === 'messages') {
         query(url, []);
-        const input = await body(request, maxBodyBytes); fields(input, ['text']);
-        json(response, 202, await team.runner.postUser(workspaceId, input.text));
+        if (request.headers['content-type']?.startsWith('multipart/form-data')) {
+          const input = await readImageSubmission(request);
+          json(response, 202, await team.runner.postUser(workspaceId, input.text, input.images));
+        } else {
+          const input = await body(request, maxBodyBytes); fields(input, ['text']);
+          json(response, 202, await team.runner.postUser(workspaceId, input.text));
+        }
       } else if (method === 'POST' && memberId === 'reset') {
         query(url, []);
         json(response, 200, await team.runner.reset(workspaceId));

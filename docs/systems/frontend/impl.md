@@ -183,3 +183,7 @@ MemberTree and MemberInspector describe persistent Bash, system reads, whole-wor
 ## Changes read ownership
 
 A Changes client owns the review snapshot, single-flight reads, operation state and separate committed-configuration validation. ChangesTab renders that state and schedules visibility/focus/working-team refresh. GET team/changes replaces the former comprehensive-current-plus-two-review loading chain. Committed validation runs only for approved-versus-active changes and is keyed by approved design/member refs and active revision; obsolete validation results are ignored. Tests exercise slow reads, overlapping ticks, validation independence, exact operation payloads and disposal.
+
+## Image attachment integration
+
+Workspace GroupChat adds picture selection, clipboard/drop, preview lifecycle and stable attachment display. Its GroupClient sends binary uploads and consumes reference-only shared history. Existing AgentClient private stream/fold logic and solo composer are unchanged. The frontend group-chat child owns this UI and its tests.

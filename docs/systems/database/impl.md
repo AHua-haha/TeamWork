@@ -123,3 +123,7 @@ Database storage has no appendChunk or live-range reads. beginMessage returns th
 ## Conversation-context durability verification
 
 MySQL/runtime tests cover the exact earlier-group/document/retained/incoming/retrieval composition, consecutive failed ranges once, cleanup on success surviving reopen, abandoned execution recovery, context-only missing tool results, retrieval Bash inputs/results, invalid-document repair, fixed activation prefixes and reset of the new tables. Completed history and frontend final references remain independent of these boundaries.
+
+## Image attachment integration
+
+MySqlStore creates chat_images(workspace_id,id,metadata,content MEDIUMBLOB). publishChat stores each prepared Buffer once and records its ordered metadata on the user ChatMessage and timeline entry in the same transaction. SQL metadata deserialization uses validateChatImages and binary reads verify the stored size. chatImage scopes both workspace and image ID. prepareMemberContext resolves shared images using its transaction connection and passes native ImageContent to groupEntry; no separate per-member shared-history record is created. Existing run-local model context may contain image bytes just as other native Pi messages do; terminal lifecycle clears that context while preserving shared pictures. resetChat deletes chat_images with shared records; workspace-reset table order includes it before workspaces. Additive migration preserves existing text-only history without rewriting it.

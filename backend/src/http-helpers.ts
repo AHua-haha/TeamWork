@@ -9,6 +9,15 @@ export interface Route { request: IncomingMessage; response: ServerResponse; url
 
 export async function body(request: IncomingMessage, limit = maxInputBytes): Promise<Record<string, unknown>> {
   if (!request.headers['content-type']?.startsWith('application/json')) throw new AppError('invalid_input', 'Content-Type must be application/json', 415);
+  const bytes = await rawBody(request, limit);
+  let data: unknown;
+  try { data = JSON.parse(bytes.toString('utf8')); }
+  catch { throw new AppError('invalid_input', 'Invalid JSON body'); }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new AppError('invalid_input', 'Expected a JSON object');
+  return data as Record<string, unknown>;
+}
+
+export async function rawBody(request: IncomingMessage, limit: number): Promise<Buffer> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -19,11 +28,7 @@ export async function body(request: IncomingMessage, limit = maxInputBytes): Pro
     }
     chunks.push(chunk);
   }
-  let data: unknown;
-  try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-  catch { throw new AppError('invalid_input', 'Invalid JSON body'); }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new AppError('invalid_input', 'Expected a JSON object');
-  return data as Record<string, unknown>;
+  return Buffer.concat(chunks);
 }
 
 export function fields(input: Record<string, unknown>, allowed: string[]): void {

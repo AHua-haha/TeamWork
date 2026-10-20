@@ -1,3 +1,5 @@
+import type { ImageContent } from '@earendil-works/pi-ai';
+import { validateChatImages, type ChatImage, type PreparedChatImage, type ChatImageStore } from './chat-images.js';
 import { validateRun } from './codec.js';
 import type { RunState, ContextEntry } from './types.js';
 import { AppError, identity, position } from './types.js';
@@ -7,12 +9,12 @@ export const defaultMentionLimit = 32;
 export type ChatAuthor = { type: 'user' } | { type: 'member'; memberId: string; name: string; runId: string };
 export interface ChatMessage {
   workspaceId: string; messageId: string; position: number; exchangeId: string;
-  author: ChatAuthor; text: string; recipients: string[]; time: number;
+  author: ChatAuthor; text: string; attachments?: ChatImage[]; recipients: string[]; time: number;
 }
 export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; /** UTF-16 offset in the joined selected text; backend-owned. */ bodyOffset?: number; /** Historical accepted response-tool records only. */ toolCallId?: string }
 export interface TimelineBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
 export type TimelineEntry = TimelineBase & (
-  | { kind: 'user'; text: string; messageId: string }
+  | { kind: 'user'; text: string; messageId: string; attachments?: ChatImage[] }
   | { kind: 'member'; memberId: string; name: string; run: RunState; working: { after: number; through: number | null }; finalRef: FinalReference | null; text: string | null }
 );
 export interface TimelineChange { cursor: number; entry: TimelineEntry }
@@ -27,7 +29,7 @@ export function validateTimelineEntry(value: unknown): asserts value is Timeline
   identity(entry.workspaceId); identity(entry.entryId); identity(entry.exchangeId);
   position(entry.position); position(entry.revision);
   if (!entry.position || !entry.revision || !Number.isSafeInteger(entry.time) || entry.time < 0) throw new AppError('invalid_data', 'Invalid timeline position or time');
-  if (entry.kind === 'user') { identity(entry.messageId); chatText(entry.text); return; }
+  if (entry.kind === 'user') { identity(entry.messageId); chatText(entry.text, entry.attachments); return; }
   if (entry.kind !== 'member') throw new AppError('invalid_data', 'Invalid timeline entry kind');
   identity(entry.memberId); validateRun(entry.run);
   if (entry.run.agentId !== entry.memberId || entry.run.runId !== entry.entryId || typeof entry.name !== 'string' || !entry.name || !entry.working) throw new AppError('invalid_data', 'Invalid timeline member');
@@ -50,9 +52,9 @@ export interface ChatSnapshot {
 }
 export interface ChatPublication {
   memberRevisions?: Record<string, number>;
-  workspaceId: string; author: ChatAuthor; text: string; recipients: string[]; exchangeId?: string; finalMessageId?: string;
+  workspaceId: string; author: ChatAuthor; text: string; images?: PreparedChatImage[]; recipients: string[]; exchangeId?: string; finalMessageId?: string;
 }
-export interface ChatStore {
+export interface ChatStore extends ChatImageStore {
   publishChat(input: ChatPublication): Promise<ChatAcceptance>;
   chatSnapshot(workspaceId: string, after?: number, limit?: number): Promise<ChatSnapshot>;
   chatTimeline(workspaceId: string, after?: number, limit?: number): Promise<TimelineSnapshot>;
@@ -67,7 +69,7 @@ export function validateChatMessage(value: unknown): asserts value is ChatMessag
   identity(message.workspaceId); identity(message.messageId); identity(message.exchangeId);
   position(message.position);
   if (!message.position || !Number.isSafeInteger(message.time) || message.time < 0) throw new AppError('invalid_data', 'Invalid chat position or time');
-  chatText(message.text);
+  chatText(message.text, message.attachments);
   if (!Array.isArray(message.recipients) || new Set(message.recipients).size !== message.recipients.length) throw new AppError('invalid_data', 'Invalid chat recipients');
   for (const recipient of message.recipients) identity(recipient);
   if (!message.author || !['user', 'member'].includes(message.author.type)) throw new AppError('invalid_data', 'Invalid chat author');
@@ -77,8 +79,9 @@ export function validateChatMessage(value: unknown): asserts value is ChatMessag
   }
 }
 
-export function chatText(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > maxChatCharacters) throw new AppError('invalid_input', `A group message has 1–${maxChatCharacters} characters`);
+export function chatText(value: unknown, attachments?: ChatImage[]): string {
+  if (attachments !== undefined) validateChatImages(attachments);
+  if (typeof value !== 'string' || (!value.trim() && !attachments?.length) || value.length > maxChatCharacters) throw new AppError('invalid_input', `A group message needs text (at most ${maxChatCharacters} characters) or pictures`);
   return value;
 }
 
@@ -100,11 +103,12 @@ export function userMentions(text: string): string[] {
   return [...result.values()];
 }
 
-export function groupEntry(message: ChatMessage): ContextEntry {
+export function groupEntry(message: ChatMessage, images: ImageContent[] = []): ContextEntry {
   const author = message.author.type === 'user' ? 'User' : message.author.name;
+  const text = `[Group message ${message.position} from ${author}]\n${message.recipients.length ? `[Mentioned members: ${message.recipients.join(', ')}]\n` : ''}${message.text}`;
   return {
     messageId: message.messageId,
-    message: { role: 'user', content: `[Group message ${message.position} from ${author}]\n${message.recipients.length ? `[Mentioned members: ${message.recipients.join(', ')}]\n` : ''}${message.text}`, timestamp: message.time },
+    message: { role: 'user', content: images.length ? [{ type: 'text', text }, ...images] : text, timestamp: message.time },
     metadata: { source: 'group-chat', workspaceId: message.workspaceId, groupPosition: message.position, author: message.author, recipients: message.recipients },
   };
 }

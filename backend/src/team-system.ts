@@ -178,6 +178,9 @@ export class TeamSystem {
         const request = await base.buildRequest(scope, history);
         const member = await this.service.find(scope.agentId);
         if (!member) return request;
+        if (request.context.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image')) && !request.model.input.includes('image')) {
+          throw new AppError('image_not_supported', 'This context contains pictures; select a model with image input', 409);
+        }
         if (member.value.lead) await this.configuration.materialize(scope.agentId);
         const prepared = await this.harness.prepare(scope.agentId, member.value.lead ? management : []);
         const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');

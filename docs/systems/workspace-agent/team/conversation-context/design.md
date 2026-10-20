@@ -143,3 +143,7 @@ Startup initializes new member-boundary records for existing members from their 
 6. A recorded Bash call has no result at restart. The next context contains a missing-result error without changing history or executing Bash again.
 7. New workspace bootstrap supplies root impl/README.md with empty commands. A workspace with only old impl.md receives a missing-entry diagnostic; its files are preserved for agent/user repair.
 8. Idle chat reset removes retained private history and boundaries. It preserves implementation README files and retrieval configuration; the next activation loads them with only new shared messages.
+
+## Shared user pictures
+
+Shared user messages can contain ordered pictures alongside text. Construct the corresponding user context entry from its group text/identity/mention information and the same prepared native image blocks. Resolve picture references from durable storage during context preparation; never replace pictures with generated text descriptions. Preserve the group message position and image order across subsequent runs/restart. These shared pictures are separate from private tool-read image results. A model request containing images requires an image-capable model and otherwise fails explicitly.

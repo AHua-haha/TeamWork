@@ -1,3 +1,4 @@
+import { imageContent, validateChatImages, type PreparedChatImage } from './chat-images.js';
 import { repairInterruptedTools } from './conversation-context.js';
 import { finalAnswer } from './final-answer.js';
 import { parseMemberResponse } from './member-response.js';
@@ -84,6 +85,12 @@ const schema = [
     directory_key CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
     seq BIGINT UNSIGNED NOT NULL DEFAULT 0,
     created_at BIGINT NOT NULL
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS chat_images (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    metadata JSON NOT NULL, content MEDIUMBLOB NOT NULL,
+    PRIMARY KEY(workspace_id, id), FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS workspace_models (
     workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
@@ -558,7 +565,11 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       const [state] = await rows(db, 'SELECT * FROM member_contexts WHERE member_id = ?', [agentId]);
       if (!member || !state) throw new AppError('corrupt_data', 'Member context state is missing', 500);
       const groupRows = await rows(db, 'SELECT entry FROM chat_messages WHERE workspace_id = ? AND position <= ? ORDER BY position', [member.workspace_id, admission.group_through]);
-      const groups = await Promise.all(groupRows.map(async row => groupEntry(await this.resolveChatMessage(db, decode<StoredChatMessage>(row.entry, () => undefined)))));
+      const groups = await Promise.all(groupRows.map(async row => {
+        const message = await this.resolveChatMessage(db, decode<StoredChatMessage>(row.entry, () => undefined));
+        const images = await Promise.all((message.attachments ?? []).map(image => this.readChatImage(db, member.workspace_id, image.id)));
+        return groupEntry(message, images.map(imageContent));
+      }));
       const retainedRows = await rows(db, 'SELECT entry FROM messages WHERE agent_id = ? AND position > ? AND position <= ? ORDER BY position', [agentId, state.success_position, admission.history_after]);
       const retained = repairInterruptedTools(retainedRows.map(row => decode<ContextEntry>(row.entry, value => validateEntries([value]))));
       const entries = [
@@ -591,6 +602,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
   }
 
   async publishChat(input: ChatPublication): Promise<ChatAcceptance> {
+    if (input.author.type === 'member' && input.images?.length) throw new AppError('invalid_input', 'Only user publications accept picture attachments');
     if (input.author.type === 'member' && input.recipients.length > 1) throw new AppError('invalid_mentions', 'An agent response can mention at most one member');
     return this.transaction(async db => {
       // Workspace lock serializes publication, budget allocation and stop. Runtime writes lock agents.
@@ -631,8 +643,9 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
         if (await this.finalText(db, finalRef) !== input.text) throw new AppError('invalid_input', 'Final response text does not match its committed reference');
       }
       const entries: TimelineEntry[] = [];
-      const message: ChatMessage = { workspaceId: input.workspaceId, messageId: randomUUID(), position: settings!.position + 1, exchangeId, author: input.author, text: input.text, recipients: input.recipients, time: Date.now() };
+      const message: ChatMessage = { workspaceId: input.workspaceId, messageId: randomUUID(), position: settings!.position + 1, exchangeId, author: input.author, text: input.text, ...(input.images?.length ? { attachments: input.images.map(image => image.metadata) } : {}), recipients: input.recipients, time: Date.now() };
       validateChatMessage(message);
+      for (const image of input.images ?? []) await db.execute('INSERT INTO chat_images (workspace_id, id, metadata, content) VALUES (?, ?, ?, ?)', [input.workspaceId, image.metadata.id, encode(image.metadata), image.bytes]);
       await db.execute('INSERT INTO chat_messages (workspace_id, position, entry) VALUES (?, ?, ?)', [input.workspaceId, message.position, encode(finalRef ? { ...message, text: undefined, finalRef } : message)]);
       await db.execute('UPDATE chat_settings SET position = ? WHERE workspace_id = ?', [message.position, input.workspaceId]);
       await db.execute('UPDATE chat_exchanges SET used = used + ? WHERE id = ?', [input.recipients.length, exchangeId]);
@@ -648,7 +661,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
         await db.execute('UPDATE agents SET active_run_id = NULL WHERE id = ?', [sender.id]);
         sender.active_run_id = null;
       }
-      if (input.author.type === 'user') entries.push(await this.writeChatEntry(db, { workspaceId: input.workspaceId, entryId: message.messageId, position: 0, revision: 0, exchangeId, time: message.time, kind: 'user', text: input.text, messageId: message.messageId }));
+      if (input.author.type === 'user') entries.push(await this.writeChatEntry(db, { workspaceId: input.workspaceId, entryId: message.messageId, position: 0, revision: 0, exchangeId, time: message.time, kind: 'user', text: input.text, messageId: message.messageId, ...(message.attachments ? { attachments: message.attachments } : {}) }));
       const runs: RunState[] = [];
       for (const agentId of input.recipients) {
         const run: RunState = { agentId, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
@@ -725,6 +738,19 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     }
     if (entry.message.content.some(part => part.type === 'toolCall')) throw new AppError('corrupt_data', 'Historical final reference contains tool calls', 500);
     return entry.message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+  }
+
+  private async readChatImage(db: Db, workspaceId: string, imageId: string): Promise<PreparedChatImage> {
+    const [row] = await rows(db, 'SELECT metadata, content FROM chat_images WHERE workspace_id = ? AND id = ?', [workspaceId, imageId]);
+    if (!row) throw new AppError('not_found', 'Picture not found', 404);
+    const metadata = decode<PreparedChatImage['metadata']>(row.metadata, value => validateChatImages([value]));
+    if (!Buffer.isBuffer(row.content) || row.content.length !== metadata.size) throw new AppError('corrupt_data', 'Stored picture size does not match metadata', 500);
+    return { metadata, bytes: row.content };
+  }
+
+  async chatImage(workspaceId: string, imageId: string): Promise<PreparedChatImage> {
+    identity(workspaceId, 'workspaceId'); identity(imageId, 'imageId');
+    return this.readChatImage(this.pool, workspaceId, imageId);
   }
 
   private async resolveChatMessage(db: Db, stored: StoredChatMessage): Promise<ChatMessage> {
@@ -816,7 +842,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       const [clock] = await rows(db, 'SELECT seq FROM chat_clock WHERE workspace_id = ? FOR UPDATE', [workspaceId]);
       const resetCursor = clock!.seq + 1;
       const resetPosition = settings!.position + 1;
-      for (const table of ['chat_changes', 'chat_entries', 'chat_messages']) await db.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [workspaceId]);
+      for (const table of ['chat_changes', 'chat_entries', 'chat_messages', 'chat_images']) await db.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [workspaceId]);
       // Include all member runs, even ones not linked to an exchange, but never solo agents.
       await db.execute('DELETE cr FROM chat_runs cr JOIN runs r ON r.id = cr.run_id JOIN members m ON m.id = r.agent_id WHERE m.workspace_id = ?', [workspaceId]);
       await db.execute('DELETE FROM chat_exchanges WHERE workspace_id = ?', [workspaceId]);

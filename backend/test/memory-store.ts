@@ -1,3 +1,4 @@
+import { imageContent, type PreparedChatImage } from '../src/chat-images.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,6 +53,12 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     const changes = all.filter(item => item.cursor > after).slice(0, limit);
     return { workspaceId, resetCursor: this.resets.get(workspaceId)?.resetCursor ?? 0, cursor: all.at(-1)?.cursor ?? this.resets.get(workspaceId)?.resetCursor ?? 0, changes: structuredClone(changes), more: all.some(item => item.cursor > (changes.at(-1)?.cursor ?? after)), mentionLimit: this.limits.get(workspaceId) ?? 32 };
   }
+  readonly chatImages = new Map<string, PreparedChatImage>();
+  async chatImage(workspaceId: string, id: string) {
+    const image = this.chatImages.get(`${workspaceId}:${id}`);
+    if (!image) throw new AppError('not_found', 'Picture not found', 404);
+    return image;
+  }
   readonly chatMessages = new Map<string, ChatMessage[]>();
   readonly chatRuns = new Map<string, { exchangeId: string; run: RunState }>();
   readonly agentContexts = new Map<string, ContextEntry[]>();
@@ -74,11 +81,13 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     if (exchange.used + input.recipients.length > exchange.limit) throw new AppError('mention_limit', 'Mention limit reached', 409);
     if (this.failNextPublication) { this.failNextPublication = false; throw new Error('injected publication failure'); }
     const messages = this.chatMessages.get(input.workspaceId) ?? [];
-    const message: ChatMessage = { ...input, exchangeId, messageId: randomUUID(), position: (messages.at(-1)?.position ?? this.resets.get(input.workspaceId)?.resetPosition ?? 0) + 1, time: Date.now() };
+    const { images, ...publication } = input;
+    for (const image of images ?? []) this.chatImages.set(`${input.workspaceId}:${image.metadata.id}`, image);
+    const message: ChatMessage = { ...publication, ...(images?.length ? { attachments: images.map(image => image.metadata) } : {}), exchangeId, messageId: randomUUID(), position: (messages.at(-1)?.position ?? this.resets.get(input.workspaceId)?.resetPosition ?? 0) + 1, time: Date.now() };
     messages.push(structuredClone(message)); this.chatMessages.set(input.workspaceId, messages);
     exchange.used += input.recipients.length; this.exchanges.set(exchangeId, exchange);
     const entries: TimelineEntry[] = [];
-    if (input.author.type === 'user') entries.push(this.writeEntry({ workspaceId: input.workspaceId, entryId: message.messageId, position: 0, revision: 0, exchangeId, time: message.time, kind: 'user', text: input.text, messageId: message.messageId }));
+    if (input.author.type === 'user') entries.push(this.writeEntry({ workspaceId: input.workspaceId, entryId: message.messageId, position: 0, revision: 0, exchangeId, time: message.time, kind: 'user', text: input.text, messageId: message.messageId, ...(message.attachments ? { attachments: message.attachments } : {}) }));
     else {
       this.onPublicationComplete?.(input.author.runId);
       const entry = this.timelineEntries.get(input.author.runId)!;
@@ -99,7 +108,8 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     const through = this.contextAdmissions.get(runId)!;
     const point = this.contextPositions.get(memberId) ?? 0;
     const messages = (this.chatMessages.get(member.workspaceId) ?? []).filter(m => m.position <= through);
-    this.agentContexts.set(memberId, [...messages.filter(m => m.position <= point).map(groupEntry), ...documents, ...messages.filter(m => m.position > point).map(groupEntry)]);
+    const entry = (message: ChatMessage) => groupEntry(message, (message.attachments ?? []).map(image => imageContent(this.chatImages.get(`${member.workspaceId}:${image.id}`)!)));
+    this.agentContexts.set(memberId, [...messages.filter(m => m.position <= point).map(entry), ...documents, ...messages.filter(m => m.position > point).map(entry)]);
   }
   finishContext(memberId: string, runId: string) {
     const through = this.contextAdmissions.get(runId);
@@ -130,6 +140,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     const members = await this.listMembers(workspaceId);
     const runs = [...this.chatRuns.values()].filter(item => members.some(member => member.id === item.run.agentId));
     if (runs.some(item => item.run.status === 'running')) throw new AppError('workspace_busy', 'Workspace busy', 409);
+    for (const key of this.chatImages.keys()) if (key.startsWith(`${workspaceId}:`)) this.chatImages.delete(key);
     const resetCursor = (await this.chatTimeline(workspaceId)).cursor + 1;
     const resetPosition = (await this.chatSnapshot(workspaceId)).position + 1;
     this.resets.set(workspaceId, { resetCursor, resetPosition });

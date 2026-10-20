@@ -257,3 +257,7 @@ Member and solo execution follows use version-2 envelopes with compact start/blo
 Changes displays design/member current-versus-last-approved file diffs and independent approval controls from one lightweight read. It includes newly created files and retains exact review/base approval tokens. Reading changes does not wait for full team/configuration validation or commit history. Member activation remains separate: when approved configuration differs from active, load its validation independently and show its loading/errors/blockers without hiding the file review. Approval refreshes accepted design discovery and activation validation as before.
 
 Only one Changes read is in flight per workspace view. Focus and polling reuse it rather than invalidate successful responses. Retain previous files during refresh, ignore disposed/workspace-obsolete responses, and serialize user operations with review refresh. Stale/busy approval preserves files and presents the backend reason.
+
+## Shared user pictures
+
+Workspace group input accepts PNG/JPEG/WebP pictures through the composer file picker, clipboard and drop. Users can remove local previews and send pictures alone or with text. Refused sends preserve their draft. Sent pictures remain viewable after reload through durable backend attachment references. Picture input does not change solo-conversation input.

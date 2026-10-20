@@ -34,3 +34,7 @@ member_contexts.group_position is the previous processed shared prefix and succe
 ## Prototype repair policy
 
 Missing/invalid documents generate private context diagnostics, with no retrieval from that document. Parsing validates the complete commands array with parseBashInput before execution. Recoverable invocation errors are recorded private user input and allow the model to repair. Store/ownership failures remain terminal. repairInterruptedTools adds only missing results to constructed context; no completed stable record is changed. The module consumes accepted canonical working-design paths for casing/authority, then reads the current shared README bytes. No recursive lookup-target reading or source-code preloading remains.
+
+## Image attachment integration
+
+During prepareMemberContext, shared user attachment references are loaded from chat_images through the same SQL transaction. groupEntry builds a user content array containing the existing author/recipient-prefixed text followed by ordered ImageContent; text-only entries keep their existing string representation. Summary/retrieval/private-history ordering and boundary semantics are unchanged. No caption generation or file lookup expansion is introduced. The team request policy checks image input capability against the final constructed messages before invoking a provider.

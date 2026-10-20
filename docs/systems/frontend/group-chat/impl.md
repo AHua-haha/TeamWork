@@ -102,3 +102,9 @@ ToolSet retains the numeric failure count without a failure class on its contain
 ResponseContent renders one Thinking status after the normal activity items, within the existing Work disclosure. The status is independent of runActivity's immutable text/tool projection, so hidden thinking still does not split tool groups or appear in history. CSS owns the small neutral dot animation and reduced-motion fallback. No timer, polling, extra follow connection, protocol or backend change is added.
 
 Projection tests cover the event and run lifecycle, missing/stale streams, completed history and unrelated members. A controlled compact-SSE browser fixture verifies actual thinking/text/tool transitions, collapse/reopen, terminal/final cleanup, content privacy, animation, reduced motion and narrow-screen layout.
+
+## Image attachment integration
+
+GroupClient.send(text, files) posts binary FormData only when pictures exist; otherwise it keeps the JSON text representation. GroupEntry carries optional attachment metadata, validated before merging. imageUrl builds the same-workspace stable binary endpoint. useImageDraft owns file count/type/size validation, preview URL creation and release on removal, successful submission or component unmount. GroupChat owns picker/paste/drop events, submitted attachment capture, disabled controls during sending/reset, filename/removal previews and sent-picture links. MessageImage handles image loading errors locally. CSS bounds thumbnails to the existing user message reading width. No base64 image body enters group SSE/replay or private stream reducers.
+
+[Client tests](../../../../frontend/test/chat-images.test.ts) verify binary multipart/image-only input, refusal, metadata and limits. The task browser fixture uses actual backend preparation with in-memory persistence; real SQL/native-context checks live in backend integration tests.

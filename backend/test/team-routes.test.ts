@@ -273,3 +273,40 @@ test('scoped review and independent approvals unblock member activation after ac
   await call(`/workspaces/missing/team/members/${lead}/harness/design/review`, { status: 404 });
   await call(`${scope}/design/review?unknown=1`, { status: 400 });
 }));
+
+test('multipart HTTP publication stores scoped pictures, preserves image-only input and refuses atomically', () => withTeam(async fixture => {
+  const { png } = await import('./image-fixture.js');
+  const server = createAgentServer(fixture.runtime as unknown as AgentRuntime, stubConfig, fixture.workspaces, fixture.team);
+  const base = `/workspaces/${fixture.workspaceId}/team/chat`;
+  const upload = async (files: Uint8Array[], textValue = '') => {
+    const form = new FormData(); form.set('text', textValue);
+    files.forEach((bytes, i) => form.append('images', new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'image/png' }), `picture-${i}.png`));
+    const encoded = new Request('http://localhost', { method: 'POST', body: form });
+    const raw = Buffer.from(await encoded.arrayBuffer());
+    const [client, socket] = duplexPair(); server.emit('connection', socket);
+    return new Promise<IncomingMessage>((resolve, reject) => {
+      const request = httpRequest({ path: `${base}/messages`, method: 'POST', createConnection: () => client, headers: { 'Content-Type': encoded.headers.get('content-type')!, 'Content-Length': raw.length } }, resolve);
+      request.on('error', reject); request.end(raw);
+    });
+  };
+  try {
+    const refused = await upload([png(), Buffer.from('bad image')]);
+    assert.equal(refused.statusCode, 400); await text(refused);
+    assert.equal(fixture.store.chatImages.size, 0); assert.equal((await fixture.team.runner.snapshot(fixture.workspaceId)).messages.length, 0);
+    const accepted = await upload([png()]); const payload = JSON.parse(await text(accepted));
+    assert.equal(accepted.statusCode, 202); assert.equal(payload.message.text, '');
+    const image = payload.message.attachments[0];
+    assert.equal(JSON.stringify(payload).includes('base64'), false);
+    const response = await send(server, `${base}/attachments/${image.id}`);
+    assert.equal(response.statusCode, 200); assert.equal(response.headers['content-type'], 'image/png');
+    const chunks: Buffer[] = []; for await (const chunk of response) chunks.push(chunk);
+    assert.deepEqual(Buffer.concat(chunks), png());
+    const cross = await send(server, `/workspaces/other/team/chat/attachments/${image.id}`);
+    assert.equal(cross.statusCode, 404); await text(cross);
+    const busy = await upload([png()], 'try again'); assert.equal(busy.statusCode, 409); await text(busy);
+    assert.equal(fixture.store.chatImages.size, 1);
+    fixture.runtime.runs[0]!.settle('completed'); await new Promise(resolve => setImmediate(resolve));
+    await fixture.team.runner.reset(fixture.workspaceId);
+    const gone = await send(server, `${base}/attachments/${image.id}`); assert.equal(gone.statusCode, 404); await text(gone);
+  } finally { server.closeAllConnections(); }
+}));

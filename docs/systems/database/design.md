@@ -139,3 +139,9 @@ Shared clocks remain monotonic, advancing timeline sequence and shared-message p
 ## Temporary progress boundary
 
 SQL stores completed member messages and group references independently of model context. It does not store progress frames or cumulative partials. Runtime startup migration removes the obsolete chunks/live_messages tables while preserving completed messages, run records, contexts and workspace data. State/history reads do not load progress or canonical model-context content.
+
+## Shared picture storage
+
+User ChatPublication may carry prepared images (metadata and binary content). Successful publication atomically persists those images, the user message with ordered attachment metadata, and its recipient runs/reservations. A transaction failure leaves no images or message. Metadata contains id, name, MIME type, dimensions and byte size; source originals are not stored separately. Shared history and timeline reads return references/metadata without binary/base64 payloads.
+
+chatImage(workspaceId, imageId) returns the stored prepared binary and metadata only for that workspace; absent or reset images fail not_found. Images survive reopening the store. prepareMemberContext resolves attachments to native image blocks at their shared message's position, preserving text, author/mention metadata and image order. These blocks become model context without changing the immutable shared records. Chat reset removes its images atomically with conversation data. Administrative workspace reset also removes images before workspace registrations.

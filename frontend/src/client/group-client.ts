@@ -2,10 +2,12 @@ import { BackendError, waitForRetry } from './agent-client.js';
 import { ProtocolError, readSse } from './sse.js';
 import type { RunState } from './protocol.js';
 
+export interface ChatImage { id: string; name: string; mimeType: string; width: number; height: number; size: number }
+export const imageUrl = (workspaceId: string, imageId: string) => `/workspaces/${encodeURIComponent(workspaceId)}/team/chat/attachments/${encodeURIComponent(imageId)}`;
 export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; bodyOffset?: number; toolCallId?: string }
 interface EntryBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
 export type GroupEntry = EntryBase & (
-  | { kind: 'user'; text: string; messageId: string }
+  | { kind: 'user'; text: string; messageId: string; attachments?: ChatImage[] }
   | { kind: 'member'; memberId: string; name: string; run: RunState; working: { after: number; through: number | null }; finalRef: FinalReference | null; text: string | null }
 );
 export interface GroupChange { cursor: number; entry: GroupEntry }
@@ -21,6 +23,7 @@ export function validateEntry(value: unknown, workspaceId: string): asserts valu
   if (!entry || entry.workspaceId !== workspaceId || !id.test(entry.entryId) || !positive(entry.position) || !positive(entry.revision)
     || !id.test(entry.exchangeId) || !Number.isFinite(entry.time)) throw new ProtocolError('Invalid group entry');
   if (entry.kind === 'user') {
+    if (entry.attachments !== undefined && (!Array.isArray(entry.attachments) || entry.attachments.length > 4 || entry.attachments.some(image => !image || !id.test(image.id) || typeof image.name !== 'string' || !['image/png', 'image/jpeg'].includes(image.mimeType) || ![image.width, image.height, image.size].every(n => Number.isSafeInteger(n) && n > 0)) || new Set(entry.attachments.map(image => image.id)).size !== entry.attachments.length)) throw new ProtocolError('Invalid picture attachment');
     if (typeof entry.text !== 'string' || !id.test(entry.messageId)) throw new ProtocolError('Invalid user entry');
   } else if (entry.kind === 'member') {
     if (!id.test(entry.memberId) || typeof entry.name !== 'string' || !entry.name || !entry.run || entry.run.agentId !== entry.memberId || !id.test(entry.run.runId)
@@ -127,12 +130,15 @@ export class GroupClient {
       }
     }
   }
-  async send(text: string) {
+  async send(text: string, images: readonly File[] = []) {
     if (this.disposed || this.snapshot.sending || this.snapshot.resetting) throw new Error('Group submission is unavailable');
-    if (!text.trim()) throw new Error('Enter a message');
+    if (!text.trim() && !images.length) throw new Error('Enter a message or attach a picture');
+    if (images.length > 4) throw new Error('Attach at most four pictures');
+    const form = images.length ? new FormData() : null;
+    if (form) { form.append('text', text); for (const image of images) form.append('images', image, image.name); }
     this.publish({ sending: true, commandError: null });
     try {
-      const accepted = await json(await this.fetcher(`${this.path}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })) as { entries?: GroupEntry[] };
+      const accepted = await json(await this.fetcher(`${this.path}/messages`, { method: 'POST', ...(form ? { body: form } : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }) })) as { entries?: GroupEntry[] };
       if (!Array.isArray(accepted.entries)) throw new ProtocolError('Missing reserved group entries');
       for (const entry of accepted.entries) this.merge(entry);
       this.publish();

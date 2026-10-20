@@ -89,3 +89,7 @@ TeamSystem selects the raw active lead and last activation marker, delegates bot
 ## Conversation context ownership
 
 [Conversation context](conversation-context/impl.md) owns implementation README parsing, retrieval orchestration and interrupted-tool normalization. TeamSystem calls it in the first beforeStep after the workspace execution lock is acquired. Shared messages remain in chat_messages; MySqlStore prepares model context from admitted group bounds, supplied document entries and failed-history positions. New members do not receive materialized shared-context copies. Role/roster instructions remain MemberInstructions's separate responsibility. Harness prompts require README maintenance before final success. Publication and failed terminal writes update reconstruction boundaries atomically with terminal state. Reset clears admission/retention state with history; activation retains existing member identity/history and resets shells as before.
+
+## Image attachment integration
+
+teamRoutes accepts bounded multipart image input and retains the JSON text route. TeamRunner.postUser accepts prepared images, validates text/image presence and recipient model capability, then invokes the single publication/admission flow. TeamSystem.policy.buildRequest checks images in constructed user/tool-result content and fails image_not_supported before the model request if its model cannot consume them. Context hydration belongs to the conversation/database path; upload/storage/display do not enter AgentRuntime's loop.

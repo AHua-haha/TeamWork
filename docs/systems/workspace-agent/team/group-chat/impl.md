@@ -73,3 +73,11 @@ The version-1 durable group timeline and final references are unchanged. Private
 ## Shared workspace execution lock
 
 TeamRunner.acquireExecution uses a separate per-workspace HarnessQueue from publication admission. RuntimePolicy.acquireRun obtains it before any request/tool and returns a release callback. AgentRuntime releases only after pending effects, afterRun and terminal persistence settle. Waiting abort rejects acquisition and skips policy finalization/checkpoints, while still recording cancellation durably. Publication continues to atomically reserve recipients; no lock is held while waiting for a recipient execution. parseMemberResponse and the SQL publication boundary enforce at most one agent recipient. Existing user multi-recipient admission remains unchanged.
+
+## Image attachment integration
+
+The attachment adapter [chat-images.ts](../../../../../backend/src/chat-images.ts) owns bounded multipart decoding, actual PNG/JPEG/WebP byte signatures, preparation and metadata validation. It reuses public Pi 0.87.1 convertToPng for WebP normalization and resizeImage for decoding, aspect-preserving resizing and encoding. The encoded limit is 4.5 MiB with 2000-pixel edges (below the external 5 MiB stored-image cap). It adds no semantic caption and has no private Pi imports or custom image decoder. Invalid preparation refuses the full publication before SQL admission. HTTP rawBody bounds multipart source data to four 10 MiB images plus 128 KiB envelope/text overhead. JSON text submissions keep their existing route.
+
+TeamRunner resolves recipients and checks new-picture model input capability before publishChat. GET chat/attachments/:id uses the workspace-scoped store lookup and serves binary with its stored type, byte length, private no-cache and nosniff. Missing images return 404. The same transaction that records the user publication stores prepared binary data, metadata references, timeline reservation and run admissions. The group API/feed never carries image bytes/base64.
+
+[Image unit tests](../../../../../backend/test/chat-images.test.ts), [HTTP tests](../../../../../backend/test/team-routes.test.ts) and disposable MySQL integration cover real Pi processing, malformed input, refusals, workspace isolation, restart, native context and reset.
