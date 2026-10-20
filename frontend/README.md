@@ -25,7 +25,7 @@ npm test
 npm run build
 ```
 
-The tests cover SSE parsing, completed/live reconciliation, gaps, reconnect, one-run termination, input submission, Pi-to-assistant-ui conversion, and cross-connection model selection. The development UI supports text input; Pi image content received from the backend is displayed. Authentication and history pagination are not implemented.
+The tests cover SSE parsing, completed/live reconciliation, gaps, reconnect, one-run termination, input submission, Pi-to-assistant-ui conversion, and cross-connection model selection. The workspace composer supports text and PNG/JPEG/WebP picture input; Pi image content received from the backend is displayed. Authentication and history pagination are not implemented.
 
 ## Current design and team views
 
@@ -36,3 +36,8 @@ Design/member links navigate between views. Implementation links open a file or 
 ## Streaming group replies
 
 Active members stream text and tool activity in one ordered flow, initially visible through **Work**. Thinking stays hidden. Consecutive tool calls form collapsible groups, including across tool-only messages; visible text separates them. Each tool row can show its full arguments and result. The private follow API reads whole SQL Pi records and version-2 compact in-memory progress without cumulative partials or a special response annotation. The client reconstructs block deltas incrementally and recovers evicted starts through SQL history or the next message start. Accepted group publication identifies the exact final text blocks, folds earlier work once, and keeps the full final report visible in the same reserved section. Reopening Work excludes that final and shows no placeholder when empty. Manual folding keeps active updates running and preserves tool disclosure choices. Reconnect/reload reconstructs the flow from backend records, and streaming follows the bottom only while you are already there.
+
+
+## Host deployment
+
+Use [scripts/deploy.sh](../scripts/deploy.sh) from the project base folder. It builds a committed source snapshot under /tmp and serves frontend/dist on loopback 5274 through the host frontend server. API, binary uploads, pictures and SSE share that origin and reach the deployed backend on 3001. Vite remains the development server on 5273 with backend 3000. No frontend build-time API URL is required. See the [environment commands](../README.md) for database/configuration isolation and lifecycle.

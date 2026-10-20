@@ -2,38 +2,26 @@
 
 ## Purpose and boundary
 
-A developer can start, inspect, and stop the local MySQL, backend, and frontend used to review this project through one command. This facility manages only local development processes it starts. It does not deploy the application or change agent configuration.
+Run development from the project checkout independently of host deployment. Development owns its backend/frontend processes and configuration, and uses a separate database on shared MySQL.
 
 ## Inputs and preconditions
 
-- The command accepts `start`, `stop`, or `status` from any working directory.
-- Docker with Compose, Node.js, curl, and installed backend/frontend dependencies are available. The project provides a local database example and a backend environment example.
-- The backend and frontend use local loopback ports 3000 and 5273. The frontend does not use Vite's default 5173, which other local Vite and VitePress servers commonly hold. A conflicting process on either port prevents startup; the command does not take ownership of that process.
+scripts/dev.sh supports init, start, stop, restart, status and logs [backend|frontend] from any directory. Node.js 22.19+, Docker Compose, curl/ps and installed backend/frontend dependencies are required. Defaults are loopback backend 3000 and Vite frontend 5273; occupied ports fail rather than moving or taking over unrelated processes.
 
 ## Outputs and observable effects
 
-- `start` makes the local database healthy, starts the backend, waits for its API to respond, then starts the frontend and waits for its page to respond. It prints the frontend URL and log locations. Repeating `start` with the managed services already healthy is safe and does not start duplicates.
-- If the backend environment file is absent, `start` copies the provided local example once. It does not overwrite an existing file. When neither the process environment nor that file supplies `CONFIG_ENCRYPTION_KEY`, `start` adds a generated key to the file so editable provider credentials can be saved. Provider credentials remain for the developer to supply when model calls are needed.
-- `status` reports whether each managed application process is running and whether the local database is running. It does not change their state.
-- `stop` stops the managed frontend and backend, then stops the database only if the script started it. It keeps database data and logs. Repeating `stop` is safe. An unrelated manually started process is never stopped based only on its port.
-- Process IDs and logs are stored outside tracked source files for inspection between commands.
+First initialization preserves the current backend/.env and existing encryption key for deployment outside the temporary source tree. Development backend/.env is then initialized for the new rsi_agent_dev database with an independent key and no copied provider connections/workspaces/chats. Future starts preserve development data/configuration. No database is cleared to simulate emptiness. Direct backend dev/start commands read this development environment file.
+
+start ensures shared MySQL is healthy and the development database/account exists, then starts the development backend and Vite with readiness checks. Environment-specific file settings determine database/key rather than an accidentally inherited DATABASE_URL. Repeated healthy start creates no duplicate processes. stop stops only identified development processes and leaves shared MySQL/deployment running. restart stops/starts development. status reports database/application status without changing them; logs shows managed log tails. Existing two-line development PID records remain recognizable for a safe initial transition.
 
 ## Failure behavior
 
-- Missing dependencies, occupied ports, database startup failure, or an application that does not become ready produce a nonzero exit and a useful diagnostic; for an application that does not become ready, the diagnostic includes the response its URL gave. An application newly started by the failed invocation is stopped. A database newly started by that invocation is stopped. Previously running services are left as they were.
-- A stale process ID does not cause an unrelated process to be signaled. `stop` removes stale ownership records without killing another process.
-- `stop` reports a failed shutdown instead of claiming success if a managed service cannot be stopped.
+Missing dependencies, occupied ports, invalid database configuration or readiness failure are explicit nonzero failures. Newly started applications are stopped on failure; preexisting applications and shared MySQL remain. A stale/reused PID never causes an unrelated process to be signaled. Refuse concurrent lifecycle mutations. A failed or incomplete configuration transition preserves the original deployment settings and can be retried.
 
 ## Guarantees and limits
 
-- The script manages one local backend and frontend pair on the documented ports. It does not install packages or manage production processes.
-- Stopping MySQL preserves its Docker volume. The developer may remove it separately if desired.
-- Readiness checks confirm that the documented local API and frontend URL respond; they do not confirm provider credentials or a successful live model call. They contact those loopback addresses directly, so proxy settings in the developer's shell do not affect them.
+This command does not build deployment releases, install development packages, reset database contents or move registered workspace files. Provider credentials in the existing database remain available only in deployment; development starts with backend defaults. Explicit database infrastructure shutdown is separate. Local readiness requests bypass shell HTTP proxy settings.
 
 ## Acceptance examples
 
-1. With dependencies installed and Docker available, `start` returns after both URLs respond; `status` reports all three services running.
-2. A second `start` leaves the same managed process IDs in place.
-3. `stop` ends the managed application processes and the MySQL container it started, without deleting the database volume. A second `stop` succeeds.
-4. Port 5273 is used by an unrelated server. `start` reports the conflict, stops the backend and MySQL it just started, and leaves that server running.
-5. The developer's shell sets `http_proxy` and `https_proxy` to a local proxy with no exceptions. `start` still reaches the backend and frontend directly and returns once both respond.
+Initialize with current data: deployment retains that database/key and development has a new independent key/database. Start both environments; each frontend reaches its own backend. Stop development repeatedly: deployment/MySQL remain available. A foreign process holding 5273 is left untouched and newly started development backend is stopped. Subsequent development restart preserves development data.

@@ -2,32 +2,24 @@
 
 TypeScript backend with a backend-owned agent loop, Pi AI 0.87.1 provider integration, MySQL persistence, and a sync-then-follow SSE protocol. The [frontend](../frontend/README.md) consumes that protocol.
 
-## Run locally
+## Development and deployment
 
-For the complete local stack, install dependencies in `backend/` and `frontend/` with `npm ci`, then run `./scripts/dev.sh start` from the repository root. Use `./scripts/dev.sh status` to inspect it and `./scripts/dev.sh stop` to stop it. The script creates `backend/.env` from the example if needed, stores logs under `.run/`, and preserves MySQL data on stop.
+Use the [root lifecycle commands](../README.md) to separate environments. `./scripts/dev.sh start` provisions the new `rsi_agent_dev` database, starts the source backend on 3000 and Vite on 5273. Development settings live in backend/.env and logs in .run/. Application stop leaves shared MySQL running.
 
-To start the backend manually, run these commands from `backend/`.
+`./scripts/deploy.sh init` preserves the former database URL and encryption key before development changes. `./scripts/deploy.sh deploy <git-ref>` builds committed source under /tmp and runs the compiled backend on 3001 with existing rsi_agent data. Durable deployment configuration is ~/.local/state/rsi-agent/deploy/backend.env by default; never replace its encryption key when keeping saved provider credentials. The built frontend on 5274 proxies API/SSE/uploads to that backend. Development and deployment connections/settings are independent.
 
-Requires Node.js 22.19+ and MySQL 8.4. Docker Compose can supply the local database:
+For manual debugging, initialize/provision once with scripts/dev.sh start, then stop the managed applications with scripts/dev.sh stop. The shared MySQL service remains available. From backend/:
 
 ```sh
-npm ci
-docker compose up -d --wait
-cp .env.example .env
-# Edit .env: set the database URL and a stable CONFIG_ENCRYPTION_KEY.
 npm run dev
-```
-
-The service initializes its schema and listens on `127.0.0.1:3000`. `.env` is ignored by Git. `CONFIG_ENCRYPTION_KEY` must be a stable base64-encoded 32-byte key to save and later use provider API keys; `./scripts/dev.sh start` generates one in `backend/.env` if needed. Keep this key when preserving the database. Known Pi providers can also resolve credentials from their deployment environment when a connection has no saved key. Provider connections and tool/prompt choices are editable globally; each agent selects its model and call options. There is no deployment-wide default model. A custom entry point can register Pi providers, executable tools, and policy hooks. Only one runtime can own a database at a time.
-
-For compiled execution:
-
-```sh
+# Or compiled development execution:
 npm run build
 npm start
 ```
 
-The server has no built-in authentication or tenant authorization. Its default binding is local; deployments that expose it must supply access control. The current schema initializer creates missing tables; future schema changes will require migrations.
+Both direct commands read backend/.env (the development database); use deploy.sh to run deployment settings. Node.js 22.19+ and MySQL 8.4 are required. Startup initializes each application's schema. The databases have independent runtime ownership locks; only one backend may own each database at a time. Provider connections are managed separately through each environment's Config UI. Known Pi providers can also resolve credentials from their process environment. A custom entry point can register providers, tools and policy hooks.
+
+The HTTP server has no built-in authentication or tenant authorization and binds to loopback by default. Host deployment does not add public exposure or a boot supervisor.
 
 ## Submit and follow
 
