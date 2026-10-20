@@ -382,3 +382,9 @@ The workspace panel has a Changes tab for pending design/member files, separate 
 ### Sequential execution
 
 User routing and busy-recipient refusal are unchanged. User multi-mentions admit recipients in order, but only one executes at a time. Agent final responses may name at most one distinct member in the leading routing header; more than one is refused with private feedback. Waiting admitted runs keep the existing running state with step zero until execution. Stop/shutdown cancel waiting runs without tools/checkpoints. Different workspaces may run independently.
+
+### Fast Changes review
+
+GET /workspaces/:workspaceId/team/changes returns the lead ID, design/member scope reviews and lightweight approved-versus-active member revision status. Each review compares current files with the last user-approved scope commit and includes untracked additions, modifications, mode changes and deletions. It preserves staging and accepted refs; an immutable review checkpoint retains exact revision/base approval tokens. Fixed management scope resolution avoids rebuilding the whole team, materializing files, returning raw configurations/history or validating pending/committed teams on every file read. Snapshot object hashing and patch generation are batched rather than one Git process per file. Links/special files and oversized snapshots/output fail explicitly; patches retain bounded previews.
+
+Changes displays files immediately, coalesces overlapping refreshes and retains old content during refresh. When approved members differ from active, GET team/configuration?source=committed loads validation/digest separately; files do not wait for it. Approval and idle-team activation use the existing exact-state control endpoints. GET configuration/current remains the comprehensive inspection API for callers needing that data.

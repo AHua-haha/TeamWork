@@ -94,6 +94,14 @@ export class TeamSystem {
   currentConfiguration(workspaceId: string) {
     return this.runner.workspaceOperation(workspaceId, () => this.configuration.current(workspaceId));
   }
+  changes(workspaceId: string) {
+    return this.runner.workspaceOperation(workspaceId, async () => {
+      const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);
+      if (!lead) throw new AppError('not_found', 'Workspace lead is unavailable', 404);
+      const scopes = await this.harness.changes(lead.id), active = await this.service.activation(workspaceId);
+      return { workspaceId, leadId: lead.id, ...scopes, activation: { revision: scopes.members.base, activeRevision: active?.revision ?? null, hasChanges: scopes.members.base !== active?.revision } };
+    });
+  }
   commitConfiguration(workspaceId: string, revision: string, base: string, message: string) {
     return this.runner.workspaceOperation(workspaceId, async () => {
       const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);

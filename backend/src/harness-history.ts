@@ -1,6 +1,6 @@
 import { ProjectGit } from './project-git.js';
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { contextDocuments } from './context-documents.js';
@@ -178,9 +178,33 @@ export class HarnessHistory {
   }
   private async snapshot(root: string, part: HarnessPart): Promise<string> {
     const files = await this.files(root, part);
-    const entries: Entry[] = [];
-    for (const file of files) entries.push({ path: file.path, mode: file.mode, object: await this.text(['hash-object', '-w', '--stdin'], file.bytes) });
+    const objects = files.length ? (await this.text(['hash-object', '-w', '--no-filters', '--stdin-paths'], files.map(file => JSON.stringify(join(root, file.path))).join('\n') + '\n')).split('\n') : [];
+    const entries: Entry[] = files.map((file, index) => {
+      const object = objects[index];
+      if (!object || !objectId(object)) throw new AppError('harness_git_error', 'Git did not return a file object', 503);
+      const expected = createHash(object.length === 64 ? 'sha256' : 'sha1').update(`blob ${file.bytes.length}\0`).update(file.bytes).digest('hex');
+      if (object !== expected) throw new AppError('stale_revision', 'Files changed while capturing the scope; read it again', 409);
+      return { path: file.path, mode: file.mode, object };
+    });
     return this.tree(entries);
+  }
+
+  /** Approved scope refs and current files, independent of member validation. */
+  async review(memberId: string, part: HarnessPart, root: string) {
+    return this.queue.run(`scope:${this.key(part)}`, async () => {
+      const refs = this.refs(memberId, part);
+      const raw = await this.text(['for-each-ref', '--format=%(refname) %(objectname)', ...Object.values(refs)]);
+      const values = new Map(raw.split('\n').map(line => line.split(' ') as [string, string]));
+      const committed = values.get(refs.committed), previous = values.get(refs.checkpoint);
+      if (!committed || !previous || !values.get(refs.base)) throw new AppError('config_unavailable', 'Scope history has not been initialized', 409);
+      const tree = await this.snapshot(root, part);
+      let revision = previous;
+      if (tree !== await this.text(['rev-parse', `${previous}^{tree}`])) {
+        revision = await this.record(tree, previous, 'checkpoint', { type: 'harness', memberId }, 'Review pending files');
+        await this.update(refs.checkpoint, revision, previous);
+      }
+      return { memberId, partId: part.id, revision, base: committed, changes: await this.compareSnapshots(committed, tree) };
+    });
   }
   private async tree(files: Entry[]): Promise<string> {
     const index = join(this.storage, `index-${randomUUID()}`);
@@ -593,10 +617,13 @@ export class HarnessHistory {
   }
   async compareSnapshots(before: string, after: string): Promise<SnapshotDiff[]> {
     const fields = (await this.git(['diff', '--no-renames', '--name-status', '-z', before, after, '--'])).toString('utf8').split('\0');
+    if (!fields[0]) return [];
+    const patches = (await this.git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=3', before, after, '--'])).toString('utf8').split(/(?=^diff --git )/m).filter(Boolean);
     const result: SnapshotDiff[] = [];
     for (let i = 0; i + 1 < fields.length; i += 2) {
       const path = fields[i + 1]!; safePath(path);
-      const patch = (await this.git(['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=3', before, after, '--', `:(literal)${path}`])).toString('utf8');
+      const patch = patches[i / 2];
+      if (patch === undefined) throw new AppError('harness_git_error', 'Git returned an incomplete file diff', 503);
       result.push({ path, action: fields[i] === 'A' ? 'add' : fields[i] === 'D' ? 'delete' : 'modify', patch: patch.slice(0, 256 * 1024), truncated: patch.length > 256 * 1024 });
     }
     return result;

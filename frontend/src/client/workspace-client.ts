@@ -48,6 +48,11 @@ export interface MemberInspection {
 export interface ConfigurationIssue { path: string; code: string; message: string }
 export interface FileChange { path: string; action: 'add' | 'modify' | 'delete'; patch: string; truncated: boolean }
 export interface ScopeReview { memberId: string; partId: string; revision: string; base: string; changes: FileChange[] }
+export interface WorkspaceChanges {
+  workspaceId: string; leadId: string; design: ScopeReview; members: ScopeReview;
+  activation: { revision: string; activeRevision: string | null; hasChanges: boolean };
+}
+export interface MemberConfigurationReview { revision: string; digest: string; valid: boolean; issues: ConfigurationIssue[] }
 export interface ConfigurationCommit { revision: string; message: string; time: number; kind: string; actor: { type: string; memberId: string } }
 export interface CurrentMemberConfiguration {
   workspaceId: string; leadId: string;
@@ -86,6 +91,8 @@ export class WorkspaceClient {
   scopeReview(workspaceId: string, memberId: string, partId: string): Promise<ScopeReview> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/harness/${encodeURIComponent(partId)}/review`); }
   approveScope(workspaceId: string, memberId: string, partId: string, input: { revision: string; base: string; message: string }): Promise<ConfigurationCommit> { return this.write(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/harness/${encodeURIComponent(partId)}/commit`, 'POST', input); }
   currentMemberConfiguration(workspaceId: string): Promise<CurrentMemberConfiguration> { return this.get(`${this.base(workspaceId)}/team/configuration/current`); }
+  changes(workspaceId: string): Promise<WorkspaceChanges> { return this.get(`${this.base(workspaceId)}/team/changes`); }
+  committedMemberReview(workspaceId: string): Promise<MemberConfigurationReview> { return this.get(`${this.base(workspaceId)}/team/configuration?source=committed`); }
   commitMemberConfiguration(workspaceId: string, input: { revision: string; base: string; message: string }): Promise<ConfigurationCommit> { return this.write(`${this.base(workspaceId)}/team/configuration/commit`, 'POST', input); }
   activateMemberConfiguration(workspaceId: string, input: { revision: string; digest: string }): Promise<{ revision: string; memberIds: string[] }> { return this.write(`${this.base(workspaceId)}/team/configuration/activate`, 'POST', input); }
   workspaceModels(workspaceId: string): Promise<WorkspaceModelsRecord> { return this.get(`${this.base(workspaceId)}/models`); }

@@ -100,6 +100,25 @@ export class HarnessService {
     if (!member || member.value.retiredAt !== null) throw new AppError('not_found', 'This agent is not an active team member', 404);
     return member;
   }
+  private async historyFor(member: StoredMember) {
+    const root = (await this.workspaces.record(member.workspaceId)).directory;
+    try { if (!(await lstat(root)).isDirectory()) throw new Error('not a directory'); }
+    catch { throw new AppError('workspace_unavailable', 'The shared workspace directory is missing or unreadable', 503); }
+    let opening = this.histories.get(member.workspaceId);
+    if (!opening) {
+      const history = new HarnessHistory(harnessStorage(root), root);
+      opening = history.open().then(() => history);
+      this.histories.set(member.workspaceId, opening);
+      void opening.catch(() => { if (this.histories.get(member.workspaceId) === opening) this.histories.delete(member.workspaceId); });
+    }
+    return { root, history: await opening };
+  }
+  private async managementEnvironment(id: string): Promise<HarnessEnvironment> {
+    const member = await this.active(id);
+    if (!member.value.lead) throw new AppError('not_found', 'No writable management scope for this member', 404);
+    const definitions = purposeHarnesses(member, { paths: [], usePaths: [] }, { working: [], dependencies: [] }).filter(h => h.id === 'management');
+    return { ...await this.historyFor(member), definitions, parts: definitions.flatMap(h => h.parts) };
+  }
   async environment(id: string): Promise<HarnessEnvironment> {
     const member = await this.active(id);
     return this.openEnvironment(member);
@@ -107,18 +126,7 @@ export class HarnessService {
   private async openEnvironment(member: StoredMember): Promise<HarnessEnvironment> {
     const id = member.id;
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
-    const source = (await this.workspaces.record(member.workspaceId)).directory;
-    try { if (!(await lstat(source)).isDirectory()) throw new Error('not a directory'); }
-    catch { throw new AppError('workspace_unavailable', 'The shared workspace directory is missing or unreadable', 503); }
-    let opening = this.histories.get(member.workspaceId);
-    if (!opening) {
-      const history = new HarnessHistory(harnessStorage(source), source);
-      opening = history.open().then(() => history);
-      this.histories.set(member.workspaceId, opening);
-      void opening.catch(() => { if (this.histories.get(member.workspaceId) === opening) this.histories.delete(member.workspaceId); });
-    }
-    const history = await opening;
-    const root = source;
+    const { root, history } = await this.historyFor(member);
     const definitions = purposeHarnesses(member, { paths: resolved.writable, usePaths: resolved.readonly }, { working: resolved.working.map(d=>d.path), dependencies: resolved.dependencies.map(d=>d.path) });
     const parts = definitions.flatMap(d => d.parts);
     validateParts(parts);
@@ -197,10 +205,16 @@ export class HarnessService {
   }
   async review(id: string, partId: string) {
     return this.operation(id, async () => {
-      const env = await this.environment(id), part = this.part(env, partId);
-      const snapshot = await env.history.checkpoint(id, part, env.root, { type: 'harness', memberId: id }, 'Review pending files');
-      const state = await env.history.ensure(id, part, env.root);
-      return { memberId: id, partId, revision: snapshot.revision, base: state.committed, changes: await env.history.compareSnapshots(state.committed, snapshot.revision) };
+      const env = ['design', 'member-config'].includes(partId) ? await this.managementEnvironment(id) : await this.environment(id);
+      return env.history.review(id, this.part(env, partId), env.root);
+    });
+  }
+  async changes(id: string) {
+    return this.operation(id, async () => {
+      const env = await this.managementEnvironment(id);
+      const design = await env.history.review(id, this.part(env, 'design'), env.root);
+      const members = await env.history.review(id, this.part(env, 'member-config'), env.root);
+      return { design, members };
     });
   }
   async inspect(id: string) {
@@ -213,7 +227,7 @@ export class HarnessService {
   }
   async commit(id: string, partId: string, message: string, actor: HistoryActor, revision?: string, base?: string) {
     return this.operation(id, async () => {
-      const env = await this.environment(id);
+      const env = ['design', 'member-config'].includes(partId) ? await this.managementEnvironment(id) : await this.environment(id);
       const part = this.part(env, partId);
       if (partId === 'implementation') throw new AppError('invalid_input', 'Implementation semantic commits use project Git through bash; this endpoint accepts protected/context scopes only');
       if (actor.memberId !== id || (actor.type !== 'agent' && actor.type !== 'user')) throw new AppError('access_denied', 'Invalid commit actor', 403);

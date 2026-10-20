@@ -181,3 +181,9 @@ The execute base admits arbitrary Bash for every active member. Existing execute
 ## Harness tool execution boundary
 
 Workspace members receive native Pi file/search tools. Read-only tools inspect workspace content; write/edit enforce accepted assignment and role grants at invocation. Custom Bash supplies one persistent shell per member with system reads, whole-workspace/workspace-temp writes and networking. This broader Bash authority does not enforce working-design scopes. Pi content/details and native truncation are preserved. Custom results use readable content plus relevant metadata. Shells/jobs survive runs and stop on context reset, retirement, affected configuration activation/update, or shutdown. Foreground timeout/cancellation resets the member shell/jobs; background jobs use native job IDs and default their output to /dev/null unless explicitly redirected. Scoped Git acceptance and activation APIs retain their checks but do not claim to prevent all raw workspace changes.
+
+## Lightweight Changes inspection
+
+GET /workspaces/:workspaceId/team/changes returns workspaceId, leadId, design and member scope reviews ({memberId,partId,revision,base,changes}) plus activation {revision,activeRevision,hasChanges}. It reads fixed approved scope refs and current files; no full member validation, active-file materialization, raw configuration dump or commit-history enumeration occurs. activation.revision is the approved member commit; activeRevision is the last activated revision or null. A legacy missing activation marker conservatively reports changes; validation remains authoritative.
+
+GET configuration?source=committed supplies the separate approved-configuration validation/digest. It may run after files display when approved and active differ. Existing commit/activate operations retain exact revision/digest, stale/busy checks and atomic activation; reading changes never approves or activates.

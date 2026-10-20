@@ -11,6 +11,12 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     identity(workspaceId, 'workspaceId');
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
+    if (area === 'changes') {
+      if (method !== 'GET' || memberId !== undefined || extra.length) throw notFound();
+      query(url, []);
+      json(response, 200, await team.changes(workspaceId));
+      return;
+    }
     if (area === 'configuration') {
       if (extra.length) throw notFound();
       if (method === 'GET' && memberId === 'current') {
@@ -46,7 +52,8 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     }
     if (area === 'members' && memberId && extra[0] === 'harness') {
       identity(memberId, 'memberId');
-      await team.member(workspaceId, memberId);
+      const member = await team.service.find(memberId);
+      if (!member || member.workspaceId !== workspaceId) throw notFound();
       query(url, []);
       if (extra.length === 1 && method === 'GET') {
         json(response, 200, await team.harness.inspect(memberId));

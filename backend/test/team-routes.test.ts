@@ -215,6 +215,21 @@ test('user reset endpoint clears idle conversations and rejects busy, unknown an
   assert.equal((await call(`/workspaces/${f.workspaceId}/team`)).members.length, 1);
 }));
 
+test('Changes endpoint returns only protected reviews and activation references without full configuration inspection', () => withServer(async (call, f) => {
+  const path = `/workspaces/${f.workspaceId}/team/changes`;
+  f.team.configuration.current = async () => { throw new Error('Comprehensive inspection must not run'); };
+  const review = await call(path);
+  assert.equal(review.leadId, f.lead.memberId);
+  assert.equal(review.activation.hasChanges, false);
+  assert.deepEqual(review.design.changes, []);
+  assert.deepEqual(review.members.changes, []);
+  assert.equal(review.current, undefined);
+  assert.equal(review.activation.digest, undefined);
+  await call(path + '?unknown=1', { status: 400 });
+  await call(path, { method: 'POST', status: 404 });
+  await call('/workspaces/missing/team/changes', { status: 404 });
+}));
+
 test('scoped review and independent approvals unblock member activation after accepting referenced designs', () => withServer(async (call, f) => {
   const base = `/workspaces/${f.workspaceId}/team`, lead = f.lead.memberId;
   await f.team.configuration.materialize(lead);

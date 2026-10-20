@@ -55,6 +55,14 @@ test('current review, commit and activation clients send distinct exact-state pa
   assert.deepEqual(calls,[{path:'/workspaces/w%201/team/configuration/current',body:null},{path:'/workspaces/w%201/team/configuration/commit',body:{revision:'current',base:'committed',message:'Accept prompt'}},{path:'/workspaces/w%201/team/configuration/activate',body:{revision:'committed',digest:'review'}}]);
 });
 
+test('Changes reads use the lightweight review and separate committed validation endpoints', async () => {
+  const calls: string[] = [];
+  const client = new WorkspaceClient((async input => { calls.push(String(input)); return new Response('{}'); }) as typeof fetch);
+  await client.changes('w 1');
+  await client.committedMemberReview('w 1');
+  assert.deepEqual(calls, ['/workspaces/w%201/team/changes', '/workspaces/w%201/team/configuration?source=committed']);
+});
+
 // A removed design can become a directory while its active assignment still exists.
 test('unavailable file assignments remain visible when that path now contains designs', () => {
   const members = [member('Previous',['backend/metadata.json']), member('Current',['backend/api/metadata.json'])];

@@ -251,3 +251,9 @@ Settings belong to that member, persist through reload and apply to its next run
 ## Compact execution stream
 
 Member and solo execution follows use version-2 envelopes with compact start/block/delta/end frames. Whole completed messages remain authoritative. The frontend incrementally reconstructs text, thinking and tool arguments by block index without receiving cumulative partials or replaying the entire frame list on each update. It preserves native signatures at block/message completion. Missing starts/evicted sequences discard only the affected partial; completed SQL history and a subsequent valid message start recover the display. Reconnect uses its completed-history cursor and SQL-to-retained-start cutover. Group timeline remains version 1 with existing reservation and final-reference/folding behavior.
+
+## Simple Changes loading
+
+Changes displays design/member current-versus-last-approved file diffs and independent approval controls from one lightweight read. It includes newly created files and retains exact review/base approval tokens. Reading changes does not wait for full team/configuration validation or commit history. Member activation remains separate: when approved configuration differs from active, load its validation independently and show its loading/errors/blockers without hiding the file review. Approval refreshes accepted design discovery and activation validation as before.
+
+Only one Changes read is in flight per workspace view. Focus and polling reuse it rather than invalidate successful responses. Retain previous files during refresh, ignore disposed/workspace-obsolete responses, and serialize user operations with review refresh. Stale/busy approval preserves files and presents the backend reason.
