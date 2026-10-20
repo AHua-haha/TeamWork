@@ -106,3 +106,30 @@ test('lifecycle mutations exclude one another and stale lock owners recover with
   await writeFile(lock, JSON.stringify({ pid: process.pid, start: 'not-this-process-start' }));
   const recovered = await f.call('deploy', 'init'); assert.equal(recovered.code, 0, recovered.output);
 }));
+
+test('update defaults to committed HEAD, reuses the same version, accepts a ref and preserves deployment on invalid input', { timeout: 30_000 }, () => fixture(async f => {
+  let result = await f.call('deploy', 'update'); assert.notEqual(result.code, 0); assert.match(result.output, /deploy <git-ref> first/);
+  result = await f.call('deploy', 'deploy', 'HEAD'); assert.equal(result.code, 0, result.output);
+  const initial = git(f.root, 'rev-parse', 'HEAD');
+  const state = join(f.state, 'deploy'), selected = () => readFile(join(state, 'active.json'), 'utf8').then(JSON.parse);
+  const settings = await readFile(join(state, 'backend.env'), 'utf8');
+  const development = await readFile(join(f.root, 'backend/.env'), 'utf8');
+  const source = await readFile(join(f.root, 'backend/main.mjs'), 'utf8');
+  await writeFile(join(f.root, 'backend/main.mjs'), source.replace("version:'first'", "version:'second'"));
+  git(f.root, 'add', 'backend/main.mjs'); git(f.root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'version two');
+  const newer = git(f.root, 'rev-parse', 'HEAD');
+  await writeFile(join(f.root, 'backend/main.mjs'), source.replace("version:'first'", "version:'uncommitted'"));
+  result = await f.call('deploy', 'update'); assert.equal(result.code, 0, result.output);
+  assert.equal((await selected()).commit, newer);
+  const url = `http://127.0.0.1:${f.env.RSI_DEPLOY_FRONTEND_PORT}/agents`;
+  assert.equal((await (await fetch(url)).json()).version, 'second');
+  const backendPid = await readFile(join(state, 'backend.pid'), 'utf8'), frontendPid = await readFile(join(state, 'frontend.pid'), 'utf8');
+  result = await f.call('deploy', 'update'); assert.equal(result.code, 0, result.output);
+  assert.equal(await readFile(join(state, 'backend.pid'), 'utf8'), backendPid); assert.equal(await readFile(join(state, 'frontend.pid'), 'utf8'), frontendPid);
+  result = await f.call('deploy', 'update', 'missing-version'); assert.notEqual(result.code, 0);
+  assert.equal((await selected()).commit, newer); assert.equal(await readFile(join(state, 'backend.pid'), 'utf8'), backendPid);
+  result = await f.call('deploy', 'update', initial); assert.equal(result.code, 0, result.output);
+  assert.equal((await selected()).commit, initial); assert.equal((await (await fetch(url)).json()).version, 'first');
+  assert.equal(git(f.root, 'rev-parse', 'HEAD'), newer); assert.match(await readFile(join(f.root, 'backend/main.mjs'), 'utf8'), /uncommitted/);
+  assert.equal(await readFile(join(state, 'backend.env'), 'utf8'), settings); assert.equal(await readFile(join(f.root, 'backend/.env'), 'utf8'), development);
+}));

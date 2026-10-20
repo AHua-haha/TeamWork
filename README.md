@@ -48,12 +48,16 @@ Development uses Vite and the source backend. `init` initializes environment set
 
 ```sh
 ./scripts/deploy.sh deploy HEAD
+./scripts/deploy.sh update
+./scripts/deploy.sh update <git-ref>
 ./scripts/deploy.sh start
 ./scripts/deploy.sh restart
 ./scripts/deploy.sh status
 ./scripts/deploy.sh logs frontend
 ./scripts/deploy.sh stop
 ```
+
+`update` updates an existing deployment to the current project checkout’s committed `HEAD`; pass a branch, tag or commit to select another version. It builds before replacing the running application and uses the same recovery as `deploy`. It does not fetch/pull, switch your checkout, include uncommitted edits or change settings/database. If that commit is already selected, healthy processes are reused.
 
 `start` uses the selected commit. If its temporary source was cleaned, it rebuilds that exact commit from local Git. The source/build directories are replaceable; deployment settings, logs, release selection and user workspaces must remain outside them. No automatic boot supervisor or public exposure is configured.
 

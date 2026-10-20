@@ -57,10 +57,11 @@ async function start() {
   }
   await launch(selected); await saveManifest(selected);
 }
+function resolveCommit(ref) { return capture('git', ['-C', root, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]); }
 async function deploy(ref) {
   if (!ref) throw new Error('deploy requires an explicit local Git ref');
   await initializeEnvironments();
-  const commit = capture('git', ['-C', root, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]);
+  const commit = resolveCommit(ref);
   const selected = await build(commit), previous = await manifest();
   const wasRunning = !!(await processRecord(backPid) || await processRecord(frontPid));
   try {
@@ -75,17 +76,30 @@ async function deploy(ref) {
   }
   console.log(`Deployed commit ${commit}\nSource: ${selected.directory}\nState: ${deployment}`);
 }
+async function update(ref = 'HEAD') {
+  const previous = await manifest();
+  if (!previous) throw new Error('No deployment selected; run scripts/deploy.sh deploy <git-ref> first');
+  const commit = resolveCommit(ref);
+  if (commit === previous.commit) {
+    await start();
+    console.log(`Deployment is already at commit ${commit}`);
+    return;
+  }
+  await deploy(commit);
+}
+
 try {
   const [command, argument] = process.argv.slice(2);
   if (command === 'status') {
     const selected = await manifest(); console.log(`Selected commit: ${selected?.commit ?? 'none'}\nSource: ${selected?.directory ?? 'none'}\nState: ${deployment}`);
     for (const [name, path] of [['Backend', backPid], ['Frontend', frontPid]]) { const record = await processRecord(path); console.log(`Deployed ${name}: ${record ? `running (PID ${record.pid})` : 'stopped'}`); }
   } else if (command === 'logs') await showLogs(deployment, argument);
-  else if (['init', 'start', 'stop', 'restart', 'deploy'].includes(command)) await withLock(async () => {
+  else if (['init', 'start', 'stop', 'restart', 'deploy', 'update'].includes(command)) await withLock(async () => {
     if (command === 'init') await initializeEnvironments();
     if (command === 'stop' || command === 'restart') await stop();
     if (command === 'start' || command === 'restart') await start();
     if (command === 'deploy') await deploy(argument);
+    if (command === 'update') await update(argument);
   });
-  else throw new Error('Usage: scripts/deploy.sh {init|deploy <git-ref>|start|stop|restart|status|logs [backend|frontend]}');
+  else throw new Error('Usage: scripts/deploy.sh {init|deploy <git-ref>|update [git-ref]|start|stop|restart|status|logs [backend|frontend]}');
 } catch (error) { console.error(error.message); process.exitCode = 1; }
