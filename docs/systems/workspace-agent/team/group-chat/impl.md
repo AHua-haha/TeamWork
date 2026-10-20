@@ -6,15 +6,15 @@
 
 ## Responsibilities and decomposition
 
-Chat records and delivery cursors are durable in MySQL. Publication validates mentions and resolves recipient model snapshots before one transaction persists the shared message, exchange budget, member context delivery, and recipient run records. Busy checks and optional prepared recipient member-revision checks occur again inside the transaction. A revision mismatch refuses the whole publication before any message or activation is stored. A member final publication completes its sender run in that transaction, completing durable sender admission; recipient execution still waits for sender runtime finalization. Runtime terminal finalization is idempotent for this case.
+Chat records and member context/admission boundaries are durable in MySQL. Publication validates mentions and resolves recipient model snapshots before one transaction persists the shared message, exchange budget, frozen context admission, and recipient run records. Busy checks and optional prepared recipient member-revision checks occur again inside the transaction. A revision mismatch refuses the whole publication before any message or activation is stored. A member final publication completes its sender run in that transaction, completing durable sender admission; recipient execution still waits for sender runtime finalization. Runtime terminal finalization is idempotent for this case.
 
-TeamRunner coordinates atomic publication and admission. Its workspace execution gate serializes persisted runs through finalization. The runtime loop retains private history and asks TeamRunner to publish a final candidate before ending. Expected refusals append private feedback and continue the same loop. No send-message or assignment call tool remains. Group delivery appends only model-context entries, preserving the separate immutable private runtime history. Each member has a durable group position: idle members drain on publication; busy members drain at terminal completion. New members inherit existing shared messages when created.
+TeamRunner coordinates publication/admission and sequential execution. TeamSystem.beforeStep invokes [conversation context](../conversation-context/impl.md) on the first model step. It loads assigned implementation README summaries and prepares a fixed group/document/failed-history/incoming composition, then records fresh Bash retrieval results as private history. Idle members have no shared-message delivery copies. Terminal SQL transactions advance processed/successful boundaries and clear run-local context while preserving immutable history. Expected publication refusals still add private feedback and continue the same run.
 
-Workspace chat queries read durable transcript and run status; long-lived SSE follows use versioned notifications and database snapshots. Restart interrupts run records and drains pending member delivery without reactivating members. Stop fences exchanges before cancellation.
+Workspace chat queries read durable transcript and run status; long-lived SSE follows use versioned notifications and database snapshots. Restart interrupts run records and retains recorded failed private work without reactivating members. Stop fences exchanges before cancellation.
 
 ## Verification
 
-Unit tests cover mention parsing, routing, ordered admission and sequential execution, atomic refusal, budgeting, stop and follow. Disposable MySQL tests exercise real runtime private/public separation, deferred context delivery, publication feedback, persistence/restart, and SQL atomicity. Existing solo runtime, design, harness and configuration checks remain required.
+Unit tests cover mention parsing, routing, ordered admission and sequential execution, atomic refusal, budgeting, stop and follow. Disposable MySQL tests exercise real runtime private/public separation, activation-time context snapshots, publication feedback, persistence/restart, and SQL atomicity. Existing solo runtime, design, harness and configuration checks remain required.
 
 ## Code map
 
@@ -26,7 +26,7 @@ Unit tests cover mention parsing, routing, ordered admission and sequential exec
 - Parent [team implementation](../impl.md) owns runtime policy integration and routes.
 - [Group unit tests](../../../../../backend/test/team-group-chat.test.ts) and [MySQL integration](../../../../../backend/test/integration/backend.test.ts).
 
-Shutdown fences new publication, waits for accepted in-flight publications to register jobs, and then closes the runtime. Retirement records the final shared position before cancellation, so buffered prior messages can drain while later messages are excluded. No group transcript is reconstructed from private agent history.
+Shutdown fences new publication, waits for accepted in-flight publications to register jobs, and then closes the runtime. Retirement cancels execution and preserves stable history; retired members receive no new model activation context. No group transcript is reconstructed from private agent history.
 
 ## Coordination and data flow
 
@@ -56,7 +56,7 @@ Regression tests cover scoped packages with unknown and existing member names, m
 
 member-response.ts owns strict optional-header parsing. TeamRunner parses each candidate before recipient resolution and passes only body plus explicitly parsed names to publication; the body never enters the user mention scanner. MySqlStore independently parses the immutable selected assistant source, stores its bodyOffset with contentIndices and verifies the published body against that slice. finalText resolves new references by their stored offset, without reparsing accepted older messages. No schema/table migration or raw-history mutation is required.
 
-MemberContext loads backend/prompts/team/group-chat.md once for fixed response/routing instructions; build packages this required asset. Dynamic member/role/roster instructions remain backend-owned. Invalid header syntax is an AppError caught by the normal private publication-feedback path. No completion tool or second runtime loop is introduced.
+MemberInstructions loads backend/prompts/team/group-chat.md once for fixed response/routing instructions; build packages this required asset. Dynamic member/role/roster instructions remain backend-owned. Invalid header syntax is an AppError caught by the normal private publication-feedback path. No completion tool or second runtime loop is introduced.
 
 Frontend projection hides a leading routing header, including incomplete prefixes while streaming, without deciding recipient validity or final acceptance. It preserves text block identity/order, tools, native commentary and accepted-final exclusion. Private records remain raw; group APIs and shared contexts contain body text only.
 

@@ -14,6 +14,7 @@ export interface StepScope {
   config: ResolvedRunConfig;
   readContext(): Promise<ContextHistory>;
   replaceContext(revision: number, entries: ContextEntry[]): Promise<ContextHistory>;
+  recordInput(text: string, metadata: JsonObject): Promise<void>;
 }
 
 export interface RuntimeTool {
@@ -232,6 +233,12 @@ export class AgentRuntime {
           replaceContext: (revision, entries) => {
             signal.throwIfAborted();
             return this.replaceContext(run.agentId, revision, entries);
+          },
+          recordInput: async (text, metadata) => {
+            signal.throwIfAborted();
+            this.store.assertRuntime();
+            await this.store.commitMessage(run.agentId, run.runId, { messageId: randomUUID(), message: { role: 'user', content: text, timestamp: Date.now() }, metadata });
+            this.progress.changed(run.agentId);
           },
         };
         if (this.policy.beforeStep) await abortable(track(this.policy.beforeStep(scope)), signal);

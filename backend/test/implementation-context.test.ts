@@ -20,10 +20,10 @@ test('root bootstrap supplies design and implemented-contract templates and agen
   const base=await f.workspaces.context(f.workspaceId);
   const design=await base.read({path:'design/design.md'});
   for(const title of ['Purpose, responsibilities and boundaries','Interface contract','Constraints, specifications and requirements'])assert.ok(design.content.includes(title));
-  const context=await base.read({path:'implement/impl.md'});
+  const context=await base.read({path:'implement/impl/README.md'});
   for(const title of ['Implemented contract','Input','Output','Effect','Usage examples'])assert.ok(context.content.includes(title));
   assert.match(context.content,/No implemented interfaces have been documented/);
-  const files=await f.team.harness.files(f.lead.memberId),path=join(files.root,'.rsi/context/implement/impl.md');
+  const files=await f.team.harness.files(f.lead.memberId),path=join(files.root,'.rsi/context/implement/impl/README.md');
   await files.edit.writeFile(path,context.content+'\nCurrent implementation notes.\n');
   await assert.rejects(files.write.writeFile(join(files.root,'code.ts'),'outside'),code('not_found'));
   const prepared=await f.team.harness.prepare(f.lead.memberId,[]);
@@ -35,7 +35,7 @@ test('root bootstrap supplies design and implemented-contract templates and agen
   assert.equal(committed.exitCode,0,committed.output);
   const after=(await f.team.harness.inspect(f.lead.memberId)).parts.find(p=>p.state.part.id==='design')!;
   assert.equal(after.state.committed,before.state.committed);
-  assert.equal((await base.read({path:'implement/impl.md'})).content,context.content+'\nCurrent implementation notes.\n','raw context observes the same shared workspace');
+  assert.equal((await base.read({path:'implement/impl/README.md'})).content,context.content+'\nCurrent implementation notes.\n','raw context observes the same shared workspace');
 }));
 
 test('working context is writable/searchable while dependencies, unrelated context, member and private state stay protected',()=>withTeam(async f=>{

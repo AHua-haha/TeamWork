@@ -75,9 +75,10 @@ test('implementation context transitions keep one scope history and refuse ambig
  const id=f.lead.memberId,part=implementationContextPart('metadata.json'),files=await f.team.harness.files(id);
  const git=(command:string)=>f.team.harness.bash(id,{command,metadata:{git:{scope:part.id}}},signal());
  await files.write.mkdir(join(files.root,'.rsi/context/implement/impl'));
+ await files.write.writeFile(join(files.root,'.rsi/context/implement/impl.md'),'# Old single-file context');
  await files.write.writeFile(join(files.root,'.rsi/context/implement/impl/README.md'),'# Current implementation');
  const denied=await git('git add . && git commit -m "Ambiguous"');assert.notEqual(denied.exitCode,0);assert.match(denied.output,/never both/);
- assert.equal((await git('git rm .rsi/context/implement/impl.md && git add . && git commit -m "Expand implementation context"')).exitCode,0);
+ assert.equal((await git('git rm -f .rsi/context/implement/impl.md && git add . && git commit -m "Expand implementation context"')).exitCode,0);
  const history=await f.team.harness.history(id,part.id);assert.ok(history.some(item=>item.kind==='commit'));
  const peer=await f.team.service.create(f.workspaceId,{name:'Replacement',role:'developer',responsibility:'Continue',settings:{},harness:{designScope:{working:['metadata.json'],dependencies:[]},allowedCommands:[]}});
  const next=await f.team.harness.files(peer.memberId);assert.match((await next.read.readFile(join(next.root,'.rsi/context/implement/impl/README.md'))).toString(),/Current implementation/);

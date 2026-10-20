@@ -23,6 +23,7 @@ export function contextPaths(reference: string, kind: 'design' | 'impl'): string
 }
 export const designContextPaths = (reference: string) => [metadataPath(reference), ...contextPaths(reference,'design')];
 export function implementationContextPath(reference: string): string { return contextPaths(reference,'impl')[0]!; }
+export function memberContextPath(reference: string): string { return `${contextRoot}/${contextPaths(reference,'impl')[1]!}/README.md`; }
 export interface ContextLocation { node: string; kind: 'metadata' | 'design' | 'impl' | 'node'; area: 'design' | 'implement' }
 /** The root selects purpose; topic directories retain the enclosing system boundary. */
 export function contextLocation(path: string): ContextLocation | null {

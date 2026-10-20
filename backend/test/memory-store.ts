@@ -55,7 +55,8 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   readonly chatMessages = new Map<string, ChatMessage[]>();
   readonly chatRuns = new Map<string, { exchangeId: string; run: RunState }>();
   readonly agentContexts = new Map<string, ContextEntry[]>();
-  readonly delivery = new Map<string, number>();
+  readonly contextPositions = new Map<string, number>();
+  readonly contextAdmissions = new Map<string, number>();
   private readonly limits = new Map<string, number>();
   private readonly exchanges = new Map<string, { used: number; limit: number; stopped: boolean }>();
   onPublicationComplete?: (runId: string) => void;
@@ -83,23 +84,27 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
       const entry = this.timelineEntries.get(input.author.runId)!;
       if (entry.kind === 'member') entries.push(this.writeEntry({ ...entry, run: structuredClone(this.chatRuns.get(input.author.runId)!.run), text: input.text, working: { after: 0, through: 1 }, finalRef: { agentId: input.author.memberId, runId: input.author.runId, messageId: input.finalMessageId!, position: 1 } }));
     }
-    for (const member of await this.listMembers(input.workspaceId)) if (member.value.retiredAt === null) await this.syncChatMember(member.id);
+
     const runs = input.recipients.map(agentId => {
       const run: RunState = { agentId, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
       this.chatRuns.set(run.runId, { exchangeId, run });
+      this.contextAdmissions.set(run.runId, message.position);
       entries.push(this.writeEntry({ workspaceId: input.workspaceId, entryId: run.runId, position: 0, revision: 0, exchangeId, time: run.startedAt, kind: 'member', memberId: agentId, name: this.members.get(agentId)!.member.value.name, run: structuredClone(run), working: { after: 0, through: null }, finalRef: null, text: null })); return run;
     });
     return { message, runs, entries };
   }
 
-  async syncChatMember(memberId: string) {
-    if ([...this.chatRuns.values()].some(item => item.run.agentId === memberId && item.run.status === 'running')) return;
-    const member = this.members.get(memberId)?.member;
-    if (!member) return;
-    const pending = (this.chatMessages.get(member.workspaceId) ?? []).filter(item => item.position > (this.delivery.get(memberId) ?? 0));
-    const entries = this.agentContexts.get(memberId) ?? [];
-    entries.push(...pending.map(groupEntry)); this.agentContexts.set(memberId, entries);
-    if (pending.length) this.delivery.set(memberId, pending.at(-1)!.position);
+  async prepareMemberContext(memberId: string, runId: string, documents: ContextEntry[]) {
+    const member = this.members.get(memberId)!.member;
+    const through = this.contextAdmissions.get(runId)!;
+    const point = this.contextPositions.get(memberId) ?? 0;
+    const messages = (this.chatMessages.get(member.workspaceId) ?? []).filter(m => m.position <= through);
+    this.agentContexts.set(memberId, [...messages.filter(m => m.position <= point).map(groupEntry), ...documents, ...messages.filter(m => m.position > point).map(groupEntry)]);
+  }
+  finishContext(memberId: string, runId: string) {
+    const through = this.contextAdmissions.get(runId);
+    if (through !== undefined) this.contextPositions.set(memberId, through);
+    this.agentContexts.set(memberId, []);
   }
 
   async chatSnapshot(workspaceId: string, after = 0, limit = 100): Promise<ChatSnapshot> {
@@ -131,7 +136,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     this.chatMessages.delete(workspaceId); this.timelineChanges.delete(workspaceId);
     for (const [id, entry] of this.timelineEntries) if (entry.workspaceId === workspaceId) this.timelineEntries.delete(id);
     for (const item of runs) { this.chatRuns.delete(item.run.runId); this.exchanges.delete(item.exchangeId); }
-    for (const member of members) { this.agentContexts.set(member.id, []); this.delivery.set(member.id, resetPosition); }
+    for (const member of members) { this.agentContexts.set(member.id, []); this.contextPositions.set(member.id, resetPosition); }
     return { workspaceId, resetCursor, resetPosition };
   }
 
@@ -145,7 +150,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
 
   async createWorkspace(record: WorkspaceRecord, key: string, lead: NewMember, models?: WorkspaceModels, bootstrap?: WorkspaceBootstrap): Promise<void> {
     if (this.workspaces.has(record.workspaceId) || [...this.workspaces.values()].some(stored => stored.key === key)) throw new AppError('workspace_exists', 'A workspace with this ID or folder already exists', 409);
-    const members = structuredClone(this.members), contexts = structuredClone(this.agentContexts), delivery = structuredClone(this.delivery), ordinal = this.ordinal;
+    const members = structuredClone(this.members), contexts = structuredClone(this.agentContexts), contextPositions = structuredClone(this.contextPositions), ordinal = this.ordinal;
     this.workspaces.set(record.workspaceId, { record, key, seq: 0, blobs: new Map(), versions: [], files: new Map(), records: [] });
     try { await this.createMember(lead); if (models) this.workspaceModels.set(record.workspaceId, { revision: 0, value: structuredClone(models) });
       if (bootstrap) { await this.commitContext(record.workspaceId, 0, bootstrap.context); this.memberActivations.set(record.workspaceId, structuredClone(bootstrap.activation)); }
@@ -156,7 +161,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
       this.workspaceModels.delete(record.workspaceId); this.memberActivations.delete(record.workspaceId);
       this.members.clear(); for (const [key,value] of members) this.members.set(key,value);
       this.agentContexts.clear(); for (const [key,value] of contexts) this.agentContexts.set(key,value);
-      this.delivery.clear(); for (const [key,value] of delivery) this.delivery.set(key,value); this.ordinal = ordinal;
+      this.contextPositions.clear(); for (const [key,value] of contextPositions) this.contextPositions.set(key,value); this.ordinal = ordinal;
       throw error;
     }
   }
@@ -217,7 +222,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     if (active.length !== expected.size || active.some(m => expected.get(m.id) !== m.revision)) throw new AppError('config_conflict','Team changed',409);
     if (this.workspaceModels.get(workspaceId)?.revision !== input.modelsRevision) throw new AppError('config_conflict','Workspace models changed',409);
     if ([...this.chatRuns.values()].some(({run}) => run.status === 'running' && active.some(m => m.id === run.agentId))) throw new AppError('workspace_busy','Workspace busy',409);
-    const members = structuredClone(this.members), contexts = structuredClone(this.agentContexts), delivery = structuredClone(this.delivery), ordinal = this.ordinal;
+    const members = structuredClone(this.members), contexts = structuredClone(this.agentContexts), contextPositions = structuredClone(this.contextPositions), ordinal = this.ordinal;
     try {
       for (const next of input.update.slice().sort((a,b) => Number(b.value.retiredAt !== null)-Number(a.value.retiredAt !== null))) {
         const old = active.find(m => m.id === next.id);
@@ -229,7 +234,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     } catch (error) {
       this.members.clear(); for (const [k,v] of members) this.members.set(k,v);
       this.agentContexts.clear(); for (const [k,v] of contexts) this.agentContexts.set(k,v);
-      this.delivery.clear(); for (const [k,v] of delivery) this.delivery.set(k,v);
+      this.contextPositions.clear(); for (const [k,v] of contextPositions) this.contextPositions.set(k,v);
       this.ordinal=ordinal; throw error;
     }
   }
@@ -241,7 +246,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     if (others.some(item => item.nameKey === input.nameKey)) throw new AppError('member_exists', 'Another member of this team has that name', 409);
     const member = { id: input.id, workspaceId: input.workspaceId, revision: 0, value: structuredClone(input.value) };
     this.members.set(input.id, { member, lead: input.lead, nameKey: input.nameKey, ordinal: ++this.ordinal });
-    await this.syncChatMember(member.id);
+    this.agentContexts.set(member.id, []);
     return structuredClone(member);
   }
 

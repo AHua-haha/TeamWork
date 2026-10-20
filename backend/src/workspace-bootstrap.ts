@@ -8,7 +8,7 @@ import { HarnessHistory, harnessStorage } from './harness-history.js';
 import type { NewMember, MemberActivationState } from './team.js';
 import { sha256 } from './text.js';
 import { AppError } from './types.js';
-import { contextRoot, designRoot, managedRoot, rootDesignPath, implementationContextPath, metadataPath, contextPaths } from './workspace-layout.js';
+import { contextRoot, designRoot, managedRoot, rootDesignPath, metadataPath, contextPaths, memberContextPath } from './workspace-layout.js';
 
 export interface WorkspaceBootstrap { activation: MemberActivationState; context: ContextCommit }
 /** Prepare all initial files/history before the registry can expose the workspace. */
@@ -21,7 +21,7 @@ export async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMe
     const initial = [
       { path: metadataPath(rootDesignPath), content: JSON.stringify({ implementation: [] }, null, 2) + '\n' },
       { path: contextPaths(rootDesignPath,'design')[0]!, content: harnessPrompt('design-template', { project: workspace.name }) + '\n' },
-      { path: implementationContextPath(rootDesignPath), content: harnessPrompt('implementation-context-template', { design: rootDesignPath }) + '\n' },
+      { path: memberContextPath(rootDesignPath).slice(contextRoot.length + 1), content: harnessPrompt('implementation-context-template', { design: rootDesignPath }) + '\n' },
     ];
     for (const file of initial) { const absolute=join(workspace.directory,contextRoot,file.path); await mkdir(dirname(absolute),{recursive:true}); await writeFile(absolute,file.content,{flag:'wx'}); }
     for (const [path, content] of Object.entries(lead.value.configuration!.files)) {

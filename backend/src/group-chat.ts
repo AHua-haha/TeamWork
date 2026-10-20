@@ -56,7 +56,6 @@ export interface ChatStore {
   publishChat(input: ChatPublication): Promise<ChatAcceptance>;
   chatSnapshot(workspaceId: string, after?: number, limit?: number): Promise<ChatSnapshot>;
   chatTimeline(workspaceId: string, after?: number, limit?: number): Promise<TimelineSnapshot>;
-  syncChatMember(memberId: string): Promise<void>;
   configureChat(workspaceId: string, mentionLimit: number): Promise<void>;
   stopChat(workspaceId: string): Promise<RunState[]>;
   resetChat(workspaceId: string): Promise<ChatReset>;
@@ -105,8 +104,8 @@ export function groupEntry(message: ChatMessage): ContextEntry {
   const author = message.author.type === 'user' ? 'User' : message.author.name;
   return {
     messageId: message.messageId,
-    message: { role: 'user', content: `[Group message ${message.position} from ${author}]\n${message.text}`, timestamp: message.time },
-    metadata: { source: 'group-chat', workspaceId: message.workspaceId, groupPosition: message.position, author: message.author },
+    message: { role: 'user', content: `[Group message ${message.position} from ${author}]\n${message.recipients.length ? `[Mentioned members: ${message.recipients.join(', ')}]\n` : ''}${message.text}`, timestamp: message.time },
+    metadata: { source: 'group-chat', workspaceId: message.workspaceId, groupPosition: message.position, author: message.author, recipients: message.recipients },
   };
 }
 

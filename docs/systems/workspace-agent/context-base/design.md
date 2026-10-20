@@ -103,7 +103,7 @@ Each working node has a stable impl-context-<hash> Git part (first 16 SHA-256 he
 
 User-accepted design Git snapshots feed semantic catalog/inspection and implementation permission resolution; pending bytes do not. Raw context APIs/history observe original-workspace files. Members edit the same workspace files directly; no member worktree copying occurs. Design inspection returns separate Markdown documents with correct source paths, plus aggregate content and metadata; its revision covers all design files. Current multi-file inspection is an observation, not a transaction spanning concurrent edits. Reusable knowledge and automatic publication/merge/maintenance scheduling remain deferred.
 
-New workspaces initialize design/metadata.json, design/design.md and implement/impl.md in one sequence-1 change. Old user/agent layout is not a compatibility content format. Safe but unresolvable active references remain inspectable/unready; execution and member-file validation cannot derive authority from them. Existing workspace files/history are not automatically reset or converted.
+New workspaces initialize design/metadata.json, design/design.md and implement/impl/README.md in one sequence-1 change. Old user/agent layout is not a compatibility content format. Safe but unresolvable active references remain inspectable/unready; execution and member-file validation cannot derive authority from them. Existing workspace files/history are not automatically reset or converted.
 
 ## Outputs and observable effects
 
@@ -219,7 +219,7 @@ Invalid metadata, missing/empty design documents, mixed forms, a missing README.
 
 ## Acceptance examples
 
-1. Fresh create/adopt returns seq 1 with design/metadata.json, design/design.md and implement/impl.md, and a ready lead assigned to metadata.json; implementation mappings start empty.
+1. Fresh create/adopt returns seq 1 with design/metadata.json, design/design.md and implement/impl/README.md, and a ready lead assigned to metadata.json; implementation mappings start empty.
 2. Backend changes design.md into design/README.md and design/request-flow.md. Catalog still has one backend node; document paths and the combined revision update.
 3. Backend independently uses design.md with an impl/ directory. Its metadata identity and context Git scope remain stable through the transition.
 4. Adding backend/storage/metadata.json and complete child contexts creates a real subdesign. Reading backend/design/flow.md alone never creates a child system.
@@ -229,3 +229,7 @@ Invalid metadata, missing/empty design documents, mixed forms, a missing README.
 8. Invalid JSON-embedded design content, mixed forms or missing directory README makes the node unavailable; current raw files explain the issue.
 9. A replacement member inherits committed multi-document context with the same metadata reference. Pending writer edits stay private and stale semantic commits refuse.
 10. A backend-attributed file import records exact before/after content and author; the existing revision-based raw save/history/reconnect behavior remains applicable at category-free paths.
+
+## Member summary entry point
+
+For member working-context construction, each working node selects impl/README.md under its implementation-context directory. It holds Result summary, File lookup and machine-readable Automatic retrieval sections while preserving the node's Implemented contract documentation. Lookup targets are not recursively loaded. Other Markdown remains project context available to tools. New workspace bootstrap initializes this directory form; existing single-file content remains available for explicit conversion under existing context permissions. Conversation-context parsing/execution belongs to the team; raw context storage continues preserving text without running commands.

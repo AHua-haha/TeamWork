@@ -6,7 +6,8 @@ import { MemberConfigService } from './member-config.js';
 import { DesignService } from './design.js';
 import { HarnessService } from './harness.js';
 import { inspectHarnesses } from './harness-bases.js';
-import { MemberContext } from './member-context.js';
+import { MemberInstructions } from './member-instructions.js';
+import { ConversationContext, type MemberConversationStore } from './conversation-context.js';
 import { teamTools } from './member-tools.js';
 import type { RunConfigSource, RuntimePolicy, RuntimeTool } from './runtime.js';
 import { webTools } from './web-tools.js';
@@ -22,18 +23,20 @@ export interface TeamStatus extends Omit<TeamView, 'members'> { members: MemberS
 export class TeamSystem {
   readonly service: TeamService;
   readonly runner: TeamRunner;
-  readonly context: MemberContext;
+  readonly instructions: MemberInstructions;
+  readonly conversation: ConversationContext;
   readonly configuration: MemberConfigService;
   readonly designs: DesignService;
   readonly harness: HarnessService;
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
 
-  constructor(store: TeamStore & ChatStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools()) {
+  constructor(store: TeamStore & ChatStore & MemberConversationStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools()) {
     this.designs = new DesignService(workspaces);
     this.service = new TeamService(store, workspaces, config, this.designs);
     this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id), web);
-    this.context = new MemberContext(this.service, workspaces, id => this.runner.isRunning(id));
+    this.conversation = new ConversationContext(store, this.harness);
+    this.instructions = new MemberInstructions(this.service, workspaces, id => this.runner.isRunning(id));
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
@@ -124,6 +127,13 @@ export class TeamSystem {
     const checkpointed = new Set<string>();
     return {
       ...base,
+      beforeStep: async scope => {
+        if (scope.step === 1) {
+          const member = await this.service.find(scope.agentId);
+          if (member) await this.conversation.prepare(member, scope);
+        }
+        await base.beforeStep?.(scope);
+      },
       acquireRun: async (run, signal) => {
         const release = await this.runner.acquireExecution(run.agentId, signal);
         try {
@@ -170,7 +180,7 @@ export class TeamSystem {
         if (!member) return request;
         if (member.value.lead) await this.configuration.materialize(scope.agentId);
         const prepared = await this.harness.prepare(scope.agentId, member.value.lead ? management : []);
-        const systemPrompt = [await this.context.instructions(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
+        const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
         return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };
       },
     };

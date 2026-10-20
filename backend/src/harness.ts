@@ -8,7 +8,6 @@ import type { HarnessConfig } from './harness-config.js';
 import { executeBash, parseBashInput, resetMemberShell, type CommandResult } from './harness-command.js';
 import { harnessBashTool, harnessFileTools } from './harness-tools.js';
 import { HarnessHistory, HarnessQueue, harnessStorage, partOwns, validateParts, type HarnessDefinition, type HarnessPart, type HistoryActor } from './harness-history.js';
-import { ProjectFiles } from './project-files.js';
 import { MemberFiles, type FileAccess } from './member-files.js';
 import type { RuntimeTool } from './runtime.js';
 import type { StoredMember } from './team.js';
@@ -287,7 +286,6 @@ export class HarnessService {
       ...env.definitions.map(d => `## ${d.id} harness\n${d.prompt}\n${d.parts.map(p => `Part ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
       '## Accepted working designs', await this.designView(resolved.working),
       '## Dependency designs', await this.designView(resolved.dependencies),
-      '## Implementation files', await this.implementationView(env.root, resolved.readable, member),
     ];
     return { tools, context: parts.join('\n\n') };
   }
@@ -300,35 +298,5 @@ export class HarnessService {
       used += size;
       return heading + '\n' + part.content;
     }).join('\n\n') || '(none configured)';
-  }
-  private async implementationView(root: string, scopes: string[], member: StoredMember): Promise<string> {
-    const files = new ProjectFiles(root);
-    const candidates = new Set<string>(), notes: string[] = [];
-    for (const scope of new Set(scopes)) {
-      const path = scope === '.' ? '' : scope;
-      const kind = await files.kind(path);
-      if (kind === null) { notes.push(`Implementation not created yet: ${scope}`); continue; }
-      if (kind === 'file') candidates.add(path);
-      else {
-        const listing = await files.tree(path, 16);
-        for (const entry of listing.entries) if (entry.type === 'file') candidates.add(entry.path);
-        if (listing.truncated) notes.push(`Listing truncated: ${scope}; use ls to inspect further.`);
-      }
-    }
-    const access = harnessAccess(member, await resolveHarness(this.designs, member.workspaceId, member.value.harness));
-    let used = 0;
-    for (const path of [...candidates].sort()) {
-      if (path.toLowerCase() === '.rsi' || path.toLowerCase().startsWith('.rsi/') || access.deny(path, 'read') !== null) continue;
-      try {
-        const file = await files.read(path);
-        if (used + file.size > viewBudget) { notes.push(`Not loaded: ${path}`); continue; }
-        used += file.size;
-        notes.push(`### ${path}\n${file.content}`);
-      } catch (error) {
-        if (!(error instanceof AppError) || !['unsupported_file', 'not_found'].includes(error.code)) throw error;
-        notes.push(`Cannot load ${path}: ${error.message}`);
-      }
-    }
-    return notes.join('\n\n') || '(none mapped)';
   }
 }

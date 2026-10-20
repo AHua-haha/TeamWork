@@ -1,5 +1,5 @@
 import { sha256 } from './text.js';
-import { contextRoot, designRoot, implementationContextPath, contextPaths, nodeReference } from './workspace-layout.js';
+import { contextRoot, designRoot, memberContextPath, contextPaths, nodeReference } from './workspace-layout.js';
 import { harnessPrompt } from './harness-prompts.js';
 import type { HarnessDefinition, HarnessPart } from './harness-history.js';
 import type { StoredMember } from './team.js';
@@ -9,7 +9,7 @@ const reads = ['ls', 'read', 'grep', 'find'];
 const files = [...reads, 'write', 'edit'];
 /** One system context scope covers both document forms and survives representation changes. */
 export function implementationContextPart(design: string): HarnessPart {
-  const path = `${contextRoot}/${implementationContextPath(design)}`;
+  const path = memberContextPath(design);
   return { id: `impl-context-${sha256(design.toLowerCase()).slice(0, 16)}`, paths: contextPaths(design,'impl').map(p=>`${contextRoot}/${p}`), exclude: [], context: 'impl', commit: 'agent', prompt: harnessPrompt('implementation-context', { design, context: path }) };
 }
 /** Fixed purpose policy; an assignment supplies design references, never permissions or tool definitions. */

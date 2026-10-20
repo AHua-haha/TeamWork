@@ -67,25 +67,27 @@ test('header validation refuses multiple recipients atomically and a revised hea
   assert.equal(f.runtime.active(frontend.memberId), undefined);
 }));
 
-test('all members receive messages and user mentions preserve multi-recipient admission', () => withTeam(async f => {
+test('shared messages stay authoritative and user mentions preserve multi-recipient admission', () => withTeam(async f => {
   const backend = await worker(f, 'Backend'); const frontend = await worker(f, 'Frontend');
   const result = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');
   assert.equal(result.runs.length, 2);
   assert.ok(f.runtime.active(backend.memberId) && f.runtime.active(frontend.memberId));
   assert.equal(f.runtime.active(f.lead.memberId), undefined);
-  for (const member of [f.lead, backend, frontend]) assert.equal(f.store.agentContexts.get(member.memberId)?.length, 1);
+  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 0);
+  for (const member of [backend, frontend]) assert.equal(f.store.agentContexts.get(member.memberId)?.length, 1);
   const firstRun = f.runtime.active(backend.memberId)!.runId;
   await f.team.runner.publishFinal(backend.memberId, firstRun, 'Backend done without mentions', 'final');
   assert.equal(f.runtime.active(backend.memberId), undefined);
-  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 2);
+  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 0);
   assert.equal(f.store.agentContexts.get(frontend.memberId)?.length, 1);
   f.runtime.end(frontend.memberId);
   await settle();
-  assert.equal(f.store.agentContexts.get(frontend.memberId)?.length, 2);
-  assert.equal(f.runtime.runs.length, 2, 'buffer flushing starts no run');
+  assert.equal(f.store.agentContexts.get(frontend.memberId)?.length, 0);
+  assert.equal((await f.team.runner.snapshot(f.workspaceId)).messages.length, 2);
+  assert.equal(f.runtime.runs.length, 2, 'context bookkeeping starts no run');
 }));
 
-test('busy members buffer all accepted shared messages after private work; idle members append immediately', () => withTeam(async f => {
+test('group updates do not insert into ongoing working context or idle member context', () => withTeam(async f => {
   const backend = await worker(f, 'Backend');
   await f.team.runner.postUser(f.workspaceId, '@Backend start');
   const context = f.store.agentContexts.get(backend.memberId)!;
@@ -94,7 +96,9 @@ test('busy members buffer all accepted shared messages after private work; idle 
   assert.equal(context.length, 2);
   assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 2);
   f.runtime.end(backend.memberId); await settle();
-  assert.deepEqual(textOf(context), ['[Group message 1 from User]\n@Backend start', 'PRIVATE WORK', '[Group message 2 from User]\n@Lead discuss']);
+  assert.equal(context.length, 2);
+  assert.ok(!textOf(context).some(text => text.includes('@Lead discuss')));
+  assert.equal((await f.team.runner.snapshot(f.workspaceId)).messages.length, 2);
   assert.equal(f.runtime.runs.length, 2);
 }));
 
@@ -106,7 +110,7 @@ test('busy, unknown, self and unready recipients refuse entire publications with
   await assert.rejects(f.team.runner.publishFinal(backend.memberId, first.runs[0]!.runId, '<mentions>["Backend"]</mentions>\nAgain', 'final'), code('self_mention'));
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 1);
   assert.equal(f.runtime.active(frontend.memberId), undefined);
-  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 1);
+  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 0);
 }));
 
 test('default lead routing, return mentions, and limit count accepted activations only', () => withTeam(async f => {
@@ -224,7 +228,7 @@ test('reset requires idle work, clears the workspace conversation and wakes both
   assert.equal((await waiting).value?.type, 'entry');
   assert.ok(fresh.entries[0]!.revision > reset.resetCursor);
   assert.ok(fresh.message.position > reset.resetPosition);
-  assert.deepEqual(textOf(f.store.agentContexts.get(f.lead.memberId)!), [`[Group message ${fresh.message.position} from User]\nNew conversation`]);
+  assert.ok(textOf(f.store.agentContexts.get(f.lead.memberId)!).some(t => t.endsWith('New conversation')));
   controller.abort(); await timeline.return(); await legacy.return();
 }));
 

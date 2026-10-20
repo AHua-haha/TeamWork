@@ -14,7 +14,7 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 - Input submission supplies the new user input and routing identifiers. The runtime obtains the model-context history from its own storage rather than requiring the frontend to submit that history.
 - Multiple frontends may follow an agent. Their connection state does not determine whether the agent run continues or when temporary chunks are removed.
 - Before accepting input, the runtime resolves that agent's run snapshot from its config source: the [config system](../config/design.md) for an agent outside any team, or the member's settings for a [team](../workspace-agent/team/design.md) member, which the team supplies by the same rules. The agent must explicitly select a resolvable provider connection and model; selected tools, prompt templates, instructions, and call options must be valid.
-- A team member retains private execution history. The team admits activations from its group chat and supplies already-persisted run records and resolved configuration snapshots for execution. The runtime enforces one active model/tool run per agent.
+- A team member retains durable private execution history for inspection; team context construction includes failed working ranges until a successful run. The team admits activations from its group chat and supplies already-persisted run records and resolved configuration snapshots for execution. The runtime enforces one active model/tool run per agent.
 
 ## Outputs and observable effects
 
@@ -119,7 +119,7 @@ The default FIFO retains up to 1,024 compact progress events per member across r
 6. An agent starts a run with model A. Its provider connection and instructions are edited while the run is active. Later steps in that run keep the original config; the next run resolves the new values.
 7. Private member history is followed like any agent. Direct input to Lead or Backend returns 409 `member_conversation`; shared workspace input can trigger either according to the team rule. `GET /agents` lists neither.
 
-Team coordination resolves configurations using `prepareRun`, persists run creation atomically with group publication, and starts execution using `launch`. Expected publication refusals are recorded by `feedback` as private user messages and let the same loop continue. Successful publication can persist terminal sender state before recipient launch; subsequent runtime terminal finalization returns that stored state. Group-message delivery changes canonical context separately from private display history.
+Team coordination resolves configurations using `prepareRun`, persists run creation atomically with group publication, and starts execution using `launch`. Expected publication refusals are recorded by `feedback` as private user messages and let the same loop continue. Successful publication can persist terminal sender state before recipient launch; subsequent runtime terminal finalization returns that stored state. Activation-time group-context construction changes canonical model context separately from private display history.
 
 ## Unified streaming and model completion
 
@@ -132,3 +132,7 @@ The workspace team may explicitly reset all its members' conversation state when
 ## Recoverable tool failure examples
 
 A response requests three fetches. The second returns a timeout error result. Persist successful first/third results and the second error in call order, then let the model see all three and produce an answer or request another source in the same run. An invalid argument or unavailable tool produces a call-matched error result without executing that call; a later model turn may correct it. A failed tool-result database write still fails the run and cannot be reported as a stored success. Cancellation during a tool never becomes a retryable tool failure.
+
+## Member conversation context integration
+
+The team initializes stored model context once before the first model step from its admitted shared prefix and assigned implementation README files. New group messages do not mutate that context mid-run. A policy may record private user input through StepScope.recordInput(text, metadata); the runtime validates ownership, persists it as a completed history record and notifies followers. Automatic retrieval uses this path for Bash results without synthetic model tool calls. Subsequent model/tool steps use the same canonical working context. Terminal transactions clear assembled member working context while retaining stable history and durable reconstruction boundaries; successful runs exclude prior private work next time and unsuccessful executed runs retain it. Solo runtime behavior is unchanged.

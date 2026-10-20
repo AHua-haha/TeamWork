@@ -21,7 +21,8 @@ test('member requests get team rules and only their harness design and implement
   const request = await fixture.team.policy(base).buildRequest(scope(backend.memberId), { revision: 0, entries: [] });
   assert.match(request.context.systemPrompt!, /You are Backend, backend developer/);
   assert.match(request.context.systemPrompt!, /Design for Backend/);
-  assert.match(request.context.systemPrompt!, /BACKEND SOURCE/);
+  assert.doesNotMatch(request.context.systemPrompt!, /BACKEND SOURCE/);
+  assert.match(request.context.systemPrompt!, /Resolved permissions/);
   assert.doesNotMatch(request.context.systemPrompt!, /FRONTEND SOURCE|Design for Frontend/);
   assert.match(request.context.systemPrompt!, /commits require user approval/);
   assert.match(request.context.systemPrompt!, /standing words/);
@@ -47,7 +48,7 @@ test('the lead receives design maintenance, choices and management tools with sh
   const configured = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });
   for (const name of ['write', 'edit', 'bash']) assert.ok(names(configured).includes(name));
 }));
-test('bounded file context names omitted files and unrelated catalog tools are not injected', () => withTeam(async fixture => {
+test('source files are loaded on demand and unrelated catalog tools are not injected', () => withTeam(async fixture => {
   const member = await worker(fixture, 'Backend', ['backend']);
   await mkdir(join(fixture.directory, 'backend'));
   await writeFile(join(fixture.directory, 'backend', 'a.txt'), 'a'.repeat(viewBudget - 10));
@@ -55,7 +56,7 @@ test('bounded file context names omitted files and unrelated catalog tools are n
   const unscoped = { definition: { name: 'unscoped', description: '', parameters: {} as never }, execute: async () => ({ content: [], isError: false }) };
   const policy = fixture.team.policy({ buildRequest: () => ({ model: {} as never, tools: [unscoped], context: { messages: [] } }) });
   const request = await policy.buildRequest(scope(member.memberId), { revision: 0, entries: [] });
-  assert.match(request.context.systemPrompt!, /Not loaded: backend\/b.txt/);
+  assert.doesNotMatch(request.context.systemPrompt!, /a{100}|b{100}/);
   assert.doesNotMatch(request.context.systemPrompt!, /### backend\/b.txt/);
   assert.ok(!names(request).includes('unscoped'));
   const plain = await policy.buildRequest(scope('plain-agent'), { revision: 0, entries: [] });

@@ -31,3 +31,20 @@ Record the realization, code locations/relationships and important decisions as 
 ## Verification and continuation
 
 No verification or continuation facts have been recorded yet. Maintain relevant evidence, unfinished work and inconsistencies for subsequent tasks.
+
+## Result summary
+
+No implementation result has been recorded yet. Examine current files before describing completed work. Record unfinished work and known problems here for the next activation.
+
+## File lookup
+
+| Path | Description |
+| --- | --- |
+
+## Automatic retrieval
+
+```json
+{
+  "commands": []
+}
+```

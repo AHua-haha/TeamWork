@@ -22,11 +22,11 @@ This is the agreed group-chat behavior with the prototype conventions recorded d
 ## Outputs and observable effects
 
 - A shared transcript contains user messages and published member final responses, attributed to their authors.
-- Each member has continuing context ordered as group messages, its private working context, subsequent group messages, subsequent private working context. Group messages retain their individual identities, authors, content, and group order.
-- Every accepted group message is delivered to all active members, including its sender, independently of who is mentioned. An idle member appends the message to its continuing context immediately, preserving its existing group messages and private work. Do not aggregate or reinject the complete transcript as an activation snapshot.
-- During an activation, append the member's private working messages as it runs. Buffer incoming accepted group messages separately while it is working; they do not enter the middle of its ongoing working context or its model requests for that activation.
-- When the member's work finishes, append buffered group messages individually, in group order, at the end of its private working context. This happens without waiting for another activation. Receiving or flushing these messages does not itself start another run; only the triggering rule does.
-- Each member retains its own private execution history across activations. Its model context consists of this interleaved history with the context and instructions supplied by its harness. Only that member receives its private working history.
+- Group context is one authoritative ordered sequence of accepted user messages and member final responses, with sender, recipient and message metadata. Members consume it without per-member delivery copies.
+- Admission freezes the shared prefix for that activation. Later accepted messages remain available for the next activation and do not enter ongoing model requests. Receiving shared messages does not trigger execution by itself.
+- At execution start, assemble earlier group messages through the member's processed boundary, its assigned impl/README.md result summary/file lookup, retained failed working messages, incoming group messages through admission, and fresh automatic Bash retrieval results. Lookup targets are not loaded. Each assigned working-design README is read in normalized path order.
+- Every executed stopped run advances the processed group boundary through its supplied prefix. Failure/cancellation/interruption retains recorded private working messages since the last success; success clears those ranges from future model input and relies on the maintained document. Private stable history remains inspectable. Waiting runs cancelled before construction process no group input.
+- The [conversation context contract](../conversation-context/design.md) specifies member documents, retrieval and durable restart behavior. No automatic replay or summary model call is introduced.
 - Reasoning, model/tool steps, tool results, and intermediate assistant messages belong to private execution context and are not copied into the group transcript.
 - A final response is a new group message. Its mentions can trigger subsequent member activations under the same rule.
 - The lead can assign work by addressing members in a shared message. A member can address a colleague or ask the lead for a design decision through a shared response.
@@ -35,7 +35,7 @@ This is the agreed group-chat behavior with the prototype conventions recorded d
 
 If any mentioned recipient is busy, refuse the whole publication: the candidate does not enter the shared transcript, and none of its recipients is activated. Return private feedback naming busy recipients to the sending agent, which can revise or retry before ending its activation. Do not queue, wait automatically for a recipient, or retry automatically. A user submission with the same condition is refused to the user.
 
-Failed, cancelled, or interrupted runs are exposed as status, without a fabricated shared response. Stop cancels active members and marks their exchanges stopped, preventing further publications from those runs. Completed files and messages remain. Backend restart marks abandoned runs interrupted, appends buffered group messages after their private work, and does not replay triggers. Refused candidates and feedback remain private. Storage failures are explicit; no automatic application retry occurs.
+Failed, cancelled, or interrupted runs are exposed as status, without a fabricated shared response. Stop cancels active members and marks their exchanges stopped, preventing further publications from those runs. Completed files and messages remain. Backend restart marks abandoned runs interrupted and retains their recorded private work for the next activation without replaying triggers or commands. Refused candidates and feedback remain private. Storage failures are explicit; no automatic application retry occurs.
 
 ### Mention-limit semantics
 
@@ -49,10 +49,10 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 ## Guarantees and limits
 
 - A member can see shared messages without being triggered by every message.
-- Buffering message delivery for a working member is separate from trigger scheduling. Busy mentions are still refused without queuing; accepted messages that do not mention that member are still shared with it.
+- Shared context availability is separate from trigger scheduling. Busy mentions are still refused without queuing; accepted messages remain available to every member on its next activation.
 - Sharing a transcript does not expand a member's harness permissions or give it lead management/design-editing capabilities.
 - Shared chat publication and private execution are distinct. This distinction does not prevent members from reporting relevant results in their final responses.
-- Retained private history belongs to the member's execution continuity. Durable project design and knowledge remain organized independently of member identity; automated harness-context maintenance is deferred.
+- Failed private working ranges support continuity until success. Project context stays organized by design; agents maintain assigned implementation README summaries using common file tools. Automatic retrieval uses existing Bash inputs and results.
 - History retention and private-history maintenance remain open.
 - The new design replaces the private blocking-call mechanism; implementation must derive cooperation from shared messages and triggering rules.
 
@@ -65,11 +65,11 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 5. The user posts a message without mentions. The lead is activated.
 6. A message mentions Backend and Frontend. For user input both are admitted in mention order and execute sequentially. An agent response naming both is refused atomically.
 7. Backend is working when another sender mentions it. The publication is refused and no later activation is queued. The sending agent receives private feedback and must make a new attempt when Backend is free.
-8. Frontend publishes a response without mentioning busy Backend. The response enters idle members' contexts immediately and is buffered for Backend. When Backend finishes, append that response after Backend's private working context without triggering another Backend activation.
+8. Frontend publishes without mentioning Backend. The response is stored once as group context. Backend sees it on its next activation; no idle context copy or mid-run insertion is made.
 9. A candidate mentions busy Backend and free Frontend. Refuse the whole publication; neither is activated by that attempt. The sender can revise its recipients or try again later.
-10. Backend is activated again. Its previous group messages and private execution history, including messages appended when its last work finished and while it was idle, remain in place. Append its new private working messages as it runs. Frontend receives Backend's shared final reports, never Backend's private execution history.
+10. Backend is activated again. Shared history is split around its processed boundary, with document result context and any retained failed private work before incoming messages and fresh retrieval. After a successful run, previous private work is excluded. Frontend sees only Backend's published reports.
 11. Under the budget rules, one slot remains when a response mentions two distinct members. Refuse the whole publication without consuming the remaining slot. The sender can revise to one recipient or publish a response without mentions.
-12. A message mentions only Backend. Idle Frontend receives the same message in its context immediately but remains idle. Backend is activated by the mention.
+12. A message mentions only Backend. Frontend remains idle with shared history available for its next activation. Backend is activated by the mention.
 
 ## Backend operations
 
@@ -79,7 +79,7 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 - `PUT /workspaces/:id/team/chat` with `{mentionLimit}` configures the budget for subsequent exchanges (1–1,000); existing exchanges keep their budget.
 - `POST /workspaces/:id/team/chat/stop` cancels active chat work and stops its exchanges.
 - Direct `POST /agents/:memberId/runs` refuses team members; solo agents retain their API. Private agent history/follow remains available for inspection.
-- Shared text is 1–20,000 characters. Rejected publication changes neither shared history, member delivery, nor activation budget. Accepted publication and creation of its recipient run records are atomic. Model execution begins after persistence; execution failures remain visible statuses.
+- Shared text is 1–20,000 characters. Rejected publication changes neither shared history, member context, nor activation budget. Accepted publication and creation of its recipient run records are atomic. Model execution begins after persistence; execution failures remain visible statuses.
 
 ## Persisted presentation timeline
 
@@ -123,7 +123,7 @@ Malformed-header refusals produce private feedback and allow the same activation
 
 `POST /workspaces/:id/team/chat/reset` is a user control with no request body. It returns 200 `{workspaceId,resetCursor,resetPosition}` after an atomic reset. The entire workspace team must be idle, including admitted jobs and finalization; otherwise return 409 `workspace_busy` and change nothing. The user may stop team work and wait for completion before retrying. Missing workspace returns 404. No agent tool exposes reset.
 
-Reset deletes the shared transcript, response reservations and change records, exchanges, runs, private completed messages, temporary streamed chunks and model conversation context for every workspace member, including retired members. Their current/latest run becomes null, private history position becomes zero, and context revision advances to invalidate stale context edits. Subsequent input starts a fresh conversation without replaying removed group messages. This explicit destructive operation is the exception to normal history retention.
+Reset deletes the shared transcript, response reservations and change records, exchanges, runs, private completed messages, temporary streamed chunks, model conversation context and retained-range/processed-boundary state for every workspace member, including retired members. Their current/latest run becomes null, private history position becomes zero, and context revision advances to invalidate stale context edits. Subsequent input starts a fresh conversation without replaying removed group messages. This explicit destructive operation is the exception to normal history retention.
 
 Member identities, accepted/pending configuration, models, workspace settings including mention limit, project/design/implementation context files, harness checkpoints/commits and provider connections are preserved. Other workspaces and solo agents are unaffected. Reset does not undo tool/file effects.
 

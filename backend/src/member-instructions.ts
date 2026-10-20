@@ -9,9 +9,9 @@ if (!responseRules) throw new AppError('invalid_config', 'Required team group-ch
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 200);
 
 /** Team roles and cooperation. The harness supplies file context and tools. */
-export class MemberContext {
+export class MemberInstructions {
   constructor(private readonly team: TeamService, private readonly workspaces: WorkspaceService, private readonly isRunning: (memberId: string) => boolean = () => false) {}
-  async instructions(agentId: string, own: string | undefined): Promise<string | null> {
+  async build(agentId: string, own: string | undefined): Promise<string | null> {
     const member = await this.team.find(agentId);
     if (!member) return null;
     const { name, role, responsibility, lead } = member.value;
@@ -25,8 +25,8 @@ export class MemberContext {
       '- The user design is the shared agreement. Read and follow it. Implementation context belongs to the design and subdesigns, independently of member identity. Follow your harness maintenance rules.',
       responseRules,
       '- Only one member executes at a time in this workspace. Your final response can mention at most one distinct member. Publication is refused as a whole if any recipient is busy, missing or unready, or the exchange mention limit would be exceeded. Private refusal feedback lets you revise or retry within your current run. A refused attempt delivered no task. Busy mentions are not queued or retried automatically.',
-      '- All accepted shared messages enter every member context. Messages received during your work are appended after you finish. Your retained private work and tool results are yours alone; they are not shared with colleagues.',
-      '- End with what was done, which files changed, and what is still open. Automatic harness-context maintenance is deferred.',
+      '- Group context is shared and maintained centrally. Each activation constructs working context from earlier group messages, your implementation README summary/lookup, retained failed work, new group messages and automatic retrieval results. New messages do not enter the middle of ongoing work. Only final published responses are shared; private tool/work history remains yours.',
+      '- Maintain your assigned implementation-context impl/README.md with current results, file lookup and Bash retrieval configuration before a successful final response. End with what was done, which files changed, and what is still open. A successful run clears retained working messages from future context; failures preserve recorded private work across restart.',
       lead
         ? [
             '- User messages without mentions trigger you. Help the user create, update, and maintain the whole project design and its subdesigns. Use common read/write/edit tools in the shared workspace. Explain pending changes and request user review; only user acceptance commits design.',
