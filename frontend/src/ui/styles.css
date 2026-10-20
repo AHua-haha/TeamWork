@@ -745,3 +745,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-message-images a { display: block; max-width: 100%; }
 .group-message-images img { display: block; max-width: 100%; width: auto; height: auto; max-height: 340px; object-fit: contain; border-radius: 8px; }
 .image-load-error { color: #986b59; font-size: 12px; }
+
+/* Commit decisions stay adjacent to input; detailed review belongs to the side panel. */
+.commit-approval-input { border: 1px solid var(--border, #dce5df); border-radius: 12px; padding: 12px; margin: 0 0 10px; background: var(--surface, #fff); box-shadow: 0 3px 16px #20382a0a; }
+.commit-approval-heading, .commit-approval-actions { display: flex; align-items: center; gap: 8px; }
+.commit-approval-heading { justify-content: space-between; font-size: 13px; }
+.commit-approval-input textarea { display: block; width: 100%; min-height: 48px; resize: vertical; margin: 8px 0; border: 1px solid #dce5df; border-radius: 8px; padding: 8px; font: inherit; box-sizing: border-box; background: transparent; }
+.commit-approval-actions { justify-content: flex-end; flex-wrap: wrap; }
+.commit-review-command { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; padding: 12px; }
+
+.group-conversation { container-type: inline-size; }
+.commit-approval-input { width: 100%; max-width: var(--group-reading-width); margin-inline: auto; box-sizing: border-box; }
+.commit-review-directory { overflow-wrap: anywhere; font-size: 12px; color: #859589; }
+@container (max-width: 520px) { .group-composer-footer { padding-inline: 16px; } }

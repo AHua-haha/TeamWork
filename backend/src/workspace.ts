@@ -1,3 +1,4 @@
+import { legacyBaseline, type GitBaseline } from './workspace-git.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
@@ -26,6 +27,31 @@ export class WorkspaceService {
   private closed = false;
 
   constructor(private readonly store: ContextStore, private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> }) {}
+
+  async gitBaseline(workspaceId: string): Promise<GitBaseline> {
+    const previous = await this.store.getGitBaseline(workspaceId);
+    if(previous)return previous;
+    const record=await this.record(workspaceId), legacy=await legacyBaseline(record.directory);
+    // Import accepted bytes once, never materialize them over pending files.
+    const design=legacy?.design ?? {};
+    if(!legacy){
+      const state=await this.store.loadContext(workspaceId);
+      for(const file of state.files)if(file.path.startsWith('design/')){
+        let before:number|null=null;
+        do {const versions=await this.store.history(workspaceId,file.fileId,before,100);const user=versions.find(v=>v.author.type==='user');
+          if(user){if(user.hash){const content=await this.store.blob(workspaceId,user.hash);if(content!==null)design[`.rsi/context/${user.path}`]=content;}break;}
+          before=versions.length===100?versions.at(-1)!.seq:null;
+        }while(before!==null);
+      }
+    }
+    const members=legacy?.members ?? {};
+    if(!Object.keys(members).length){
+      // Existing active bundles are a bootstrap fallback, not a live mirror.
+      const store=this.store as ContextStore & {listMembers?(id:string):Promise<import('./team.js').StoredMember[]>};
+      for(const member of await store.listMembers?.(workspaceId)??[])if(member.value.retiredAt===null&&member.value.configuration){const source=member.value.configuration;for(const [path,content]of Object.entries(source.files))members[`${dirname(source.path)}/${path}`]=content;}
+    }
+    return this.store.initializeGitBaseline(workspaceId,{time:legacy?.time??record.createdAt,design,members});
+  }
 
   async models(workspaceId: string): Promise<WorkspaceModelsView> {
     await this.record(workspaceId);

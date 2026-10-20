@@ -1,3 +1,4 @@
+import { fileChanges, configurationCommits } from './workspace-git.js';
 import { memberRoot } from './workspace-layout.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -7,7 +8,7 @@ import { harnessConfig } from './harness-config.js';
 import { sourceBundle, type MemberConfigSource } from './member-config-format.js';
 import { memberFields, maxMembers, type MemberFields, type MemberActivationState, type NewMember, type StoredMember, type TeamService } from './team.js';
 import { modelRunSettings } from './workspace-models.js';
-import { decodeText, encodeText, sha256 } from './text.js';
+import { encodeText, sha256 } from './text.js';
 import { AppError, identity } from './types.js';
 
 interface MemberChange {
@@ -37,30 +38,10 @@ export class MemberConfigService {
     if (!lead) throw new AppError('lead_required', 'Workspace lead is unavailable', 409);
     return lead;
   }
-  async materialize(agentId: string): Promise<void> {
-    const lead = await this.team.find(agentId);
-    if (!lead?.value.lead || lead.value.retiredAt !== null) throw new AppError('access_denied', 'Only the lead reads member configuration', 403);
-    await this.harness.operation(agentId, async () => {
-      const files = await this.harness.files(agentId), environment = await this.harness.environment(agentId);
-      for (const member of await this.team.active(lead.workspaceId)) {
-        const source = member.value.configuration;
-        if (!source) continue;
-        await environment.history.initializeMemberBundle(agentId, source.path, async () => {
-          for (const [path, content] of Object.entries(source.files)) {
-            const absolute = join(files.root, dirname(source.path), path);
-            if (await files.ls.exists(absolute)) continue;
-            await files.write.mkdir(dirname(absolute));
-            await files.write.writeFile(absolute, content);
-          }
-        });
-      }
-    });
-  }
   async validate(agentId: string, path: unknown): Promise<MemberConfigReview> {
     const lead = await this.team.find(agentId);
     if (!lead?.value.lead || lead.value.retiredAt !== null) throw new AppError('access_denied', 'Only the lead validates member files', 403);
     if (path !== memberRoot) throw new AppError('invalid_input', `Validate the complete ${memberRoot} change set`);
-    await this.materialize(agentId);
     return this.harness.operation(agentId, async () => (await this.plan(lead.workspaceId, lead.id, 'pending')).review);
   }
   async review(workspaceId: string): Promise<MemberConfigReview> {
@@ -69,35 +50,25 @@ export class MemberConfigService {
   }
   async current(workspaceId: string) {
     const lead = await this.lead(workspaceId);
-    await this.materialize(lead.id);
     return this.harness.operation(lead.id, async () => {
       const pending = await this.plan(workspaceId, lead.id, 'pending');
       const committed = await this.plan(workspaceId, lead.id, 'committed');
-      const env = await this.harness.environment(lead.id), marker = await this.team.activation(workspaceId);
-      const part = env.parts.find(part => part.id === 'member-config')!;
-      const state = await env.history.ensure(lead.id, part, env.root);
-      const activeFiles: Record<string, string> = {};
-      for (const member of pending.active) for (const [path, text] of Object.entries(member.value.configuration!.files)) activeFiles[`${dirname(member.value.configuration!.path)}/${path}`] = text;
-      const baseline = marker?.revision ?? await env.history.textSnapshot(activeFiles);
-      const files = await env.history.snapshotFiles(pending.review.revision);
-      const changes = await env.history.compareSnapshots(baseline, pending.review.revision);
-      const pendingFiles = await env.history.compareSnapshots(state.committed, pending.review.revision);
-      const history = await env.history.committedSince(state.committed, marker?.revision ?? null);
-      const historyKnown = !!marker || !(await this.team.all(workspaceId)).some(member => member.value.configuration?.acceptedRevision || member.value.retiredAt !== null);
+      const marker=await this.team.activation(workspaceId);
+      const current=await this.harness.controlFiles(lead.id,'pending',memberRoot), accepted=await this.harness.controlFiles(lead.id,'committed',memberRoot);
+      const activeFiles:Record<string,string>={};
+      for(const member of pending.active)for(const [path,text]of Object.entries(member.value.configuration!.files))activeFiles[`${dirname(member.value.configuration!.path)}/${path}`]=text;
+      const history=await configurationCommits((await this.harness.environment(lead.id)).root,marker?.revision??null);
+      const changes=await fileChanges(activeFiles,current.files),pendingFiles=await fileChanges(accepted.files,current.files);
+      const files=Object.entries(current.files).map(([path,content])=>({path,content,problem:null,size:Buffer.byteLength(content)}));
       return {
         workspaceId, leadId: lead.id,
         active: { revision: marker?.revision ?? null, time: marker?.time ?? null },
-        current: { revision: pending.review.revision, members: pending.configurations, files },
+        current: { revision: current.revision, members: pending.configurations, files },
         changes,
-        status: { hasPending: pendingFiles.length > 0, pendingPaths: pendingFiles.map(file => file.path), valid: pending.review.valid, issues: pending.review.issues, ...history, historyKnown },
-        commit: { revision: pending.review.revision, base: state.committed },
-        activation: { revision: committed.review.revision, digest: committed.review.digest, valid: committed.review.valid, issues: committed.review.issues, hasChanges: state.committed !== marker?.revision },
+        status: { hasPending: pendingFiles.length > 0, pendingPaths: pendingFiles.map(file => file.path), valid: pending.review.valid, issues: pending.review.issues, ...history },
+        activation: { revision: committed.review.revision, digest: committed.review.digest, valid: committed.review.valid, issues: committed.review.issues, hasChanges: committed.review.changes.length > 0 },
       };
     });
-  }
-  async commit(workspaceId: string, revision: string, base: string, message: string) {
-    const lead = await this.lead(workspaceId);
-    return this.harness.commit(lead.id, 'member-config', message, { type: 'user', memberId: lead.id }, revision, base);
   }
   /** Only the user HTTP control boundary calls this, inside the workspace idle gate. */
   async activate(workspaceId: string, revision: string, digest: string) {
@@ -116,10 +87,6 @@ export class MemberConfigService {
           update.push({ ...current, revision: current.revision + 1, value: change.type === 'delete' ? { ...current.value, retiredAt: Date.now() } : { ...current.value, ...change.fields!, configuration: change.after } });
         }
       }
-      // These bundles already exist in user-accepted history. Mark them before
-      // persistence so later materialization cannot undo an intentional deletion.
-      const environment = await this.harness.environment(lead.id);
-      for (const change of review.changes) if (change.type !== 'delete') await environment.history.initializeMemberBundle(lead.id, change.path, async () => {});
       await this.team.activate(workspaceId, { expected: plan.active.map(m => ({ id: m.id, revision: m.revision })), modelsRevision: plan.modelsRevision, create, update, expectedActivation: plan.activation, activation: { revision, time: Math.max(Date.now(), (plan.activation?.time ?? -1) + 1) } });
       await this.harness.closeShells(update.map(member => member.id));
       return { revision, changes: review.changes.map(change => ({ type: change.type, path: change.path, name: change.name })), memberIds: [...plan.active.filter(member => !update.some(next => next.id === member.id && next.value.retiredAt !== null)).map(member => member.id), ...create.map(member => member.id)] };
@@ -129,28 +96,11 @@ export class MemberConfigService {
     const all = await this.team.all(workspaceId), active = all.filter(member => member.value.retiredAt === null);
     const activation = await this.team.activation(workspaceId);
     const configurations: Plan['configurations'] = [];
-    const models = await this.team.models(workspaceId), environment = await this.harness.environment(leadId);
-    const part = environment.parts.find(part => part.id === 'member-config')!;
-    const state = await environment.history.ensure(leadId, part, environment.root);
-    const revision = origin === 'pending' ? (await environment.history.checkpoint(leadId, part, environment.root, { type: 'harness', memberId: leadId }, 'Validate member files')).revision : state.committed;
-    const paths = await environment.history.paths(revision), entries = new Map<string, string>();
-    const textAt = async (path: string) => {
-      if (entries.has(path)) return entries.get(path)!;
-      const bytes = await environment.history.readSnapshotBytes(revision, path);
-      if (bytes === null) throw new AppError('invalid_config', `Referenced file is missing: ${path}`);
-      const text = decodeText(bytes);
-      if (text === null) throw new AppError('invalid_config', `${path} must be UTF-8 text without NUL bytes`);
-      encodeText(text); entries.set(path, text); return text;
-    };
-    const review: MemberConfigReview = { origin, revision, digest: '', valid: false, changes: [], issues: [] };
-    const issue = (path: string, error: unknown) => {
-      if (!(error instanceof AppError) || error.status >= 500) throw error;
-      review.issues.push({ path, code: error.code, message: error.message });
-    };
-    if (origin === 'committed') {
-      const selected = await environment.history.revision(revision);
-      if (revision !== activation?.revision && (selected.kind !== 'commit' || selected.actor.type !== 'user')) review.issues.push({ path: memberRoot, code: 'approval_required', message: 'User must commit the member-config files before activation' });
-    }
+    const models=await this.team.models(workspaceId),selected=await this.harness.controlFiles(leadId,origin,memberRoot);
+    const revision=selected.revision, paths=Object.keys(selected.files);
+    const textAt=async(path:string)=>{const text=selected.files[path];if(text===undefined)throw new AppError('invalid_config',`Referenced file is missing: ${path}`);encodeText(text);return text;};
+    const review:MemberConfigReview={origin,revision,digest:'',valid:false,changes:[],issues:[]};
+    const issue=(path:string,error:unknown)=>{if(!(error instanceof AppError)||error.status>=500)throw error;review.issues.push({path,code:error.code,message:error.message});};
     const designs = new Map<string, string>(), known = new Map(active.map(m => [m.value.configuration!.path.toLowerCase(), m]));
     const manifests = paths.filter(path => path.toLowerCase().endsWith('/member.json')), seen = new Set<string>(), resulting: MemberFields[] = [];
     for (const path of manifests) {

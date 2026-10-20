@@ -1,12 +1,12 @@
 import { WorkspaceClient, type WorkspaceChanges, type MemberConfigurationReview } from './workspace-client.js';
 
-export type ChangeOperation = 'design' | 'members' | 'activate';
+export type ChangeOperation = 'activate';
 export interface ChangesSnapshot {
   view: WorkspaceChanges | null; loading: boolean; error: string | null;
   operation: ChangeOperation | null; operationError: string | null; notice: string | null;
   activation: MemberConfigurationReview | null; activationLoading: boolean; activationError: string | null;
 }
-type Api = Pick<WorkspaceClient, 'changes' | 'committedMemberReview' | 'approveScope' | 'commitMemberConfiguration' | 'activateMemberConfiguration'>;
+type Api = Pick<WorkspaceClient, 'changes' | 'committedMemberReview' | 'activateMemberConfiguration'>;
 const message = (error: unknown) => error instanceof Error ? error.message : 'Changes could not be read';
 
 /** One file review in flight; activation validation never blocks its display. */
@@ -69,11 +69,9 @@ export class ChangesClient {
     this.publish({ operation: kind, operationError: null, notice: null });
     let success = false;
     try {
-      if (kind === 'design') await this.api.approveScope(this.workspaceId, view.leadId, 'design', { revision: view.design.revision, base: view.design.base, message: 'Approve design changes' });
-      else if (kind === 'members') await this.api.commitMemberConfiguration(this.workspaceId, { revision: view.members.revision, base: view.members.base, message: 'Approve member changes' });
-      else await this.api.activateMemberConfiguration(this.workspaceId, { revision: activation!.revision, digest: activation!.digest });
+      await this.api.activateMemberConfiguration(this.workspaceId, { revision: activation!.revision, digest: activation!.digest });
       success = true;
-      this.publish({ notice: kind === 'design' ? 'Design approved.' : kind === 'members' ? 'Member changes approved. Activate them when ready.' : 'Approved members activated.' });
+      this.publish({ notice: 'Committed members activated.' });
     } catch (error) { this.publish({ operationError: message(error) }); }
     finally {
       this.publish({ operation: null });

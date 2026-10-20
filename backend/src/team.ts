@@ -178,6 +178,7 @@ export class TeamService {
     const [issues] = await this.config.issuesFor([{ ...emptyRunSettings, ...value }]);
     return { id: member.id, revision: member.revision, value, issues: issues! };
   }
+  async requireWorkspace(workspaceId: string) { await this.workspaces.record(workspaceId); }
   async all(workspaceId: string) { await this.workspaces.record(workspaceId); return (await this.store.listMembers(workspaceId)).map(stored); }
   async activate(workspaceId: string, input: MemberActivation) { await this.store.activateMembers(workspaceId, input); }
   activation(workspaceId: string) { return this.store.getMemberActivation(workspaceId); }

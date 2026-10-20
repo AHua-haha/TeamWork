@@ -83,18 +83,6 @@ test('Bash input accepts execution options without authority extensions', () => 
   for (const value of [{ command: 'pwd', timeout: 0 }, { command: 'pwd', background: 'yes' }, { command: 'pwd', metadata: { git: { scope: 'design', approved: true } } }]) assert.throws(() => parseBashInput(value));
 });
 
-test('background Git keeps its launch scope while later calls select another scope or native Git', { timeout: 30000 }, () => withFolder(async root => {
-  const git = (label: string) => async (args: string[]) => `${label}:${args.join(' ')}\n`;
-  try {
-    const job = await executeBash({ root, memberId: 'git-jobs', request: { command: 'sleep .2; git status > scoped.log', background: true }, signal: signal(), git: git('first') });
-    const second = await executeBash({ root, memberId: 'git-jobs', request: { command: 'git status' }, signal: signal(), git: git('second') });
-    assert.equal(second.output, 'second:status\n');
-    await run(root, 'git-jobs', { command: `wait %${job.jobId}` });
-    assert.equal(await readFile(join(root, 'scoped.log'), 'utf8'), 'first:status\n');
-    assert.match((await run(root, 'git-jobs', { command: 'git --version' })).output, /^git version /);
-  } finally { await resetMemberShell('git-jobs'); }
-}));
-
 test('explicit member reset stops a live native job and starts a fresh shell', { timeout: 30000 }, () => withFolder(async root => {
   try {
     await run(root, 'reset-jobs', { command: 'export OLD_STATE=present; sleep 30', background: true });

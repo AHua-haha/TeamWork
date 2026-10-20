@@ -89,7 +89,7 @@ GET /workspaces/:workspaceId/models returns {revision, value, issues}; value is 
 
 ## Fresh workspace bootstrap
 
-Create and adopt initialize a reserved `.rsi/` root before returning success. It owns backend-maintained workspace filesystem state: `.rsi/context/design/` for design nodes and `.rsi/context/implement/` for mirrored implementation context, `.rsi/members/` for member JSON/Markdown bundles, and `.rsi/harness/` for private scoped Git checkpoints and approval history. Durable chat/configuration records remain in the backend database. Members edit the project implementation directly; semantic implementation commits use the project repository.
+Create and adopt initialize .rsi/context/design, .rsi/context/implement and .rsi/members, plus durable SQL bootstrap control content. New workspaces create no .rsi/harness, private Git repository or checkpoints. Project files and ordinary .git are preserved; the agent initializes/manages Git through Bash. Chat/configuration remain in SQL.
 
 The backend creates `.rsi/context/design/metadata.json` containing only an empty implementation mapping and `.rsi/context/design/design.md` with purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. The initial lead selects `metadata.json` as its working design, has no dependencies and receives the fixed broad execute base, and uses the workspace default model. Its exact JSON/prompt bundle is present under `.rsi/members/<lead-id>/` before success. Backend bootstrap establishes the initial active source and member-config history baseline; later design/member edits still require normal user commit and separate member activation. Root-design assignment does not grant whole-project implementation authority.
 

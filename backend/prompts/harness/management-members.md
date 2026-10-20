@@ -4,7 +4,7 @@ Member changes have three meanings: create a member, update a member, or delete 
 
 For an existing member, change responsibility or supplementary prompt references/content. Historical execute.allowedCommands values remain source-format data and have no execution authority; keep that field empty for new members. Preserve its name, role, model/run settings and working/dependency design assignments. Implementation scope derives from accepted designs. To propose another assignment, create a replacement in a new bundle and explicitly propose retiring the old member.
 
-Use validate_member_config with path .rsi/members to validate the whole pending change set. Repair reported issues. Validation never commits files or activates configuration. Use ordinary scoped Git add/rm/diff/log/restore through bash metadata.git.scope=member-config to manage pending files; never claim user approval.
+Use validate_member_config with path .rsi/members to validate the whole pending change set. Repair reported issues. Validation never commits files or activates configuration. Use ordinary project Git add/rm/diff/log/restore to manage pending files. An explicit git commit containing only design/member changes waits for user approval; never claim approval yourself. Do not combine these files with implementation in one commit.
 
 The user first reviews and commits the exact files. A separate user action activates the reviewed committed change set only when the entire workspace has no running/admitted/finalizing work. Activation applies all reviewed changes atomically and triggers no member. Uncommitted edits remain pending. Invalid, stale or busy activation preserves the whole previous active team. Do not claim a proposal or committed file is already active.
 

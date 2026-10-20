@@ -1,3 +1,4 @@
+import { CommitReviewTab } from './CommitApproval.js';
 import { writableContextPath } from './context-path.js';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ContextFeed, WorkspaceClient, type ContextOverview, type Entry, type FeedSnapshot, type Found, type Workspace } from '../client/workspace-client.js';
@@ -21,6 +22,7 @@ const noSubscribe = () => () => {};
 const narrow = () => window.matchMedia('(max-width: 760px)').matches;
 
 interface PanelProps {
+  commitReview?:{id:string;request:number}|null;
   open: boolean;
   expanded: boolean;
   /** The workspace of the page, from its address. */
@@ -34,7 +36,7 @@ interface PanelProps {
 }
 
 /** The workspace page's sidebar: the pinned Team tab and the open files in tabs, with the workspace tree on the right. */
-export function WorkspacePanel({ open, expanded, workspaceId, team, onExpand, onClose, onDirty, onDiscuss }: PanelProps) {
+export function WorkspacePanel({ open, expanded, workspaceId, team, onExpand, onClose, onDirty, onDiscuss, commitReview }: PanelProps) {
   const client = useMemo(() => new WorkspaceClient(), []);
   const [visited, setVisited] = useState(open);
   if (open && !visited) setVisited(true);
@@ -61,7 +63,7 @@ export function WorkspacePanel({ open, expanded, workspaceId, team, onExpand, on
   if (!visited) body = null;
   else if (loadError) body = notice(<div className="sidebar-error" role="alert">{loadError}<button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></div>);
   else if (!workspace) body = notice(<p className="sidebar-muted">Opening workspace…</p>);
-  else body = <WorkspaceView key={workspace.workspaceId} client={client} workspace={workspace} team={team} actions={actions} onDirty={onDirty} onDiscuss={onDiscuss} />;
+  else body = <WorkspaceView key={workspace.workspaceId} client={client} workspace={workspace} team={team} actions={actions} commitReview={commitReview} onDirty={onDirty} onDiscuss={onDiscuss} />;
 
   return <aside className={`workspace-panel ${open ? 'open' : ''} ${expanded ? 'expanded' : ''}`} aria-label="Design, team and files" aria-hidden={!open} inert={!open}>{body}</aside>;
 }
@@ -75,7 +77,7 @@ type DialogState = { type: 'new'; source: FileSource; folder: string } | { type:
 /** An open file. Its handlers are made once, so the file view's effects keep their subscriptions. */
 interface Tab extends FileTarget { key: number; startEditing: boolean; onDirty(dirty: boolean): void; onMoved(path: string): void }
 
-function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }: { client: WorkspaceClient; workspace: Workspace; team: TeamState; actions: ReactNode; onDirty(dirty: boolean): void; onDiscuss(reference: DiscussionReference): void }) {
+function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss, commitReview }: { commitReview?:{id:string;request:number}|null; client: WorkspaceClient; workspace: Workspace; team: TeamState; actions: ReactNode; onDirty(dirty: boolean): void; onDiscuss(reference: DiscussionReference): void }) {
   const id = workspace.workspaceId;
   const [feed, setFeed] = useState<ContextFeed | null>(null);
   const [feedFrom, setFeedFrom] = useState({ seq: workspace.context.seq });
@@ -88,10 +90,14 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
   const [found, setFound] = useState<{ context: Found; project: Found } | null>(null);
   const [findError, setFindError] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
-  const [activeKey, setActiveKey] = useState<number | 'design' | 'team' | 'changes' | 'files'>('design');
+  const [activeKey, setActiveKey] = useState<number | 'design' | 'team' | 'changes' | 'files' | 'commit-review'>('design');
+  useEffect(()=>{if(commitReview)setActiveKey('commit-review');},[commitReview]);
   const [selectedDesign, setSelectedDesign] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const designs = useDesigns(client, id, feed);
+  const membersWorking=team.team?.members.some(member=>member.running)??false;
+  const wasWorking=useRef(false);
+  useEffect(()=>{if(wasWorking.current&&!membersWorking)void designs.refresh();wasWorking.current=membersWorking;},[membersWorking,designs.refresh]);
   const [scopeNote, setScopeNote] = useState<string | null>(null);
   const [dirtyKeys, setDirtyKeys] = useState<ReadonlySet<number>>(() => new Set());
   const [treeOpen, setTreeOpen] = useState(false);
@@ -196,6 +202,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
       <button type="button" className="tree-action" aria-pressed={treeOpen} aria-label="File tree" title={treeOpen ? 'Hide file tree' : 'Show file tree'} onClick={() => setTreeOpen(!treeOpen)}><Glyph name="tree" /></button>
       {actions}
     </>}>
+      {commitReview&&<div className={`workspace-tab ${activeKey==='commit-review'?'active':''}`}><button type="button" onClick={()=>setActiveKey('commit-review')}>Commit review</button></div>}
       {(['design', 'team', 'changes', 'files'] as const).map(view => <div key={view} className={`workspace-tab pinned ${activeKey === view ? 'active' : ''}`}>
         <button type="button" aria-current={activeKey === view ? 'true' : undefined} onClick={() => {
           setActiveKey(view); setScopeNote(null); if (view === 'team') void team.refresh(); if (view === 'files') setTreeOpen(true); else setTreeOpen(false);
@@ -222,6 +229,7 @@ function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss }:
     {designs.error && activeKey !== 'design' && <div className="file-banner file-banner-error" role="alert">Design updates failed: {designs.error}<button type="button" onClick={() => void designs.refresh()}>Retry</button></div>}
     <div className="workspace-body">
       <div className="workspace-viewer">
+        {commitReview&&<div className="file-tab-panel" hidden={activeKey!=='commit-review'}><CommitReviewTab key={commitReview.id} workspaceId={id} id={commitReview.id}/></div>}
         {tabs.map(tab => <div key={tab.key} className="file-tab-panel" hidden={tab.key !== active?.key}>
           <FileView client={client} workspaceId={id} workspaceName={workspace.name} target={tab} feed={feed} startEditing={tab.startEditing}
             onMoved={tab.onMoved} onDirty={tab.onDirty} onOpenLink={target => show(target)}

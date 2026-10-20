@@ -22,13 +22,13 @@ Three semantic operations are derived from the proposed member files:
 
 Changing a working/dependency assignment is not an update; an explicit replacement can be proposed with create/delete and remains subject to user review. Implementation access is always derived from accepted assigned designs; it cannot be independently configured. A separately user-approved design-mapping change remains a design change, not a member reassignment.
 
-Working mappings grant writable implementation and paired working-design implementation context; dependency designs grant read-only implementation/context, with read-only precedence and protected control paths for write/edit inputs and controlled Git scopes. Broad Bash authority is separate. Base tools and enforced policy cannot be changed through member prompt or execution configuration. The lead keeps global design-context management at .rsi/context/design and member management at .rsi/members; unassigned implementation-code access remains empty. Context paths are derived per design independently of the member identity.
+Working mappings grant writable implementation and paired implementation context; dependency paths remain read-only for write/edit. Broad Bash is separate. Explicit commit classification uses protected roots and accepted project-wide implementation mappings, without Git scope state. The lead maintains .rsi/context/design and .rsi/members. Pending design edits grant no source authority.
 
 ### Member change workflow
 
 The workflow is edit -> validate -> user commit -> separate user activation. Pending files, user-committed files and active configuration are distinct states. Validation reports create/update/delete changes and issues; it neither accepts files nor activates settings. Invalid files preserve previous stable active configuration and pending work. Intentional deletions remain pending rather than being recreated by discovery/materialization; a missing referenced prompt is an error, not a member deletion.
 
-Only the user commits member configuration. The user reviews and commits exact file content under the existing member-config scope policy. Commit does not create, update or retire active members. Later, only the user can activate the reviewed committed change set. Uncommitted edits are excluded from activation and remain pending.
+The agent proposes ordinary Git commits. Design/member-only commits require user Accept; mixed protected/implementation commits refuse. Commit does not change active members. Only the user separately activates the reviewed committed change set; newer uncommitted files remain pending.
 
 Activation requires the entire workspace team to be idle, including admitted runs and outstanding model/tool/finalization work. It applies the complete reviewed change set atomically. It neither stops running work nor queues an automatic retry. New work admission cannot race through the idle check. Activation does not trigger any member.
 
@@ -56,7 +56,7 @@ Every model call receives current role, roster/readiness/running information, st
 
 ## Outputs and observable effects
 
-Pending member/design files are checkpointed without acceptance. User commit pins exact scope bytes and accepted base. User activation separately changes the stable active member source/projection in one atomic batch. Member identity, revisions, content attribution and exact prompt bytes remain backend-managed and durable.
+Pending files remain ordinary filesystem edits. There are no automatic Git checkpoints or scope histories. Approved explicit commits become normal project Git commits. User activation separately updates durable active source/projections atomically; backend identity/revisions and exact prompt bytes remain durable.
 
 Read-only team/member inspection continues returning active configuration, readiness/running state and the three effective harnesses with backend-derived implementation paths. GET /workspaces/:workspaceId/team returns active members; GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}. Configuration contains exact active JSON/Markdown source, path, digest, attribution/time and backend format metadata. Member POST/PUT/DELETE and member /config mutation routes remain absent. It does not activate drafts or create additional checkouts. User activation is a dedicated control operation; agent authority remains file editing and validation, not activation.
 
@@ -66,7 +66,7 @@ Group publication and selected run admission remain atomic and database-backed. 
 
 Invalid schemas/paths/models/designs, forbidden updates, lead deletion, duplicate names, unsafe prompt references and base-policy overrides refuse the change set. Invalid references do not grant permissive scope. Metadata cannot claim lead/user authority.
 
-Busy, stale or failed activation leaves the entire active team unchanged and retains committed/pending files. Group mention/readiness/budget/busy refusals remain atomic. Storage/checkpoint errors cannot be claimed as successful file acceptance, activation or publication.
+Busy, stale or failed activation preserves active team and current/committed files. Group admission/publication refusal stays atomic. Persistence failures cannot be claimed as successful commits, activation or publication.
 
 ## Guarantees and limits
 
@@ -89,7 +89,7 @@ No automatic configuration activation, automatic stop/retry, new trigger queue, 
 
 ## Unified streaming and model completion
 
-Members finish using ordinary assistant text at natural model completion. Tool calls continue the run; metadata-marked commentary continues privately. Truncated responses fail without publication. Final selection prefers explicitly final text blocks and otherwise uses unphased text at natural completion. The team checkpoints and offers the selected text for atomic group acceptance; refusal appends private feedback and continues. Only accepted finals reach peer context.
+Members finish with ordinary assistant text at natural model completion. Tool calls and commentary continue privately; truncation fails without publication. Selected final text is offered directly for atomic group acceptance; refusal appends private feedback and continues. No Git checkpoint is required.
 
 ## Backend API guidance for member display and configuration review
 
@@ -101,7 +101,7 @@ Expose the complete currently active member information: identity, role, respons
 
 ### Inspect current configuration and status since activation
 
-Current configuration means the latest editable member files in the lead's member-config scope, including uncommitted edits. It is distinct from the active database snapshot and may contain invalid or incomplete proposals. Inspection provides:
+Current configuration means the current .rsi/members files, including invalid or incomplete proposals. It is distinct from the active SQL snapshot. Inspection provides:
 
 - The current member configuration and referenced supplementary prompt contents, with raw file content and validation issues when a parsed configuration is unavailable.
 - The active baseline needed to show one comparison: active configuration to current configuration.
@@ -116,7 +116,7 @@ The frontend displays the current configuration, its commit history/pending stat
 
 ### User operations
 
-Commit accepts the exact reviewed pending member files into harness Git. It leaves active member configuration unchanged. Activation applies the exact reviewed committed member configuration atomically to the database only while the entire workspace team is idle, including admission and finalization. Uncommitted edits remain pending and are excluded from activation. The single active-to-current inspection diff must not imply that pending content is already committed or will be activated. Operation review identifiers distinguish the reviewed current files from the committed state eligible for activation without requiring a second displayed diff.
+An explicit protected Git commit waits for user approval above the composer and commits only the reviewed candidate. Member activation is separate, requires the whole workspace idle, and revalidates the exact committed revision/digest. Pending edits never activate implicitly. The old configuration/commit and member/harness mutation/history routes are removed.
 
 Existing lifecycle constraints continue: update changes only execution rules, supplementary prompts and responsibility; delete retires a worker and preserves history/files; the lead cannot be deleted. Validation, commit and activation do not trigger work. Changed reviewed state is refused and requires refreshed review; invalid configuration, stale reviews and busy activation preserve the previous active team.
 
@@ -135,8 +135,8 @@ The [frontend design](../../frontend/design.md#member-tree-active-details-and-co
 
 - `GET /workspaces/:workspaceId/team` returns the active roster with readiness/activity and derived harness scope.
 - `GET /workspaces/:workspaceId/team/members/:memberId` returns `{member, configuration, harnesses}` with complete active source and effective rules. This read does not create additional checkouts.
-- `GET /workspaces/:workspaceId/team/configuration/current` takes no query parameters and returns the fields below. It may initialize the shared workspace and capture a checkpoint; it does not commit files, change active settings or trigger work.
-- `POST /workspaces/:workspaceId/team/configuration/commit` accepts only `{revision, base, message}` from the returned `commit` object plus user intent. It returns the harness commit result. The lead must be idle. Invalid pending configuration can be accepted as files, but cannot activate until a valid configuration is committed.
+- `GET /workspaces/:workspaceId/team/configuration/current` returns the fields below. It reads ordinary files and Git, and may initialize the one-time SQL import baseline; it never materializes/checkpoints/commits files or activates settings.
+- `GET /workspaces/:workspaceId/team/commit-approvals`, `GET .../commit-approvals/:id` and `POST .../commit-approvals/:id` expose summary, exact diff review and Accept/Deny/feedback. The harness contract defines these payloads. No independent scope commit endpoint remains.
 - `POST /workspaces/:workspaceId/team/configuration/activate` accepts only `{revision, digest}` from the returned `activation` object. It returns `{revision, changes, memberIds}` and requires the entire workspace idle.
 
 Current inspection returns:
@@ -148,14 +148,14 @@ Current inspection returns:
 | `current: {revision, members, files}` | Immutable current file snapshot; parsed valid members contain path, optional existing member ID and validated fields; files contain path, raw content, byte size and optional preview problem |
 | `changes` | Flat active-to-current file differences: path, add/modify/delete action, unified patch and truncation flag |
 | `status: {hasPending, pendingPaths, valid, issues, commits, more, historyKnown}` | Pending relative to latest user commit; current validation; latest commit records after activation and history-boundary availability |
-| `commit: {revision, base}` | Exact current snapshot and latest committed base for file acceptance |
+
 | `activation: {revision, digest, valid, issues, hasChanges}` | Exact committed snapshot/review, independent committed validation and whether its activation boundary differs |
 
-A validation issue contains path, code and message. Raw previews remain available even when a member cannot be parsed. Text previews are bounded to 1 MiB per file and 4 MiB total; binary/invalid UTF-8/over-limit files have null content and an explicit problem. Each file patch is bounded to 262,144 characters with an explicit truncation flag. Renames appear as deletion/addition. Commit records include revision, tree, kind, actor, message and epoch-millisecond time, newest first; at most 100 are returned and `more` marks additional history. The prototype does not page older inspection history. Generic file history remains separate.
+A validation issue has path, code and message. Malformed UTF-8 text remains inspectable as text/validation issues; binary, link and over-limit control files refuse explicitly. Reads allow 1 MiB per file, 16 MiB total and 2,000 files. Patches cap at 262,144 characters per file with truncation flags. Renames appear as deletion/addition. Native Git commit records contain revision, author, message and epoch-millisecond time, newest first, at most 100 with more. historyKnown indicates whether the active marker is a reachable normal Git commit; legacy/bootstrap digest markers do not pretend to be Git history.
 
 The activation boundary is persisted atomically even when no member fields change. Replaying a successful activation review is stale; refreshing can review the same files against the new boundary. Before the first tracked activation, active source bytes supply the comparison baseline. A legacy team with earlier accepted sources or retirements and no workspace activation marker reports `historyKnown: false`; available history is not claimed to begin at an exact known activation. The next successful activation establishes that boundary. Active runtime loading continues using database source snapshots independently of the Git marker.
 
-A changed pending snapshot or committed base refuses commit with `stale_revision`. Changed activation, active team, models or referenced designs refuse activation with `stale_revision`. Busy commit reports `member_busy`; busy activation reports `workspace_busy`; invalid activation reports `invalid_config`. Errors preserve active state and require refreshed review rather than silently selecting different bytes. Unknown request fields and query parameters are refused.
+Changed commit candidates/HEAD refuse approval as stale_approval; cancellation never replays them. Changed activation, active team, models or accepted designs refuse activation as stale_revision. Busy activation reports workspace_busy; invalid activation reports invalid_config. Unknown input fields/queries refuse; active state is preserved.
 
 
 ## Initial lead configuration
@@ -180,11 +180,11 @@ The execute base admits arbitrary Bash for every active member. Existing execute
 
 ## Harness tool execution boundary
 
-Workspace members receive native Pi file/search tools. Read-only tools inspect workspace content; write/edit enforce accepted assignment and role grants at invocation. Custom Bash supplies one persistent shell per member with system reads, whole-workspace/workspace-temp writes and networking. This broader Bash authority does not enforce working-design scopes. Pi content/details and native truncation are preserved. Custom results use readable content plus relevant metadata. Shells/jobs survive runs and stop on context reset, retirement, affected configuration activation/update, or shutdown. Foreground timeout/cancellation resets the member shell/jobs; background jobs use native job IDs and default their output to /dev/null unless explicitly redirected. Scoped Git acceptance and activation APIs retain their checks but do not claim to prevent all raw workspace changes.
+Workspace members receive native Pi file/search tools. Read-only tools inspect workspace content; write/edit enforce accepted assignment and role grants at invocation. Custom Bash supplies one persistent shell per member with system reads, whole-workspace/workspace-temp writes and networking. This broader Bash authority does not enforce working-design scopes. Pi content/details and native truncation are preserved. Custom results use readable content plus relevant metadata. Shells/jobs survive runs and stop on context reset, retirement, affected configuration activation/update, or shutdown. Foreground timeout/cancellation resets the member shell/jobs; background jobs use native job IDs and default their output to /dev/null unless explicitly redirected. Explicit commit approval and idle activation remain separate; indirect Git is outside prototype detection.
 
 ## Lightweight Changes inspection
 
-GET /workspaces/:workspaceId/team/changes returns workspaceId, leadId, design and member scope reviews ({memberId,partId,revision,base,changes}) plus activation {revision,activeRevision,hasChanges}. It reads fixed approved scope refs and current files; no full member validation, active-file materialization, raw configuration dump or commit-history enumeration occurs. activation.revision is the approved member commit; activeRevision is the last activated revision or null. A legacy missing activation marker conservatively reports changes; validation remains authoritative.
+GET /workspaces/:workspaceId/team/changes returns {workspaceId,leadId,design:{revision,base,changes},members:{revision,base,changes},activation:{revision,activeRevision,hasChanges}}. File groups compare ordinary committed files (bootstrap/import content before Git tracking) against current files. Reads preserve staging, history and active settings; no full member validation or commit enumeration runs. Activation hasChanges compares committed member bytes against active bundles rather than unrelated commit IDs.
 
 GET configuration?source=committed supplies the separate approved-configuration validation/digest. It may run after files display when approved and active differ. Existing commit/activate operations retain exact revision/digest, stale/busy checks and atomic activation; reading changes never approves or activates.
 

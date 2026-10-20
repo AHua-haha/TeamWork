@@ -79,6 +79,7 @@ interface Job { agentId: string; controller: AbortController; done: Promise<void
 
 export class AgentRuntime {
   readonly progress: ProgressStore;
+  private readonly completionReads = new Map<string, Promise<RunState>>();
   private readonly jobs = new Map<string, Job>();
   private readonly finalizationFailures = new Map<string, unknown>();
   private accepting = false;
@@ -170,11 +171,18 @@ export class AgentRuntime {
   }
 
   /** Resolves with the run's final state once its work has ended here. A run this runtime does not run reports its stored state at once. */
-  async finished(agentId: string, runId: string): Promise<RunState> {
-    await this.jobs.get(runId)?.done;
-    const { state } = await this.store.followSnapshot(agentId, runId, 0, false);
-    this.checkFinalization(runId);
-    return state.run!;
+  finished(agentId: string, runId: string): Promise<RunState> {
+    const key=agentId+'\0'+runId;
+    const existing=this.completionReads.get(key);
+    if(existing)return existing;
+    const request=(async()=>{
+      await this.jobs.get(runId)?.done;
+      const {state}=await this.store.followSnapshot(agentId,runId,0,false);
+      this.checkFinalization(runId);return state.run!;
+    })();
+    this.completionReads.set(key,request);
+    void request.finally(()=>{if(this.completionReads.get(key)===request)this.completionReads.delete(key);}).catch(()=>{});
+    return request;
   }
 
   /** The text of the last assistant message of a run that has any, or an empty string. */
@@ -315,7 +323,7 @@ export class AgentRuntime {
       status = signal.aborted ? 'cancelled' : 'failed';
       failure = { code: signal.aborted ? 'cancelled' : error instanceof AppError ? error.code : 'runtime_error', message: signal.aborted ? 'Run cancelled' : error instanceof Error ? error.message : 'Runtime failed' };
     }
-    // Cancellation stops observation promptly, but a checkpoint must wait for file effects to stop.
+    // Cancellation stops observation promptly, but finalization must wait for tool effects to stop.
     await Promise.allSettled([...pendingEffects]);
     try {
       if (entered) await this.policy.afterRun?.({ agentId: run.agentId, runId: run.runId, status });

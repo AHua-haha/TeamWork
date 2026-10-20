@@ -120,7 +120,7 @@ If execution stopped after recording a tool call but before recording its result
 
 - Invalid/missing member documents are private repair diagnostics; commands from those documents do not run. Existing documents are not silently overwritten or converted.
 - Ordinary retrieval failures become recorded results for the model to handle. No automatic retries or rollback.
-- Cancellation aborts retrieval/model/tool work under existing lifecycle rules and retains recorded private work for executed runs. A cancelled waiting run has no processed prefix or file checkpoint.
+- Cancellation aborts retrieval/model/tool work under existing lifecycle rules and retains recorded private work for executed runs. A cancelled waiting run has no processed prefix and creates no Git history.
 - Storage/runtime ownership failures are explicit and cannot claim context finalization without durable state. Existing terminal persistence failure/restart recovery applies.
 - Context-only missing-tool errors do not imply the tool had no effects and never cause automatic replay.
 - Explicit idle chat reset clears group/private history, retained-range markers and processed boundaries under the existing cursor reset contract. Project/context documents and their configured retrieval remain preserved.

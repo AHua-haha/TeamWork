@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-Provide reusable tools for agents assembled by the harness. Reuse Pi's built-in tool contracts and default operations wherever they fit. Customize capabilities that require project-specific behavior, including Bash execution and scoped Git control.
+Provide reusable tools for agents assembled by the harness. Reuse Pi's built-in tool contracts and default operations wherever they fit. Customize capabilities that require project-specific behavior, including Bash execution and explicit Git commit approval.
 
 The harness selects tools and authorizes invocations. It does not implement permission control by replacing the filesystem operations used by the built-in tools. Tools remain independent of a particular agent; the backend binds the caller's identity and authority.
 
@@ -80,7 +80,7 @@ A failed operation does not imply rollback of filesystem changes already made. I
 - No HTTP filesystem operation service is required between tools and harness.
 - No new tool for checkpoints, approval, activation or final response is introduced.
 - Pi file-tool inputs must resolve inside the workspace. Existing ancestors that resolve outside it are refused. write/edit targets may not traverse symbolic links. These input checks are not OS isolation against concurrent broad Bash mutations; search tools preserve their native traversal/ignore behavior.
-- Bash input/output, shell/job behavior, resource policy and lifecycle are defined in the Bash contract. Optional scoped Git is a workflow feature; raw Bash/native Git have the deliberate broader workspace authority.
+- Bash input/output, shell/job behavior, resource policy and lifecycle are defined in the Bash contract. Explicit Git commit approval is a workflow feature; raw Bash/native Git have the deliberate broader workspace authority.
 
 ## Acceptance examples
 

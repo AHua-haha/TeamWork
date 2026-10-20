@@ -24,7 +24,7 @@ test('member requests get team rules and only their harness design and implement
   assert.doesNotMatch(request.context.systemPrompt!, /BACKEND SOURCE/);
   assert.match(request.context.systemPrompt!, /Resolved permissions/);
   assert.doesNotMatch(request.context.systemPrompt!, /FRONTEND SOURCE|Design for Frontend/);
-  assert.match(request.context.systemPrompt!, /commits require user approval/);
+  assert.match(request.context.systemPrompt!, /commits wait for user|waits for user approval/);
   assert.match(request.context.systemPrompt!, /standing words/);
   assert.deepEqual(names(request).sort(), ['bash', 'edit', 'find', 'grep', 'ls', 'read', 'web_fetch', 'web_search', 'write']);
   assert.deepEqual(request.context.tools!.map(tool => tool.name), names(request));
@@ -42,7 +42,7 @@ test('the lead receives design maintenance, choices and management tools with sh
   assert.match(request.context.systemPrompt!, /offer concrete choices with their tradeoffs and your recommendation/);
   assert.match(request.context.systemPrompt!, /wait for the user's answer/);
   assert.match(request.context.systemPrompt!, /Assign work in your final group response/);
-  assert.match(request.context.systemPrompt!, /Design\/member semantic commits require user acceptance/);
+  assert.match(request.context.systemPrompt!, /design\/member-only waits for user approval/);
   await seedDesign(fixture.workspaces, fixture.workspaceId, 'metadata.json', { content: 'Project', implementation: ['.'] });
   await configureHarness(fixture, 'Lead', { designScope: { working: ['metadata.json'], dependencies: [] }, allowedCommands: [{ kind: 'executable', executable: 'bash' }] });
   const configured = await fixture.team.policy(base).buildRequest(scope(fixture.lead.memberId), { revision: 0, entries: [] });

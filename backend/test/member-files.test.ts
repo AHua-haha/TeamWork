@@ -53,7 +53,7 @@ test('file tools read working design and edit implementation while dependencies 
 test('scope hides unrelated implementation and context while exposing ancestors for navigation', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['src/backend.ts']);
   await mkdir(join(fixture.directory, 'src'));
-  await mkdir(join(fixture.directory, '.git'));
+  await (await import('../src/workspace-git.js')).gitText(fixture.directory,['init','-q']);
   await writeFile(join(fixture.directory, 'src', 'frontend.ts'), 'frontend');
   await writeFile(join(fixture.directory, 'src', 'backend.ts'), 'backend');
   await writeFile(join(fixture.directory, 'README.md'), 'readme');

@@ -1,3 +1,4 @@
+import { acceptFiles, initGit } from './git-fixture.js';
 import { seedDesign } from './design-fixture.js';
 import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
@@ -11,8 +12,7 @@ const signal = () => new AbortController().signal;
 const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['work/metadata.json'], dependencies: [] }, execute: { allowedCommands: [] as unknown[] } });
 async function setup(f: Fixture) {
   await seedDesign(f.workspaces, f.workspaceId, 'work/metadata.json', { content: 'Work', implementation: ['src'] });
-  await f.team.configuration.materialize(f.lead.memberId);
-}
+  }
 async function draft(f: Fixture, path: string, value: unknown, prompt = 'Member prompt') {
   const files = await f.team.harness.files(f.lead.memberId);
   await files.write.mkdir(join(files.root, dirname(path), 'prompts'));
@@ -20,11 +20,7 @@ async function draft(f: Fixture, path: string, value: unknown, prompt = 'Member 
   await files.write.writeFile(join(files.root, dirname(path), 'prompts/member.md'), prompt);
   return files;
 }
-async function commit(f: Fixture) {
-  const part = (await f.team.harness.inspect(f.lead.memberId)).parts.find(p => p.state.part.id === 'member-config')!;
-  await f.team.harness.commit(f.lead.memberId, 'member-config', 'Accept member changes', { type: 'user', memberId: f.lead.memberId }, part.revision, part.state.committed);
-  return f.team.reviewConfiguration(f.workspaceId);
-}
+const commit=(f:Fixture)=>acceptFiles(f);
 const activate = async (f: Fixture) => { const review = await commit(f); assert.equal(review.valid, true, JSON.stringify(review.issues)); return f.team.activateConfiguration(f.workspaceId, review.revision, review.digest); };
 
 test('file validation and user commit do not activate; separate activation consumes committed bytes only', () => withTeam(async f => {
@@ -70,11 +66,10 @@ test('scoped Git deletion persists through materialization/restart and activatio
   await setup(f); const path = '.rsi/members/backend/member.json'; await draft(f, path, manifest('Backend')); await activate(f);
   const member = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
   f.store.agentContexts.set(member.id, [{ messageId: 'retained', message: { role: 'user', content: 'History', timestamp: 0 }, metadata: {} }]);
-  const deletion = await f.team.harness.bash(f.lead.memberId, { command: `git rm -r -- ${dirname(path)}`, metadata: { git: { scope: 'member-config' } } }, signal());
+  const deletion = await f.team.harness.bash(f.lead.memberId, { command: `git rm -r -- ${dirname(path)}` }, signal());
   assert.equal(deletion.exitCode, 0, deletion.output);
-  await f.team.configuration.materialize(f.lead.memberId);
   const reopened = new TeamSystem(f.store, f.workspaces, stubConfig); reopened.attach(f.runtime);
-  try { await reopened.configuration.materialize(f.lead.memberId); } finally { await reopened.runner.close(); }
+  try { await reopened.initialize(); } finally { await reopened.runner.close(); }
   const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members');
   assert.equal(pending.valid, true, JSON.stringify(pending.issues)); assert.equal(pending.changes[0]!.type, 'delete');
   await activate(f); assert.equal(await f.team.service.byName(f.workspaceId, 'Backend'), undefined);
@@ -91,14 +86,12 @@ test('malformed references, lead deletion, duplicate names and base-policy overr
     assert.deepEqual(await f.team.service.team(f.workspaceId), original);
   }
   const files = await f.team.harness.files(f.lead.memberId), leadSource = await f.team.configuration.accepted(f.workspaceId, f.lead.memberId);
-  await rm(join(files.root, leadSource.path)); await f.team.configuration.materialize(f.lead.memberId);
-  assert.ok((await f.team.configuration.validate(f.lead.memberId, '.rsi/members')).issues.some(i => i.code === 'lead_required'));
+  await rm(join(files.root, leadSource.path)); assert.ok((await f.team.configuration.validate(f.lead.memberId, '.rsi/members')).issues.some(i => i.code === 'lead_required'));
   await assert.rejects(f.team.configuration.validate((await worker(f, 'Worker')).memberId, '.rsi/members'), code('access_denied'));
 }));
 
 test('unrelated running workspace member blocks activation; stale active/config/design reviews fail without partial application', () => withTeam(async f => {
   await setup(f); const other = await worker(f, 'Other', ['other']);
-  await f.team.configuration.materialize(f.lead.memberId);
   await draft(f, '.rsi/members/backend/member.json', manifest('Backend'));
   const review = await commit(f); const before = await f.team.service.team(f.workspaceId);
   await f.team.runner.postUser(f.workspaceId, '@Other work');
@@ -171,8 +164,7 @@ test('binary prompt bytes and an active configuration changed after review are r
   await setup(f); const path = '.rsi/members/backend/member.json'; const files = await draft(f, path, manifest('Backend'));
   const { writeFile } = await import('node:fs/promises');
   await writeFile(join(files.root, '.rsi/members/backend/prompts/member.md'), Buffer.from([0xff, 0xfe]));
-  const invalid = await f.team.configuration.validate(f.lead.memberId, '.rsi/members');
-  assert.equal(invalid.valid, false); assert.match(invalid.issues[0]!.message, /UTF-8/);
+  await assert.rejects(f.team.configuration.validate(f.lead.memberId,'.rsi/members'),/UTF-8/);
   await draft(f, path, manifest('Backend')); const review = await commit(f);
   const lead = (await f.team.service.find(f.lead.memberId))!;
   await f.team.service.update(f.workspaceId, lead.id, lead.revision, {name:lead.value.name,role:lead.value.role,responsibility:'Concurrent backend change',settings:lead.value.settings,harness:lead.value.harness});

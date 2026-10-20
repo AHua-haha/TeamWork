@@ -7,7 +7,7 @@ export function FileDiff({ files, selected, onSelect }: { files: FileChange[]; s
   const file = files.find(item => item.path === selected) ?? files[0];
   const lines = file ? diffLines(file.patch) : [];
   return <section className="change-files" aria-label="Pending file changes">
-    <div className="change-files-heading"><h3>Changed files <span>{files.length}</span></h3><span>Approved → pending</span></div>
+    <div className="change-files-heading"><h3>Changed files <span>{files.length}</span></h3><span>Committed → current</span></div>
     {!file ? <p className="changes-empty">No pending design or member changes.</p> : <div className="change-diff-layout">
       <nav className="change-file-list" aria-label="Changed files">{files.map(item => <button type="button" key={item.path} className={file.path === item.path ? 'selected' : ''} aria-current={file.path === item.path ? 'true' : undefined} onClick={() => onSelect(item.path)}>
         <Glyph name="file" /><span><small>{item.path.startsWith('.rsi/context/design/') ? 'Design' : 'Members'}</small><code>{item.path.replace(/^\.rsi\//, '')}</code></span><span className={`file-action ${item.action}`} aria-label={item.action}>{item.action === 'add' ? 'A' : item.action === 'delete' ? 'D' : 'M'}</span>

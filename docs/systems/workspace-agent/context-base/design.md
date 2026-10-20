@@ -6,7 +6,7 @@ The context base stores a project's design and implementation context in paralle
 
 A system's design may occupy one Markdown file or multiple Markdown documents within design/. Its implementation context independently uses one file or impl/. Multiple documents remain the same system. Creating a child system with its own boundary, design, implementation context and metadata is a separate decomposition decision.
 
-Context stores information and versions. Purpose harnesses provide capabilities, scope, commit policy and maintenance instructions. Member configuration stays in .rsi/members, private Git snapshots in .rsi/harness. Reusable knowledge is separate and deferred. Context does not store credentials, chat transcripts or project source code.
+Context stores information and versions. Purpose harnesses provide capabilities, scope, commit policy and maintenance instructions. Member configuration stays in .rsi/members, ordinary Git history in the project .git. Reusable knowledge is separate and deferred. Context does not store credentials, chat transcripts or project source code.
 
 ## Content model
 
@@ -83,7 +83,7 @@ Backend here is one system with several documents, without implied child systems
 
 metadata.json contains exactly {implementation: [project paths]}; no Markdown content, agent-supplied revisions or version fields. There are at most 50 distinct case-insensitive implementation paths, relative to the project, including . for the project root and excluding protected .rsi/.git paths. Paths can refer to future source files. These mappings remain user-approved design metadata.
 
-Each node chooses design.md OR design/, independently impl.md OR impl/. Directory form requires README.md and may contain nested Markdown documents. There are 1–100 nonempty Markdown documents and at most 1 MiB of content in each complete context. Simultaneous single-file and directory content is invalid. Design discovery/acceptance and implementation-context semantic commits enforce the structural format; prose completeness follows harness prompts. Pending edits/checkpoints can retain incomplete intermediate structure for repair.
+Each node chooses design.md OR design/, independently impl.md OR impl/. Directory form requires README.md and may contain nested Markdown documents. There are 1–100 nonempty Markdown documents and at most 1 MiB of content in each complete context. Simultaneous single-file and directory content is invalid. Design discovery and configuration activation enforce the structural format; prose completeness follows harness prompts. Pending edits and ordinary Git commits can retain incomplete intermediate structure for repair.
 
 The complete design context, across its documents, retains purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. No fixed purpose/interfaces/requirements file split is required. Individual documents need not repeat the entire contract. The complete design context is sufficient at its caller boundary; actual child systems' internal documents are not required reading. Implementation context documents exact implemented Input, Output, Effect and Usage examples, plus useful implementation/verification/continuation facts.
 
@@ -99,7 +99,7 @@ The complete design context, across its documents, retains purpose/responsibilit
 
 Agents edit the shared workspace through common tools, under workspace execution exclusion. Working-node implementation context can be read/edited/agent-committed; dependencies are read-only. Metadata/design commits require user acceptance. A directory representation does not create extra assignments or permissions. Lead management can create design nodes across the tree, including designs used as dependencies, without gaining unrelated implementation-context authority. Ordinary members read/follow working and dependency designs but have no write/edit tool permission for metadata or design prose. Bash has broader whole-workspace authority independent of these file-tool scopes.
 
-Each working node has a stable impl-context-<hash> Git part (first 16 SHA-256 hex characters of lower-case metadata reference), covering both impl.md and impl/. Inspection and assembled prompts give the exact ID/paths. Staging/checkpoints/semantic commits remain independent of code and design/member history. Scoped file tools and Git supply the assigned editing/acceptance workflow. Bash can write the entire workspace, including .rsi; these workflow checks do not prevent equivalent direct Bash effects. New members opening a scope inherit its committed context; current peers are not overwritten, and stale-base commits refuse.
+Each working node has file-tool authority for its impl.md or impl/ context, independent of member identity. Members manage ordinary project Git history for implementation/context together or separately. No scope IDs, scoped indexes or checkpoints are created. Pending files remain shared; opening a member never restores older content over them.
 
 User-accepted design Git snapshots feed semantic catalog/inspection and implementation permission resolution; pending bytes do not. Raw context APIs/history observe original-workspace files. Members edit the same workspace files directly; no member worktree copying occurs. Design inspection returns separate Markdown documents with correct source paths, plus aggregate content and metadata; its revision covers all design files. Current multi-file inspection is an observation, not a transaction spanning concurrent edits. Reusable knowledge and automatic publication/merge/maintenance scheduling remain deferred.
 
@@ -221,7 +221,7 @@ Invalid metadata, missing/empty design documents, mixed forms, a missing README.
 
 1. Fresh create/adopt returns seq 1 with design/metadata.json, design/design.md and implement/impl/README.md, and a ready lead assigned to metadata.json; implementation mappings start empty.
 2. Backend changes design.md into design/README.md and design/request-flow.md. Catalog still has one backend node; document paths and the combined revision update.
-3. Backend independently uses design.md with an impl/ directory. Its metadata identity and context Git scope remain stable through the transition.
+3. Backend independently uses design.md with an impl/ directory. Its metadata identity and context file identity remains stable through the transition.
 4. Adding backend/storage/metadata.json and complete child contexts creates a real subdesign. Reading backend/design/flow.md alone never creates a child system.
 5. A member can read/edit/commit its working node's implementation context, read dependency context and access no child merely because it owns the parent.
 6. Design Git cannot stage or restore impl.md/impl/ content, including content beside newly created nodes. Design acceptance validates the exact immutable reviewed metadata/Markdown tree.

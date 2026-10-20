@@ -38,8 +38,8 @@ export interface Member {
 export type MemberModelSettings = Pick<RunSettings, 'connectionId' | 'modelId' | 'modelOptions'>;
 export interface MemberModelConfig extends ConfigRecord<MemberModelSettings> { issues: string[] }
 export interface Team { workspaceId: string; members: Member[] }
-export interface HarnessPart { id: string; paths: string[]; exclude: string[]; commit: 'agent' | 'user'; prompt: string; context?: 'design' | 'impl' }
-export interface HarnessDefinition { id: string; tools: string[]; prompt: string; parts: HarnessPart[] }
+export interface HarnessResource { id: string; paths: string[]; exclude: string[]; commit: 'agent' | 'user'; prompt: string; context?: 'design' | 'impl' }
+export interface HarnessDefinition { id: string; tools: string[]; prompt: string; resources: HarnessResource[] }
 export interface MemberInspection {
   member: Member;
   configuration: { path: string; files: Record<string, string>; digest: string; submittedBy: string; submittedAt: number; formatVersion?: number; acceptedRevision?: string } | null;
@@ -47,20 +47,19 @@ export interface MemberInspection {
 }
 export interface ConfigurationIssue { path: string; code: string; message: string }
 export interface FileChange { path: string; action: 'add' | 'modify' | 'delete'; patch: string; truncated: boolean }
-export interface ScopeReview { memberId: string; partId: string; revision: string; base: string; changes: FileChange[] }
+export interface FileReview { revision: string; base: string; changes: FileChange[] }
 export interface WorkspaceChanges {
-  workspaceId: string; leadId: string; design: ScopeReview; members: ScopeReview;
+  workspaceId: string; leadId: string; design: FileReview; members: FileReview;
   activation: { revision: string; activeRevision: string | null; hasChanges: boolean };
 }
 export interface MemberConfigurationReview { revision: string; digest: string; valid: boolean; issues: ConfigurationIssue[] }
-export interface ConfigurationCommit { revision: string; message: string; time: number; kind: string; actor: { type: string; memberId: string } }
+export interface ConfigurationCommit { revision: string; message: string; time: number; author: string }
 export interface CurrentMemberConfiguration {
   workspaceId: string; leadId: string;
   active: { revision: string | null; time: number | null };
   current: { revision: string; members: { path: string; memberId?: string; fields: { name: string; role: string; responsibility: string; settings: RunSettings; harness: Omit<HarnessConfig, 'implementationScope'> } }[]; files: { path: string; content: string | null; problem: string | null; size: number }[] };
   changes: FileChange[];
   status: { hasPending: boolean; pendingPaths: string[]; valid: boolean; issues: ConfigurationIssue[]; commits: ConfigurationCommit[]; more: boolean; historyKnown: boolean };
-  commit: { revision: string; base: string };
   activation: { revision: string; digest: string; valid: boolean; issues: ConfigurationIssue[]; hasChanges: boolean };
 }
 
@@ -88,12 +87,11 @@ export class WorkspaceClient {
   inspectMember(workspaceId: string, memberId: string): Promise<MemberInspection> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}`); }
   memberModelSettings(workspaceId: string, memberId: string): Promise<MemberModelConfig> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/model-settings`); }
   updateMemberModelSettings(workspaceId: string, memberId: string, revision: number, value: MemberModelSettings): Promise<MemberModelConfig> { return this.write(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/model-settings`, 'PUT', { revision, value }); }
-  scopeReview(workspaceId: string, memberId: string, partId: string): Promise<ScopeReview> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/harness/${encodeURIComponent(partId)}/review`); }
-  approveScope(workspaceId: string, memberId: string, partId: string, input: { revision: string; base: string; message: string }): Promise<ConfigurationCommit> { return this.write(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/harness/${encodeURIComponent(partId)}/commit`, 'POST', input); }
+
   currentMemberConfiguration(workspaceId: string): Promise<CurrentMemberConfiguration> { return this.get(`${this.base(workspaceId)}/team/configuration/current`); }
   changes(workspaceId: string): Promise<WorkspaceChanges> { return this.get(`${this.base(workspaceId)}/team/changes`); }
   committedMemberReview(workspaceId: string): Promise<MemberConfigurationReview> { return this.get(`${this.base(workspaceId)}/team/configuration?source=committed`); }
-  commitMemberConfiguration(workspaceId: string, input: { revision: string; base: string; message: string }): Promise<ConfigurationCommit> { return this.write(`${this.base(workspaceId)}/team/configuration/commit`, 'POST', input); }
+
   activateMemberConfiguration(workspaceId: string, input: { revision: string; digest: string }): Promise<{ revision: string; memberIds: string[] }> { return this.write(`${this.base(workspaceId)}/team/configuration/activate`, 'POST', input); }
   workspaceModels(workspaceId: string): Promise<WorkspaceModelsRecord> { return this.get(`${this.base(workspaceId)}/models`); }
   updateWorkspaceModels(workspaceId: string, revision: number, value: WorkspaceModels): Promise<WorkspaceModelsRecord> { return this.write(`${this.base(workspaceId)}/models`, 'PUT', { revision, value }); }

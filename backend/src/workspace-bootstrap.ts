@@ -3,14 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { ContextCommit, WorkspaceRecord } from './context-base.js';
-import { purposeHarnesses } from './harness-bases.js';
-import { HarnessHistory, harnessStorage } from './harness-history.js';
+import { filesRevision, type GitBaseline } from './workspace-git.js';
 import type { NewMember, MemberActivationState } from './team.js';
 import { sha256 } from './text.js';
 import { AppError } from './types.js';
 import { contextRoot, designRoot, managedRoot, rootDesignPath, metadataPath, contextPaths, memberContextPath } from './workspace-layout.js';
 
-export interface WorkspaceBootstrap { activation: MemberActivationState; context: ContextCommit }
+export interface WorkspaceBootstrap { baseline: GitBaseline; activation: MemberActivationState; context: ContextCommit }
 /** Prepare all initial files/history before the registry can expose the workspace. */
 export async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMember): Promise<WorkspaceBootstrap> {
   if ((await readdir(workspace.directory)).some(name => name.toLowerCase() === managedRoot)) throw new AppError('file_exists', `${managedRoot} already exists; adopt a project without managed state`, 409);
@@ -28,15 +27,10 @@ export async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMe
       const absolute = join(workspace.directory, dirname(lead.value.configuration!.path), path);
       await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, content, { flag: 'wx' });
     }
-    const history = new HarnessHistory(harnessStorage(workspace.directory), workspace.directory);
-    await history.open();
-    const rootDirectory = workspace.directory;
-    let memberRevision = '';
-    for (const part of purposeHarnesses({ ...lead, revision: 0 }).flatMap(harness => harness.parts)) {
-      const state = await history.ensure(lead.id, part, rootDirectory);
-      if (part.id === 'member-config') memberRevision = state.committed;
-    }
-    await history.initializeMemberBundle(lead.id, lead.value.configuration!.path, async () => {});
+    const baseline: GitBaseline = { time:workspace.createdAt, design: {}, members: {} };
+    for(const {path,content} of initial) if(path.startsWith('design/'))baseline.design[`${contextRoot}/${path}`]=content;
+    for(const [path,content] of Object.entries(lead.value.configuration!.files))baseline.members[join(dirname(lead.value.configuration!.path),path)]=content;
+    const memberRevision = filesRevision(baseline.members);
     lead.value.configuration!.acceptedRevision = memberRevision;
     lead.value.configuration!.submittedBy = 'harness';
     const context: ContextCommit = { seq: 1, blobs: [], versions: [], removeKeys: [], files: [], record: { seq: 1, time: workspace.createdAt, author: { type: 'user' }, reason: 'Workspace bootstrap', files: [] } };
@@ -48,6 +42,6 @@ export async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMe
       context.files.push({ path, fileId, revision, hash, size, mtimeMs: (await stat(join(workspace.directory, contextRoot, path))).mtimeMs, updatedAt: time, author, reason });
       context.record.files.push({ action: 'create', path, fromPath: null, revision });
     }
-    return { activation: { revision: memberRevision, time: workspace.createdAt }, context };
+    return { baseline, activation: { revision: memberRevision, time: workspace.createdAt }, context };
   } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
 }

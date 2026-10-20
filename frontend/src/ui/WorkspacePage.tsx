@@ -13,8 +13,9 @@ export interface FilesControl { open: boolean; expanded: boolean; show(open: boo
  */
 export function WorkspacePage({ workspaceId, name, files }: { workspaceId: string; name: string | null; files: FilesControl }) {
   const client = useMemo(() => new WorkspaceClient(), []);
+  const [commitReview,setCommitReview]=useState<{id:string;request:number}|null>(null);
   const [reference, setReference] = useState<DiscussionReference | null>(null);
-  useEffect(() => { setReference(null); }, [workspaceId]);
+  useEffect(() => { setReference(null);setCommitReview(null); }, [workspaceId]);
   const discuss = (next: DiscussionReference) => {
     setReference(next); files.showConversation();
   };
@@ -33,9 +34,9 @@ export function WorkspacePage({ workspaceId, name, files }: { workspaceId: strin
   }
   return <div className={`conversation-page ${files.open && files.expanded ? 'expanded' : ''}`}>
     <GroupChat key={workspaceId} workspaceId={workspaceId} team={state} title={title}
-      filesOpen={files.open} onFiles={files.show} onRunning={setTeamRunning} discussion={{ reference, clear: () => setReference(null), sent: referenceSent }} />
+      filesOpen={files.open} onFiles={files.show} onCommitReview={id=>{setCommitReview({id,request:Date.now()});files.show(true);}} onRunning={setTeamRunning} discussion={{ reference, clear: () => setReference(null), sent: referenceSent }} />
     {files.open && <button type="button" className="workspace-scrim" aria-label="Hide workspace panel" onClick={() => files.show(false)} />}
     <WorkspacePanel open={files.open} expanded={files.expanded} workspaceId={workspaceId} team={state}
-      onExpand={files.expand} onClose={() => files.show(false)} onDirty={files.onDirty} onDiscuss={discuss} />
+      commitReview={commitReview} onExpand={files.expand} onClose={() => files.show(false)} onDirty={files.onDirty} onDiscuss={discuss} />
   </div>;
 }

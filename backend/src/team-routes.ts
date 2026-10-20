@@ -23,11 +23,6 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
       if (method === 'GET' && memberId === 'current') {
         query(url, []);
         json(response, 200, await team.currentConfiguration(workspaceId));
-      } else if (method === 'POST' && memberId === 'commit') {
-        query(url, []);
-        const input = await body(request, maxBodyBytes); fields(input, ['revision', 'base', 'message']);
-        if (typeof input.revision !== 'string' || typeof input.base !== 'string' || typeof input.message !== 'string') throw new AppError('invalid_input', 'Commit names reviewed revision, committed base and message');
-        json(response, 200, await team.commitConfiguration(workspaceId, input.revision, input.base, input.message));
       } else if (method === 'GET' && memberId === undefined) {
         query(url, ['source']);
         const origin = url.searchParams.get('source') ?? 'committed';
@@ -51,39 +46,12 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
       } else throw notFound();
       return;
     }
-    if (area === 'members' && memberId && extra[0] === 'harness') {
-      identity(memberId, 'memberId');
-      const member = await team.service.find(memberId);
-      if (!member || member.workspaceId !== workspaceId) throw notFound();
-      query(url, []);
-      if (extra.length === 1 && method === 'GET') {
-        json(response, 200, await team.harness.inspect(memberId));
-        return;
-      }
-      const [, partId, action] = extra;
-      identity(partId, 'part');
-      if (extra.length !== 3) throw notFound();
-      if (method === 'GET' && action === 'review') {
-        json(response, 200, await team.harness.review(memberId, partId));
-        return;
-      }
-      if (method === 'GET' && action === 'history') {
-        json(response, 200, { history: await team.harness.history(memberId, partId) });
-        return;
-      }
-      if (method !== 'POST' || (action !== 'commit' && action !== 'restore')) throw notFound();
-      if (team.runner.isRunning(memberId)) throw new AppError('member_busy', 'Wait for this member to finish before accepting or restoring its work', 409);
-      const input = await body(request, maxBodyBytes);
-      fields(input, action === 'commit' ? ['revision', 'base', 'message'] : ['revision']);
-      if (typeof input.revision !== 'string' || (action === 'commit' && (typeof input.base !== 'string' || typeof input.message !== 'string'))) throw new AppError('invalid_input', 'Name the exact reviewed revision, committed base and commit intent');
-      const actor = { type: 'user' as const, memberId };
-      const result = await team.runner.workspaceOperation(workspaceId, () => {
-        if (team.runner.isRunning(memberId)) throw new AppError('member_busy', 'Wait for this member to finish before accepting or restoring its work', 409);
-        return action === 'commit'
-          ? team.harness.commit(memberId, partId, input.message as string, actor, input.revision as string, input.base as string)
-          : team.harness.restore(memberId, partId, input.revision as string, actor);
-      });
-      json(response, 200, result);
+    if (area === 'commit-approvals') {
+      query(url,[]);if(extra.length)throw notFound();
+      await team.service.requireWorkspace(workspaceId);
+      if(method==='GET')json(response,200,memberId?team.harness.approvals.read(workspaceId,memberId):{approvals:team.harness.approvals.list(workspaceId)});
+      else if(method==='POST'&&memberId){const input=await body(request,maxBodyBytes);fields(input,['action','message']);json(response,200,team.harness.approvals.decide(workspaceId,memberId,input.action,input.message??''));}
+      else throw notFound();
       return;
     }
     if (area === 'chat') {

@@ -1,3 +1,6 @@
+import { mkdir,writeFile } from 'node:fs/promises';
+import { dirname,join } from 'node:path';
+import { filesRevision } from './workspace-git.js';
 import { finalAnswer, textPhase } from './final-answer.js';
 import type { ChatStore } from './group-chat.js';
 import { AppError } from './types.js';
@@ -75,7 +78,11 @@ export class TeamSystem {
   }
 
   async create(workspaceId: string, input: unknown): Promise<MemberStatus> {
-    return this.status(await this.service.create(workspaceId, input));
+    const member=await this.service.create(workspaceId,input);
+    const files=await this.harness.files(member.memberId);
+    const source=(await this.service.find(member.memberId))!.value.configuration;
+    if(source)for(const [path,content]of Object.entries(source.files)){const target=join(files.root,dirname(source.path),path);await mkdir(dirname(target),{recursive:true});await writeFile(target,content,{flag:'wx'});}
+    return this.status(member);
   }
 
   async update(workspaceId: string, memberId: string, revision: number, value: unknown): Promise<MemberStatus> {
@@ -102,18 +109,11 @@ export class TeamSystem {
       const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);
       if (!lead) throw new AppError('not_found', 'Workspace lead is unavailable', 404);
       const scopes = await this.harness.changes(lead.id), active = await this.service.activation(workspaceId);
-      return { workspaceId, leadId: lead.id, ...scopes, activation: { revision: scopes.members.base, activeRevision: active?.revision ?? null, hasChanges: scopes.members.base !== active?.revision } };
+      const committed = await this.harness.controlFiles(lead.id,'committed','.rsi/members');
+      const activeFiles:Record<string,string>={};for(const member of await this.service.active(workspaceId))if(member.value.configuration)for(const [path,text]of Object.entries(member.value.configuration.files))activeFiles[`${member.value.configuration.path.slice(0,-'member.json'.length)}${path}`]=text;
+      return { workspaceId, leadId: lead.id, ...scopes, activation: { revision: scopes.members.base, activeRevision: active?.revision ?? null, hasChanges: filesRevision(committed.files) !== filesRevision(activeFiles) } };
     });
   }
-  commitConfiguration(workspaceId: string, revision: string, base: string, message: string) {
-    return this.runner.workspaceOperation(workspaceId, async () => {
-      const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);
-      if (!lead) throw new AppError('lead_required', 'Workspace lead is unavailable', 409);
-      if (this.runner.isRunning(lead.id)) throw new AppError('member_busy', 'Wait for the lead before accepting its member files', 409);
-      return this.configuration.commit(workspaceId, revision, base, message);
-    });
-  }
-
   private status(member: MemberView): MemberStatus {
     return { ...member, running: this.runner.isRunning(member.memberId) };
   }
@@ -124,7 +124,6 @@ export class TeamSystem {
    */
   policy(base: RuntimePolicy): RuntimePolicy {
     const { management } = teamTools(this.service, this.configuration);
-    const checkpointed = new Set<string>();
     return {
       ...base,
       beforeStep: async scope => {
@@ -141,14 +140,6 @@ export class TeamSystem {
           return () => { try { releaseBase?.(); } finally { release(); } };
         } catch (error) { release(); throw error; }
       },
-      afterRun: async run => {
-        try {
-          if (await this.service.find(run.agentId)) {
-            if (!checkpointed.has(run.runId)) await this.harness.checkpoint(run.agentId, run.runId);
-          }
-          await base.afterRun?.(run);
-        } finally { checkpointed.delete(run.runId); }
-      },
       shouldContinue: async (scope, response, results, record) => {
         const member = await this.service.find(scope.agentId);
         if (!member) return base.shouldContinue ? base.shouldContinue(scope, response, results, record) : response.content.some(part => part.type === 'toolCall');
@@ -161,11 +152,9 @@ export class TeamSystem {
           throw new AppError('empty_response', 'The model finished without final answer text');
         }
         scope.signal.throwIfAborted();
-        await this.harness.checkpoint(scope.agentId, scope.runId);
         try {
           scope.signal.throwIfAborted();
           await this.runner.publishFinal(scope.agentId, scope.runId, answer.text, record.messageId);
-          checkpointed.add(scope.runId);
           return false;
         } catch (error) {
           if (!(error instanceof AppError) || error.status >= 500 || error.code === 'exchange_stopped') throw error;
@@ -181,7 +170,6 @@ export class TeamSystem {
         if (request.context.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image')) && !request.model.input.includes('image')) {
           throw new AppError('image_not_supported', 'This context contains pictures; select a model with image input', 409);
         }
-        if (member.value.lead) await this.configuration.materialize(scope.agentId);
         const prepared = await this.harness.prepare(scope.agentId, member.value.lead ? management : []);
         const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
         return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };

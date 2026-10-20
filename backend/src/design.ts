@@ -4,9 +4,7 @@ import { projectPath } from './project-files.js';
 import { AppError } from './types.js';
 import { sha256 } from './text.js';
 import type { WorkspaceService } from './workspace.js';
-import { join } from 'node:path';
-import { lstat } from 'node:fs/promises';
-import { HarnessHistory, harnessStorage } from './harness-history.js';
+import { committedFiles, gitText } from './workspace-git.js';
 import { contextPaths, contextRoot, nodeReference, metadataPath } from './workspace-layout.js';
 
 export interface DesignMetadata { implementation: string[] }
@@ -45,37 +43,32 @@ export function resolveDesign(path: string, files: ReadonlyMap<string,string>): 
 /** Metadata identifies systems; Markdown documents never create extra system nodes. */
 export class DesignService {
   constructor(private readonly workspaces: WorkspaceService) {}
-  private async history(workspaceId:string):Promise<HarnessHistory|null>{
-    const source=(await this.workspaces.record(workspaceId)).directory,history=new HarnessHistory(harnessStorage(source),source);
-    try{await lstat(join(history.repository,'HEAD'));return history;}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+  private async accepted(workspaceId:string) {
+    const root=(await this.workspaces.record(workspaceId)).directory;
+    const baseline=await this.workspaces.gitBaseline(workspaceId);
+    const result=await committedFiles(root,'.rsi/context/design',baseline.design);
+    const committed=result.committed;
+    const time=committed ? Number(await gitText(root,['show','-s','--format=%ct',result.revision]))*1000+999 : baseline.time??0;
+    return {...result,time};
   }
-  private async file(workspaceId:string,path:string,history:HarnessHistory|null):Promise<ContextFile>{
-    const accepted=await history?.acceptedDesign(`${contextRoot}/${path}`);
-    if(accepted){
-      // SQL distinguishes explicit user saves from observations of pending agent edits.
-      const base = await this.workspaces.context(workspaceId);
-      let selected: { revision: string | null } | undefined;
-      try {
-        let before: number | null = null;
-        do {
-          const page = await base.history(path,before,100);
-          const user = page.versions.find(version=>version.author.type==='user');
-          if (user) { if(user.time > accepted.state.time) selected=user; break; }
-          before=page.next;
-        } while(before!==null);
-      } catch(error) { if(!(error instanceof AppError)||error.code!=='not_found') throw error; }
-      if(selected) {
-        if(!selected.revision) throw new AppError('not_found',`${path} not found in accepted design history`,404);
-        return base.read({revision:selected.revision});
-      }
-      if(accepted.content===null)throw new AppError('not_found',`${path} not found in accepted design history`,404);
-      return {path,content:accepted.content,size:Buffer.byteLength(accepted.content),revision:accepted.state.revision,updatedAt:accepted.state.time,current:true,author:{type:'user'},reason:accepted.state.message};
-    }
-    return (await this.workspaces.context(workspaceId)).read({path});
+  private async file(workspaceId:string,path:string,accepted:Awaited<ReturnType<DesignService['accepted']>>):Promise<ContextFile>{
+    const base=await this.workspaces.context(workspaceId);
+    let before:number|null=null, userRevision:string|null|undefined;
+    try {
+      do {const page=await base.history(path,before,100),user=page.versions.find(v=>v.author.type==='user');
+        if(user){if(user.time>accepted.time)userRevision=user.revision;break;}
+        before=page.next;
+      }while(before!==null);
+    }catch(error){if(!(error instanceof AppError)||error.code!=='not_found')throw error;}
+    if(userRevision===null)throw new AppError('not_found',`${path} was deleted`,404);
+    if(userRevision!==undefined)return base.read({revision:userRevision});
+    const entry=Object.entries(accepted.files).find(([key])=>key.toLowerCase()===`${contextRoot}/${path}`.toLowerCase());
+    if(!entry)throw new AppError('not_found',`${path} not found in committed design`,404);
+    return {path:entry[0].slice(contextRoot.length+1),content:entry[1],size:Buffer.byteLength(entry[1]),revision:accepted.revision,updatedAt:accepted.time,current:true,author:{type:'user'},reason:'Committed project design'};
   }
   async list(workspaceId:string):Promise<{designs:Omit<ResolvedDesign,'content'|'documents'>[];truncated:boolean}>{
-    const base=await this.workspaces.context(workspaceId),listing=await base.tree('',16),history=await this.history(workspaceId);
-    const paths=new Set([...listing.entries.filter(e=>e.type==='file').map(e=>e.path),...await history?.acceptedDesignPaths()??[]]);
+    const base=await this.workspaces.context(workspaceId),listing=await base.tree('',16),history=await this.accepted(workspaceId);
+    const paths=new Set([...listing.entries.filter(e=>e.type==='file').map(e=>e.path),...Object.keys(history.files).map(p=>p.slice(contextRoot.length+1))]);
     const designs:Omit<ResolvedDesign,'content'|'documents'>[]=[];
     for(const path of paths){
       if(!path.toLowerCase().startsWith('design/')||path.split('/').at(-1)?.toLowerCase()!=='metadata.json')continue;
@@ -85,7 +78,7 @@ export class DesignService {
     return {designs:designs.sort((a,b)=>a.path.localeCompare(b.path)),truncated:listing.truncated};
   }
   async inspect(workspaceId:string,input:unknown):Promise<ContextFile & {design:DesignPart|null;designIssue:string|null}>{
-    const path=designPath(input),history=await this.history(workspaceId),metadata=await this.file(workspaceId,metadataPath(path),history);
+    const path=designPath(input),history=await this.accepted(workspaceId),metadata=await this.file(workspaceId,metadataPath(path),history);
     try{
       const base=await this.workspaces.context(workspaceId),[single,directory]=contextPaths(metadata.path,'design');
       const overview=await base.overview();
@@ -93,7 +86,7 @@ export class DesignService {
       if(problem)throw new AppError('invalid_design',`Design document problem: ${problem.path}: ${problem.message}`);
       let raw:string[]=[];
       try{const listing=await base.tree(directory!,16);if(listing.truncated)throw new AppError('invalid_design','Design document listing exceeds the context listing limit');raw=listing.entries.filter(e=>e.type==='file').map(e=>e.path);}catch(error){if(!(error instanceof AppError)||error.code!=='not_found')throw error;}
-      const candidates=new Set([single!,...raw,...(await history?.acceptedDesignPaths()??[]).filter(p=>p.toLowerCase().startsWith(directory!.toLowerCase()+'/'))]);
+      const candidates=new Set([single!,...raw,...Object.keys(history.files).map(p=>p.slice(contextRoot.length+1)).filter(p=>p.toLowerCase().startsWith(directory!.toLowerCase()+'/'))]);
       const versions=[metadata],files=new Map([[metadata.path.toLowerCase(),metadata.content]]);
       for(const candidate of candidates){try{const file=await this.file(workspaceId,candidate,history);versions.push(file);files.set(file.path.toLowerCase(),file.content);}catch(error){if(!(error instanceof AppError)||error.code!=='not_found')throw error;}}
       const design=resolveDesign(metadata.path,files);

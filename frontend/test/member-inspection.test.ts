@@ -46,13 +46,12 @@ test('unified diff parsing preserves independent line numbers, multiple hunks, l
   assert.ok(!html.includes('<script>')); assert.ok(!html.includes('Configuration operations')); assert.ok(!html.includes('<details'));
 });
 
-test('current review, commit and activation clients send distinct exact-state payloads', async () => {
+test('current review and activation clients send distinct exact-state payloads', async () => {
   const calls: {path:string;body:unknown}[]=[];
   const client = new WorkspaceClient((async (input,init)=>{calls.push({path:String(input),body:init?.body?JSON.parse(String(init.body)):null});return new Response('{}');}) as typeof fetch);
   await client.currentMemberConfiguration('w 1');
-  await client.commitMemberConfiguration('w 1',{revision:'current',base:'committed',message:'Accept prompt'});
   await client.activateMemberConfiguration('w 1',{revision:'committed',digest:'review'});
-  assert.deepEqual(calls,[{path:'/workspaces/w%201/team/configuration/current',body:null},{path:'/workspaces/w%201/team/configuration/commit',body:{revision:'current',base:'committed',message:'Accept prompt'}},{path:'/workspaces/w%201/team/configuration/activate',body:{revision:'committed',digest:'review'}}]);
+  assert.deepEqual(calls,[{path:'/workspaces/w%201/team/configuration/current',body:null},{path:'/workspaces/w%201/team/configuration/activate',body:{revision:'committed',digest:'review'}}]);
 });
 
 test('Changes reads use the lightweight review and separate committed validation endpoints', async () => {
@@ -76,23 +75,10 @@ test('unavailable file assignments remain visible when that path now contains de
 });
 
 
-test('scope review and approval clients keep design/member tokens separate', async () => {
-  const calls: { path: string; method: string; body: unknown }[] = [];
-  const client = new WorkspaceClient((async (input, init) => { calls.push({ path: String(input), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null }); return new Response('{}'); }) as typeof fetch);
-  await client.scopeReview('w 1', 'lead 1', 'design');
-  await client.scopeReview('w 1', 'lead 1', 'member-config');
-  await client.approveScope('w 1', 'lead 1', 'design', { revision: 'design-reviewed', base: 'design-base', message: 'Approve design changes' });
-  assert.deepEqual(calls, [
-    { path: '/workspaces/w%201/team/members/lead%201/harness/design/review', method: 'GET', body: null },
-    { path: '/workspaces/w%201/team/members/lead%201/harness/member-config/review', method: 'GET', body: null },
-    { path: '/workspaces/w%201/team/members/lead%201/harness/design/commit', method: 'POST', body: { revision: 'design-reviewed', base: 'design-base', message: 'Approve design changes' } },
-  ]);
-});
-
 test('the shared pending file diff supports design/member paths and an empty review without approval controls', () => {
   const files = [{ path: '.rsi/context/design/backend/design.md', action: 'add' as const, patch, truncated: false }, { path: '.rsi/members/backend/member.json', action: 'modify' as const, patch, truncated: false }];
   const html = renderToStaticMarkup(createElement(FileDiff, { files, selected: files[1]!.path, onSelect() {} }));
-  assert.match(html, /Design/); assert.match(html, /Members/); assert.match(html, /Approved → pending/);
+  assert.match(html, /Design/); assert.match(html, /Members/); assert.match(html, /Committed → current/);
   assert.match(html, /Diff for .rsi\/members\/backend\/member.json/); assert.ok(!html.includes('<script>'));
   assert.ok(!html.includes('Approve members'));
   assert.match(renderToStaticMarkup(createElement(FileDiff, { files: [], selected: null, onSelect() {} })), /No pending design or member changes/);

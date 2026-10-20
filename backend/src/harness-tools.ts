@@ -23,11 +23,11 @@ export function harnessBashTool(harness: HarnessService): RuntimeTool {
   return {
     definition: {
       name: 'bash',
-      description: 'Run Bash in this member’s persistent shell. cwd is optional; cd, variables and functions persist. Foreground output combines stdout/stderr. timeout is seconds (foreground default 60; background default unlimited). background starts a native job and returns job_id; manage it using jobs, wait %N and kill %N in later calls. Background output defaults to /dev/null; redirect in command to retain it. Sandbox permits system reads, entire workspace/workspace-temp writes and networking; Bash does not enforce design assignments. metadata.git.scope optionally routes ordinary git through the listed controlled scope; without it Git is native project Git. Scoped design/member commits still require user acceptance. No command is retried automatically. Foreground timeout/cancellation resets the shell and jobs; an explicit background timeout stops only that job. Noninteractive stdin is /dev/null.',
+      description: 'Run Bash in this member’s persistent shell. cwd is optional; cd, variables and functions persist. Foreground output combines stdout/stderr. timeout is seconds (foreground default 60; background default unlimited). background starts a native job and returns job_id; manage it using jobs, wait %N and kill %N in later calls. Background output defaults to /dev/null; redirect in command to retain it. Sandbox permits system reads, entire workspace/workspace-temp writes and networking; Bash does not enforce design assignments. Explicit git commit is checked against actual commit contents: implementation-only runs; mixed design/member and implementation is refused; design/member-only waits for user approval. Stage intended files, then use git commit [-a] -m <message>. Other Git operations are native. No checkpoints or Git scopes are managed. No command is retried automatically. Foreground timeout/cancellation resets the shell and jobs; an explicit background timeout stops only that job. Noninteractive stdin is /dev/null.',
       parameters: Type.Object({
         command: Type.String({ minLength: 1, maxLength: 20000 }), cwd: Type.Optional(Type.String({ minLength: 1 })),
         timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 2_147_483 })), background: Type.Optional(Type.Boolean({ default: false })),
-        metadata: Type.Optional(Type.Object({ git: Type.Optional(Type.Object({ scope: Type.String({ minLength: 1 }) }, { additionalProperties: false })) }, { additionalProperties: false })),
+        metadata: Type.Optional(Type.Object({}, { additionalProperties: false })),
       }, { additionalProperties: false }),
     },
     execute: async (args, scope) => {

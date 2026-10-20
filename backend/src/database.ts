@@ -51,6 +51,7 @@ const versionRow = (row: RowDataPacket): StoredVersion => ({
 });
 
 const schema = [
+  `CREATE TABLE IF NOT EXISTS workspace_git_baselines (workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY, data JSON NOT NULL) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS agents (
     id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     context JSON NOT NULL, context_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
@@ -696,7 +697,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
 
   /** The clock is locked after agent rows, including on terminal writes. */
   private async writeChatEntry(db: Db, input: TimelineEntry): Promise<TimelineEntry> {
-    await db.execute('INSERT IGNORE INTO chat_clock (workspace_id) VALUES (?)', [input.workspaceId]);
+    await db.execute('INSERT INTO chat_clock (workspace_id) VALUES (?) ON DUPLICATE KEY UPDATE workspace_id = VALUES(workspace_id)', [input.workspaceId]);
     const [clock] = await rows(db, 'SELECT position, seq FROM chat_clock WHERE workspace_id = ? FOR UPDATE', [input.workspaceId]);
     const entry: TimelineEntry = { ...input, position: input.position || clock!.position + 1, revision: clock!.seq + 1 };
     validateTimelineEntry(entry);
@@ -942,6 +943,15 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     return { id: memberId, workspaceId: value.workspaceId, revision: revision + 1, value: decode<MemberRecord>(data, () => undefined) };
   }
 
+  async getGitBaseline(workspaceId: string): Promise<import('./workspace-git.js').GitBaseline | null> {
+    const [row] = await rows(this.pool, 'SELECT data FROM workspace_git_baselines WHERE workspace_id = ?', [workspaceId]);
+    return row ? decode(row.data, () => undefined) : null;
+  }
+  async initializeGitBaseline(workspaceId: string, baseline: import('./workspace-git.js').GitBaseline) {
+    await this.pool.execute('INSERT IGNORE INTO workspace_git_baselines (workspace_id, data) VALUES (?, ?)', [workspaceId, encode(baseline)]);
+    return (await this.getGitBaseline(workspaceId))!;
+  }
+
   async listWorkspaces(): Promise<WorkspaceRecord[]> {
     return (await rows(this.pool, 'SELECT id, name, directory, created_at FROM workspaces ORDER BY name, id')).map(workspaceRow);
   }
@@ -963,6 +973,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       await this.insertMember(db, lead);
       if (models) await db.execute('INSERT INTO workspace_models (workspace_id, data) VALUES (?, ?)', [workspace.workspaceId, encode(models)]);
       if (bootstrap) {
+        await db.execute('INSERT INTO workspace_git_baselines (workspace_id, data) VALUES (?, ?)', [workspace.workspaceId, encode(bootstrap.baseline)]);
         await db.execute('INSERT INTO member_activation (workspace_id, revision, time) VALUES (?, ?, ?)', [workspace.workspaceId, bootstrap.activation.revision, bootstrap.activation.time]);
         await this.writeContext(db, workspace.workspaceId, 0, bootstrap.context);
       }

@@ -1,5 +1,5 @@
 import type { PreparedChatImage } from './chat-images.js';
-import { HarnessQueue } from './harness-history.js';
+import { OperationQueue } from './workspace-git.js';
 import type { AgentRuntime } from './runtime.js';
 import type { TeamService, TeamStore } from './team.js';
 import { Changes } from './changes.js';
@@ -15,8 +15,8 @@ export class TeamRunner {
   private readonly active = new Map<string, { runId: string; exchangeId: string; workspaceId: string }>();
   private closed = false;
   private readonly publications = new Set<Promise<unknown>>();
-  private readonly gate = new HarnessQueue();
-  private readonly execution = new HarnessQueue();
+  private readonly gate = new OperationQueue();
+  private readonly execution = new OperationQueue();
   private readonly jobs = new Map<string, string>();
   constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost, private readonly resetShells: (ids?: string[]) => Promise<void> = async () => {}) {}
 
@@ -93,12 +93,13 @@ export class TeamRunner {
       this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });
       this.runtime().launch(run, configs[index]!);
       this.jobs.set(run.runId, workspaceId);
-      void this.runtime().finished(run.agentId, run.runId).catch(() => undefined).finally(() => {
+      const settled = () => {
         // A successor run may already have started after atomic final publication.
         if (this.active.get(run.agentId)?.runId === run.runId) this.active.delete(run.agentId);
         this.jobs.delete(run.runId);
         this.changes.publish();
-      });
+      };
+      void this.runtime().finished(run.agentId, run.runId).then(settled, settled);
     }
     this.changes.publish();
     return result;

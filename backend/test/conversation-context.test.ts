@@ -8,7 +8,7 @@ import type { ContextEntry } from '../src/types.js';
 const document = (commands: unknown[] = []) => `# Context\n\n## Result summary\nCurrent state.\n\n## File lookup\n| Path | Description |\n| --- | --- |\n| secret.txt | Inspect only when needed |\n\n## Automatic retrieval\n\n\`\`\`json\n${JSON.stringify({ commands })}\n\`\`\`\n`;
 
 test('context document selects prose/table without expanding lookup or including retrieval configuration', () => {
-  const inputs = [{ command: 'echo ready', cwd: '/project', timeout: 3, background: true, metadata: { git: { scope: 'implementation' } } }];
+  const inputs = [{ command: 'echo ready', cwd: '/project', timeout: 3, background: true, metadata: {} }];
   const parsed = parseContextDocument(document(inputs));
   assert.deepEqual(parsed.commands, inputs);
   assert.match(parsed.text, /Current state/); assert.match(parsed.text, /secret.txt/);

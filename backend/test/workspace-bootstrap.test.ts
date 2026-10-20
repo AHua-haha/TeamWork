@@ -12,7 +12,7 @@ test('new workspace has a ready root-design lead, exact active files and clean b
   assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.map(d=>d.path),['metadata.json']);
   const source = await f.team.configuration.accepted(f.workspaceId,lead.memberId);
   for (const [path, content] of Object.entries(source.files)) assert.equal(await readFile(join(f.directory,'.rsi/members',lead.memberId,path),'utf8'),content);
-  assert.deepEqual((await readdir(join(f.directory,'.rsi'))).sort(),['context','harness','members']);
+  assert.deepEqual((await readdir(join(f.directory,'.rsi'))).sort(),['context','members']);
   const view = await f.team.currentConfiguration(f.workspaceId);
   assert.equal(view.status.valid,true); assert.equal(view.status.hasPending,false); assert.equal(view.status.commits.length,0);
   assert.equal(view.activation.valid,true); assert.equal(view.activation.hasChanges,false); assert.deepEqual(view.changes,[]);

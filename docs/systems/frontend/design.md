@@ -226,11 +226,11 @@ This view contains active information only. It does not contain pending configur
 
 ### Unified Changes tab
 
-Changes is a permanent panel tab, outside Team. It presents pending design and member files in one flat path list and a unified text diff, comparing each scope's approved commit with current pending files. Show add/modify/delete status, full paths, safe literal text, line numbers and explicit binary/truncated previews. Selecting a file changes only its diff. No member-specific diff editor or commit-history timeline is required.
+Changes is a permanent panel tab outside Team, with a flat design/member file list and unified committed-to-current text diffs. It has no scope approval buttons. Selecting a file changes only the diff; errors/truncation are explicit.
 
-Approve design and Approve members independently commit the exact reviewed revision and base of their own scope. Approved files leave the pending list. Approval never activates members or accepts the other scope. Activate members is a separate action against reviewed committed revision/digest; it requires the whole team idle and leaves newer pending edits pending. Show missing accepted-design references and other activation blockers plainly. Refresh design discovery, review and member validation after approval so approving designs can unblock already approved member files. Busy/stale/invalid failures preserve files and active state, show the backend reason and refresh the review. Empty/loading/error states and explicit refresh remain available. Active tree/details stay unchanged until activation.
+An explicit protected Git commit opens a compact decision input above the composer. Accept executes its exact candidate; Deny or Send feedback skips execution and returns the decision to the agent. Review opens commit details/diffs in the right panel. The popup contains no diff. Activate members remains a separate Changes action for valid committed configuration and requires the entire team idle. Stale/busy/invalid results preserve active state.
 
-Acceptance: propose a child design and a worker referencing it. Approve member files first: the design remains pending and activation is blocked. Approve design: it leaves the pending list and validation becomes ready. Activate members: the worker enters the active tree. A later pending edit is not included in activation. Stale approval refuses rather than accepting unreviewed bytes. Narrow panels stack the flat file list and diff without page overflow.
+Acceptance: propose a child design and member configuration, stage their files and request a protected commit. Review opens the right-panel diff; Accept commits but activates nobody. Activate members applies valid committed configuration only when idle, leaving newer pending edits pending.
 
 ## Initialized workspace
 
@@ -254,9 +254,9 @@ Member and solo execution follows use version-2 envelopes with compact start/blo
 
 ## Simple Changes loading
 
-Changes displays design/member current-versus-last-approved file diffs and independent approval controls from one lightweight read. It includes newly created files and retains exact review/base approval tokens. Reading changes does not wait for full team/configuration validation or commit history. Member activation remains separate: when approved configuration differs from active, load its validation independently and show its loading/errors/blockers without hiding the file review. Approval refreshes accepted design discovery and activation validation as before.
+Changes displays design/member current-versus-ordinary-committed diffs from one lightweight read. It retains old data during refresh and loads activation validation independently when committed bundles differ from active. Commit approval is the composer-adjacent pending request flow, without old scope revision/base mutation controls.
 
-Only one Changes read is in flight per workspace view. Focus and polling reuse it rather than invalidate successful responses. Retain previous files during refresh, ignore disposed/workspace-obsolete responses, and serialize user operations with review refresh. Stale/busy approval preserves files and presents the backend reason.
+Only one Changes read is in flight per workspace view. Focus/polling coalesce; disposal ignores late reads. Activation errors remain visible and refresh the review without changing active state.
 
 ## Shared user pictures
 

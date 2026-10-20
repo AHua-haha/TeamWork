@@ -16,7 +16,7 @@ This contract defines the tool interface, persistent execution, resource policy 
   timeout?: number;      // Seconds
   background?: boolean; // Default false
   metadata?: {
-    // Invocation metadata; obsolete git.scope selection is removed.
+    // No metadata keys are currently defined.
   };
 }
 ```
@@ -25,7 +25,7 @@ This contract defines the tool interface, persistent execution, resource policy 
 - cwd optionally changes the persistent shell directory before execution. Without cwd, the first invocation starts at the workspace root and subsequent calls use the shell's current directory. If entering an explicit cwd fails, do not run command. cwd does not change or narrow sandbox authority: ordinary cd and actual resource access follow the policy below and underlying OS permissions.
 - timeout requests a command lifetime in seconds, including background commands. Foreground defaults to 60 seconds; background has no default timeout. Explicit values must be positive finite seconds up to 2147483 (the timer limit). Foreground expiration resets the shell and its jobs; background expiration terminates that job. This is not merely a timeout on waiting for the background launch response.
 - background defaults to false. When true, launch a native background job and return without waiting for completion.
-- metadata remains invocation information. Remove the old git.scope selector; commit approval and caller identity are backend-owned. The replacement metadata fields are not prescribed by this design.
+- metadata remains invocation information. Remove the old git.scope selector; commit approval and caller identity are backend-owned. Only an empty metadata object is currently accepted; unknown fields refuse.
 
 Caller identity and shell association come from the backend, not fields supplied by the agent.
 
@@ -152,9 +152,9 @@ Shell state and jobs survive agent-run completion. Context reset and member reti
 
 Commands are noninteractive with stdin /dev/null. The tool returns output on invocation completion. Foreground content retains the last 50 KiB with an explicit truncation notice and advice to redirect/read selected ranges for more. No automatic foreground or background log file is created. Background launch has a 10-second control-response deadline; if the shell cannot acknowledge, reset it and report the failure. Shell startup has a 10-second deadline. Bash metadata is small and not truncated with command content.
 
-Explicit git commit requests use the [harness commit decision](../../design.md). Evaluate actual candidate contents rather than all dirty files. Implementation-only commits execute; mixed protected/implementation commits refuse with split instructions; design/member-only commits wait for user Accept, Deny or Send feedback. Approval covers exact reviewed contents. Indirect commits inside scripts/programs are outside detection. Other Git operations are native, with no scope selector, controlled Git dialect or backend checkpoints. Member activation remains separate. Waiting approval timeout/cancellation/restart behavior is a follow-up; do not silently inherit a foreground execution timeout as the user-input deadline.
+Explicit git commit requests use the [harness commit decision](../../design.md). Evaluate actual candidate contents rather than all dirty files. Implementation-only commits execute; mixed protected/implementation commits refuse with split instructions; design/member-only commits wait for user Accept, Deny or Send feedback. Approval covers exact reviewed contents. Indirect commits inside scripts/programs are outside detection. Other Git operations are native, with no scope selector, controlled Git dialect or backend checkpoints. Member activation remains separate. Foreground execution timeout is suspended while waiting for user input, then resumes with its remaining budget. Cancellation/reset/shutdown removes the pending request; restart never replays it. Explicit commits must be foreground. The harness contract defines supported flags, unknown-path refusal and stale-candidate checks. Commit preparation/execution uses the same sandbox resources and disables commit hooks to preserve reviewed content.
 
-Sandbox rules are fixed for the shell lifetime. Configuration activation/update stops affected shells rather than mutating policy under an existing shell/job. File-tool input authorization remains a separate mechanism. Any backend control IPC must retain narrowly configured sandbox access and must not expand system-read/workspace-write authority. Removing the obsolete scope bridge must not retain its socket as a required resource. Linux depends on bubblewrap/runtime dependencies and is not verified by the macOS-only test environment.
+Sandbox rules are fixed for the shell lifetime. Configuration activation/update stops affected shells rather than mutating policy under an existing shell/job. File-tool input authorization remains a separate mechanism. Any backend control IPC must retain narrowly configured sandbox access and must not expand system-read/workspace-write authority. The commit approval IPC socket is granted narrowly on macOS; no obsolete scope-routing socket or Git scope selector remains. Linux depends on bubblewrap/runtime dependencies and is not verified by the macOS-only test environment.
 
 ## Acceptance examples
 

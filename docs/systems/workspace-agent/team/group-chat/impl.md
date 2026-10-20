@@ -38,7 +38,7 @@ Lock order is workspace then all relevant agents then clock for publication; run
 
 Migration imports old prototype records once per workspace in publication order. Old atomic completed-run endPosition identifies the original committed final candidate; migration validates its text and never searches for the latest response. Missing/corrupt references fail explicitly. Old runs without an accepted final become retained status entries. Existing reference data and agent history are never deleted.
 
-TeamSystem checkpoints harness state before invoking final publication. Its runtime afterRun hook finalizes failed/cancelled/interrupted work after policy/tool effects settle and skips a successfully checkpointed publication, preventing an older sender from checkpointing a successor activation. No filesystem or Git policy is added to SQL group admission.
+TeamSystem offers naturally completed final text for atomic group publication without Git checkpoints. Runtime still settles pending effects and optional finalization before releasing the workspace execution lock. No filesystem or Git policy is added to SQL group admission.
 
 ## Unified streaming and model completion
 
@@ -64,7 +64,7 @@ Frontend projection hides a leading routing header, including incomplete prefixe
 
 TeamRunner.reset serializes with publication and configuration activation through the workspace operation gate, rejects any active/admitted/finalizing job and invokes one database reset transaction. SQL rechecks all workspace member active-run markers while holding workspace then agent locks. Clearing durable history follows dependency order; no filesystem operation is involved. Successful reset wakes timeline and legacy followers. Both follow loops emit a reset boundary before post-reset data and continue using monotonic positions. A reset cannot race with a new run inside the gate.
 
-AgentRuntime persists recoverable tool errors and completes the call batch before invoking team continuation policy. TeamSystem already continues any response with tool calls; the next step reads the full canonical context including error results. Final publication/checkpoint/mentions stay on the same natural-completion path. No team retry scheduler or provider-specific exception is added.
+AgentRuntime persists recoverable tool errors and completes the call batch before invoking team continuation policy. TeamSystem already continues any response with tool calls; the next step reads the full canonical context including error results. Final publication/mentions stay on the same natural-completion path. No team retry scheduler or provider-specific exception is added.
 
 ## Private execution progress
 
@@ -72,7 +72,7 @@ The version-1 durable group timeline and final references are unchanged. Private
 
 ## Shared workspace execution lock
 
-TeamRunner.acquireExecution uses a separate per-workspace HarnessQueue from publication admission. RuntimePolicy.acquireRun obtains it before any request/tool and returns a release callback. AgentRuntime releases only after pending effects, afterRun and terminal persistence settle. Waiting abort rejects acquisition and skips policy finalization/checkpoints, while still recording cancellation durably. Publication continues to atomically reserve recipients; no lock is held while waiting for a recipient execution. parseMemberResponse and the SQL publication boundary enforce at most one agent recipient. Existing user multi-recipient admission remains unchanged.
+TeamRunner.acquireExecution uses a separate per-workspace OperationQueue from publication admission. RuntimePolicy.acquireRun obtains it before any request/tool and returns a release callback. AgentRuntime releases only after pending effects, afterRun and terminal persistence settle. Waiting abort rejects acquisition and skips policy finalization, while still recording cancellation durably. Publication continues to atomically reserve recipients; no lock is held while waiting for a recipient execution. parseMemberResponse and the SQL publication boundary enforce at most one agent recipient. Existing user multi-recipient admission remains unchanged.
 
 ## Image attachment integration
 

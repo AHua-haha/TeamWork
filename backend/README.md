@@ -95,139 +95,37 @@ Hover, focus or click a group-chat member avatar to choose its model, reasoning 
 
 `GET /workspaces/:workspaceId/team/members/:memberId/model-settings` returns `{id, revision, value, issues}`. `value` has `connectionId`, `modelId`, and per-model `modelOptions`. `PUT` to the same path accepts `{revision, value}`; unknown fields, invalid model capabilities, foreign/retired members and stale revisions are refused. User preferences live on the member database record separately from the activated manifest and have precedence in effective settings/readiness/run preparation. Users may choose any model on a configured connection; workspace choices still govern agent-created defaults. Other member mutations remain file-based.
 
-## Workspace group chat, lead and harness prototype
+## Workspace group chat and agent-managed Git
 
-Create or adopt a workspace with its model choices/default in the frontend. Its lead starts with the default model. Post workspace requests through the group chat API below. The lead can offer choices, edit pending designs, maintain pending member configuration files, and assign work through shared responses. Pending designs have independent harness history and require exact user acceptance to commit. The frontend displays the persistent group timeline, final responses and expandable private work. Solo conversations remain supported.
+User input uses `POST /workspaces/:id/team/chat/messages` with `{text}` or the documented picture multipart input. No mention triggers Lead; user @ mentions route to active members. Agent finals use an optional leading `<mentions>["Member"]</mentions>` block and may name at most one member. Other @ text is ordinary content. Members share project files and execute sequentially; only final reports enter shared chat. Completed history is SQL-backed, progress is a bounded in-memory delta stream.
 
-```sh
-# Replace WORKSPACE_ID with the registered workspace ID.
-curl -s http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/messages \
-  -H 'Content-Type: application/json' -d '{"text":"Help clarify the project design"}'
+`GET /workspaces/:id/team` lists active members. `GET /workspaces/:id/team/members/:memberId` returns active configuration and management/implementation/execute harness resources. These endpoints do not write member files. Agents edit `.rsi/members/<bundle>/member.json` and referenced Markdown prompts through common tools; `validate_member_config` checks the whole directory. Existing-member updates allow responsibility, supplementary prompts and historical execution settings; identity/models/design assignments remain fixed. User model preferences use the separate model-settings API.
 
-# No mention in user input triggers Lead. Explicit mentions trigger only their recipients.
-curl -s http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/messages \
-  -H 'Content-Type: application/json' -d '{"text":"@Backend @{Frontend Worker} implement your assigned designs"}'
+### Git commits and user approval
 
-# Persistent group history; use the last received position to fetch the next page.
-curl -s 'http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat?after=0&limit=100'
-# Follow spans member runs; it exposes shared final messages and run status, never private chunks.
-curl -N 'http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/follow?after=0'
+Agents initialize/manage the ordinary project Git repository. There are no scoped Git references/indexes, private history, automatic run checkpoints or scope commit/restore/history endpoints. Bash metadata currently accepts only `{}`; the old git.scope selector is retired.
 
-curl -s -X PUT http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat \
-  -H 'Content-Type: application/json' -d '{"mentionLimit":32}'
-curl -s -X POST http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/stop
-# Explicitly clear this workspace's conversation only after all members finish.
-curl -s -X POST http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/reset
-```
+Use `git add` for intended paths, then `git commit [-a] -m "meaningful message"`. Implementation-context and mapped project implementation changes commit directly. A candidate mixing design/member files with implementation refuses with split instructions. Design/member-only candidates wait for user approval. Unknown paths refuse; renames count both old/new paths. Ordinary dirty files outside the candidate do not affect the decision. Supported commit flags include repeated/attached messages, `-a/--all`, `--allow-empty`, `--signoff/-s`, `--quiet/-q`, `--no-verify`, and literal `git -C` paths. Other modes (path-only/amend/interactive/signing/repository overrides) return staging guidance. Commit hooks are disabled for mediated commits. Git requires a directory repository at the registered workspace root.
 
-Every accepted message enters authoritative group context, available to all members when activated. No shared-message copies are appended into idle member contexts. Each admission freezes its shared prefix; later group messages do not enter ongoing work. Receiving messages alone does not activate a member. Mentioned members execute sequentially in one shared workspace; agent final headers name at most one distinct recipient. Working context combines earlier group messages, implementation README result/lookup text, retained unsuccessful private work, incoming group messages and fresh Bash retrieval results. Private execution history is durable; success excludes it from future model input while preserving it for inspection. Only accepted final responses enter the shared transcript.
+The compact approval input appears above the chat composer. Accept executes the reviewed candidate. Deny skips it; Send feedback skips it and returns the user's text to the agent. Review opens commit details/diffs in the right panel; no diff is embedded in the input. Contents/HEAD changing after review invalidate acceptance. Waiting pauses the foreground timeout. Run cancellation, reset/shutdown and restart do not replay a commit. This checks explicit commands only; indirect scripts/manual Git are outside this workflow guard.
 
-Agent final responses use an optional leading routing header; the report body is never scanned for @ mentions:
+| Endpoint | Result |
+| --- | --- |
+| GET `/workspaces/:id/team/commit-approvals` | Pending summaries, no diffs |
+| GET `/workspaces/:id/team/commit-approvals/:approvalId` | Exact proposed command/message/diff |
+| POST same request URL with `{action:"accept"|"deny"|"feedback",message?:string}` | Resolve pending input; original tool returns execution/refusal |
+| GET `/workspaces/:id/team/changes` | Read-only committed-to-current design/member file groups |
+| GET `/workspaces/:id/team/configuration/current` | Current configuration/status and active-to-current diff |
+| GET `/workspaces/:id/team/configuration?source=pending|committed` | Validation/change plan |
+| POST `/workspaces/:id/team/configuration/activate` with `{revision,digest}` | Atomic valid committed-member activation while whole team idle |
 
-```text
-<mentions>
-["Backend"]
-</mentions>
+Commit and activation remain separate. Newer pending files are excluded from activation. Old `/team/configuration/commit` and `/team/members/:id/harness/...` routes are removed.
 
-Please implement the accepted design. @joplin/lib and @Nobody here are ordinary text.
-```
+### Bash execution
 
-Omit the block when nobody should run; an empty block or `[]` is also valid. Names are matched ignoring case and duplicates count once. Invalid header syntax or recipients refuse the whole publication with private feedback. Only the body is displayed and delivered as the shared message. Raw private history retains the original response. New final references include backend-owned `bodyOffset` alongside `contentIndices`; old accepted references remain unchanged. User composer `@Name` / `@{Name With Spaces}` input keeps its existing routing/default-lead behavior.
+Bash accepts command, optional cwd, timeout seconds, background and empty metadata. One shell per member preserves cwd/variables/functions/jobs across calls/runs. Output combines stdout/stderr with plain-text execution metadata, bounded to the last 50 KiB. Foreground timeout defaults to 60 seconds, background unlimited unless specified. Background returns native job_id and defaults inherited output to /dev/null; explicit redirects work normally. Manage jobs with jobs/wait/kill. No output file is created automatically. Foreground timeout/cancellation resets the shell and jobs; member reset/retirement/activated changes/shutdown also stop them.
 
-A busy, invalid, unavailable or self recipient refuses the entire publication with no partial delivery or queue. Agents receive private feedback to revise or retry. Each user message starts an exchange with an activation budget (default 32); duplicate mentions count once, refused attempts consume nothing, and subsequent response activations share the exchange budget. Stop cancels all active branches. Restart interrupts abandoned work, delivers buffered messages and never replays triggers. Private agent `/follow` APIs remain available for inspection; direct `/agents/:memberId/runs` refuses all members. Existing private history is preserved and is not converted into shared chat history.
-
-A system node has metadata.json containing only implementation paths, and Markdown document content:
-
-```text
-.rsi/context/
-  design/backend/
-    metadata.json     # {"implementation":["backend/src"]}
-    design.md         # OR design/README.md plus Markdown documents
-  implement/backend/
-    impl.md           # OR impl/README.md plus Markdown documents
-```
-
-The metadata path identifies the node. References are relative to the design root: metadata.json for root, backend/metadata.json for backend. Raw file paths include design/ or implement/. Large context can use multiple documents without creating child systems; actual child nodes have their own metadata and paired contexts. Each representation allows 1–100 nonempty Markdown documents/1 MiB total, requires README.md in directory form and forbids simultaneous file/directory forms. Semantic prose sections remain harness instructions.
-
-Member configuration uses JSON plus Markdown prompts in the shared workspace:
-
-```text
-.rsi/members/backend/member.json
-.rsi/members/backend/prompts/member.md
-```
-
-Example editable manifest (identity, format version and revisions are backend-owned):
-
-```json
-{
-  "name": "Backend",
-  "role": "developer",
-  "responsibility": "Implement the backend design",
-  "settings": {},
-  "promptFiles": ["prompts/member.md"],
-  "designScope": {
-    "working": ["backend/metadata.json"],
-    "dependencies": ["api/metadata.json"]
-  },
-  "execute": {"allowedCommands": []}
-}
-```
-
-Use common write/edit tools for pending files. Only the lead receives write/edit tool permission and validation capability for member files; read-only tools can inspect the workspace. User acceptance is required for design and member-config semantic commits. Accepting member files does **not** create/update/retire active members. The user activates the reviewed committed change set separately, atomically, while the entire workspace is idle. The former submit_member_config and retire_member agent shortcuts are removed; list_models remains read-only and validate_member_config validates the complete .rsi/members file change set without committing/activating. Existing member updates may change only execution rules, supplementary prompts and responsibility; name, role, model/run settings and design assignments stay fixed. Delete retires a worker while preserving history/files; the lead cannot be deleted. Bundle files seed once; deliberate deletion is preserved across requests/restarts.
-
-Base rule text is maintained in [backend/prompts/harness](prompts/README.md), including common and per-scope instructions. Runtime and inspection load the same Markdown files. Restart development mode after edits; compiled use requires rebuilding and restarting. Build output includes the required assets. Prompt text does not change enforced scope/tool/approval policy.
-
-Three fixed bases assemble common tools and maintenance prompts:
-
-- **management:** lead-only global design editing and member management at .rsi/context/design and .rsi/members; other members read/follow assigned designs, user-approved design/member commits;
-- **implementation:** writable paths derived from accepted working designs, dependency mappings/context read-only with overlap precedence; paired working-design implementation context is editable; code/context commits allowed independently for the agent;
-- **execute:** a persistent Bash per member with system reads, whole-workspace/owned-temporary writes, outbound networking, local binding and native background jobs.
-
-designScope selects assignment; execute.allowedCommands remains source-format data without controlling execution. No other base policy is configurable in member JSON. No explicit implementationScope assignment or base-policy override is accepted. The inspection member view retains implementationScope as a backend-derived projection. GET /workspaces/:workspaceId/team/members/:memberId returns {member, configuration, harnesses}, including stable source metadata and all three effective definitions without creating additional checkouts. Member POST/PUT/DELETE and separate /config remain absent.
-
-One bash tool replaces run_command and the dedicated scope commit/history/restore tools:
-
-```json
-{"command":"git add . && git commit -m \"Implement backend route\"","metadata":{"git":{"scope":"implementation"}}}
-```
-
-Use scope design or member-config for protected files; agent git commit is refused with approval_required and leaves staging pending. Supported Git commands are status, diff, add, rm, log, show, restore and commit with the finite options in the harness contract. One invocation selects one scope; metadata cannot supply identity/approval or retarget repositories. Metadata-selected ordinary Git calls, including descendants, use the backend bridge. Unscoped Git is native; broad Bash can modify workspace/Git metadata directly, so the bridge is a workflow control rather than an exclusive security boundary.
-
-All members operate directly in the registered workspace, one executing member at a time including finalization. Pending edits are immediately visible under existing harness permissions. No member worktree or dependency hydration is created. Implementation Git uses the project repository/current branch and a shared index; commits refuse unrelated staged changes and preserve unstaged edits. The repository is initialized on first implementation Git use if absent. Automatic checkpoints stay private and do not create project commits. Design/member acceptance and implementation-context history remain independently controlled. Existing legacy member directories remain preserved and unused, without automatic import. For stable local review, wait for or stop the team. Git-ignored untracked dependencies/build outputs are excluded from implementation checkpoints.
-
-Generic harness review/acceptance remains available alongside the Team configuration UI. Under `/workspaces/:workspaceId/team/members/:memberId/harness`:
-
-- `GET` returns shared workspace directory and per-part state, review revision and diff.
-- `GET /:part/history` returns checkpoint/semantic-commit history.
-- `POST /:part/commit` with `{revision, base, message}` accepts the exact reviewed protected/context state as the user; idle member required. Implementation semantic commits use project Git through Bash.
-- `POST /:part/restore` with `{revision}` restores one part; idle member required.
-
-For example, review the member, take `revision` and `state.committed` from its `design` part, then submit them as `revision` and `base` to `/design/commit`. A changed working file or committed base causes `stale_revision`; inspect again. Actor/approval fields cannot be supplied through agent tool arguments.
-
-Workers need a nonempty valid design assignment and empty catalog tool selections. Startup strips old explicit implementation paths, migrates active sources to backend formatVersion 4, retains exact previous bundles/settings/commands, and preserves existing pending drafts and historical refs. Existing draft files are never automatically rewritten. There is no automatic accepted-file activation.
-
-### Member configuration activation
-
-1. The lead edits JSON/Markdown and calls `validate_member_config({"path":".rsi/members"})`.
-2. `GET /workspaces/:workspaceId/team/configuration/current` inspects the latest files and one active-to-current diff. It returns `active`, `current` (revision, parsed valid members and raw files), flat `changes`, `status` (pending paths, current validation and commit history), and separate `commit` / `activation` review tokens. Reading may seed/checkpoint the shared workspace, without accepting files or changing active members.
-3. `POST /workspaces/:workspaceId/team/configuration/commit` with `{"revision":"<commit.revision>","base":"<commit.base>","message":"Accept member changes"}` accepts exact reviewed files as the user. The lead must be idle; active settings remain unchanged. Refresh inspection after success.
-4. `POST /workspaces/:workspaceId/team/configuration/activate` with `{"revision":"<activation.revision>","digest":"<activation.digest>"}` activates that exact committed configuration. Response is `{revision, changes, memberIds}`. No agent run starts and pending files remain pending.
-
-The whole workspace must be idle for activation, including admission and finalization. Busy activation returns `workspace_busy`; changed review/active/model/design state returns `stale_revision`; invalid configuration returns `invalid_config`. Nothing partially activates. Reusing a successful activation body becomes stale; fetch fresh inspection. A fresh no-change activation updates the history boundary without advancing member revisions. There is no agent activation tool, auto watcher or automatic retry. **Changes** provides these separate user actions; avatar details stay active-only.
-
-Inspection's active revision/time is recorded atomically with activation. Earlier backend versions did not record a workspace-wide activation boundary; those teams compare active database source bytes with current files and label available history with `historyKnown:false` until the next activation. Runtime configuration still loads from exact database snapshots independently of Git references. Commit history is newest first, up to 100 records (`more` marks older history). Raw text preview limits are 1 MiB/file and 4 MiB total; unreadable/over-limit files return an explicit problem. Patches are capped at 262,144 characters/file with `truncated:true` when needed. Renames appear as add/delete.
-
-The low-level `GET /workspaces/:workspaceId/team/configuration?source=pending|committed` semantic review and generic member-config harness commit endpoint remain available. The current inspection endpoint supplies both operation tokens so the frontend needs one displayed diff and separate pending/committed validation states.
-
-Creation selects workspace models/defaults and valid accepted designs. Update is limited to responsibility, referenced supplementary prompts and execute rules. Reassignment/name/role/model changes require an explicit replacement proposal in a fresh bundle. Retired bundle paths cannot be reused. JSON version/identity/revision fields are invalid; backend source envelopes own formatVersion and acceptedRevision. Relevant files must be UTF-8 text; missing referenced prompts invalidate the batch. Startup migrates old accepted sources with their previous exact bytes retained; existing drafts need explicit schema reconciliation, including execute assignment.
-
-Every member receives Pi's native read, ls, grep, find, write and edit tools with default operations, schemas, content/details and native truncation. Harness checks input paths before invocation: read-only tools inspect workspace content freely; write/edit remain restricted by accepted working-design/role permissions. No filesystem operations or extra result-format/truncation layer are injected into these tools.
-
-The custom Bash tool takes command, optional cwd, timeout (seconds), background and metadata.git.scope. One shell per member preserves cwd, variables, functions and jobs across calls/runs. Foreground stdout/stderr combine into readable text plus execution metadata; output retains the last 50 KiB. Foreground timeout defaults to 60 seconds; background has no default timeout, and explicit positive values apply to either. Background launch returns native job_id (no PID/cwd/output path); manage with jobs, wait %N and kill %N. Inherited background stdout/stderr go to /dev/null; command-specified redirection overrides them. No output files are created by the tool. Foreground timeout/cancellation resets the shell and its jobs. Reset, retirement, affected configuration activation/update and shutdown also stop shells/jobs. A stopped shell is reported on next use, without replaying commands.
-
-Bash uses @anthropic-ai/sandbox-runtime 0.0.79: macOS sandbox-exec or Linux bubblewrap/dependencies, with no unrestricted fallback. Read system resources subject to OS permissions; write the entire workspace (including .rsi and .git) and its owned temporary area; network/local binding allowed, no executable allowlist. Bash does not enforce assignment write scopes. Writable HOME/cache/tmp live in that workspace's temporary area. A controlled environment does not inherit arbitrary backend variables; filesystem confidentiality is not promised by system read access. Sandbox proxy compatibility still matters. Background jobs can continue changing files after a checkpoint; a checkpoint is an observation, not filesystem quiescence. No CPU/memory quota is introduced. Linux remains unverified by this macOS test environment.
-
-Contracts: [lead](../docs/systems/workspace-agent/team/lead/design.md), [harness](../docs/systems/workspace-agent/harness/design.md), [design parts](../docs/systems/workspace-agent/context-base/design-parts/design.md), and [team](../docs/systems/workspace-agent/team/design.md).
+The sandbox permits system reads, workspace/owned-temp writes, networking/local binding and no executable allowlist. It does not enforce working-design write boundaries. Pi write/edit retain assignment checks; read-only native tools inspect the workspace. Temporary homes/caches stay outside `.rsi`. No CPU/memory quota is added. Linux runtime enforcement remains unverified on the macOS host.
 
 ## Predefined Modelflare provider
 
@@ -338,16 +236,16 @@ Old prototype history imports once in publication order. New admissions reserve 
 
 ## Unified activity streaming and final acceptance
 
-Workspace members finish with ordinary assistant text. Tool calls continue execution. At natural model completion (`stop`), native `final_answer` text blocks are selected when present; otherwise unphased text blocks are selected, excluding native `commentary`. Commentary-only output continues, and token truncation fails without publication. The team checkpoints, parses the optional leading mention header and offers its body for atomic group acceptance. Busy/invalid mentions refuse the whole publication and return private feedback so the same run can continue.
+Workspace members finish with ordinary assistant text. Tool calls continue execution. At natural model completion (`stop`), native `final_answer` text blocks are selected when present; otherwise unphased text blocks are selected, excluding native `commentary`. Commentary-only output continues, and token truncation fails without publication. The team parses the optional leading mention header and offers its body for atomic group acceptance. Busy/invalid mentions refuse the whole publication and return private feedback so the same run can continue.
 
 Private `/agents/:id/follow` synchronizes SQL completed history and version-2 compact in-memory progress, preserving native signatures without cumulative partials. The frontend streams visible text and tools in one activity flow, hiding thinking. Successful group publication pins the latest committed assistant record and exact ordered text-block `contentIndices`; only then does the frontend fold earlier work and keep the complete final visible. Historical plain-message and retired response-tool references remain readable as immutable accepted history. New runs use no completion tool or response-action annotation. Restart the backend and reload the frontend together to use this contract.
 
 
 ### Fresh workspace initialization and local reset
 
-Create/adopt prepares .rsi/context/design/metadata.json, .rsi/context/design/design.md and .rsi/context/implement/impl/README.md, exact lead JSON/Markdown under .rsi/members/<lead-id>/, and private .rsi/harness checkpoint/approval history. The lead works on root metadata.json, uses the workspace model default and starts without dependencies or project-code mappings, with the fixed broad execute base. All three initial context files share sequence 1. Source/history is clean and active; later design/member changes still require normal user commit/activation. Existing .rsi entries are refused and project implementation/Git is preserved. Old layout is not silently migrated; safe unresolved active references remain inspectable but cannot run.
+Create/adopt prepares .rsi/context/design/metadata.json, .rsi/context/design/design.md and .rsi/context/implement/impl/README.md, exact lead JSON/Markdown under .rsi/members/<lead-id>/, and a static SQL bootstrap control baseline. The lead works on root metadata.json, uses the workspace model default and starts without dependencies or project-code mappings, with the fixed broad execute base. All three initial context files share sequence 1. Source/history is clean and active; later design/member changes still require normal user commit/activation. Existing .rsi entries are refused and project implementation/Git is preserved. Old layout is not silently migrated; safe unresolved active references remain inspectable but cannot run.
 
-For a deliberate local clean slate, stop the backend and run `npm --prefix backend run reset:workspace-data -- --apply`. The script uses backend/.env and refuses a database owned by a running backend. It removes all workspace/agent/chat/runtime/context records, agent configs and registered-workspace managed directories (new .rsi, legacy .context/.team and exact legacy harness stores). It retains provider connections/encrypted credentials, app settings, catalogs/model caches and project implementation/Git checkouts. It does not unregister provider connections or drop the database. Paths are quarantined during the transaction and restored if deletion fails; committed cleanup removes the quarantines. Start the backend afterward and create/adopt workspaces afresh. Keep `/.rsi/` out of your project's own version control; initialization does not edit its Git settings or ignore files.
+For a deliberate local clean slate, stop the backend and run `npm --prefix backend run reset:workspace-data -- --apply`. The script uses backend/.env and refuses a database owned by a running backend. It removes all workspace/agent/chat/runtime/context records, agent configs and registered-workspace managed directories (new .rsi, legacy .context/.team and exact legacy harness stores). It retains provider connections/encrypted credentials, app settings, catalogs/model caches and project implementation/Git checkouts. It does not unregister provider connections or drop the database. Paths are quarantined during the transaction and restored if deletion fails; committed cleanup removes the quarantines. Start the backend afterward and create/adopt workspaces afresh. Track intended design/member/implementation-context files in project Git (use git add -f if ignored); never track legacy .rsi/harness; initialization does not edit its Git settings or ignore files.
 
 ## Design and implementation-context maintenance
 
@@ -355,35 +253,35 @@ Parallel design/implement roots follow the same project-system hierarchy indepen
 
 Complete design context describes purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. Implementation context documents exact Input, Output, Effect and Usage examples for actual interfaces. Directory documents stay within one system; do not impose a fixed interfaces/requirements file split. Base Markdown rules instruct reading applicable context, updating facts/examples and continuation information, and surfacing mismatches. Reusable knowledge and automatic maintenance remain deferred.
 
-Permissions have working and dependencies, each with designContext, implementationContext and implementation. Only the lead edits all design context. Both roles edit exact working-node implementation context and accepted mapped code; dependency implementation/context is read-only. The lead role grants no extra implementation rights. Design/metadata acceptance is user-only. Each working node has an agent-committable impl-context-<hash> scope covering both impl.md and impl/, with ID derived from its lower-case metadata path. Use existing Bash metadata.git.scope and ordinary Git commands; histories/staging stay independent of code/design/member state. Only the lead has design Git scope. New read-only member views inherit accepted design files, including user-committed additions, updates and deleted-document tombstones. Semantic commits validate structural form on immutable selected/staged bytes; checkpoints preserve unfinished edits. Write/edit inputs remain scoped, while Bash can write all workspace files including .rsi.
+Permissions retain working/dependency design context, implementation context and implementation. Lead edits design/member files; both roles edit exact working implementation/context via native file tools; dependencies remain read-only. Bash is broader. Git history is ordinary project history, with explicit commit approval as described above.
 
 Raw user context mutation can edit design/metadata, but refuses implementation context and mutations under implement/. Semantic design inspection returns metadata plus ordered Markdown documents, aggregate content and a revision covering all design bytes. Members see the same implementation context directly. Accepted design snapshots still govern permissions; pending filesystem edits do not grant authority. Prompt changes require restart (and rebuild for compiled deployments). Existing old-layout data needs explicit repair/reset before new node assignments can run.
 
 ### Reset a workspace conversation
 
-The group-chat header's trash control confirms `POST /workspaces/:id/team/chat/reset`. It requires the whole team to be idle, including finalization, and returns `{workspaceId,resetCursor,resetPosition}`. Busy requests return 409 `workspace_busy`; use Stop team and wait first. This explicitly deletes shared messages/reservations/exchanges and every workspace member's private runtime context, messages, runs and chunks, including retired members. It preserves member/model configuration, workspace settings, project and context documents, harness history and other workspaces/solo agents. It does not roll back file effects.
+The group-chat header's trash control confirms `POST /workspaces/:id/team/chat/reset`. It requires the whole team to be idle, including finalization, and returns `{workspaceId,resetCursor,resetPosition}`. Busy requests return 409 `workspace_busy`; use Stop team and wait first. This explicitly deletes shared messages/reservations/exchanges and every workspace member's private runtime context, messages, runs and chunks, including retired members. It preserves member/model configuration, workspace settings, project and context documents, ordinary Git history and other workspaces/solo agents. It does not roll back file effects.
 
 Timeline reads add `resetCursor`; shared-history reads add `resetPosition` (initially 0). Follow streams emit a version-1 `reset` before new data when the supplied cursor precedes the durable boundary, then synchronize again. Timeline reset payloads carry `cursor`; shared-message reset payloads carry `position`. Discard records at/before the boundary and ignore delayed old acknowledgements. Shared counters remain monotonic; fresh private member history starts at zero. Backend startup adds the boundary columns to existing databases.
 
 ### Unified pending change review
 
-The workspace panel has a Changes tab for pending design/member files, separate from Team's active information. It shows one flat file list and unified text diff. Approve design and Approve members commit only their own reviewed scope; Activate members remains a separate idle-team action. Approve design before activating members that reference newly proposed designs. Approval refreshes accepted design discovery and member validation; files already reside in the shared workspace; approval changes accepted history and authority.
+Changes contains read-only committed-to-current design/member diffs and separate idle member activation. Commit approval lives above the composer; Review opens the exact candidate in the right panel.
 
-`GET /workspaces/:id/team/members/:memberId/harness/:part/review` returns `{memberId,partId,revision,base,changes:[{path,action,patch,truncated}]}` comparing the committed scope to a stable current checkpoint. It changes no working files or staged content. Existing scoped user commit APIs accept these exact revision/base tokens; changed files/base refuse stale approval. Member current inspection and separate activation revision/digest remain unchanged. Approved files leave the pending list; pending edits are excluded from activation.
+The old member harness scope review/commit/history/restore routes are removed. Use the pending commit approval endpoints for exact review; configuration activation stays separate.
 
 ### Sequential execution
 
-User routing and busy-recipient refusal are unchanged. User multi-mentions admit recipients in order, but only one executes at a time. Agent final responses may name at most one distinct member in the leading routing header; more than one is refused with private feedback. Waiting admitted runs keep the existing running state with step zero until execution. Stop/shutdown cancel waiting runs without tools/checkpoints. Different workspaces may run independently.
+User routing and busy-recipient refusal are unchanged. User multi-mentions admit recipients in order, but only one executes at a time. Agent final responses may name at most one distinct member in the leading routing header; more than one is refused with private feedback. Waiting admitted runs keep the existing running state with step zero until execution. Stop/shutdown cancel waiting runs without tools or Git history. Different workspaces may run independently.
 
 ### Fast Changes review
 
-GET /workspaces/:workspaceId/team/changes returns the lead ID, design/member scope reviews and lightweight approved-versus-active member revision status. Each review compares current files with the last user-approved scope commit and includes untracked additions, modifications, mode changes and deletions. It preserves staging and accepted refs; an immutable review checkpoint retains exact revision/base approval tokens. Fixed management scope resolution avoids rebuilding the whole team, materializing files, returning raw configurations/history or validating pending/committed teams on every file read. Snapshot object hashing and patch generation are batched rather than one Git process per file. Links/special files and oversized snapshots/output fail explicitly; patches retain bounded previews.
+GET /workspaces/:workspaceId/team/changes returns ordinary committed-to-current design/member file groups and committed-versus-active member status. It preserves staging and files, creates no checkpoints, and avoids full member validation/history enumeration. Per-file patches are bounded; invalid/binary/link/over-limit control files fail explicitly.
 
 Changes displays files immediately, coalesces overlapping refreshes and retains old content during refresh. When approved members differ from active, GET team/configuration?source=committed loads validation/digest separately; files do not wait for it. Approval and idle-team activation use the existing exact-state control endpoints. GET configuration/current remains the comprehensive inspection API for callers needing that data.
 
 ### Member conversation context
 
-Each activation reads the assigned working designs' `.rsi/context/implement/<node>/impl/README.md` files in path order. Use exact `## Result summary`, `## File lookup`, and `## Automatic retrieval` headings. The retrieval section contains one fenced JSON block: `{"commands":[{"command":"git status --short"}]}`. Each entry accepts the full Bash input (`command`, optional `cwd`, `timeout`, `background`, `metadata.git.scope`), using normal member shell/harness rules. An empty commands array disables retrieval. Summary/lookup text is loaded; referenced source files are not automatically read. Missing/invalid documents produce private repair diagnostics, and no commands from those documents run. Existing `impl.md` documents are preserved for explicit conversion rather than silently loaded or moved.
+Each activation reads the assigned working designs' `.rsi/context/implement/<node>/impl/README.md` files in path order. Use exact `## Result summary`, `## File lookup`, and `## Automatic retrieval` headings. The retrieval section contains one fenced JSON block: `{"commands":[{"command":"git status --short"}]}`. Each entry accepts the full Bash input (`command`, optional `cwd`, `timeout`, `background`, `metadata` (currently empty)), using normal member shell/harness rules. An empty commands array disables retrieval. Summary/lookup text is loaded; referenced source files are not automatically read. Missing/invalid documents produce private repair diagnostics, and no commands from those documents run. Existing `impl.md` documents are preserved for explicit conversion rather than silently loaded or moved.
 
 Working context is earlier shared history, document summary/lookup, failed private working ranges, incoming shared history through admission, and fresh retrieval results. SQL boundaries retain failed/cancelled/interrupted working messages across restart; success excludes all private traces from later model context while keeping stable history for inspection. Startup does not replay commands. Temporary uncommitted chunks remain transient. Reset clears conversation boundaries/history while preserving context documents. No frontend endpoint or stream envelope changes.
 

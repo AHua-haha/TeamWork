@@ -59,6 +59,8 @@ export interface ContextCommit {
 }
 
 export interface ContextStore {
+  getGitBaseline(workspaceId: string): Promise<import('./workspace-git.js').GitBaseline | null>;
+  initializeGitBaseline(workspaceId: string, baseline: import('./workspace-git.js').GitBaseline): Promise<import('./workspace-git.js').GitBaseline>;
   listWorkspaces(): Promise<WorkspaceRecord[]>;
   getWorkspace(workspaceId: string): Promise<WorkspaceRecord | null>;
   /** Stores the workspace and its team's lead together, or neither. Fails with 409 `workspace_exists` for a duplicate ID or directory key. */

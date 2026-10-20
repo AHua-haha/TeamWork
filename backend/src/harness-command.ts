@@ -6,18 +6,19 @@ import { realpath, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { SandboxManager, getDefaultWritePaths, type SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
-import { HarnessQueue } from './harness-history.js';
+import { OperationQueue } from './workspace-git.js';
 import { AppError } from './types.js';
 import { closeExecutionResources, executionResources } from './harness-execution.js';
 
 export const commandTimeoutMs = 60_000;
 export const commandOutputBytes = 50 * 1024;
-export interface BashInput { command: string; cwd?: string; timeout?: number; background?: boolean; metadata?: { git?: { scope: string } } }
+export interface BashInput { command: string; cwd?: string; timeout?: number; background?: boolean; metadata?: Record<string, unknown> }
 export interface CommandResult {
   output: string; exitCode: number | null; durationMs: number; truncated: boolean;
   timedOut: boolean; jobId?: number; shellRestarted?: boolean; error?: string;
 }
-type GitOperation = (args: string[], cwd: string) => Promise<string>;
+export type GitExecutor = (args:string[],env:NodeJS.ProcessEnv)=>Promise<{output:string;code:number}>;
+type GitOperation = (args: string[], cwd: string, env: NodeJS.ProcessEnv, onWait: (waiting: boolean) => void, signal: AbortSignal, execute: GitExecutor) => Promise<{output: string; code: number}>;
 interface BashEnvironment { memberId: string; root: string; request: BashInput; signal: AbortSignal; git?: GitOperation }
 const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -27,13 +28,12 @@ export function parseBashInput(value: unknown): BashInput {
   if (value.timeout !== undefined && (typeof value.timeout !== 'number' || !Number.isFinite(value.timeout) || value.timeout <= 0 || value.timeout > 2_147_483)) throw new AppError('invalid_input', 'timeout must be positive seconds, at most 2147483');
   if (value.background !== undefined && typeof value.background !== 'boolean') throw new AppError('invalid_input', 'background must be boolean');
   if (value.metadata !== undefined) {
-    const meta = value.metadata;
-    if (!object(meta) || Object.keys(meta).some(k => k !== 'git') || (meta.git !== undefined && (!object(meta.git) || Object.keys(meta.git).some(k => k !== 'scope') || typeof meta.git.scope !== 'string' || !meta.git.scope))) throw new AppError('invalid_input', 'metadata accepts only git.scope; authority is backend-owned');
+    if (!object(value.metadata) || Object.keys(value.metadata).length) throw new AppError('invalid_input', 'No Bash metadata fields are currently defined; git.scope is retired');
   }
   return value as unknown as BashInput;
 }
 
-const wrapping = new HarnessQueue(), queues = new HarnessQueue();
+const wrapping = new OperationQueue(), queues = new OperationQueue();
 const sessions = new Map<string, Promise<MemberShell>>();
 const restarted = new Set<string>();
 let initialized: Promise<void> | undefined;
@@ -57,6 +57,7 @@ function send(target: number, signal: NodeJS.Signals) { try { process.kill(targe
 
 interface Pending {
   prefix: string; buffer: string; text: string; bytes: number; truncated: boolean; started: number;
+  waiting?: (waiting: boolean) => void;
   resolve: (result: CommandResult & { pid?: number; jobs?: number[] }) => void;
 }
 /** A pipe-fed Bash, with one output pipe and an invocation-specific completion frame. */
@@ -68,12 +69,16 @@ class MemberShell {
   private stopping?: Promise<void>;
   private server!: Server;
   private clients = new Set<Socket>();
-  private gitCalls = new Map<string, { git: GitOperation; pid?: number }>();
+  private gitCalls = new Map<string, { git: GitOperation }>();
+  private brokerAbort = new AbortController();
   private timers = new Map<number, NodeJS.Timeout>();
   private jobPids = new Set<number>();
   private brokerOperations = new Set<Promise<void>>();
   private home = '';
   private socketPath = '';
+  private profile!: SandboxRuntimeConfig;
+  private nativeGit='';
+  private shellEnv:NodeJS.ProcessEnv={};
   // Use a high descriptor, leaving ordinary script descriptors (e.g. flock 9)
   // available, while supporting the system Bash 3.2 shipped with macOS.
   private control = randomInt(100, 240);
@@ -84,19 +89,26 @@ class MemberShell {
     if (!['darwin', 'linux'].includes(process.platform)) throw new AppError('sandbox_unavailable', 'Bash requires macOS sandbox-exec or Linux bubblewrap', 503);
     if (process.platform === 'linux') { const deps = await SandboxManager.checkDependenciesAsync(); if (deps.errors.length) throw new AppError('sandbox_unavailable', deps.errors.join('; '), 503); }
     const resources = await executionResources(this.root), shell = await resources.shell();
+    this.shellEnv=shell.env;
     this.home = shell.home; this.socketPath = join(this.home, 'git.sock');
     await this.openBroker();
     const bridge = join(this.home, 'git.mjs');
+    const nativeGit = this.nativeGit = (await runFile('/usr/bin/which', ['git'])).stdout.trim();
     await writeFile(bridge, `import {connect} from 'node:net';
-const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()=>s.write(JSON.stringify({token:process.env.RSI_GIT_TOKEN,argv:process.argv.slice(2),cwd:process.cwd()})+'\\n'));s.on('data',b=>{raw+=b;const n=raw.indexOf('\\n');if(n<0)return;const r=JSON.parse(raw.slice(0,n));process.stdout.write(r.output);process.exitCode=r.code;s.end();});s.on('error',()=>{process.stderr.write('Scoped Git session is unavailable\\n');process.exitCode=1;});`);
-    const nativeGit = (await runFile('/usr/bin/which', ['git'])).stdout.trim();
-    await writeFile(join(this.home, '.local/bin/git'), `#!/bin/bash\nif [[ -n "\${RSI_GIT_TOKEN:-}" ]]; then exec ${quote(process.execPath)} ${quote(bridge)} "$@"; else exec ${quote(nativeGit)} "$@"; fi\n`, { mode: 0o700 });
+const argv=process.argv.slice(2);let n=0;while(argv[n]==='-C')n+=2;
+if(argv[n]!=='commit'&&!argv.includes('commit')){const {spawnSync}=await import('node:child_process');const r=spawnSync(${JSON.stringify(nativeGit)},argv,{stdio:'inherit'});process.exit(r.status??1);}
+const allowed=['HOME','PATH','LANG','LC_ALL','GIT_AUTHOR_NAME','GIT_AUTHOR_EMAIL','GIT_AUTHOR_DATE','GIT_COMMITTER_NAME','GIT_COMMITTER_EMAIL','GIT_COMMITTER_DATE'];
+const invalid=['GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_COMMON_DIR','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_NAMESPACE'].filter(k=>process.env[k]!==undefined);
+const env=Object.fromEntries(allowed.filter(k=>process.env[k]!==undefined).map(k=>[k,process.env[k]]));
+const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()=>s.write(JSON.stringify({token:process.env.RSI_COMMIT_TOKEN,argv,cwd:process.cwd(),env,invalid})+'\\n'));s.on('data',b=>{raw+=b;const n=raw.indexOf('\\n');if(n<0)return;const r=JSON.parse(raw.slice(0,n));process.stdout.write(r.output);process.exitCode=r.code;s.end();});s.on('error',()=>{process.stderr.write('Git approval session unavailable; commit not executed\\n');process.exitCode=1;});`);
+    await writeFile(join(this.home, '.local/bin/git'), `#!/bin/bash\nif [[ -n "\${RSI_COMMIT_TOKEN:-}" ]]; then exec ${quote(process.execPath)} ${quote(bridge)} "$@"; else exec ${quote(nativeGit)} "$@"; fi\n`, { mode: 0o700 });
     // Remove SRT convenience write grants outside this workspace's resource area.
     const denyWrite = getDefaultWritePaths().filter(p => !p.startsWith('/dev/') && !inside(this.root, p) && !inside(resources.area, p));
     const config: SandboxRuntimeConfig = {
       filesystem: { denyRead: [], allowWrite: [{ path: this.root, literal: true }, { path: resources.area, literal: true }], denyWrite },
       network: { allowedDomains: ['*'], deniedDomains: [], allowLocalBinding: true, allowUnixSockets: [this.socketPath], allowAllUnixSockets: process.platform === 'linux', allowMachLookup: ['com.apple.SystemConfiguration.DNSConfiguration'] },
     };
+    this.profile=config;
     const wrapped = await wrapping.run('profile', async () => {
       initialized ??= SandboxManager.initialize(config);
       try { await initialized; } catch (error) { initialized = undefined; throw error; }
@@ -129,16 +141,21 @@ const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()
           try {
             const request = JSON.parse(data.split('\n')[0]!);
             const call = this.gitCalls.get(request.token);
-            if (this.dead || !call || !Array.isArray(request.argv) || request.argv.length > 128 || request.argv.some((v: unknown) => typeof v !== 'string') || typeof request.cwd !== 'string') throw new AppError('command_denied', 'Scoped Git invocation is unavailable');
+            if (this.dead || !call || !request.env || request.invalid?.length || !Array.isArray(request.argv) || request.argv.length > 128 || request.argv.some((v: unknown) => typeof v !== 'string') || typeof request.cwd !== 'string') throw new AppError('command_denied', `Explicit Git commit invocation is unavailable (active=${!!call}, env=${!!request.env}, unsupported=${(request.invalid??[]).join(',')})`);
             const cwd = await realpath(request.cwd);
-            if (!inside(this.root, cwd)) throw new AppError('access_denied', 'Scoped Git cwd must be inside the workspace');
-            socket.end(JSON.stringify({ output: await call.git(request.argv, cwd), code: 0 }) + '\n');
+            socket.end(JSON.stringify(await call.git(request.argv, cwd, request.env, waiting => this.pending?.waiting?.(waiting), this.brokerAbort.signal,(args,env)=>this.executeGit(args,env))) + '\n');
           } catch (error) { socket.end(JSON.stringify({ output: `${error instanceof AppError ? error.code : 'git_error'}: ${error instanceof Error ? error.message : 'Git failed'}\n`, code: 1 }) + '\n'); }
         })();
         this.brokerOperations.add(op); void op.finally(() => this.brokerOperations.delete(op)).catch(() => undefined);
       });
     });
     await new Promise<void>((resolve, reject) => { this.server.once('error', reject); this.server.listen(this.socketPath, resolve); });
+  }
+  private async executeGit(args:string[],env:NodeJS.ProcessEnv):Promise<{output:string;code:number}>{
+    const command=[this.nativeGit,'--no-replace-objects','-C',this.root,...args].map(quote).join(' ');
+    const wrapped=await wrapping.run('profile',async()=>{SandboxManager.updateConfig(this.profile);return SandboxManager.wrapWithSandbox(command,'/bin/bash',this.profile,this.brokerAbort.signal);});
+    try{const result=await runFile('/bin/bash',['--noprofile','--norc','-c',wrapped],{cwd:this.root,env:{...this.shellEnv,...env,RSI_COMMIT_TOKEN:''},maxBuffer:128*1024*1024,timeout:60_000,signal:this.brokerAbort.signal});return {output:result.stdout+result.stderr,code:0};}
+    catch(error){const result=error as {code?:unknown;stdout?:string;stderr?:string;message:string};if(typeof result.code!=='number')throw error;return {output:(result.stdout??'')+(result.stderr??''),code:result.code};}
   }
   private append(text: string) {
     const p = this.pending; if (!p || !text) return;
@@ -177,14 +194,15 @@ const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()
     const commandBody = background
       ? `builtin eval -- ${quote(command)} </dev/null >/dev/null 2>&1 &\n${variable}_pid=$!\n${variable}_job=$(builtin jobs -l %+)\n${variable}_job=\${${variable}_job%%]*}\n${variable}_job=\${${variable}_job#\\[}\n${variable}_exit=0`
       : `builtin eval -- ${quote(command)} </dev/null\n${variable}_exit=$?\n${variable}_job=0\n${variable}_pid=0`;
-    const body = `export RSI_GIT_TOKEN=${quote(token)}\n${cwd === undefined ? commandBody : `if builtin cd -- ${quote(cwd)}; then\n${commandBody}\nelse\n${variable}_exit=$?\n${variable}_job=0\n${variable}_pid=0\nfi`}\n${variable}_jobs=$(builtin jobs -p)\nbuiltin printf '\\036RSI_${id}:%s:%s:%s:%s\\037' "$${variable}_exit" "$${variable}_job" "$${variable}_pid" "$${variable}_jobs" >&${this.control}\nunset ${variable}_exit ${variable}_job ${variable}_pid ${variable}_jobs\n`;
+    const body = `export RSI_COMMIT_TOKEN=${quote(token)}\n${cwd === undefined ? commandBody : `if builtin cd -- ${quote(cwd)}; then\n${commandBody}\nelse\n${variable}_exit=$?\n${variable}_job=0\n${variable}_pid=0\nfi`}\n${variable}_jobs=$(builtin jobs -p)\nbuiltin printf '\\036RSI_${id}:%s:%s:%s:%s\\037' "$${variable}_exit" "$${variable}_job" "$${variable}_pid" "$${variable}_jobs" >&${this.control}\nunset ${variable}_exit ${variable}_job ${variable}_pid ${variable}_jobs\n`;
     let timer: NodeJS.Timeout | undefined;
-    let timedOut = false;
+    let timedOut = false, remaining = timeout, armedAt = Date.now();
+    const arm = () => { armedAt=Date.now();timer=setTimeout(()=>{timedOut=true;void this.stop();},remaining);timer.unref(); };
     const abort = () => { void this.stop(); };
     signal.addEventListener('abort', abort, { once: true });
     const result = new Promise<CommandResult & { pid?: number; jobs?: number[] }>(resolve => {
-      this.pending = { prefix, buffer: '', text: '', bytes: 0, truncated: false, started: Date.now(), resolve };
-      timer = setTimeout(() => { timedOut = true; void this.stop(); }, timeout); timer.unref();
+      this.pending = { prefix, buffer: '', text: '', bytes: 0, truncated: false, started: Date.now(), resolve, waiting: waiting => { if(waiting){clearTimeout(timer);remaining=Math.max(1,remaining-(Date.now()-armedAt));}else if(!this.dead)arm(); } };
+      arm();
       this.child.stdin.write(body);
       if (signal.aborted) abort();
     });
@@ -196,21 +214,24 @@ const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()
     } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); }
   }
   async run(request: BashInput, signal: AbortSignal, git?: GitOperation): Promise<CommandResult> {
-    const token = git ? randomUUID() : '';
-    if (git) this.gitCalls.set(token, { git });
-    const result = await this.invoke(request.command, request.background ?? false, request.cwd, token, signal, request.background ? 10_000 : (request.timeout === undefined ? commandTimeoutMs : request.timeout * 1000));
+    const explicit = /(?:^|[\s;&|()])(?:["']?(?:[^\s;&|()"']*\/)?git["']?)\s+[^\n;&|()]*\bcommit(?:\s|$)/m.test(request.command.replace(/\\\r?\n/g,' '));
+    if(explicit && request.background)throw new AppError('command_denied','Explicit Git commits must run in the foreground so approval and execution can be observed');
+    const token = explicit && git ? randomUUID() : '';
+    if(token && git)this.gitCalls.set(token,{git});
+    // Absolute explicit Git executables use the same commit gate. Other commands are untouched.
+    const command = token ? request.command.replace(/(^|[;&|\n]\s*|\b(?:command|exec)\s+)["']?(?:\/[^\s;&|()"']+\/git)["']?(?=\s)/gm, '$1git') : request.command;
+    const result = await this.invoke(command, request.background ?? false, request.cwd, token, signal, request.background ? 10_000 : (request.timeout === undefined ? commandTimeoutMs : request.timeout * 1000));
     if (!this.alive) await this.stop();
     for (const [pid, timer] of this.timers) if (!result.jobs?.includes(pid)) { clearTimeout(timer); this.timers.delete(pid); }
     for (const pid of this.jobPids) if (!result.jobs?.includes(pid)) this.jobPids.delete(pid);
-    for (const [key, call] of this.gitCalls) if (call.pid && !result.jobs?.includes(call.pid)) this.gitCalls.delete(key);
     if (result.jobId && result.pid) {
       this.jobPids.add(result.pid);
-      if (git) this.gitCalls.set(token, { git, pid: result.pid });
       if (request.timeout !== undefined) {
         const pid = result.pid;
         const timer = setTimeout(() => { void this.stopJob(pid).catch(() => this.stop()); this.timers.delete(pid); }, request.timeout * 1000); timer.unref(); this.timers.set(pid, timer);
       }
-    } else this.gitCalls.delete(token);
+    }
+    this.gitCalls.delete(token);
     const { pid: _pid, jobs: _jobs, ...visible } = result;
     return visible;
   }
@@ -224,7 +245,7 @@ const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()
     return this.stopping ??= this.shutdown();
   }
   private async shutdown() {
-    this.dead = true;
+    this.dead = true;this.brokerAbort.abort();
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear(); this.gitCalls.clear();
     if (this.child?.pid) {

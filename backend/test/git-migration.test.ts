@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { mkdir,writeFile,readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { withTeam } from './team-fixture.js';
+import { gitText } from '../src/workspace-git.js';
+import { sha256 } from '../src/text.js';
+test('legacy accepted files import once into a durable baseline without restoring pending files or writing private history',()=>withTeam(async f=>{
+ const source=join(f.directory,'.rsi/harness/repository.git');await mkdir(source,{recursive:true});await gitText(f.directory,['init','--bare',source]);
+ const path='.rsi/context/design/design.md',blob=await gitText(f.directory,['--git-dir',source,'hash-object','-w','--stdin'],{},'Accepted legacy design\n');
+ const leaf=await gitText(f.directory,['--git-dir',source,'mktree'],{},`100644 blob ${blob}\tdesign.md\n`);
+ let tree=leaf;for(const folder of ['design','context','.rsi'])tree=await gitText(f.directory,['--git-dir',source,'mktree'],{},`040000 tree ${tree}\t${folder}\n`);
+ const env={GIT_AUTHOR_NAME:'Legacy',GIT_AUTHOR_EMAIL:'legacy@example.invalid',GIT_COMMITTER_NAME:'Legacy',GIT_COMMITTER_EMAIL:'legacy@example.invalid'};
+ const revision=await gitText(f.directory,['--git-dir',source,'commit-tree',tree,'-m','Legacy accepted files'],env);
+ await gitText(f.directory,['--git-dir',source,'update-ref',`refs/harness/designs/${sha256(path)}`,revision]);
+ const refs=await gitText(f.directory,['--git-dir',source,'show-ref']);await writeFile(join(f.directory,path),'Pending edit, preserve me');f.store.gitBaselines.delete(f.workspaceId);
+ const imported=await f.workspaces.gitBaseline(f.workspaceId);assert.equal(imported.design[path],'Accepted legacy design\n');assert.equal(await readFile(join(f.directory,path),'utf8'),'Pending edit, preserve me');
+ await gitText(f.directory,['--git-dir',source,'update-ref','-d',`refs/harness/designs/${sha256(path)}`]);assert.equal((await f.workspaces.gitBaseline(f.workspaceId)).design[path],imported.design[path]);
+ assert.ok(refs.includes(revision));assert.equal(await gitText(f.directory,['--git-dir',source,'for-each-ref','--format=%(refname)','refs/harness/runs']), '');
+}));

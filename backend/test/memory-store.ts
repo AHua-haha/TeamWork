@@ -20,6 +20,9 @@ interface Stored { record: WorkspaceRecord; key: string; seq: number; blobs: Map
 
 /** The MySQL store's context semantics in memory. `failNextCommit` makes the next commit fail before it applies. */
 export class MemoryStore implements ContextStore, TeamStore, ChatStore {
+  readonly gitBaselines = new Map<string, import('../src/workspace-git.js').GitBaseline>();
+  async getGitBaseline(id: string) { return structuredClone(this.gitBaselines.get(id) ?? null); }
+  async initializeGitBaseline(id: string, value: import('../src/workspace-git.js').GitBaseline) { if(!this.gitBaselines.has(id))this.gitBaselines.set(id,structuredClone(value));return (await this.getGitBaseline(id))!; }
   readonly workspaces = new Map<string, Stored>();
   readonly members = new Map<string, { member: StoredMember; lead: boolean; nameKey: string | null; ordinal: number }>();
   readonly workspaceModels = new Map<string, StoredWorkspaceModels>();
@@ -164,11 +167,12 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     const members = structuredClone(this.members), contexts = structuredClone(this.agentContexts), contextPositions = structuredClone(this.contextPositions), ordinal = this.ordinal;
     this.workspaces.set(record.workspaceId, { record, key, seq: 0, blobs: new Map(), versions: [], files: new Map(), records: [] });
     try { await this.createMember(lead); if (models) this.workspaceModels.set(record.workspaceId, { revision: 0, value: structuredClone(models) });
-      if (bootstrap) { await this.commitContext(record.workspaceId, 0, bootstrap.context); this.memberActivations.set(record.workspaceId, structuredClone(bootstrap.activation)); }
+      if (bootstrap) {
+      this.gitBaselines.set(record.workspaceId, structuredClone(bootstrap.baseline)); await this.commitContext(record.workspaceId, 0, bootstrap.context); this.memberActivations.set(record.workspaceId, structuredClone(bootstrap.activation)); }
     }
     catch (error) {
       // Like the real store's transaction: a workspace is never stored without its lead.
-      this.workspaces.delete(record.workspaceId);
+      this.workspaces.delete(record.workspaceId);this.gitBaselines.delete(record.workspaceId);
       this.workspaceModels.delete(record.workspaceId); this.memberActivations.delete(record.workspaceId);
       this.members.clear(); for (const [key,value] of members) this.members.set(key,value);
       this.agentContexts.clear(); for (const [key,value] of contexts) this.agentContexts.set(key,value);

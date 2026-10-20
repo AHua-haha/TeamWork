@@ -1,3 +1,4 @@
+import { CommitApprovalInput } from './CommitApproval.js';
 import { useImageDraft } from './useImageDraft.js';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { GroupClient, imageUrl, type ChatImage, type GroupEntry } from '../client/group-client.js';
@@ -11,9 +12,9 @@ import { Glyph } from './Glyph.js';
 import { Markdown } from './Markdown.js';
 import { memberColor, mentionAt, mentionToken, workDuration, runActivity, isRunThinking, workToolSummary, toolSetSummary, type ActivityItem, type ToolActivity } from './group-work.js';
 
-export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion }: {
+export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion, onCommitReview }: {
   workspaceId: string; title: string; team: TeamState; filesOpen: boolean; onFiles(open: boolean): void;
-  onRunning(running: boolean): void; discussion: Discussion;
+  onRunning(running: boolean): void; discussion: Discussion; onCommitReview(id:string):void;
 }) {
   const client = useMemo(() => new GroupClient(workspaceId), [workspaceId]);
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
@@ -85,7 +86,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
       </div>
     </div>
     {resetOpen && <ConfirmDialog eyebrow="WORKSPACE GROUP" title="Reset chat and member context?" action="Reset chat"
-      message="Permanently clear this group chat and every member’s private conversation context and message history. Project files, designs, member settings and harness history will be kept. Stop team work before resetting."
+      message="Permanently clear this group chat and every member’s private conversation context and message history. Project files, designs, member settings will be kept. Stop team work before resetting."
       onClose={() => setResetOpen(false)} onConfirm={async () => { await client.reset(); setResetOpen(false); pinned.current = true; }} />}
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={client.refresh}>Retry</button></div>}
     <div className="group-viewport" ref={viewport} onScroll={() => { const view = viewport.current!; pinned.current = view.scrollHeight - view.scrollTop - view.clientHeight < 80; }}>
@@ -97,7 +98,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
     </div>
     {modelTarget && modelMember && <MemberModelPopover key={modelTarget.memberId} workspaceId={workspaceId} member={modelMember} anchor={modelTarget.anchor}
       onClose={closeModel} onEnter={keepModelOpen} onLeave={leaveModel} onSaved={refreshTeam} />}
-    <div className="group-composer-footer"><form className={`composer ${dragging ? 'composer-dragging' : ''}`}
+    <div className="group-composer-footer"><CommitApprovalInput workspaceId={workspaceId} running={active} onReview={onCommitReview} onResolved={()=>void team.refresh()} /><form className={`composer ${dragging ? 'composer-dragging' : ''}`}
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (!snapshot.sending) setDragging(true); } }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
       onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); setDragging(false); if (!snapshot.sending && !snapshot.resetting) pictures.add([...event.dataTransfer.files]); }}

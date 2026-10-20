@@ -89,7 +89,7 @@ Accepted admission reserves recipient response entries immediately in mention or
 
 Member entries identify member/name/run, stable display position, run status/times, final reference, and private working range `(after,through]`. While running, through is null; terminal ranges are immutable. Current prototype history is imported in original publication order, preserving its content; reservation order applies to new activations.
 
-For harness-equipped members, final publication first persists scoped run-end checkpoints. Checkpoint failure prevents successful publication; expected mention/publication refusal may continue the run and later checkpoint additional edits. Scoped semantic commits and user design approval remain independent of shared-message publication.
+Final publication follows completed model/tool effects and ordinary atomic shared-message rules. It neither requires nor creates a Git checkpoint. Explicit Git commit approval is a separate Bash tool workflow.
 
 ## Unified streaming and model completion
 
@@ -125,7 +125,7 @@ Malformed-header refusals produce private feedback and allow the same activation
 
 Reset deletes the shared transcript, response reservations and change records, exchanges, runs, private completed messages, temporary streamed chunks, model conversation context and retained-range/processed-boundary state for every workspace member, including retired members. Their current/latest run becomes null, private history position becomes zero, and context revision advances to invalidate stale context edits. Subsequent input starts a fresh conversation without replaying removed group messages. This explicit destructive operation is the exception to normal history retention.
 
-Member identities, accepted/pending configuration, models, workspace settings including mention limit, project/design/implementation context files, harness checkpoints/commits and provider connections are preserved. Other workspaces and solo agents are unaffected. Reset does not undo tool/file effects.
+Member identities, accepted/pending configuration, models, workspace settings including mention limit, project/design/implementation context files, ordinary Git history and provider connections are preserved. Other workspaces and solo agents are unaffected. Reset does not undo tool/file effects.
 
 Shared cursors are never reused. Snapshots add `resetCursor` (timeline) or `resetPosition` (shared messages), initially 0. A successful reset advances both boundaries beyond preceding history, clears old records, and preserves these boundaries durably. A timeline follower whose `after` precedes the reset receives a version-1 `reset` event `{workspaceId,cursor:resetCursor}` before newer entries, then continues from that cursor. Shared-message follow uses a `reset` event with `position:resetPosition` before newer messages. Consumers discard pre-reset records and ignore delayed acknowledgements at/before the boundary. Reload and reconnect see only the new conversation. Empty snapshots at a reset boundary have `more:false`; boundaries are not chat messages.
 
@@ -141,9 +141,9 @@ The version-1 durable group timeline and final references are unchanged. Private
 
 ### Sequential workspace execution
 
-All admitted member runs in one workspace share an execution lock. It covers request construction, model/tool work, outstanding effects, run-end checkpointing and terminal persistence. An admitted handoff waits for its sender to finish finalization. Different workspaces can execute independently. User routing, default lead, availability/busy refusal, shared delivery and budget rules are unchanged. User multi-recipient admission is preserved in mention order; only one member executes at a time. Already admitted waiting recipients count as busy. This execution wait does not queue or retry refused mentions.
+All admitted member runs in one workspace share an execution lock. It covers request construction, model/tool work, outstanding effects, terminal persistence. An admitted handoff waits for its sender to finish finalization. Different workspaces can execute independently. User routing, default lead, availability/busy refusal, shared delivery and budget rules are unchanged. User multi-recipient admission is preserved in mention order; only one member executes at a time. Already admitted waiting recipients count as busy. This execution wait does not queue or retry refused mentions.
 
-An agent final header may contain zero or one distinct case-insensitive member name. More than one refuses the whole publication with private feedback; no message, reservation or budget is consumed. Duplicate spellings of the same name still count once. Stop/shutdown cancel waiting runs before model/tools and without checkpointing someone else's files. Waiting runs retain the existing running/admitted API state and can have step zero; no new public run status is introduced.
+An agent final header may contain zero or one distinct case-insensitive member name. More than one refuses the whole publication with private feedback; no message, reservation or budget is consumed. Duplicate spellings of the same name still count once. Stop/shutdown cancel waiting runs before model/tools and without creating Git history. Waiting runs retain the existing running/admitted API state and can have step zero; no new public run status is introduced.
 
 ## User image attachments
 

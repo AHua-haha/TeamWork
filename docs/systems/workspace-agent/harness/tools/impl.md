@@ -10,7 +10,7 @@
 - Harness assembly selects tools and supplies an invocation authorization hook for mutations, rather than injecting filesystem permission operations.
 - Runtime validates arguments, executes authorized calls and records content, details and error status without result presentation rewriting.
 - Custom service tools implement their own readable content, relevant metadata and bounded output.
-- Customized Bash supplies a persistent shell per member, foreground output capture, native background jobs and broad system-read/workspace-write/network sandbox policy, as described in [the Bash contract](bash/design.md). Optional scoped Git and reset/shutdown lifecycles follow the Bash child contract.
+- Customized Bash supplies a persistent shell per member, foreground output capture, native background jobs and broad system-read/workspace-write/network sandbox policy, as described in [the Bash contract](bash/design.md). Explicit Git commit approval and reset/shutdown lifecycles follow the Bash child contract.
 
 ## Coordination and data flow
 
@@ -40,4 +40,4 @@ Implementation map:
 
 ## Verification
 
-[Native integration tests](../../../../../backend/test/harness-tools.test.ts) verifies native results/details, broad workspace discovery, scoped write/edit, outside/symlink refusals, readable custom content and reset. [Real shell tests](../../../../../backend/test/bash-session.test.ts) exercises actual OS-sandboxed shells, persistent state, descriptor 9, immediate/native jobs, output redirection, wait/kill, resource boundaries, truncation, timeout and cancellation. Existing harness/history/context/member/team suites retain scoped Git/user-acceptance semantics and have updated expectations for broad Bash. MySQL integration verifies durable real runtime tool content and independent details. Linux runtime enforcement is not exercised on the macOS test host.
+[Native integration tests](../../../../../backend/test/harness-tools.test.ts) verifies native results/details, broad workspace discovery, scoped write/edit, outside/symlink refusals, readable custom content and reset. [Real shell tests](../../../../../backend/test/bash-session.test.ts) exercises actual OS-sandboxed shells, persistent state, descriptor 9, immediate/native jobs, output redirection, wait/kill, resource boundaries, truncation, timeout and cancellation. Git approval/context/member/team suites verify ordinary commit decisions, separate activation and broad Bash. MySQL integration verifies durable real runtime tool content and independent details. Linux runtime enforcement is not exercised on the macOS test host.

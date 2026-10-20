@@ -1,36 +1,28 @@
-# Persistent Bash implementation
+# Bash implementation
 
 ## Contract
 
-[Bash contract](design.md). The important guarantees are persistent per-member state, native job handles, unchanged script redirection, broad resource restrictions and cleanup before timeout/cancellation settles.
+[Bash](design.md) defines persistent member shells, native jobs, resource limits and explicit commit approval.
 
 ## Responsibilities and decomposition
 
-backend/src/harness-command.ts owns parsing, member-shell registry, serialized invocation, completion framing, output capture, native jobs, timers, process cleanup and optional scoped Git broker. backend/src/harness-execution.ts supplies one temporary write area per workspace and per-shell home/cache directories. HarnessService supplies member/workspace identity and the selected Git callback, rather than filesystem access adapters.
+harness-command owns input parsing, shell registry, completion framing, bounded output, process/job cleanup and explicit-commit IPC. harness-execution provides workspace-owned temporary homes/caches. GitApprovals owns candidate decisions; it receives a sandboxed Git executor rather than general filesystem authority. No scoped Git service remains.
 
 ## Coordination and data flow
 
-A shell opens lazily inside SRT. A controlled environment retains installed PATH and isolated writable home/cache/tmp but omits arbitrary backend environment. All member shells share initialized network proxies; profile generation is serialized and updates SRT global socket configuration before wrapping each shell. OS profiles remain fixed for that shell. Filesystem read denies are empty; writable roots are workspace and its temporary area. Extra SRT host convenience-write roots are denied; device/stdio defaults stay available. Linux retains existing Unix-socket compatibility configuration; macOS grants the shell bridge socket.
+A pipe-fed OS-sandboxed Bash preserves state across calls/runs. A reserved high descriptor emits per-invocation random completion frames on the combined output pipe; foreground eval stays in the parent shell with stdin /dev/null. Background eval uses native jobs and inherited /dev/null outputs, preserving explicit script redirects. Native job IDs are visible; backend PIDs support bounded cleanup. Reset snapshots descendant process groups and stops known jobs safely.
 
-Foreground scripts execute through eval in the parent shell with stdin /dev/null. Each call sends a random completion frame through a high reserved descriptor duplicated from stdout. stderr joins the same pipe. Parse the completion marker in that pipe so output cannot be overtaken by a separate control pipe. Keep a bounded 50-KiB tail while continuing to drain output. The descriptor is above ordinary script descriptor 9 and works on macOS system Bash 3.2. Agent commands that replace the shell or disrupt control state are reported as shell loss/timeout and never replayed.
-
-Background eval runs asynchronously in the native Bash job table, inheriting /dev/null stdout/stderr before executing the untouched script. Capture its native job number and PID for internal tracking; expose only job_id. Calls can continue while the job runs, and command-specified log redirection is entirely agent-owned. Explicit job timers validate ownership before signalling the process group. Foreground timeout/cancellation, reset and close terminate the shell's descendant/known job groups and await broker effects. Known background groups are retained for cleanup even when the shell exits.
-
-Each metadata-selected Git invocation receives an opaque token bound to its original callback/member/run/scope. A PATH shim forwards that token from child processes to the session broker; background jobs retain launch context. Unscoped Git delegates to the host Git binary. Native absolute Git/workspace metadata are intentionally not blocked by this workflow helper. Ordinary scope history/approval logic remains in HarnessHistory/ProjectGit.
+Literal explicit Git commit detection enables a request-bound token for the PATH shim; direct absolute executable forms are routed to it too. Non-commit Git delegates to the discovered host binary. A commit sends actual argv/cwd and whitelisted shell environment fields over the member socket. Repository/index/object overrides refuse. The broker owns pending invocation callbacks and uses a separate abort signal for shell shutdown. Candidate preparation and Git commit run in sandboxed child execution with the same resource profile. User waiting pauses the foreground timer; resume preserves its remaining execution budget. The broker does not store Git history, route other Git operations into scopes or replay commands.
 
 ## Decisions and constraints
 
-No PTY or interactive stdin is provided. Foreground completion returns tool content; stdout chunks are not independently added to model history. Shell/job state is transient process state, not durable restart state. Context reset, retirement, activated changed members, administrative updates and shutdown reset it. No automatic command retries or output spill files exist. Foreground default timeout is 60 seconds; background default is unlimited; explicit timeout maximum follows Node's timer range. Startup and background acknowledgment use 10-second deadlines. Background jobs can mutate shared workspace files between runs/checkpoints; checkpointing does not claim quiescence.
+SRT 0.0.79 profiles permit system reads, workspace/owned-temp writes, networking and no executable allowlist. Profile generation is serialized because SRT uses shared networking configuration; macOS grants the member IPC socket, Linux retains its runtime socket compatibility. No PTY, interactive stdin, automatic retry or automatic log file is added. Foreground default timeout is 60 seconds, background unlimited unless specified; startup/background acknowledgement deadlines are 10 seconds. Explicit commit commands run in foreground. Indirect scripts/programs without an explicit Git commit in the tool request remain outside this workflow guard.
 
 ## Code map
 
-- [Shell service](../../../../../../backend/src/harness-command.ts).
-- [Workspace temporary resources](../../../../../../backend/src/harness-execution.ts).
-- [Tool content/schema](../../../../../../backend/src/harness-tools.ts).
-- [Harness binding](../../../../../../backend/src/harness.ts).
-- [Reset/retirement/shutdown coordination](../../../../../../backend/src/team-runner.ts).
-- [Configuration activation](../../../../../../backend/src/member-config.ts).
+- [Shell/IPC](../../../../../../backend/src/harness-command.ts), [resources](../../../../../../backend/src/harness-execution.ts).
+- [Commit decision](../../../../../../backend/src/git-approval.ts), [tool schema/results](../../../../../../backend/src/harness-tools.ts).
 
 ## Verification
 
-[Real shell tests](../../../../../../backend/test/bash-session.test.ts) exercise the contract against macOS sandbox-exec. Harness tests cover selected/unselected/nested Git and broad workspace writes independently of file-tool authorization. Team and MySQL integration tests cover reset, activation and stable recorded results. Linux requires bubblewrap/runtime dependencies and remains unverified on this host.
+Real shell tests cover persistent state, descriptors, foreground/background output, jobs, sandbox resources, timeout and cleanup. Git approval tests exercise actual sandboxed commits and pending user decisions, including timeout suspension and cancellation. Linux runtime enforcement remains unverified on the macOS host.

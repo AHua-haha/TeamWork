@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-The lead helps maintain project design and member configuration and assigns active members through shared group mentions. Its management harness supplies scoped files, validation and maintenance rules. File commit and member activation belong to the user.
+The lead helps maintain project design and member configuration and assigns active members through shared group mentions. Its management harness supplies scoped files, validation and maintenance rules. Protected commit approval and separate member activation belong to the user; the agent manages ordinary Git commands.
 
 ## Inputs and preconditions
 
@@ -22,7 +22,7 @@ Forbidden update fields, unsafe/missing references, duplicate names, lead deleti
 
 ## Guarantees and limits
 
-Only the lead receives scoped member-file mutation/validation capabilities. All members can inspect workspace files, and Bash has whole-workspace write authority. Only the user commits/activates member changes, in separate actions. Application design acceptance and group-publication rules remain. File-tool mutations use assignment checks; persistent Bash independently has broad system-read/workspace-write/network authority. Controlled Git checks apply to metadata-selected scope workflows, not all raw filesystem/Git effects. Global base rule files are backend-owned. The file validation tool is validate_member_config with path .rsi/members; user review/activation uses the team configuration control API. The existing Changes view supplies the separate user acceptance and activation actions.
+Only the lead receives member-file write/edit and validation capabilities. Read tools inspect workspace content; Bash retains broad system-read/workspace-write/network resources. Explicit design/member-only commits wait for user approval; mixed protected/implementation commits refuse. Indirect Git is outside detection. The user separately activates valid committed member files while the whole workspace is idle. validate_member_config still validates .rsi/members and never commits/activates.
 
 ## Acceptance examples
 

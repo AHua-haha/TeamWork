@@ -1,15 +1,18 @@
 from pathlib import Path
 import re
-import subprocess
-
-root = Path(__file__).resolve().parents[3]
-task = Path(__file__).resolve().parent
-for draft in (task / 'drafts').rglob('*.md'):
-    assert draft.read_text().startswith('<!-- Task proposal;'), draft
-    canonical = root / 'docs/systems' / draft.relative_to(task / 'drafts')
-    for target in re.findall(r'\]\(([^)]+)\)', draft.read_text()):
+root=Path(__file__).resolve().parents[3]
+task=Path(__file__).resolve().parent
+count=0
+for draft in (task/'drafts').rglob('*.md'):
+    assert draft.read_text().startswith('<!-- Task proposal;'),draft
+    canonical=root/'docs/systems'/draft.relative_to(task/'drafts')
+    assert canonical.read_text()==draft.read_text().split('\n',1)[1],draft
+    for target in re.findall(r'\]\(([^)]+)\)',canonical.read_text()):
         if '://' not in target:
-            path = target.split('#')[0]
-            assert (draft.parent / path).exists() or (canonical.parent / path).exists(), (draft, target)
-assert not subprocess.check_output(['git', 'diff', 'HEAD', '--', 'docs/systems', 'backend', 'frontend', 'scripts'], cwd=root), 'Design persistence must not modify canonical contracts or code'
-print('Six proposed documents checked; local links resolve; canonical contracts and code unchanged')
+            assert (canonical.parent/target.split('#')[0]).exists(),(canonical,target)
+    count+=1
+for retired in ['harness-history.ts','project-git.ts']:
+    assert not (root/'backend/src'/retired).exists(),retired
+    for path in (root/'docs/systems').rglob('*.md'):
+        assert retired not in path.read_text(),path
+print(f'{count} canonical documents match completed drafts; local links resolve; retired Git modules are absent')

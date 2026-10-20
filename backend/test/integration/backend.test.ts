@@ -1,3 +1,5 @@
+import { acceptFiles,initGit,waitApproval } from '../git-fixture.js';
+import { gitText } from '../../src/workspace-git.js';
 import { seedDesign } from '../design-fixture.js';
 import { testModels, testModelValidator } from '../memory-store.js';
 import { emptyHarness } from '../../src/harness-config.js';
@@ -1131,9 +1133,11 @@ test('members edit the shared project, checkpoint runs and separate project comm
       {type:'toolCall',id:randomUUID(),name:'write',arguments:{path:'.rsi/context/design/design.md',content:'Pending design refinement'}},
     ],{stopReason:'toolUse'}));
     const secondStep = await requests.next();
-    answer(secondStep.events, call('bash', { command: 'git add . && git commit -m "Cannot self-approve"', metadata: { git: { scope: 'design' } } }));
+    await initGit({team,workspaceId,lead});
+    answer(secondStep.events, call('bash', { command: 'git add -f .rsi/context/design && git commit -m "Requires user approval"' }));
+    const approval=await waitApproval({team,workspaceId,lead});team.harness.approvals.decide(workspaceId,approval.id,'deny','Revise first');
     const thirdStep = await requests.next();
-    assert.match(JSON.stringify(thirdStep.request.context.messages), /approval_required/);
+    assert.match(JSON.stringify(thirdStep.request.context.messages), /User denied/);
     const manifest = { name: 'Pending new member', role: 'developer', responsibility: 'Future member', settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['metadata.json'], dependencies: [] } };
     answer(thirdStep.events, call('write', { path: '.rsi/members/pending/prompts/member.md', content: 'Pending prompt.' }));
     const manifestStep = await requests.next();
@@ -1158,7 +1162,7 @@ test('members edit the shared project, checkpoint runs and separate project comm
     assert.doesNotMatch(workerStep.request.context.systemPrompt!, /Pending design refinement/);
     answer(workerStep.events, call('write', { path: 'src/result.txt', content: 'Done' }));
     const workerCommit = await requests.next();
-    answer(workerCommit.events, call('bash', { command: 'git add . && git commit -m "Implement the requested result file"', metadata: { git: { scope: 'implementation' } } }));
+    answer(workerCommit.events, call('bash', { command: 'git reset && git add src && git commit -m "Implement the requested result file"' }));
     const workerCommand = await requests.next();
     const commitResult = workerCommand.request.context.messages.findLast(item=>item.role==='toolResult' && item.toolName==='bash');
     assert.match(JSON.stringify(commitResult), /Implement the requested result file/, JSON.stringify(commitResult));
@@ -1177,13 +1181,9 @@ test('members edit the shared project, checkpoint runs and separate project comm
     const env = await team.harness.environment(backend.memberId);
     assert.equal(await readFile(join(env.root, 'src/result.txt'), 'utf8'), 'Done');
     assert.equal(await readFile(join(folder, 'project/src/result.txt'),'utf8'),'Done');
-    assert.ok((await team.harness.history(backend.memberId, 'implementation')).some(r => r.kind === 'commit' && r.actor.type === 'agent'));
-    const review = await team.harness.inspect(lead.memberId);
-    const pending = review.parts.find(p => p.state.part.id === 'design')!;
-    assert.match(pending.diff, /Pending design refinement/);
-    const committed = await team.harness.commit(lead.memberId, 'design', 'User accepted refinement', { type: 'user', memberId: lead.memberId }, pending.revision, pending.state.committed);
-    assert.equal(committed.actor.type, 'user');
-    assert.ok((await team.harness.history(lead.memberId, 'design')).some(r => r.actor.runId === run.runId && r.actor.type === 'harness'));
+    assert.match(await gitText(env.root,['log','--oneline']),/Implement/);
+    const pending=await team.changes(workspaceId);assert.match(pending.design.changes.map(c=>c.patch).join('\n'),/Pending design refinement/);
+    await gitText(env.root,['reset']);await acceptFiles({team,workspaceId,lead},'.rsi/context/design','User accepted refinement');
     const followed = await collect(runtime.follow(lead.memberId, { runId: run.runId }));
     assert.equal(followed.at(-1)?.type, 'end');
     assert.equal((await team.runner.snapshot(workspaceId)).messages.length, 4);
@@ -1545,7 +1545,7 @@ test('group chat SQL/runtime: sequential execution, private feedback and activat
   } finally { await f.close(); }
 });
 
-test('group harness checkpoints failed and cancelled runs and refuses publication when checkpointing fails', { timeout: 30_000 }, async () => {
+test('group runs preserve failed/cancelled edits and publish without Git checkpoints', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
     for (const outcome of ['cancelled', 'failed'] as const) {
@@ -1557,19 +1557,12 @@ test('group harness checkpoints failed and cancelled runs and refuses publicatio
       if (outcome === 'cancelled') await f.runtime.cancel(f.backend.memberId, run.runId);
       else pending.events.push({ type: 'error', reason: 'error', error: { ...message(), stopReason: 'error', errorMessage: 'Provider failed after write' } });
       assert.equal((await f.runtime.finished(f.backend.memberId, run.runId)).status, outcome);
-      const history = await f.team.harness.history(f.backend.memberId, 'implementation');
-      assert.ok(history.some(r => r.actor.type === 'harness' && r.actor.runId === run.runId));
-      assert.ok(!history.some(r => r.kind === 'commit'));
+      const directory=(await f.team.harness.environment(f.backend.memberId)).root;
+      assert.equal(await readFile(join(directory,'partial.txt'),'utf8'),outcome);
     }
-    const checkpoint = f.team.harness.checkpoint.bind(f.team.harness);
-    f.team.harness.checkpoint = async () => { throw new Error('Git unavailable'); };
-    try {
-      const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend report');
-      const pending = await f.requests.next();
-      answer(pending.events, message('Must not be shared without checkpoint'));
-      assert.equal((await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId)).status, 'failed');
-      assert.ok(!(await f.team.runner.snapshot(f.workspaceId)).messages.some(m => m.text === 'Must not be shared without checkpoint'));
-    } finally { f.team.harness.checkpoint = checkpoint; }
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend report');
+    answer((await f.requests.next()).events,message('Published without a Git checkpoint'));
+    assert.equal((await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId)).status,'completed');
   } finally { await f.close(); }
 });
 
@@ -1596,18 +1589,18 @@ test('group SQL publication is atomic; restart preserves shared history without 
     const abandoned = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: '@Backend abandoned', recipients: [f.backend.memberId] });
     await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'Shared while Backend is working', recipients: [] });
     assert.deepEqual((await store.getContext(f.backend.memberId)).entries, []);
-    let recoveredCheckpoint = false;
+    let recoveredFinalization = false;
     const recoveryPolicy = f.team.policy(configuredPolicy());
     const recovery = new AgentRuntime(store, f.team.runConfig, { ...recoveryPolicy, afterRun: async run => {
       assert.equal(run.status, 'interrupted');
       assert.equal((await store.getState(run.agentId)).run?.status, 'running');
-      await recoveryPolicy.afterRun!(run);
-      recoveredCheckpoint = true;
+      await recoveryPolicy.afterRun?.(run);
+      recoveredFinalization = true;
     } }, () => { throw new Error('Restart must not replay a model call'); });
     await recovery.open();
     try {
       assert.equal((await recovery.getState(f.backend.memberId)).run?.status, 'interrupted');
-      assert.equal(recoveredCheckpoint, true);
+      assert.equal(recoveredFinalization, true);
       assert.deepEqual((await store.getContext(f.backend.memberId)).entries, []);
       assert.equal((await store.runMessages(f.backend.memberId, abandoned.runs[0]!.runId)).length, 0);
       assert.equal((await store.chatSnapshot(f.workspaceId)).position, 3);
@@ -1744,7 +1737,6 @@ test('member file activation atomically replaces/updates the team, retains histo
     await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId);
     for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve));
     const oldContext = await store.getContext(f.backend.memberId);
-    await f.team.configuration.materialize(f.lead.memberId);
     const files = await f.team.harness.files(f.lead.memberId);
     const backendSource = await f.team.configuration.accepted(f.workspaceId, f.backend.memberId);
     const frontendSource = await f.team.configuration.accepted(f.workspaceId, f.frontend.memberId);
@@ -1756,8 +1748,7 @@ test('member file activation atomically replaces/updates the team, retains histo
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/member.json'), JSON.stringify(manifest));
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/prompts/member.md'), 'Accepted prompt');
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
-    const part = (await f.team.harness.inspect(f.lead.memberId)).parts.find(p => p.state.part.id === 'member-config')!;
-    await f.team.harness.commit(f.lead.memberId, 'member-config', 'User accepts team replacement', {type:'user',memberId:f.lead.memberId}, part.revision, part.state.committed);
+    await acceptFiles(f);
     const review = await f.team.reviewConfiguration(f.workspaceId);
     assert.deepEqual(review.changes.map(c => c.type).sort(), ['create','delete','update']);
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/prompts/member.md'), 'Pending after commit');
@@ -1915,7 +1906,7 @@ test('workspace chat reset atomically clears member conversation storage and sta
     const members = await store.listMembers(f.workspaceId);
     const contextBase = await store.loadContext(f.workspaceId);
     const configBefore = await store.configBundle(null);
-    const harnessBefore = await f.team.harness.inspect(f.lead.memberId);
+    const harnessBefore = await f.team.harness.environment(f.lead.memberId);
     const contextBefore = await store.getContext(f.lead.memberId);
     const before = await store.chatTimeline(f.workspaceId);
     const oldCursor = before.cursor;
@@ -1939,7 +1930,7 @@ test('workspace chat reset atomically clears member conversation storage and sta
     assert.deepEqual(await store.listMembers(f.workspaceId), members);
     assert.deepEqual(await store.loadContext(f.workspaceId), contextBase);
     assert.deepEqual(await store.configBundle(null), configBefore);
-    assert.deepEqual(await f.team.harness.inspect(f.lead.memberId), harnessBefore);
+    assert.deepEqual(await f.team.harness.environment(f.lead.memberId), harnessBefore);
     assert.equal(await readFile(file, 'utf8'), 'Keep project implementation');
     assert.deepEqual(await store.followSnapshot(solo.agentId, undefined, 0), soloBefore);
     assert.equal((await store.chatSnapshot(otherId)).messages[0]!.messageId, other.message.messageId);
@@ -2145,7 +2136,7 @@ test('stopping shared workspace cancels waiting runs without executing or checkp
     assert.deepEqual(ended.map(run=>run.status),['cancelled','cancelled']);assert.equal(calls,1);
     const waiting=start.runs[1]!;
     assert.deepEqual(await store.runMessages(waiting.agentId,waiting.runId),[]);
-    assert.ok(!(await f.team.harness.history(waiting.agentId,'implementation')).some(r=>r.actor.runId===waiting.runId));
+    assert.equal(f.team.harness.approvals.list(f.workspaceId).length,0);
     const next=await f.team.runner.postUser(f.workspaceId,'Fresh request');
     answer((await f.requests.next()).events,message('Ready.'));
     assert.equal((await f.runtime.finished(f.lead.memberId,next.runs[0]!.runId)).status,'completed');
@@ -2278,7 +2269,7 @@ test('member retrieval uses full Bash inputs in member shell order and persists 
   const f = await groupFixture();
   try {
     const root = (await f.team.harness.environment(f.backend.memberId)).root;
-    const inputs = [{ command: 'validate', cwd: root, timeout: 2, metadata: { git: { scope: 'implementation' } } }, { command: 'background validate', background: true }];
+    const inputs = [{ command: 'validate', cwd: root, timeout: 2, metadata: {} }, { command: 'background validate', background: true }];
     await writeFile(join(root, '.rsi/context/implement/impl/README.md'), memberDocument('Retrieval-enabled result', inputs));
     await writeFile(join(root, 'never-load-this.txt'), 'SECRET CONTENT MUST NOT BE IN REQUEST');
     const invocations: unknown[] = [];
@@ -2368,7 +2359,8 @@ test('shared pictures survive reopen, hydrate native model messages, and reset r
     const next = await f.team.runner.postUser(f.workspaceId, '@Backend inspect prior image');
     const other = await f.requests.next();
     assert.ok(other.request.context.messages.some(m => Array.isArray(m.content) && m.content.some(part => part.type === 'image' && part.data === picture.data)));
-    answer(other.events, message('Same picture received')); await f.runtime.finished(f.backend.memberId, next.runs[0]!.runId);
+    const completion=f.runtime.finished(f.backend.memberId,next.runs[0]!.runId);assert.equal(completion,f.runtime.finished(f.backend.memberId,next.runs[0]!.runId));
+    answer(other.events, message('Same picture received')); await completion;
     await f.team.runner.reset(f.workspaceId);
     await assert.rejects(store.chatImage(f.workspaceId, image.metadata.id), /not found/);
     assert.equal((await store.chatSnapshot(f.workspaceId)).messages.length, 0);

@@ -1,3 +1,4 @@
+import { acceptFiles,initGit,waitApproval } from './git-fixture.js';
 import assert from 'node:assert/strict';
 import { request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { duplexPair } from 'node:stream';
@@ -48,7 +49,7 @@ test('member inspection is read-only, returns accepted configuration and three h
   assert.equal(view.member.name, 'Backend');
   assert.equal(JSON.parse(view.configuration.files['member.json']).name, 'Backend');
   assert.deepEqual(view.harnesses.map((h: Body) => h.id), ['management', 'implementation', 'execute']);
-  assert.ok(!view.harnesses[0].parts.some((p: Body) => p.id === 'design'));
+  assert.ok(!view.harnesses[0].resources.some((p: Body) => p.id === 'design'));
   assert.deepEqual(view.harnesses[0].tools,['ls','read','grep','find']);
   await assert.rejects(stat(root), 'inspection creates no harness Git storage');
   const before = await fixture.team.service.find(created.memberId);
@@ -63,7 +64,7 @@ test('member inspection is read-only, returns accepted configuration and three h
   const lead = await call(`${base}/members/${fixture.lead.memberId}`);
   assert.ok(lead.harnesses[0].tools.includes('bash'));
   assert.ok(!lead.harnesses[0].tools.includes('submit_member_config'));
-  assert.equal(lead.harnesses[0].parts.find((p: Body) => p.id === 'member-config').commit, 'user');
+  assert.equal(lead.harnesses[0].resources.find((p: Body) => p.id === 'member-config').commit, 'user');
   assert.deepEqual((await call(base)).members.map((m: Body) => m.name), ['Lead', 'Backend']);
 }));
 
@@ -94,50 +95,15 @@ test('group timeline endpoints expose persisted reservations and paged changes',
   assert.equal(next.changes[0].entry.position, 2);
 }));
 
-test('harness review and user commit endpoints pin the reviewed revision and enforce member boundaries', () => withServer(async (call, fixture) => {
-  const backend = await worker(fixture, 'Backend', ['src']);
-  await configureHarness(fixture,'Lead',{designScope:{working:backend.harness.designScope.working,dependencies:[]},allowedCommands:[]});
-  const member = fixture.lead;
-  const endpoint = `/workspaces/${fixture.workspaceId}/team/members/${member.memberId}/harness`;
-  const files = await fixture.team.harness.files(member.memberId);
-  const path = join(files.root, '.rsi/context/design/design.md');
-  await files.write.writeFile(path, 'Pending');
-  const review = await call(endpoint);
-  const design = review.parts.find((p: Body) => p.state.part.id === 'design');
-  const implementation = review.parts.find((p: Body) => p.state.part.id === 'implementation');
-  assert.match(design.diff, /Pending/);
-  assert.equal(design.state.part.commit, 'user');
-  const input = { revision: design.revision, base: design.state.committed, message: 'Accept design' };
-  await call(endpoint + '/design/commit', { method: 'POST', data: { ...input, actor: 'user' }, status: 400 });
-  await files.write.writeFile(path, 'Changed after review');
-  const stale = await call(endpoint + '/design/commit', { method: 'POST', data: input, status: 409 });
-  assert.equal(stale.error.code, 'stale_revision');
-  const updated = (await call(endpoint)).parts.find((p: Body) => p.state.part.id === 'design');
-  const approval = { ...input, revision: updated.revision };
-  const run = await fixture.team.runner.postUser(fixture.workspaceId, '@Lead work');
-  assert.equal((await call(endpoint + '/design/commit', { method: 'POST', data: approval, status: 409 })).error.code, 'member_busy');
-  fixture.runtime.end(member.memberId);
-  await fixture.runtime.finished(member.memberId, run.runs[0]!.runId);
-  const accepted = await call(endpoint + '/design/commit', { method: 'POST', data: approval });
-  assert.equal(accepted.actor.type, 'user');
-  assert.equal(accepted.kind, 'commit');
-  const current = await call(endpoint);
-  assert.equal(current.parts.find((p: Body) => p.state.part.id === 'implementation').state.committed, implementation.state.committed);
-  assert.ok((await call(endpoint + '/design/history')).history.some((r: Body) => r.revision === accepted.revision));
-  await call(`/workspaces/missing/team/members/${member.memberId}/harness`, { status: 404 });
-}));
-
 test('configuration review and separate user activation enforce exact input and whole-workspace idle state', () => withServer(async (call, f) => {
   const member = await worker(f, 'Backend', ['src']);
-  await f.team.configuration.materialize(f.lead.memberId);
   const source = await f.team.configuration.accepted(f.workspaceId, member.memberId), files = await f.team.harness.files(f.lead.memberId);
   const { writeFile } = await import('node:fs/promises');
   await writeFile(join(files.root, source.path), JSON.stringify({ ...JSON.parse(source.files['member.json']!), responsibility: 'Validated update' }));
   const base = `/workspaces/${f.workspaceId}/team/configuration`;
   const pending = await call(base + '?source=pending'); assert.equal(pending.valid, true); assert.equal(pending.changes[0].type, 'update');
   await call(base + '?source=bad', {status:400});
-  const review = (await call(`/workspaces/${f.workspaceId}/team/members/${f.lead.memberId}/harness`)).parts.find((p:Body) => p.state.part.id === 'member-config');
-  await call(`/workspaces/${f.workspaceId}/team/members/${f.lead.memberId}/harness/member-config/commit`, {method:'POST',data:{revision:review.revision,base:review.state.committed,message:'Accept config'}});
+  await acceptFiles(f);
   assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,member.responsibility);
   const accepted = await call(base), input = { revision:accepted.revision,digest:accepted.digest };
   await call(base+'/activate',{method:'POST',data:{...input,actor:'user'},status:400});
@@ -149,24 +115,6 @@ test('configuration review and separate user activation enforce exact input and 
   assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,'Validated update');
   assert.equal((await call(base+'/activate',{method:'POST',data:input,status:409})).error.code,'stale_revision');
 }));
-
-test('current configuration endpoint supplies file diff and separate commit/activation operations', () => withServer(async (call, f) => {
-  const base = `/workspaces/${f.workspaceId}/team/configuration`;
-  const initial = await call(base + '/current');
-  assert.equal(initial.status.hasPending,false); assert.equal(initial.activation.valid,true);
-  const files = await f.team.harness.files(f.lead.memberId);
-  await files.write.writeFile(join(files.root, '.rsi/members', f.lead.memberId, 'prompts/member.md'), 'Pending instructions');
-  const current = await call(base + '/current');
-  assert.ok(current.current.files.length); assert.equal(current.status.hasPending, true);
-  assert.equal(current.activation.valid, true, 'bootstrap is the initial active baseline');
-  await call(base+'/commit',{method:'POST',data:{...current.commit,message:'User accepts initial files',actor:'user'},status:400});
-  await call(base+'/commit',{method:'POST',data:{...current.commit,message:'User accepts initial files'}});
-  const accepted = await call(base+'/current'); assert.equal(accepted.status.hasPending,false); assert.equal(accepted.activation.valid,true);
-  await call(base+'/activate',{method:'POST',data:{revision:accepted.activation.revision,digest:accepted.activation.digest}});
-  const active = await call(base+'/current'); assert.equal(active.status.commits.length,0); assert.deepEqual(active.changes,[]);
-  await call(base+'/current?source=pending',{status:400});
-}));
-
 
 test('user model settings persist independently of member files, reject stale/foreign/extra writes and allow busy saves', () => withServer(async (call, f) => {
   const member = await worker(f, 'Backend', ['src']);
@@ -230,50 +178,6 @@ test('Changes endpoint returns only protected reviews and activation references 
   await call('/workspaces/missing/team/changes', { status: 404 });
 }));
 
-test('scoped review and independent approvals unblock member activation after accepting referenced designs', () => withServer(async (call, f) => {
-  const base = `/workspaces/${f.workspaceId}/team`, lead = f.lead.memberId;
-  await f.team.configuration.materialize(lead);
-  const files = await f.team.harness.files(lead), env = await f.team.harness.environment(lead);
-  const designDir = join(files.root, '.rsi/context/design/backend');
-  await files.write.mkdir(designDir);
-  await files.write.writeFile(join(designDir, 'metadata.json'), JSON.stringify({ implementation: ['src'] }));
-  await files.write.writeFile(join(designDir, 'design.md'), '# Backend\nDesign to review.');
-  await files.write.writeFile(join(files.root, '.rsi/context/implement/impl.md'), 'Pending implementation context must be excluded.');
-  await files.write.mkdir(join(files.root, '.rsi/members/backend'));
-  await files.write.writeFile(join(files.root, '.rsi/members/backend/member.json'), JSON.stringify({ name: 'Backend', role: 'developer', responsibility: 'Implement the backend', settings: {}, promptFiles: [], designScope: { working: ['backend/metadata.json'], dependencies: ['metadata.json'] }, execute: { allowedCommands: [] } }));
-  const scope = `${base}/members/${lead}/harness`;
-  const part = env.parts.find(part => part.id === 'design')!;
-  const actor = { type: 'agent' as const, memberId: lead };
-  await env.history.scopedGit(lead, part, env.root, ['add', '.rsi/context/design/backend/metadata.json'], env.root, actor);
-  const staged = await env.history.scopedGit(lead, part, env.root, ['diff', '--cached'], env.root, actor);
-  const design = await call(`${scope}/design/review`), members = await call(`${scope}/member-config/review`);
-  assert.deepEqual(design.changes.map((file: Body) => file.path), ['.rsi/context/design/backend/design.md', '.rsi/context/design/backend/metadata.json']);
-  assert.deepEqual(members.changes.map((file: Body) => file.path), ['.rsi/members/backend/member.json']);
-  assert.match(design.changes[0].patch, /Design to review/);
-  assert.equal(await env.history.scopedGit(lead, part, env.root, ['diff', '--cached'], env.root, actor), staged, 'review preserves staging');
-  const memberCommit = await call(`${base}/configuration/commit`, { method: 'POST', data: { revision: members.revision, base: members.base, message: 'Approve member proposal' } });
-  let current = await call(`${base}/configuration/current`);
-  assert.equal(current.activation.valid, false);
-  assert.match(current.activation.issues.map((issue: Body) => issue.message).join(' '), /backend\/metadata.json not found/);
-  assert.equal((await call(`${scope}/design/review`)).base, design.base, 'member approval does not accept design');
-  assert.equal((await call(`${scope}/member-config/review`)).changes.length, 0, 'approved member files leave pending review');
-  await files.write.writeFile(join(designDir, 'design.md'), '# Backend\nRevised after review.');
-  await call(`${scope}/design/commit`, { method: 'POST', status: 409, data: { revision: design.revision, base: design.base, message: 'Stale approval' } });
-  const refreshed = await call(`${scope}/design/review`);
-  await call(`${scope}/design/commit`, { method: 'POST', data: { revision: refreshed.revision, base: refreshed.base, message: 'Approve child design' } });
-  assert.equal((await call(`${scope}/design/review`)).changes.length, 0);
-  assert.equal((await call(`${scope}/member-config/review`)).base, memberCommit.revision, 'design approval preserves member approval');
-  assert.equal((await files.read.readFile(join(files.root, '.rsi/context/implement/impl.md'))).toString('utf8'), 'Pending implementation context must be excluded.');
-  current = await call(`${base}/configuration/current`);
-  assert.equal(current.activation.valid, true);
-  assert.equal((await call(base)).members.length, 1, 'approvals do not activate members');
-  await call(`${base}/configuration/activate`, { method: 'POST', data: { revision: current.activation.revision, digest: current.activation.digest } });
-  assert.deepEqual((await call(base)).members.map((member: Body) => member.name), ['Lead', 'Backend']);
-  await call(`${scope}/unknown/review`, { status: 404 });
-  await call(`/workspaces/missing/team/members/${lead}/harness/design/review`, { status: 404 });
-  await call(`${scope}/design/review?unknown=1`, { status: 400 });
-}));
-
 test('multipart HTTP publication stores scoped pictures, preserves image-only input and refuses atomically', () => withTeam(async fixture => {
   const { png } = await import('./image-fixture.js');
   const server = createAgentServer(fixture.runtime as unknown as AgentRuntime, stubConfig, fixture.workspaces, fixture.team);
@@ -309,4 +213,16 @@ test('multipart HTTP publication stores scoped pictures, preserves image-only in
     await fixture.team.runner.reset(fixture.workspaceId);
     const gone = await send(server, `${base}/attachments/${image.id}`); assert.equal(gone.statusCode, 404); await text(gone);
   } finally { server.closeAllConnections(); }
+}));
+
+test('commit approval endpoints expose pending command and right-panel diff; decisions are workspace-bound and old scope APIs are absent',()=>withServer(async(call,f)=>{
+ await initGit(f);const {gitText}=await import('../src/workspace-git.js');await gitText(f.directory,['add','-f','.rsi/members']);
+ const running=f.team.harness.bash(f.lead.memberId,{command:'git commit -m "Review members"'},new AbortController().signal);const request=await waitApproval(f);
+ const base=`/workspaces/${f.workspaceId}/team/commit-approvals`;
+ f.team.team=async()=>{throw new Error('Approval polling must not inspect the entire team');};
+ const list=await call(base);assert.equal(list.approvals[0].id,request.id);assert.equal(list.approvals[0].changes,undefined);
+ const review=await call(`${base}/${request.id}`);assert.ok(review.changes.length);assert.match(review.command,/Review members/);
+ await call(`${base}/${request.id}`,{method:'POST',data:{action:'feedback',message:'Revise the prompt'}});assert.match((await running).output,/Revise the prompt/);
+ await call(`${base}/${request.id}`,{status:404});await call(`/workspaces/${f.workspaceId}/team/members/${f.lead.memberId}/harness`,{status:404});
+ await call(`/workspaces/${f.workspaceId}/team/configuration/commit`,{method:'POST',data:{},status:404});
 }));

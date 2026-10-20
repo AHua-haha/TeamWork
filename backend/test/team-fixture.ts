@@ -1,7 +1,7 @@
 import { seedDesign } from './design-fixture.js';
 import { after } from 'node:test';
 import { closeBashRuntime } from '../src/harness-command.js';
-import { realpath } from 'node:fs/promises';
+import { realpath, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ResolvedRunConfig } from '../src/config.js';
 import type { ConfigService, RunSettings } from '../src/config.js';
@@ -160,7 +160,10 @@ export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void
 export async function worker(fixture: Fixture, name: string, implementation: string[] = ['.'], role = 'developer'): Promise<MemberView> {
   const path = `systems/${name.toLowerCase()}/metadata.json`;
   await seedDesign(fixture.workspaces, fixture.workspaceId, path, { content: `Design for ${name}`, implementation });
-  return fixture.team.service.create(fixture.workspaceId, { name, role, responsibility: `Owns ${name}`, harness: { designScope: { working: [path], dependencies: [] }, allowedCommands: [] } });
+  const created=await fixture.team.service.create(fixture.workspaceId, { name, role, responsibility: `Owns ${name}`, harness: { designScope: { working: [path], dependencies: [] }, allowedCommands: [] } });
+  const source=(await fixture.team.configuration.accepted(fixture.workspaceId,created.memberId));
+  for(const [path,content]of Object.entries(source.files)){const target=join(fixture.directory,source.path.slice(0,-'member.json'.length),path);await mkdir(target.slice(0,target.lastIndexOf('/')),{recursive:true});await writeFile(target,content);}
+  return created;
 }
 
 /** User-side assignment update for fixtures. Agent edits remain pending until a future activation workflow. */

@@ -31,12 +31,12 @@ export function MemberInspector({ workspaceId, member, onDesign, onImplementatio
     {harnesses.map(harness => <section className="inspected-harness" key={harness.id}>
       <h3>{harness.id === 'management' ? 'Management harness' : harness.id === 'implementation' ? 'Implementation harness' : 'Execute harness'}</h3>
       <p className="harness-tools">{harness.tools.length ? harness.tools.map(tool => <code key={tool}>{tool}</code>) : 'No command execution allowed.'}</p>
-      {harness.parts.map(part => <div className="inspected-part" key={part.id}><h4>{part.id === 'design' ? 'Design management' : part.id === 'implementation' ? 'Implementation' : part.id === 'member-config' ? 'Member configuration drafts' : part.id.startsWith('impl-context-') ? 'Implementation context' : part.id}</h4>
+      {harness.resources.map(part => <div className="inspected-part" key={part.id}><h4>{part.id === 'design' ? 'Design management' : part.id === 'implementation' ? 'Implementation' : part.id === 'member-config' ? 'Member configuration drafts' : part.id.startsWith('impl-context-') ? 'Implementation context' : part.id}</h4>
         <p>{part.commit === 'user' ? 'Commit requires user acceptance.' : 'Agent commits allowed.'}</p><ul>{part.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
         {part.exclude.length > 0 && <p>Excluded: {part.exclude.join(', ')}</p>}
       </div>)}
       {harness.id === 'execute' && <p>Persistent Bash · system reads · whole-workspace and owned-temp writes · outbound network · local binding. File edits still follow working scope. Docker daemon access is not granted.</p>}
-      <details><summary>Fixed operating rules</summary><pre>{harness.prompt}{harness.parts.map(p => `\n\n${p.id}: ${p.prompt}`).join('')}</pre></details>
+      <details><summary>Fixed operating rules</summary><pre>{harness.prompt}{harness.resources.map(p => `\n\n${p.id}: ${p.prompt}`).join('')}</pre></details>
     </section>)}
     <section className="member-config-source"><details><summary>Complete active run settings</summary><pre>{JSON.stringify(selected.settings, null, 2)}</pre></details></section>
     {configuration ? <section className="member-config-source"><h3>Active configuration files</h3><p>{configuration.path}</p>
