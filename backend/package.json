@@ -9,12 +9,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-harness-prompts.mjs",
     "check": "tsc --noEmit -p tsconfig.json",
-    "start": "node --env-file-if-exists=.env dist/src/main.js",
-    "dev": "node --env-file-if-exists=.env --import tsx src/main.ts",
+    "start": "env -u NODE_OPTIONS -u NODE_PATH node ../scripts/backend-command.mjs start",
+    "dev": "env -u NODE_OPTIONS -u NODE_PATH node ../scripts/backend-command.mjs dev",
     "test": "tsx --test test/*.test.ts",
     "test:integration": "tsx --test test/integration/*.test.ts",
     "test:mysql": "node scripts/mysql-test.mjs",
-    "reset:workspace-data": "node --env-file-if-exists=.env --import tsx scripts/reset-workspace-data.mjs"
+    "reset:workspace-data": "env -u NODE_OPTIONS -u NODE_PATH node ../scripts/backend-command.mjs reset"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.79",

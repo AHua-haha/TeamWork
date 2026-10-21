@@ -21,7 +21,7 @@ Use built-in Node fetch without an extra provider SDK. Inject fetch for determin
 - [web-tools.ts](../../../backend/src/web-tools.ts): reusable definitions, provider adapter, validation, Markdown/metadata formatting and limits.
 - [main.ts](../../../backend/src/main.ts), [team-system.ts](../../../backend/src/team-system.ts), [harness.ts](../../../backend/src/harness.ts) and [harness-bases.ts](../../../backend/src/harness-bases.ts): deployment injection and fixed capability assembly.
 - [execute.md](../../../backend/prompts/harness/execute.md): usage and external-content rules.
-- [.env.example](../../../backend/.env.example) and [README.md](../../../backend/README.md): deployment setup and examples.
+- [Project configuration example](../../../rsi.config.example.json) and [README.md](../../../backend/README.md): deployment setup and examples.
 
 ## Verification
 

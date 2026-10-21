@@ -2,13 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { deployment, deploymentEnv, envFile, exists, initializeEnvironments, processRecord, root, run, capture, showLogs, startService, stopService, validateEnvironment, withLock } from './host-common.mjs';
+import { exists, processRecord, root, run, capture, showLogs, startService, stopService, withLock } from './host-common.mjs';
 import { startDatabase } from './database.mjs';
+import { backendSettings, hostEnvironment, initializeConfiguration, locations, readConfiguration } from './host-config.mjs';
+
+let config;
+try { config = await readConfiguration(); } catch (error) { console.error(error.message); process.exit(1); }
+const { deployment } = locations(config);
 
 const manifestPath = join(deployment, 'active.json');
 const backPid = join(deployment, 'backend.pid'), frontPid = join(deployment, 'frontend.pid');
-const backendPort = Number(process.env.RSI_DEPLOY_BACKEND_PORT ?? 3001), frontendPort = Number(process.env.RSI_DEPLOY_FRONTEND_PORT ?? 5274);
-if (![backendPort, frontendPort].every(port => Number.isInteger(port) && port > 0 && port <= 65535) || backendPort === frontendPort) throw new Error('Deployment ports must be distinct valid ports');
+
 async function manifest() { return await exists(manifestPath) ? JSON.parse(await readFile(manifestPath, 'utf8')) : null; }
 async function stop() {
   await stopService('Deployed frontend', frontPid);
@@ -19,11 +23,12 @@ async function saveManifest(value) {
   await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); await rename(temporary, manifestPath);
 }
 async function build(commit) {
-  const temporaryRoot = resolve(process.env.RSI_DEPLOY_ROOT ?? '/tmp/rsi-agent-deploy');
+  if (capture('git', ['-C', root, 'ls-tree', '--name-only', commit, '--', 'rsi.config.json'])) throw new Error('Refusing to deploy a revision containing private rsi.config.json');
+  const temporaryRoot = resolve(config.paths.deploymentSourceRoot);
   await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
   const canonical = await realpath(temporaryRoot);
   const allowed = await Promise.all(['/tmp', tmpdir()].map(path => realpath(path)));
-  if (!allowed.some(parent => { const part = relative(parent, canonical); return part && !part.startsWith('..') && !isAbsolute(part); })) throw new Error('RSI_DEPLOY_ROOT must be a subdirectory of temporary storage');
+  if (!allowed.some(parent => { const part = relative(parent, canonical); return part && !part.startsWith('..') && !isAbsolute(part); })) throw new Error('paths.deploymentSourceRoot must be a subdirectory of temporary storage');
   const directory = join(canonical, `${commit.slice(0, 12)}-${randomUUID()}`), archive = `${directory}.tar`;
   await mkdir(directory, { mode: 0o700 });
   try {
@@ -39,16 +44,17 @@ async function build(commit) {
   finally { await rm(archive, { force: true }); }
 }
 async function launch(release) {
-  const settings = await envFile(deploymentEnv); validateEnvironment(settings, 'rsi_agent');
-  await startDatabase();
+  const settings = backendSettings(config, 'deployment');
+  const { backendPort, frontendPort } = config.deployment;
+  await startDatabase(config);
   let startedBackend = false;
   try {
-    startedBackend = await startService({ name: 'Deployed backend', entry: join(release.directory, 'backend/dist/src/main.js'), cwd: join(release.directory, 'backend'), env: { ...process.env, ...settings, HOST: '127.0.0.1', PORT: String(backendPort), NODE_ENV: 'production' }, port: backendPort, url: `http://127.0.0.1:${backendPort}/agents`, pidFile: backPid, log: join(deployment, 'backend.log') });
-    await startService({ name: 'Deployed frontend', entry: join(release.directory, 'scripts/serve-frontend.mjs'), cwd: release.directory, env: { ...process.env, PORT: String(frontendPort), FRONTEND_DIST: join(release.directory, 'frontend/dist'), AGENT_BACKEND_ORIGIN: `http://127.0.0.1:${backendPort}`, NODE_ENV: 'production' }, port: frontendPort, url: `http://127.0.0.1:${frontendPort}/`, pidFile: frontPid, log: join(deployment, 'frontend.log') });
+    startedBackend = await startService({ name: 'Deployed backend', entry: join(release.directory, 'backend/dist/src/main.js'), cwd: join(release.directory, 'backend'), env: { ...hostEnvironment(), ...settings, HOST: '127.0.0.1', PORT: String(backendPort), NODE_ENV: 'production' }, port: backendPort, url: `http://127.0.0.1:${backendPort}/agents`, pidFile: backPid, log: join(deployment, 'backend.log') });
+    await startService({ name: 'Deployed frontend', entry: join(release.directory, 'scripts/serve-frontend.mjs'), cwd: release.directory, env: { ...hostEnvironment(), PORT: String(frontendPort), FRONTEND_DIST: join(release.directory, 'frontend/dist'), AGENT_BACKEND_ORIGIN: `http://127.0.0.1:${backendPort}`, NODE_ENV: 'production' }, port: frontendPort, url: `http://127.0.0.1:${frontendPort}/`, pidFile: frontPid, log: join(deployment, 'frontend.log') });
   } catch (error) { if (startedBackend) await stopService('Deployed backend', backPid); throw error; }
 }
 async function start() {
-  await initializeEnvironments();
+  config = await initializeConfiguration();
   let selected = await manifest();
   if (!selected) throw new Error('No deployment selected; run scripts/deploy.sh deploy <git-ref>');
   if (!await exists(join(selected.directory, 'backend/dist/src/main.js')) || !await exists(join(selected.directory, 'frontend/dist/index.html'))) {
@@ -60,7 +66,7 @@ async function start() {
 function resolveCommit(ref) { return capture('git', ['-C', root, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]); }
 async function deploy(ref) {
   if (!ref) throw new Error('deploy requires an explicit local Git ref');
-  await initializeEnvironments();
+  config = await initializeConfiguration();
   const commit = resolveCommit(ref);
   const selected = await build(commit), previous = await manifest();
   const wasRunning = !!(await processRecord(backPid) || await processRecord(frontPid));
@@ -95,7 +101,8 @@ try {
     for (const [name, path] of [['Backend', backPid], ['Frontend', frontPid]]) { const record = await processRecord(path); console.log(`Deployed ${name}: ${record ? `running (PID ${record.pid})` : 'stopped'}`); }
   } else if (command === 'logs') await showLogs(deployment, argument);
   else if (['init', 'start', 'stop', 'restart', 'deploy', 'update'].includes(command)) await withLock(async () => {
-    if (command === 'init') await initializeEnvironments();
+    if (command === 'init') config = await initializeConfiguration();
+    if (command === 'restart') config = await initializeConfiguration();
     if (command === 'stop' || command === 'restart') await stop();
     if (command === 'start' || command === 'restart') await start();
     if (command === 'deploy') await deploy(argument);

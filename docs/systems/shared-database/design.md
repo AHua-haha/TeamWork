@@ -6,7 +6,7 @@ Provide one local MySQL service to separate development/deployment databases. Th
 
 ## Inputs and preconditions
 
-scripts/database.sh supports start, stop and status. Docker Compose is available; the existing backend/compose.yaml, project identity backend, MySQL 8.4 service, loopback 3306 and named volume are retained. Both application environments connect to this server. Deployment uses existing rsi_agent with existing credentials. Development uses a distinct rsi_agent_dev and local rsi_dev account restricted to that database.
+scripts/database.sh supports start, stop and status. Docker Compose is available; backend/compose.yaml is a structural template; all its operator inputs come from project-root rsi.config.json. The existing backend project identity, MySQL 8.4 service and named volume are retained; the shared loopback host/port, root/account credentials and Docker context are explicit config fields. Both application environments connect to this server. Deployment uses existing rsi_agent with existing credentials. Development uses a distinct rsi_agent_dev and local rsi_dev account restricted to that database.
 
 ## Outputs and observable effects
 
@@ -23,3 +23,5 @@ Existing Compose project/container/volume identity remains stable. Provisioning 
 ## Acceptance examples
 
 Both backends run on distinct databases in the same healthy MySQL container. Repeated starts preserve both sets of data. Stopping either application leaves MySQL available. Explicit database stop preserves the volume, and start restores access.
+
+Compose uses an explicit project, file, project directory, empty env-file and configured Docker context with a clean child environment. Ambient Compose/Docker/database variables and nearby .env files cannot change the targeted service. No Docker global context/settings or shell environment is changed.

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "paths": {
+    "stateDirectory": "/absolute/path/to/rsi-state",
+    "developmentStateDirectory": "/absolute/path/to/rsi-agent/.run",
+    "deploymentSourceRoot": "/tmp/rsi-agent-deploy"
+  },
+  "mysql": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "project": "backend",
+    "dockerContext": "default",
+    "rootPassword": "LOCAL_MYSQL_ROOT_PASSWORD"
+  },
+  "development": {
+    "backendPort": 3000,
+    "frontendPort": 5273,
+    "database": {
+      "name": "rsi_agent_dev",
+      "username": "rsi_dev",
+      "password": "rsi_dev"
+    },
+    "encryptionKey": "GENERATED_BY_INIT_PRESERVE_EXISTING_KEY",
+    "environment": {
+      "DEEPSEEK_WEB_API_KEY": ""
+    }
+  },
+  "deployment": {
+    "backendPort": 3001,
+    "frontendPort": 5274,
+    "database": {
+      "name": "rsi_agent",
+      "username": "rsi",
+      "password": "LOCAL_MYSQL_PASSWORD"
+    },
+    "encryptionKey": "IMPORTED_BY_INIT_PRESERVE_EXISTING_KEY",
+    "environment": {
+      "DEEPSEEK_WEB_API_KEY": ""
+    }
+  }
+}

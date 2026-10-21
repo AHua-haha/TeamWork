@@ -2,16 +2,16 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_ROOT_PASSWORD: local-root
-      MYSQL_DATABASE: rsi_agent
-      MYSQL_USER: rsi
-      MYSQL_PASSWORD: rsi
+      MYSQL_ROOT_PASSWORD: ${RSI_MYSQL_ROOT_PASSWORD:?Use scripts/database.sh}
+      MYSQL_DATABASE: ${RSI_MYSQL_DATABASE:?Use scripts/database.sh}
+      MYSQL_USER: ${RSI_MYSQL_USER:?Use scripts/database.sh}
+      MYSQL_PASSWORD: ${RSI_MYSQL_PASSWORD:?Use scripts/database.sh}
     ports:
-      - "127.0.0.1:3306:3306"
+      - "${RSI_MYSQL_HOST:?}:${RSI_MYSQL_PORT:?}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-plocal-root"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${RSI_MYSQL_ROOT_PASSWORD:?}"]
       interval: 2s
       timeout: 2s
       retries: 30

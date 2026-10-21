@@ -8,3 +8,6 @@ output/playwright/
 .test-mysql.env
 .run/
 .rsi/
+
+/rsi.config.json
+/rsi.config.json.*.tmp

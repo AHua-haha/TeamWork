@@ -189,3 +189,7 @@ A Changes client owns the review snapshot, single-flight reads, operation state 
 Workspace GroupChat adds picture selection, clipboard/drop, preview lifecycle and stable attachment display. Its GroupClient sends binary uploads and consumes reference-only shared history. Existing AgentClient private stream/fold logic and solo composer are unchanged. The frontend group-chat child owns this UI and its tests.
 
 WorkspacePanel refreshes accepted design discovery when team activity transitions to idle, so Git acceptance changes become visible even when committing does not modify source-file timestamps.
+
+## Managed service configuration
+
+The host lifecycle supplies development proxy/port inputs from project-root rsi.config.json through explicit child settings. Vite disables envDir loading so separate frontend .env files cannot become another service configuration source. Static deployment serving receives its own configured backend origin and port; application message/state contracts are unchanged.

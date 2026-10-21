@@ -10,7 +10,7 @@ Both environments use the same local MySQL 8.4 service, with separate databases:
 | Backend | `http://127.0.0.1:3000` | `http://127.0.0.1:3001` |
 | Frontend | `http://127.0.0.1:5273` | `http://127.0.0.1:5274` |
 | Source | This project checkout | Committed snapshots under `/tmp/rsi-agent-deploy/` |
-| Settings | `backend/.env` | `~/.local/state/rsi-agent/deploy/backend.env` |
+| Settings | `rsi.config.json` → `development` | `rsi.config.json` → `deployment` |
 | Logs/PIDs | `.run/` | `~/.local/state/rsi-agent/deploy/` |
 
 Requires Node.js 22.19+, npm, Git, tar, curl, ps and Docker Compose. Application processes run directly on the host. MySQL retains the existing `backend` Compose project and data volume.
@@ -24,7 +24,11 @@ Requires Node.js 22.19+, npm, Git, tar, curl, ps and Docker Compose. Application
 ./scripts/dev.sh start
 ```
 
-Initialization preserves the existing `backend/.env` database URL and encryption key in durable deployment settings **before** creating development settings for `rsi_agent_dev` with an independent key. Saved connections, credentials, chats and workspaces stay in the deployment database. Development starts with backend defaults and no application data; repeated starts preserve new development data. No database is dropped, emptied or copied. Keep the deployment encryption key to read existing saved provider credentials.
+Initialization creates **`rsi.config.json` at this project’s root**. It imports existing `backend/.env` and saved deployment `backend.env` once, preserving database accounts, encryption keys and backend credentials. Old files are left untouched and are not read again once the project config exists. If the old database addresses conflict, initialization refuses to guess. No database is dropped, emptied or copied.
+
+The config contains a single `mysql` host/port, separate `development` and `deployment` database accounts/keys/backend options, service ports, a pinned Docker context, and `paths` for state and temporary release source. Run `init` to generate it; use [rsi.config.example.json](rsi.config.example.json) as a field reference, not as replacement credentials. The real file is mode 0600 and Git-ignored. **Preserve both encryption keys** to keep saved provider credentials readable. Never force-add the real file to Git; deployment refuses revisions containing it.
+
+The launchers construct settings only for their own child processes. They do not edit shell profiles, export variables into the caller, rewrite `.env` files or change Docker’s global context. Ambient `DATABASE_URL`, provider keys, `PORT`, `RSI_*`, `NODE_OPTIONS`, proxy and `COMPOSE_*` variables cannot override service inputs. Minimal OS/toolchain variables such as PATH/HOME/locale remain available. Configure intentional backend credentials/proxy options under that environment’s `environment` object. Other processes using the same OS user can still deliberately edit files permitted to that user; the config is not an OS security boundary.
 
 `deploy <git-ref>` requires a local committed revision containing these deployment scripts. It excludes uncommitted edits, installs locked dependencies and builds both packages in a separate temporary source snapshot. The compiled backend runs with deployment settings; a host frontend server serves the built assets and streams API/uploads/SSE to that backend. Build failure leaves the current release running. Failed launch attempts recovery of the previous running release; database migrations are not rolled back.
 
@@ -42,7 +46,7 @@ Install development dependencies once with `npm ci` in `backend/` and `frontend/
 ./scripts/dev.sh stop
 ```
 
-Development uses Vite and the source backend. `init` initializes environment settings without launching applications. A legacy managed development process is stopped before `start` switches it to the development database. Configure development provider connections independently through its UI. Direct backend commands also read the development `backend/.env`.
+Development uses Vite and the source backend. `init` initializes the project configuration without launching applications. A legacy managed development process is stopped before `start` switches it to the development database. Configure development provider connections independently through its UI. Direct backend npm commands also read the project configuration’s development section. Vite does not load separate `.env` files.
 
 ### Manage deployment
 
@@ -61,7 +65,7 @@ Development uses Vite and the source backend. `init` initializes environment set
 
 `start` uses the selected commit. If its temporary source was cleaned, it rebuilds that exact commit from local Git. The source/build directories are replaceable; deployment settings, logs, release selection and user workspaces must remain outside them. No automatic boot supervisor or public exposure is configured.
 
-`RSI_STATE_DIR` overrides durable state (otherwise `$XDG_STATE_HOME/rsi-agent` or `~/.local/state/rsi-agent`). `RSI_DEPLOY_ROOT` chooses a subdirectory of `/tmp` or the system temporary directory for source. `RSI_DEPLOY_BACKEND_PORT` and `RSI_DEPLOY_FRONTEND_PORT` override deployment ports. Use consistent overrides across lifecycle commands; changing ports/settings requires restart.
+Edit the project `rsi.config.json` to change ports, paths or credentials, then restart the affected service. The former `RSI_STATE_DIR`, `XDG_STATE_HOME`, `RSI_DEPLOY_ROOT` and deployment-port environment overrides are ignored. `paths.deploymentSourceRoot` must stay beneath temporary storage. Default state/log/release-selection paths are retained during migration. The lifecycle lock belongs to this checkout’s `.run/manage.lock`.
 
 ### Manage the shared database service
 
@@ -71,7 +75,7 @@ Development uses Vite and the source backend. `init` initializes environment set
 ./scripts/database.sh stop
 ```
 
-Application startup can ensure MySQL is running. Stopping either application or a failed application launch leaves MySQL running. Only explicit `database.sh stop` stops it; stop the applications first. The MySQL volume is preserved. Development provisioning creates the `rsi_dev` account with access only to `rsi_agent_dev`; default local credentials are in `backend/.env.example`.
+Application startup can ensure MySQL is running. Stopping either application or a failed application launch leaves MySQL running. Only explicit `database.sh stop` stops it; stop the applications first. The MySQL volume is preserved. Development provisioning creates the `rsi_dev` account with access only to `rsi_agent_dev`; the project config owns its local credentials. Compose receives an explicit project/file/context, `/dev/null` as its env file, and config-derived interpolation values. Starting an application never recreates an existing shared MySQL container; changing the database container’s binding requires an intentional infrastructure change.
 
 ### Verification
 
