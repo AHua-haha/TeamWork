@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { databaseStatus, provisionDevelopment, startDatabase } from './database.mjs';
-import { root, developmentRun, initializeEnvironments, processRecord, showLogs, startService, stopService, withLock, exists } from './host-common.mjs';
+import { root, developmentRun, initializeEnvironments, serviceSettings, loadConfig, exists, processRecord, showLogs, startService, stopService, withLock } from './host-common.mjs';
 
 const backend = join(root, 'backend/src/main.ts'), frontend = join(root, 'frontend/node_modules/vite/bin/vite.js');
 const backPid = join(developmentRun, 'backend.pid'), frontPid = join(developmentRun, 'frontend.pid');
@@ -9,13 +9,13 @@ async function stop() {
   await stopService('Development backend', backPid, backend);
 }
 async function start() {
-  const { development } = await initializeEnvironments();
+  const { development } = await initializeEnvironments(), config = await loadConfig();
   if (!await exists(join(root, 'backend/node_modules/tsx')) || !await exists(frontend)) throw new Error('Install development dependencies with npm ci in backend/ and frontend/');
   await startDatabase(); await provisionDevelopment(development);
   let startedBackend = false;
   try {
-    startedBackend = await startService({ name: 'Development backend', entry: backend, args: ['--import', 'tsx'], cwd: join(root, 'backend'), env: { ...process.env, ...development, HOST: '127.0.0.1', PORT: '3000', NODE_ENV: 'development' }, port: 3000, url: 'http://127.0.0.1:3000/agents', pidFile: backPid, log: join(developmentRun, 'backend.log') });
-    await startService({ name: 'Development frontend', entry: frontend, cwd: join(root, 'frontend'), entryArgs: ['--host', '127.0.0.1', '--port', '5273', '--strictPort'], env: { ...process.env, AGENT_BACKEND_ORIGIN: 'http://127.0.0.1:3000', PORT: '5273', NODE_ENV: 'development' }, port: 5273, url: 'http://127.0.0.1:5273/', pidFile: frontPid, log: join(developmentRun, 'frontend.log') });
+    startedBackend = await startService({ name: 'Development backend', entry: backend, args: ['--import', 'tsx'], cwd: join(root, 'backend'), env: { ...development }, port: config.development.backendPort, url: `http://127.0.0.1:${config.development.backendPort}/agents`, pidFile: backPid, log: join(developmentRun, 'backend.log') });
+    await startService({ name: 'Development frontend', entry: frontend, cwd: join(root, 'frontend'), entryArgs: ['--host', '127.0.0.1', '--port', String(config.development.frontendPort), '--strictPort'], env: { AGENT_BACKEND_ORIGIN: `http://127.0.0.1:${config.development.backendPort}`, PORT: String(config.development.frontendPort), NODE_ENV: 'development' }, port: config.development.frontendPort, url: `http://127.0.0.1:${config.development.frontendPort}/`, pidFile: frontPid, log: join(developmentRun, 'frontend.log') });
   } catch (error) { if (startedBackend) await stopService('Development backend', backPid, backend); throw error; }
 }
 try {

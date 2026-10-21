@@ -1,25 +1,63 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { access, chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { parseEnv } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const state = resolve(process.env.RSI_STATE_DIR ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), '.local/state'), 'rsi-agent'));
-export const deployment = join(state, 'deploy');
-export const deploymentEnv = join(deployment, 'backend.env');
-export const developmentEnv = join(root, 'backend/.env');
-export const developmentRun = join(root, '.run');
+export const configPath = join(root, 'operations.config.json');
 const checkoutId = createHash('sha256').update(root).digest('hex').slice(0, 16);
 export const databaseProject = `rsi-agent-${checkoutId}`;
-export const databasePort = 3307 + (parseInt(checkoutId.slice(0, 6), 16) % 1000);
-export const databaseComposeFile = join(state, `compose-${checkoutId}.yaml`);
-export const composeArgs = ['compose', '-p', databaseProject, '-f', databaseComposeFile];
+export let composeArgs;
+let loadedConfig;
+const defaultConfig = () => ({
+  stateDirectory: '.operations', deployRoot: '/tmp/rsi-agent-deploy',
+  database: { port: 3307 + (parseInt(checkoutId.slice(0, 6), 16) % 1000), rootPassword: randomBytes(24).toString('base64url') },
+  development: { backendPort: 3000, frontendPort: 5273, database: 'rsi_agent_dev', username: 'rsi_dev', password: randomBytes(24).toString('base64url'), encryptionKey: randomBytes(32).toString('base64'), deepseekWebApiKey: '' },
+  deployment: { backendPort: 3001, frontendPort: 5274, database: 'rsi_agent', username: 'rsi', password: randomBytes(24).toString('base64url'), encryptionKey: randomBytes(32).toString('base64'), deepseekWebApiKey: '' }
+});
+export async function loadConfig({ create = true } = {}) {
+  if (loadedConfig) return loadedConfig;
+  if (!await exists(configPath)) {
+    if (!create) throw new Error(`Operations config is missing: ${configPath}; run scripts/dev.sh init`);
+    await writeFile(configPath, JSON.stringify(defaultConfig(), null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    await chmod(configPath, 0o600);
+    console.log(`Created private Operations configuration: ${configPath}`);
+  }
+  let value;
+  try { value = JSON.parse(await readFile(configPath, 'utf8')); } catch { throw new Error(`Invalid JSON in ${configPath}`); }
+  const required = [value.stateDirectory, value.deployRoot, value.database?.port, value.database?.rootPassword];
+  for (const name of ['development', 'deployment']) required.push(value[name]?.backendPort, value[name]?.frontendPort, value[name]?.database, value[name]?.username, value[name]?.password, value[name]?.encryptionKey);
+  if (required.some(item => item === undefined || item === null || item === '')) throw new Error(`Operations config is missing required values: ${configPath}`);
+  const ports = [value.database.port, value.development.backendPort, value.development.frontendPort, value.deployment.backendPort, value.deployment.frontendPort];
+  if (!ports.every(port => Number.isInteger(port) && port > 0 && port <= 65535) || new Set(ports).size !== ports.length) throw new Error('Configured database and application ports must be distinct valid port numbers');
+  for (const [label, env] of [['development', value.development], ['deployment', value.deployment]]) {
+    if (env.database !== (label === 'development' ? 'rsi_agent_dev' : 'rsi_agent')) throw new Error(`Configured ${label} database must remain isolated`);
+    const key = Buffer.from(env.encryptionKey, 'base64');
+    if (key.length !== 32 || key.toString('base64') !== env.encryptionKey) throw new Error(`Invalid ${label} encryptionKey (expected base64 32-byte key)`);
+  }
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value.development.password) || !/^[A-Za-z0-9_-]{1,128}$/.test(value.deployment.password) || !/^[A-Za-z0-9_-]{1,128}$/.test(value.database.rootPassword)) throw new Error('Database passwords must contain only letters, digits, _ or - (maximum 128 characters)');
+  const state = resolve(root, value.stateDirectory);
+  if (state === root || !state.startsWith(root + '/')) throw new Error('stateDirectory must be inside the checkout and not its root');
+  loadedConfig = value;
+  return value;
+}
+export async function runtimePaths() {
+  const config = await loadConfig(), state = resolve(root, config.stateDirectory);
+  return { state, deployment: join(state, 'deploy'), developmentRun: join(state, 'dev'), databaseComposeFile: join(state, `compose-${checkoutId}.yaml`), databasePort: config.database.port };
+}
+export async function serviceSettings(kind) {
+  const config = await loadConfig(), values = config[kind], user = encodeURIComponent(values.username), password = encodeURIComponent(values.password);
+  return { DATABASE_URL: `mysql://${user}:${password}@127.0.0.1:${config.database.port}/${values.database}`, CONFIG_ENCRYPTION_KEY: values.encryptionKey, HOST: '127.0.0.1', PORT: String(values.backendPort), NODE_ENV: kind === 'development' ? 'development' : 'production', DEEPSEEK_WEB_API_KEY: values.deepseekWebApiKey ?? '' };
+}
+const pathExports = await runtimePaths();
+export const deployment = pathExports.deployment;
+export const developmentRun = pathExports.developmentRun;
+export const databaseComposeFile = pathExports.databaseComposeFile;
+composeArgs = ['compose', '-p', databaseProject, '-f', databaseComposeFile];
+
 export async function exists(path) { try { await access(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
-export async function envFile(path) { return parseEnv(await readFile(path, 'utf8')); }
 export function databaseName(settings) {
   const url = new URL(settings.DATABASE_URL);
   if (url.protocol !== 'mysql:') throw new Error('DATABASE_URL must name a MySQL database');
@@ -30,74 +68,33 @@ export function validateEnvironment(settings, name) {
   const encodedKey = settings.CONFIG_ENCRYPTION_KEY ?? '', key = Buffer.from(encodedKey, 'base64');
   if (key.length !== 32 || key.toString('base64') !== encodedKey) throw new Error(`Preserve a valid CONFIG_ENCRYPTION_KEY for ${name}`);
 }
-export async function saveEnv(path, settings) {
-  const content = Object.entries(settings).map(([key, value]) => {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error('Invalid environment variable name');
-    const quote = !value.includes('"') ? '"' : !value.includes("'") ? "'" : null;
-    if (!quote) throw new Error(`Cannot safely serialize environment field ${key}`);
-    return `${key}=${quote}${value}${quote}`;
-  }).join('\n') + '\n';
-  const parsed = parseEnv(content);
-  if (Object.keys(parsed).length !== Object.keys(settings).length || Object.entries(settings).some(([key, value]) => parsed[key] !== value)) throw new Error('Environment settings cannot be serialized losslessly');
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, content, { mode: 0o600 });
-  await rename(temporary, path); await chmod(path, 0o600);
-}
 
-/** Durable production settings are saved before replacing the legacy development file. */
 export async function initializeEnvironments() {
-  await mkdir(deployment, { recursive: true, mode: 0o700 });
-  const current = await exists(developmentEnv) ? await envFile(developmentEnv) : null;
-  const example = await envFile(join(root, 'backend/.env.example'));
-  if (!await exists(deploymentEnv)) {
-    if (current && databaseName(current) !== 'rsi_agent') throw new Error(`Restore deployment settings in ${deploymentEnv} before initializing development`);
-    const preserved = current ?? { ...example, DATABASE_URL: `mysql://rsi:rsi@127.0.0.1:${databasePort}/rsi_agent`, CONFIG_ENCRYPTION_KEY: randomBytes(32).toString('base64') };
-    validateEnvironment(preserved, 'rsi_agent');
-    await saveEnv(deploymentEnv, preserved);
-    console.log(`Preserved deployment configuration: ${deploymentEnv}`);
-  }
-  let production = await envFile(deploymentEnv); validateEnvironment(production, 'rsi_agent');
-  const productionUrl = new URL(production.DATABASE_URL);
-  if (productionUrl.hostname !== '127.0.0.1' || productionUrl.port !== String(databasePort)) {
-    productionUrl.hostname = '127.0.0.1'; productionUrl.port = String(databasePort);
-    production = { ...production, DATABASE_URL: productionUrl.href };
-    await saveEnv(deploymentEnv, production);
-  }
-  if (!current || databaseName(current) === 'rsi_agent') {
-    if (current && current.CONFIG_ENCRYPTION_KEY !== production.CONFIG_ENCRYPTION_KEY) throw new Error('Legacy and saved deployment encryption keys differ; review them before switching development');
-    const url = new URL(production.DATABASE_URL); url.hostname = '127.0.0.1'; url.port = String(databasePort); url.pathname = '/rsi_agent_dev'; url.username = 'rsi_dev'; url.password = 'rsi_dev';
-    await saveEnv(developmentEnv, { ...example, DATABASE_URL: url.href, CONFIG_ENCRYPTION_KEY: randomBytes(32).toString('base64') });
-    console.log('Initialized development settings for rsi_agent_dev; existing database data were retained.');
-  }
-  let development = await envFile(developmentEnv);
-  const developmentUrl = new URL(development.DATABASE_URL);
-  if (developmentUrl.hostname !== '127.0.0.1' || developmentUrl.port !== String(databasePort)) {
-    developmentUrl.hostname = '127.0.0.1'; developmentUrl.port = String(databasePort);
-    development = { ...development, DATABASE_URL: developmentUrl.href };
-    await saveEnv(developmentEnv, development);
-  }
-  validateEnvironment(development, 'rsi_agent_dev');
-  const devUrl = new URL(development.DATABASE_URL), prodUrl = new URL(production.DATABASE_URL);
-  if (devUrl.host !== prodUrl.host || prodUrl.port !== String(databasePort) || devUrl.username !== 'rsi_dev' || development.CONFIG_ENCRYPTION_KEY === production.CONFIG_ENCRYPTION_KEY) throw new Error('Development requires the checkout database service, rsi_dev account and its own encryption key');
+  const config = await loadConfig();
+  await mkdir(resolve(root, config.stateDirectory), { recursive: true, mode: 0o700 });
+  await chmod(configPath, 0o600);
+  const development = await serviceSettings('development'), production = await serviceSettings('deployment');
+  validateEnvironment(development, 'rsi_agent_dev'); validateEnvironment(production, 'rsi_agent');
   return { development, production };
 }
 export async function ensureDatabaseCompose() {
-  const volume = `${databaseProject}-mysql-data`;
-  const yaml = `# Generated for checkout ${root}\nservices:\n  mysql:\n    image: mysql:8.4\n    environment:\n      MYSQL_ROOT_PASSWORD: local-root\n      MYSQL_DATABASE: rsi_agent\n      MYSQL_USER: rsi\n      MYSQL_PASSWORD: rsi\n    ports:\n      - "127.0.0.1:${databasePort}:3306"\n    volumes:\n      - ${volume}:/var/lib/mysql\n    healthcheck:\n      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-plocal-root"]\n      interval: 2s\n      timeout: 2s\n      retries: 30\nvolumes:\n  ${volume}: {}\n`;
-  await mkdir(dirname(databaseComposeFile), { recursive: true, mode: 0o700 });
-  try { await writeFile(databaseComposeFile, yaml, { flag: 'wx', mode: 0o600 }); }
+  const config = await loadConfig(), paths = await runtimePaths(), volume = `${databaseProject}-mysql-data`, rootPassword = config.database.rootPassword;
+  const yaml = `# Generated for checkout ${root}\nservices:\n  mysql:\n    image: mysql:8.4\n    environment:\n      MYSQL_ROOT_PASSWORD: "${rootPassword}"\n    ports:\n      - "127.0.0.1:${config.database.port}:3306"\n    volumes:\n      - ${volume}:/var/lib/mysql\n    healthcheck:\n      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${rootPassword}"]\n      interval: 2s\n      timeout: 2s\n      retries: 30\nvolumes:\n  ${volume}: {}\n`;
+  await mkdir(dirname(paths.databaseComposeFile), { recursive: true, mode: 0o700 });
+  try { await writeFile(paths.databaseComposeFile, yaml, { flag: 'wx', mode: 0o600 }); }
   catch (error) {
     if (error.code !== 'EEXIST') throw error;
-    const existing = await readFile(databaseComposeFile, 'utf8');
-    if (existing !== yaml) throw new Error(`Checkout database Compose identity mismatch in ${databaseComposeFile}; refusing to use it`);
+    const existing = await readFile(paths.databaseComposeFile, 'utf8');
+    if (existing !== yaml) throw new Error(`Checkout database Compose identity mismatch in ${paths.databaseComposeFile}; refusing to use it`);
   }
 }
 
-export function capture(command, args) { return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
+
+const childEnvironment = () => ({ PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', HOME: root });
+export function capture(command, args) { return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnvironment() }).trim(); }
 export async function run(command, args, options = {}) {
   await new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', ...options });
+    const child = spawn(command, args, { env: childEnvironment(), stdio: 'inherit', ...options });
     child.once('error', reject);
     child.once('exit', (code, signal) => code === 0 ? resolveRun() : reject(new Error(`${command} failed (${signal ?? code})`)));
   });
@@ -141,7 +138,7 @@ export async function startService({ name, entry, args = [], entryArgs = [], cwd
   });
   await mkdir(dirname(pidFile), { recursive: true, mode: 0o700 });
   const output = await open(log, 'a', 0o600);
-  const child = spawn(process.execPath, [...args, entry, ...entryArgs], { cwd, env, detached: true, stdio: ['ignore', output.fd, output.fd] });
+  const child = spawn(process.execPath, [...args, entry, ...entryArgs], { cwd, env: { ...env, PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin', HOME: root }, detached: true, stdio: ['ignore', output.fd, output.fd] });
   const spawned = new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); });
   child.unref(); await output.close(); await spawned;
   const start = processStart(child.pid);
@@ -164,6 +161,7 @@ export async function showLogs(directory, part) {
   }
 }
 export async function withLock(action) {
+  const { state } = await runtimePaths();
   await mkdir(state, { recursive: true, mode: 0o700 });
   const path = join(state, 'manage.lock');
   let lock;

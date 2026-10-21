@@ -1,0 +1,23 @@
+{
+  "stateDirectory": ".operations",
+  "deployRoot": "/tmp/rsi-agent-deploy",
+  "database": { "port": 3307, "rootPassword": "REPLACE_WITH_LOCAL_SECRET" },
+  "development": {
+    "backendPort": 3000,
+    "frontendPort": 5273,
+    "database": "rsi_agent_dev",
+    "username": "rsi_dev",
+    "password": "REPLACE_WITH_LOCAL_SECRET",
+    "encryptionKey": "GENERATE_BASE64_32_BYTE_KEY",
+    "deepseekWebApiKey": ""
+  },
+  "deployment": {
+    "backendPort": 3001,
+    "frontendPort": 5274,
+    "database": "rsi_agent",
+    "username": "rsi",
+    "password": "REPLACE_WITH_LOCAL_SECRET",
+    "encryptionKey": "GENERATE_BASE64_32_BYTE_KEY",
+    "deepseekWebApiKey": ""
+  }
+}

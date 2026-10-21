@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { deployment, deploymentEnv, envFile, exists, initializeEnvironments, processRecord, root, run, capture, showLogs, startService, stopService, validateEnvironment, withLock } from './host-common.mjs';
-import { startDatabase } from './database.mjs';
+import { deployment, exists, initializeEnvironments, loadConfig, processRecord, root, run, capture, showLogs, startService, stopService, validateEnvironment, withLock, runtimePaths } from './host-common.mjs';
+import { startDatabase, provisionEnvironment } from './database.mjs';
 
+const paths = await runtimePaths();
 const manifestPath = join(deployment, 'active.json');
 const backPid = join(deployment, 'backend.pid'), frontPid = join(deployment, 'frontend.pid');
-const backendPort = Number(process.env.RSI_DEPLOY_BACKEND_PORT ?? 3001), frontendPort = Number(process.env.RSI_DEPLOY_FRONTEND_PORT ?? 5274);
-if (![backendPort, frontendPort].every(port => Number.isInteger(port) && port > 0 && port <= 65535) || backendPort === frontendPort) throw new Error('Deployment ports must be distinct valid ports');
+const config = await loadConfig();
+const backendPort = config.deployment.backendPort, frontendPort = config.deployment.frontendPort;
 async function manifest() { return await exists(manifestPath) ? JSON.parse(await readFile(manifestPath, 'utf8')) : null; }
 async function stop() {
   await stopService('Deployed frontend', frontPid);
@@ -19,7 +20,7 @@ async function saveManifest(value) {
   await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); await rename(temporary, manifestPath);
 }
 async function build(commit) {
-  const temporaryRoot = resolve(process.env.RSI_DEPLOY_ROOT ?? '/tmp/rsi-agent-deploy');
+  const temporaryRoot = resolve(config.deployRoot);
   await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
   const canonical = await realpath(temporaryRoot);
   const allowed = await Promise.all(['/tmp', tmpdir()].map(path => realpath(path)));
@@ -39,12 +40,12 @@ async function build(commit) {
   finally { await rm(archive, { force: true }); }
 }
 async function launch(release) {
-  const settings = await envFile(deploymentEnv); validateEnvironment(settings, 'rsi_agent');
-  await startDatabase();
+  const settings = (await initializeEnvironments()).production; validateEnvironment(settings, 'rsi_agent');
+  await startDatabase(); await provisionEnvironment('deployment');
   let startedBackend = false;
   try {
-    startedBackend = await startService({ name: 'Deployed backend', entry: join(release.directory, 'backend/dist/src/main.js'), cwd: join(release.directory, 'backend'), env: { ...process.env, ...settings, HOST: '127.0.0.1', PORT: String(backendPort), NODE_ENV: 'production' }, port: backendPort, url: `http://127.0.0.1:${backendPort}/agents`, pidFile: backPid, log: join(deployment, 'backend.log') });
-    await startService({ name: 'Deployed frontend', entry: join(release.directory, 'scripts/serve-frontend.mjs'), cwd: release.directory, env: { ...process.env, PORT: String(frontendPort), FRONTEND_DIST: join(release.directory, 'frontend/dist'), AGENT_BACKEND_ORIGIN: `http://127.0.0.1:${backendPort}`, NODE_ENV: 'production' }, port: frontendPort, url: `http://127.0.0.1:${frontendPort}/`, pidFile: frontPid, log: join(deployment, 'frontend.log') });
+    startedBackend = await startService({ name: 'Deployed backend', entry: join(release.directory, 'backend/dist/src/main.js'), cwd: join(release.directory, 'backend'), env: { ...settings, HOST: '127.0.0.1', PORT: String(backendPort), NODE_ENV: 'production' }, port: backendPort, url: `http://127.0.0.1:${backendPort}/agents`, pidFile: backPid, log: join(deployment, 'backend.log') });
+    await startService({ name: 'Deployed frontend', entry: join(release.directory, 'scripts/serve-frontend.mjs'), cwd: release.directory, env: { PORT: String(frontendPort), FRONTEND_DIST: join(release.directory, 'frontend/dist'), AGENT_BACKEND_ORIGIN: `http://127.0.0.1:${backendPort}`, NODE_ENV: 'production' }, port: frontendPort, url: `http://127.0.0.1:${frontendPort}/`, pidFile: frontPid, log: join(deployment, 'frontend.log') });
   } catch (error) { if (startedBackend) await stopService('Deployed backend', backPid); throw error; }
 }
 async function start() {

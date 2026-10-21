@@ -1,23 +1,23 @@
 import { spawn } from 'node:child_process';
-import { composeArgs, capture, databaseComposeFile, databaseName, ensureDatabaseCompose, exists, run } from './host-common.mjs';
+import { composeArgs, capture, databaseComposeFile, ensureDatabaseCompose, exists, run, loadConfig } from './host-common.mjs';
 import { pathToFileURL } from 'node:url';
 
 export async function databaseStatus() {
   try { if (!await exists(databaseComposeFile)) return false; return capture('docker', [...composeArgs, 'ps', '--status', 'running', '--services', 'mysql']) === 'mysql'; } catch { return false; }
 }
 export async function startDatabase() { await ensureDatabaseCompose(); await run('docker', [...composeArgs, 'up', '-d', '--wait', 'mysql']); }
-export async function provisionDevelopment(settings) {
-  const url = new URL(settings.DATABASE_URL);
-  if (databaseName(settings) !== 'rsi_agent_dev' || url.username !== 'rsi_dev') throw new Error('Refusing to provision an unexpected development database/account');
-  const password = decodeURIComponent(url.password);
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(password)) throw new Error('The local development password must use letters, digits, _ or -');
-  const sql = `CREATE DATABASE IF NOT EXISTS rsi_agent_dev CHARACTER SET utf8mb4;\nCREATE USER IF NOT EXISTS 'rsi_dev'@'%' IDENTIFIED BY '${password}';\nALTER USER 'rsi_dev'@'%' IDENTIFIED BY '${password}';\nGRANT ALL PRIVILEGES ON rsi_agent_dev.* TO 'rsi_dev'@'%';\n`;
+export async function provisionEnvironment(kind) {
+  if (!['development', 'deployment'].includes(kind)) throw new Error('Unknown Operations environment');
+  const config = await loadConfig(), values = config[kind], expected = kind === 'development' ? 'rsi_agent_dev' : 'rsi_agent';
+  if (values.database !== expected || !/^[A-Za-z0-9_-]{1,128}$/.test(values.username) || !/^[A-Za-z0-9_-]{1,128}$/.test(values.password)) throw new Error('Refusing to provision an unexpected database/account');
+  const sql = `CREATE DATABASE IF NOT EXISTS ${expected} CHARACTER SET utf8mb4;\nCREATE USER IF NOT EXISTS '${values.username}'@'%' IDENTIFIED BY '${values.password}';\nALTER USER '${values.username}'@'%' IDENTIFIED BY '${values.password}';\nGRANT ALL PRIVILEGES ON ${expected}.* TO '${values.username}'@'%';\n`;
   await ensureDatabaseCompose();
   await new Promise((resolve, reject) => {
     const child = spawn('docker', [...composeArgs, 'exec', '-T', 'mysql', 'sh', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -uroot'], { stdio: ['pipe', 'ignore', 'inherit'] });
-    child.once('error', reject); child.stdin.on('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('Development database provisioning failed'))); child.stdin.end(sql);
+    child.once('error', reject); child.stdin.on('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error(`${kind} database provisioning failed`))); child.stdin.end(sql);
   });
 }
+export async function provisionDevelopment() { return provisionEnvironment('development'); }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const command = process.argv[2];

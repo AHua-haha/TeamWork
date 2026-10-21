@@ -8,3 +8,5 @@ output/playwright/
 .test-mysql.env
 .run/
 .rsi/
+/operations.config.json
+/.operations/
