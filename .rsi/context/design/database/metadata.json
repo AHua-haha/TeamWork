@@ -1,6 +1,7 @@
 {
   "implementation": [
     "backend/src/storage/database.ts",
+    "backend/src/storage/store.ts",
     "backend/src/foundation/codec.ts",
     "backend/src/foundation/changes.ts",
     "backend/compose.yaml",
