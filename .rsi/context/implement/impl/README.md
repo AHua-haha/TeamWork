@@ -1,48 +1,61 @@
 ## Result summary
 
-The backend design has been successfully restructured into a hierarchical five-layer organization on branch `feat/rsi-design-tree`.
+The project is a local single-operator application for coordinating AI-agent teams over registered software workspaces. The accepted root design spans a Node.js/TypeScript backend, browser frontend, MySQL persistence, managed design/implementation context, and local development/deployment operations. User-reviewed design/member changes are distinct from implementation work; ordinary Git is the history mechanism.
 
-**Design hierarchy completed:**
-- **backend/** parent node created with layering documentation (five layers, import rules, labeled violations)
-- **backend/foundation/** — 5 source files (types, codec, changes, text, tool-result)
-- **backend/storage/** — 2 source files + compose.yaml + scripts (database, store interface)
-- **backend/domain/** — 41 source files + backend/ root files (config, workspace, team, harness, agent runtime loop, all domain logic)
-- **backend/api/** — 6 source files (http, routes, helpers, index, main as composition root)
-- **backend/runtime/** — 1 source file (main.ts as process wiring)
-
-**Old scattered backend nodes removed:**
-- agent-runtime/, config/, database/, web-tools/, backend-foundation/, backend-api/ (flat feature nodes)
-- All content consolidated into the new hierarchical structure
-
-**Commits:**
-- `658b40e` — Removed old flat backend design nodes and updated root design.md
-- `e33e24a` — Added new backend/ hierarchy with all five layer designs
-
-**Status:**
-- Design tree now matches the physical code layout (backend/src/{foundation,storage,domain,api,runtime})
-- All implementation mappings point to actual source files
-- Build passes clean (`npm run build` successful)
-- Working tree clean
-- Implementation context not touched (as requested — will be updated after domain sub-splitting)
-
-**Next step:** Further split domain/ into subdirectories (domain/config/, domain/workspace/, domain/team/, domain/harness/, domain/agent/) as the user requested.
+Implementation-context rebuild is underway after the legacy implementation-context tree was cleared. Backend Layers reports context for Backend API, Foundation, Runtime, and Storage; Backend Core reports context for the Backend Domain parent and its six child systems. Frontend and Operations have not yet reported their implementation-context inspection. These are reports, not independent verification of every document. Existing project-source edits and deletions must be preserved; this task must not modify, stage, or revert source.
 
 ## File lookup
 
 | Path | Description |
-| --- | --- |
-| `.rsi/context/design/backend/design.md` | Backend parent node with five-layer documentation |
-| `.rsi/context/design/backend/foundation/` | Foundation layer design node |
-| `.rsi/context/design/backend/storage/` | Storage layer design node |
-| `.rsi/context/design/backend/domain/` | Domain layer design node (to be further split) |
-| `.rsi/context/design/backend/api/` | API layer design node |
-| `.rsi/context/design/backend/runtime/` | Runtime layer design node |
-| `.rsi/context/design/design.md` | Root design with updated backend reference |
+|---|---|
+| `.rsi/context/design/design.md` | Accepted product-level purpose, interface, lifecycle and constraints. |
+| `.rsi/context/design/backend/` | Backend layer and domain designs. |
+| `.rsi/context/design/frontend/` | Frontend and group-chat designs. |
+| `.rsi/context/design/operations/` | Local development, deployment and shared-database designs. |
+| `.rsi/context/implement/backend/` | Backend Layers and Backend Core implementation contexts reported complete. |
+| `.rsi/context/implement/frontend/` | Frontend implementation context, pending member inspection. |
+| `.rsi/context/implement/operations/` | Operations implementation context, pending member inspection. |
+| `.rsi/context/implement/impl/README.md` | Product-level implementation context and overall continuation status. |
 
 ## Automatic retrieval
 
 ```json
-{
-  "commands": []
-}
+{"commands": []}
 ```
+
+## Implemented contract
+
+### Input
+The application accepts workspace directory/name and model settings, user chat text and prepared image attachments, provider configuration, and explicit user review/acceptance/activation decisions. Exact HTTP payloads and UI interactions are specified by backend and frontend child designs.
+
+### Output
+The product provides workspace/team state, shared timeline and private execution traces, design/member review information, commit-approval requests, and lifecycle status through loopback HTTP, SSE feeds, and the browser UI.
+
+### Effect
+It persists runtime, workspace, team, and configuration state in MySQL and writes context/member files under registered project directories. It provides member tools for project operations and uses ordinary Git history; it does not create per-member repositories or checkpoints.
+
+### Failure behavior
+Invalid or conflicting operations are refused without claiming success. Run failures remain visible as terminal execution state. Restart may mark abandoned runs interrupted rather than replaying them. Exact error contracts belong to child systems.
+
+### Usage example
+Register a project directory as a workspace, configure available models, address the team in group chat, review proposed design/member changes, and explicitly accept/activate them before implementation work relies on them.
+
+## Verification and continuation
+
+This is a product-level summary, not a substitute for child-system contracts. Backend implementation contexts have been reported by their owners; frontend and operations remain to be examined against accepted designs and actual source. No project source was changed for this context update. Preserve the existing unrelated source modifications and deletions.
+
+Root design: `.rsi/context/design/design.md`. No automated retrieval is needed.
+
+## Contract detail
+
+### Input
+Workspace creation receives name, directory, lead configuration and optional model defaults. Group chat accepts text and optional prepared images and can route to explicitly mentioned members. Configuration and design/member changes are reviewed and activated through separate user-authorized actions.
+
+### Output
+The system exposes persistent workspace and team state, timeline entries, agent-run status/progress, context/design review data, member activation outcomes, and Git approval requests. The browser consumes JSON endpoints and SSE updates.
+
+### Effect and failure
+Persistent records live in MySQL; managed context and source live under workspace directories. Failures must remain explicit, including validation/conflict failures and terminal agent errors. This root-level contract summarizes the accepted product design; use the corresponding child implemented contracts for concrete signatures and edge cases.
+
+### Example
+A user registers a workspace, configures its models, starts a group-chat exchange mentioning a member, follows the resulting work, reviews any requested commit/configuration approval, and explicitly activates reviewed member configuration before it is used.
