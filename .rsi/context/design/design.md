@@ -22,32 +22,7 @@ The project owns: the agent runtime and its HTTP/SSE protocol, provider/connecti
 
 **Failure behavior and lifecycle.** Every subsystem refuses invalid input atomically and preserves its previous durable state. A refused publication, activation, save or commit changes nothing. Run failures surface as statuses, never as fabricated shared answers. Backend restart marks abandoned runs `interrupted` and preserves committed records, context and files. There is no automatic retry, durable run resumption, multi-user authentication or multi-tenant isolation; the server binds to loopback and acts for the local user.
 
-## Backend layering
 
-The backend is organized into five physical layers under `backend/src/`. Imports flow inward only: **API → Domain → Foundation**, **API → Runtime → Domain**, **Storage → Foundation**, **Domain → Storage → Foundation**. The composition root (`runtime/main.ts`) is the only file permitted to know every concrete implementation.
-
-| Layer | Directory | What it owns | Must never |
-|---|---|---|---|
-| **Foundation** | `src/foundation/` | Value types, error codes, serialization contracts, text utilities | Import any other backend layer |
-| **Storage** | `src/storage/` | MySQL persistence, revisions, transactions, schema, migration | Make domain decisions; import Domain |
-| **Domain** | `src/domain/` | Use-case rules, capabilities, mechanisms: activation, publication, harness authority, model loop, context assembly | Speak HTTP, import API |
-| **API** | `src/api/` | HTTP routing, body validation, status codes, SSE framing, `index.ts` public re-exports | Contain policy; import Storage directly |
-| **Runtime** | `src/runtime/` | Process assembly, concrete dependency wiring, lifecycle (`main.ts` only) | Contain any business rule |
-
-### Known layering violations (labeled debt)
-
-These exist in the current codebase and are recorded here so members do not silently treat them as intended design.
-
-**Fixed:**
-1. ~~`foundation/types.ts` imports `domain/progress.ts`~~ — **Fixed in Phase 2:** `ProgressEvent` type moved into `types.ts`; cycle broken.
-2. `storage/store.ts` interface extracted — **Fixed in Phase 3:** Domain and Runtime depend on the `Store` interface; `main.ts` wires concrete `MySqlStore`.
-
-**Remaining:**
-3. **`storage/database.ts` imports 8 domain modules** (`chat-images.imageContent`, `chat-images.validateChatImages`, `conversation-context.repairInterruptedTools`, `final-answer.finalAnswer`, `member-response.parseMemberResponse`, `group-chat` validation/types, `workspace-models`, `member-config-format.generatedSource`) — Storage reaching into Domain for deserialization and business logic during reads/recovery. Fix: domain modules register serialization/parsing functions through an interface that storage calls; storage stores and retrieves opaque JSON. Complex refactor; deferred.
-4. **`foundation/codec.ts` imports `domain/context-base.ts`** types — Foundation depending on Domain. Fix: move `Author`/`ChangeRecord` type declarations into `foundation/changes.ts`. Low cost; deferred.
-5. **`foundation/tool-result.ts` imports `domain/runtime.ts`** — Foundation depending on Domain. Fix: define `ToolOutput` against a Foundation-local interface. Low cost; deferred.
-6. **`domain/workspace-reset.ts` accesses `store.pool` directly** — bypassing the storage interface for transaction scoping. Retained as acceptable given workspace reset's special requirements.
-7. **`domain/harness.ts` is a 17-module hub** spanning design, member files, git approval, bash, web tools — harness is a cross-cutting authority service that resists single-layer placement. Fix: split into `harness-authority` (domain) and `harness-execution` (runtime). Deferred.
 
 ## Constraints, specifications and requirements
 
@@ -62,17 +37,12 @@ These exist in the current codebase and are recorded here so members do not sile
 
 Each child node states its own purpose, caller-facing interface contract and constraints. This document stays sufficient for callers of the whole application; child internals are not required reading here.
 
-- [Agent runtime](agent-runtime/design.md) — the single agent loop, run protocol, follow streams and agent HTTP operations.
-- [Config](config/design.md) — deployment config, editable app/connection/catalog/agent settings, run snapshots.
-- [Database](database/design.md) — MySQL persistence of runtime, config, workspace, context-base, member and chat records.
+- [Backend](backend/design.md) — the TypeScript/Node.js execution engine: agent runtime loop, MySQL persistence, provider config, workspace/team coordination, harness authority, and HTTP/SSE APIs. Organized into five layers: Foundation, Storage, Domain, API, Runtime.
 - [Harness](harness/design.md) — fixed purpose bases, tool selection, file authority and commit approval.
 - [Workspace](workspace-agent/workspace/design.md) — workspace registry, project-file API and agent file actions.
 - [Context base](workspace-agent/context-base/design.md) — design/implementation context storage, versions and change feed.
 - [Team](workspace-agent/team/design.md) — member lifecycle, activation, work routing and member inspection.
 - [Group chat](workspace-agent/team/group-chat/design.md) — shared transcript, mentions, mention budget, reservations and reset.
 - [Conversation context](workspace-agent/team/conversation-context/design.md) — per-member working-context assembly and automatic retrieval.
-- [Web tools](web-tools/design.md) — provider-independent `web_search` and `web_fetch`.
 - [Frontend](frontend/design.md) — browser UI: conversations, workspace panel, providers, commit approval.
 - [Operations](operations/design.md) — local development, host deployment and the shared MySQL lifecycle scripts.
-- [Backend Foundation](backend-foundation/design.md) — shared value types, error codes, serialization contracts and text utilities; the innermost backend layer.
-- [Backend API](backend-api/design.md) — HTTP transport, routing, SSE framing and the process composition root.

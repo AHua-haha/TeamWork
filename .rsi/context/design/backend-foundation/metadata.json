@@ -1,9 +1,0 @@
-{
-  "implementation": [
-    "backend/src/foundation/types.ts",
-    "backend/src/foundation/codec.ts",
-    "backend/src/foundation/changes.ts",
-    "backend/src/foundation/text.ts",
-    "backend/src/foundation/tool-result.ts"
-  ]
-}
