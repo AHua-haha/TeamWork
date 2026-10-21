@@ -1,8 +1,0 @@
-{
-  "implementation": [
-    "backend/src/domain/group-chat.ts",
-    "backend/src/domain/chat-images.ts",
-    "backend/src/domain/final-answer.ts",
-    "backend/src/domain/team-runner.ts"
-  ]
-}
