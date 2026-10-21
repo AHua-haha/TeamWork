@@ -22,6 +22,29 @@ The project owns: the agent runtime and its HTTP/SSE protocol, provider/connecti
 
 **Failure behavior and lifecycle.** Every subsystem refuses invalid input atomically and preserves its previous durable state. A refused publication, activation, save or commit changes nothing. Run failures surface as statuses, never as fabricated shared answers. Backend restart marks abandoned runs `interrupted` and preserves committed records, context and files. There is no automatic retry, durable run resumption, multi-user authentication or multi-tenant isolation; the server binds to loopback and acts for the local user.
 
+## Backend layering
+
+The backend is organized into five physical layers under `backend/src/`. Imports flow inward only: **API → Domain → Foundation**, **API → Runtime → Domain**, **Storage → Foundation**, **Domain → Storage → Foundation**. The composition root (`runtime/main.ts`) is the only file permitted to know every concrete implementation.
+
+| Layer | Directory | What it owns | Must never |
+|---|---|---|---|
+| **Foundation** | `src/foundation/` | Value types, error codes, serialization contracts, text utilities | Import any other backend layer |
+| **Storage** | `src/storage/` | MySQL persistence, revisions, transactions, schema, migration | Make domain decisions; import Domain |
+| **Domain** | `src/domain/` | Use-case rules, capabilities, mechanisms: activation, publication, harness authority, model loop, context assembly | Speak HTTP, import API |
+| **API** | `src/api/` | HTTP routing, body validation, status codes, SSE framing, `index.ts` public re-exports | Contain policy; import Storage directly |
+| **Runtime** | `src/runtime/` | Process assembly, concrete dependency wiring, lifecycle (`main.ts` only) | Contain any business rule |
+
+### Known layering violations (labeled debt)
+
+These exist in the current codebase and are recorded here so members do not silently treat them as intended design:
+
+1. **`foundation/types.ts` imports `domain/progress.ts`** — creates a Foundation↔Domain cycle. Fix: move `ProgressEvent` type declaration into `types.ts`; `progress.ts` then imports from Foundation only.
+2. **`foundation/codec.ts` imports `domain/context-base.ts`** — Foundation depending on Domain. Fix: move `Author`/`ChangeRecord` type declarations into `foundation/changes.ts`.
+3. **`foundation/tool-result.ts` imports `domain/runtime.ts`** — Foundation depending on Domain. Fix: define `ToolOutput` against a Foundation-local interface rather than the full `RuntimeTool`.
+4. **`storage/database.ts` imports 8 domain modules** (`conversation-context`, `final-answer`, `member-response`, `chat-images`, `group-chat`, `workspace-models`, `member-config-format`, `codec`) — Storage reaching into Domain for deserialization logic. Fix: domain modules register serialization/deserialization functions that storage calls through a protocol interface; storage stores and retrieves opaque JSON.
+5. **`domain/runtime.ts` imports concrete `MySqlStore`** from Storage — Domain bypassing a storage interface. Fix: declare a `Store` interface in Domain; `main.ts` wires the concrete implementation.
+6. **`domain/harness.ts` is a 17-module hub** spanning design, member files, git approval, bash, web tools — harness is a cross-cutting authority service that resists single-layer placement. Fix: split into `harness-authority` (domain) and `harness-execution` (runtime). Deferred; label the debt.
+
 ## Constraints, specifications and requirements
 
 - Node.js 22.19+, TypeScript, MySQL 8.4, and Pi AI `@earendil-works/pi-ai` 0.87.1 as the message/tool/provider format. Pi Agent Core does not run the loop.
@@ -47,3 +70,5 @@ Each child node states its own purpose, caller-facing interface contract and con
 - [Web tools](web-tools/design.md) — provider-independent `web_search` and `web_fetch`.
 - [Frontend](frontend/design.md) — browser UI: conversations, workspace panel, providers, commit approval.
 - [Operations](operations/design.md) — local development, host deployment and the shared MySQL lifecycle scripts.
+- [Backend Foundation](backend-foundation/design.md) — shared value types, error codes, serialization contracts and text utilities; the innermost backend layer.
+- [Backend API](backend-api/design.md) — HTTP transport, routing, SSE framing and the process composition root.

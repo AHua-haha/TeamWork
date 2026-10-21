@@ -1,12 +1,12 @@
 {
   "implementation": [
-    "backend/src/runtime.ts",
-    "backend/src/progress.ts",
-    "backend/src/http.ts",
-    "backend/src/http-helpers.ts",
-    "backend/src/main.ts",
-    "backend/src/types.ts",
-    "backend/src/index.ts",
+    "backend/src/domain/runtime.ts",
+    "backend/src/domain/progress.ts",
+    "backend/src/api/http.ts",
+    "backend/src/api/http-helpers.ts",
+    "backend/src/runtime/main.ts",
+    "backend/src/foundation/types.ts",
+    "backend/src/api/index.ts",
     "backend/README.md"
   ]
 }

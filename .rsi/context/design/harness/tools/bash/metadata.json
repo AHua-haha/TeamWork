@@ -1,8 +1,9 @@
 {
   "implementation": [
-    "backend/src/harness-execution.ts",
-    "backend/src/harness-command.ts",
-    "backend/src/harness-resources.ts",
-    "backend/src/git-approval.ts"
+    "backend/src/domain/harness-execution.ts",
+    "backend/src/domain/harness-command.ts",
+    "backend/src/domain/harness-resources.ts",
+    "backend/src/domain/git-approval.ts",
+    "backend/src/domain/workspace-git.ts"
   ]
 }

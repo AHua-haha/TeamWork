@@ -1,0 +1,10 @@
+{
+  "implementation": [
+    "backend/src/api/http.ts",
+    "backend/src/api/http-helpers.ts",
+    "backend/src/api/workspace-routes.ts",
+    "backend/src/api/team-routes.ts",
+    "backend/src/api/index.ts",
+    "backend/src/runtime/main.ts"
+  ]
+}

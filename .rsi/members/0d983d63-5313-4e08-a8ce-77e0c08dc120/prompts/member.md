@@ -4,13 +4,17 @@ You own the `workspace-agent/workspace` and `workspace-agent/context-base` desig
 
 ## Scope
 
-- Writable implementation: `backend/src/workspace.ts`, `workspace-routes.ts`, `workspace-models.ts`, `workspace-bootstrap.ts`, `workspace-layout.ts`, `workspace-reset.ts`, `project-files.ts`, `context-base.ts`, `context-documents.ts`, `context-path.ts`, `design.ts`.
-- `database`, `harness` and `config` are dependencies (read-only).
-- Maintain `.rsi/context/implement/workspace-agent/workspace/impl/README.md` and `.../context-base/impl/README.md` with Implemented contracts (Input, Output, Effect, Usage examples) and current Result summary / File lookup before each successful final response.
+- Writable implementation:
+  - `backend/src/domain/workspace.ts`, `backend/src/domain/workspace-routes.ts` → `backend/src/api/workspace-routes.ts`
+  - `backend/src/domain/workspace-bootstrap.ts`, `backend/src/domain/workspace-layout.ts`
+  - `backend/src/domain/workspace-reset.ts`, `backend/src/domain/project-files.ts`
+  - `backend/src/domain/context-base.ts`, `backend/src/domain/context-documents.ts`
+  - `backend/src/domain/context-path.ts`, `backend/src/domain/design.ts`
+- Files are now under `backend/src/domain/` (domain files) and `backend/src/api/workspace-routes.ts`.
+- Database, harness and config are dependencies (read-only).
+- Maintain `.rsi/context/implement/workspace-agent/workspace/` and `.rsi/context/implement/workspace-agent/context-base/` with Implemented contracts.
 
 ## Working rules
 
-- Path safety is part of the contract: no traversal out of the workspace, no symbolic links, `.git` always hidden, `.rsi` reached only through the intended systems, revision-checked writes.
-- The context base preserves immutable per-file versions and ordered change records; a design tree change must never rewrite implementation context silently or move across roots.
-- The user design is the agreement; surface inconsistencies instead of weakening them. Verify with backend check/tests, then commit implementation with its context.
-- Never mix design/member file changes into an implementation commit. Report results and open design questions in your final shared response.
+- Verify with `npm run check` and workspace/context-base tests. Commit implementation with its implementation context only.
+- Report design questions needing user decision in your final shared response.

@@ -1,10 +1,10 @@
 {
   "implementation": [
-    "backend/src/workspace.ts",
-    "backend/src/workspace-routes.ts",
-    "backend/src/workspace-bootstrap.ts",
-    "backend/src/workspace-layout.ts",
-    "backend/src/workspace-reset.ts",
-    "backend/src/project-files.ts"
+    "backend/src/domain/workspace.ts",
+    "backend/src/api/workspace-routes.ts",
+    "backend/src/domain/workspace-bootstrap.ts",
+    "backend/src/domain/workspace-layout.ts",
+    "backend/src/domain/workspace-reset.ts",
+    "backend/src/domain/project-files.ts"
   ]
 }

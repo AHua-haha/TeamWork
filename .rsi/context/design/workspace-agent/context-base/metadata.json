@@ -1,8 +1,8 @@
 {
   "implementation": [
-    "backend/src/context-base.ts",
-    "backend/src/context-documents.ts",
-    "backend/src/context-path.ts",
-    "backend/src/design.ts"
+    "backend/src/domain/context-base.ts",
+    "backend/src/domain/context-documents.ts",
+    "backend/src/domain/context-path.ts",
+    "backend/src/domain/design.ts"
   ]
 }

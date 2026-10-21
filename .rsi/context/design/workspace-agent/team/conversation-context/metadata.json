@@ -1,5 +1,5 @@
 {
   "implementation": [
-    "backend/src/conversation-context.ts"
+    "backend/src/domain/conversation-context.ts"
   ]
 }
