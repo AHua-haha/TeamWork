@@ -1,39 +1,44 @@
-# Implementation context
-
-Design: `metadata.json`
-
 ## Result summary
 
-The project-wide design tree has been created under `.rsi/context/design` from the existing system documentation in `docs/systems`, on branch `feat/rsi-design-tree`.
+The backend five-layer restructure is in progress on branch `feat/rsi-design-tree`.
 
-Structure: 19 design nodes with `metadata.json` implementation mappings — `agent-runtime`, `config`, `database`, `harness` (+ `tools`, `tools/bash`), `workspace-agent` (+ `workspace`, `context-base`, `team` (+ `group-chat`, `conversation-context`, `lead`)), `web-tools`, `frontend` (+ `group-chat`), `operations` (+ `local-dev`, `host-deployment`, `shared-database`). Every node carries purpose/responsibilities/boundaries, an interface contract (inputs, outputs/effects, failure behavior, guarantees) and constraints/specifications/requirements. The root `design.md` summarizes the whole product and links each subsystem.
+**Completed:**
+- Design commit `0024ff7` is committed and awaiting user acceptance. It contains:
+  - New `backend-foundation` and `backend-api` design nodes
+  - Updated `metadata.json` paths across all nodes to reflect layer subdirectories
+  - "Backend layering" section in root `design.md` with five roles, direction rules, and six labeled debt violations
+  - Updated four member prompt files (Runtime, Storage, Team, Workspace)
+- Physical restructure of `backend/src/` is done and type-checked clean:
+  - All 51 `.ts` files moved to `foundation/`, `storage/`, `domain/`, `api/`, `runtime/`
+  - All relative imports rewritten in src, test, and scripts
+  - `node_modules/.bin/tsc --noEmit` passes with zero errors
+- 91 implementation files are staged and ready to commit, blocked on design acceptance.
 
-Implementation context is intentionally left as placeholders: only this root `impl/README.md` exists. Each working member creates and maintains its own working nodes' `impl/README.md` Implemented contract.
+**Open / pending:**
+- User must Accept design commit `0024ff7` to update active implementation path mappings
+- After acceptance, the staged implementation commit can go through
+- Phase 2–4 (foundation cycle fix, storage interface, domain-import removal from storage) are deferred next work
+- Further domain splitting (domain/config/, domain/workspace/, domain/team/, etc.) is planned after Phase 1 lands
 
-Pending for the user: the design/member commit (`.rsi/context/design`, `.rsi/members`) needs user acceptance; the five new members (Runtime, Storage, Workspace, Team, Frontend) need separate user activation before they can run. `validate_member_config` still reports `not_found` design references until the design files are committed, because validation reads the committed design.
-
-Known problems: none outstanding in the design text itself. `docs/systems` remains the previous canonical documentation and was copied, then reorganized to the three required sections; further drift between the two trees should be resolved by treating `.rsi/context/design` as the agreement.
+**Known blockers:**
+- `tsx` IPC socket (`/tmp/claude`) is not writable in this sandbox — unit tests cannot be run via tsx. TypeScript type check passes clean as the verification proxy.
 
 ## File lookup
 
 | Path | Description |
 | --- | --- |
-| `.rsi/context/design/design.md` | Root product design: purpose, interface contract, constraints, subsystem index |
-| `.rsi/context/design/metadata.json` | Root node implementation mapping (empty: lead owns no source) |
-| `.rsi/context/design/<node>/design.md` | Per-node design documents |
-| `.rsi/context/design/<node>/metadata.json` | Per-node implementation path mappings |
-| `.rsi/members/<id>/member.json` | Member manifests for the five workers plus Lead |
-| `.rsi/members/<id>/prompts/member.md` | Per-member supplementary instructions |
-| `.rsi/context/implement/impl/README.md` | This file |
-| `docs/systems/` | Original system documentation the design tree was derived from |
-| `backend/src/` | Backend implementation mapped by the design nodes |
-| `frontend/src/` | Frontend implementation mapped by the frontend nodes |
-| `scripts/` | Lifecycle scripts mapped by the operations nodes |
+| `backend/src/foundation/` | Five foundation files: types, codec, changes, text, tool-result |
+| `backend/src/storage/database.ts` | Single storage layer file |
+| `backend/src/domain/` | 38 domain files + providers/ |
+| `backend/src/api/` | HTTP, routes, helpers, index |
+| `backend/src/runtime/main.ts` | Composition root |
+| `.rsi/context/design/design.md` | Root design + Backend layering section |
+| `.rsi/context/design/backend-foundation/` | New foundation design node |
+| `.rsi/context/design/backend-api/` | New API design node |
+| `.rsi/context/design/<node>/metadata.json` | Implementation mappings updated to layer paths |
 
 ## Automatic retrieval
 
 ```json
-{
-  "commands": []
-}
+{"commands": []}
 ```

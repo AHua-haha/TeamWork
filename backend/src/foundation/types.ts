@@ -1,5 +1,7 @@
-import type { ProgressEvent } from '../domain/progress.js';
-import type { JsonObject, Message } from '@earendil-works/pi-ai';
+import type { AssistantMessage, AssistantMessageFrame, JsonObject, Message } from '@earendil-works/pi-ai';
+
+/** Pi compact frames; start carries an empty-content header, never a mutable partial. */
+export type ProgressEvent = Exclude<AssistantMessageFrame, { type: 'start' }> | { type: 'start'; message: AssistantMessage };
 
 export class AppError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) {

@@ -1,9 +1,5 @@
-import type { AssistantMessage, AssistantMessageFrame } from '@earendil-works/pi-ai';
 import { Changes } from '../foundation/changes.js';
-import { position } from '../foundation/types.js';
-
-/** Pi compact frames; start carries an empty-content header, never a mutable partial. */
-export type ProgressEvent = Exclude<AssistantMessageFrame, { type: 'start' }> | { type: 'start'; message: AssistantMessage };
+import { position, type ProgressEvent } from '../foundation/types.js';
 export interface ProgressChunk { messageId: string; runId: string; sequence: number; historyPositionBeforeMessage: number; event: ProgressEvent }
 interface Active { messageId: string; runId: string; historyPositionBeforeMessage: number; next: number }
 interface Lane { changes: Changes; durable: number; ring: (ProgressChunk | undefined)[]; head: number; length: number; active?: Active }
