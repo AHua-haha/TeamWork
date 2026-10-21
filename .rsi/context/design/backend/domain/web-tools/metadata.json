@@ -1,3 +1,5 @@
-{"implementation": [
-  "backend/src/domain/web-tools.ts"
-]}
+{
+  "implementation": [
+    "backend/src/domain/web-tools/web-tools.ts"
+  ]
+}

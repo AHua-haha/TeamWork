@@ -1,15 +1,17 @@
-{"implementation": [
-  "backend/src/domain/team.ts",
-  "backend/src/domain/team-system.ts",
-  "backend/src/domain/team-runner.ts",
-  "backend/src/domain/conversation-context.ts",
-  "backend/src/domain/group-chat.ts",
-  "backend/src/domain/chat-images.ts",
-  "backend/src/domain/final-answer.ts",
-  "backend/src/domain/member-config.ts",
-  "backend/src/domain/member-config-format.ts",
-  "backend/src/domain/member-files.ts",
-  "backend/src/domain/member-instructions.ts",
-  "backend/src/domain/member-response.ts",
-  "backend/src/domain/member-tools.ts"
-]}
+{
+  "implementation": [
+    "backend/src/domain/team/team.ts",
+    "backend/src/domain/team/team-system.ts",
+    "backend/src/domain/team/team-runner.ts",
+    "backend/src/domain/team/conversation-context.ts",
+    "backend/src/domain/team/group-chat.ts",
+    "backend/src/domain/team/chat-images.ts",
+    "backend/src/domain/team/final-answer.ts",
+    "backend/src/domain/team/member-config.ts",
+    "backend/src/domain/team/member-config-format.ts",
+    "backend/src/domain/team/member-files.ts",
+    "backend/src/domain/team/member-instructions.ts",
+    "backend/src/domain/team/member-response.ts",
+    "backend/src/domain/team/member-tools.ts"
+  ]
+}

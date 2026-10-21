@@ -1,6 +1,8 @@
-{"implementation": [
-  "backend/src/domain/config.ts",
-  "backend/src/domain/secrets.ts",
-  "backend/src/domain/providers.ts",
-  "backend/src/domain/providers"
-]}
+{
+  "implementation": [
+    "backend/src/domain/config/config.ts",
+    "backend/src/domain/config/secrets.ts",
+    "backend/src/domain/config/providers.ts",
+    "backend/src/domain/config/providers"
+  ]
+}

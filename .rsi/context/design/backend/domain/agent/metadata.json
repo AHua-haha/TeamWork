@@ -1,4 +1,6 @@
-{"implementation": [
-  "backend/src/domain/runtime.ts",
-  "backend/src/domain/progress.ts"
-]}
+{
+  "implementation": [
+    "backend/src/domain/agent/runtime.ts",
+    "backend/src/domain/agent/progress.ts"
+  ]
+}
