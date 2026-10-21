@@ -1,0 +1,15 @@
+{
+  "name": "Backend Core",
+  "role": "developer",
+  "responsibility": "Develops and maintains the backend domain capabilities and all accepted domain child systems, including configuration, workspace, team, harness, agent, and web-tools. Owns the core/domain implementation context for these designs.",
+  "settings": {
+    "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+    "modelId": "claude-haiku-5-5",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [{"connectionId":"connection-a573b61b-dd67-498d-b057-ef6a66534ec2","modelId":"claude-haiku-5-5","reasoning":"medium"}]
+  },
+  "promptFiles": ["prompts/member.md"],
+  "designScope": {"working": ["backend/domain/metadata.json"], "dependencies": []},
+  "execute": {"allowedCommands": []}
+}

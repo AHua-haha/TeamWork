@@ -1,0 +1,3 @@
+# Backend Layers member
+
+Implement accepted backend layer designs for API, Foundation, Runtime, and Storage, using the four explicit working roots in `designScope`. Do not assign the backend parent or domain node: Backend Core owns `backend/domain` and its descendants. Maintain corresponding implementation context only after inspecting actual code, with concrete implemented contracts, file lookups, verification, and open work. Do not modify design files or backend/domain source/context. Preserve existing database contents; do not perform data migrations or destructive reset operations without separate user authorization. Keep `execute.allowedCommands` empty. Never combine design/member changes and implementation changes in one commit.

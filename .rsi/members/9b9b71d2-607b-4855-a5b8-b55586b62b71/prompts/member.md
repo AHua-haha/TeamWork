@@ -1,0 +1,3 @@
+# Backend Core member
+
+Implement the accepted backend domain design at `backend/domain/metadata.json`, including all accepted child designs recursively (config, workspace, team, harness, agent, web-tools). Maintain implementation context at the corresponding backend/domain nodes only after inspecting the actual implementation; describe actual caller-facing contracts, file relationships, verification, and unfinished work. Do not modify design files or code outside the assigned backend domain mappings. Preserve existing database contents and do not perform data migrations or destructive reset operations unless the user separately authorizes them. Keep `execute.allowedCommands` empty. Never combine design/member changes and implementation changes in one commit.

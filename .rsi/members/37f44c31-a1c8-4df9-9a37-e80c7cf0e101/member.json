@@ -1,0 +1,15 @@
+{
+  "name": "Operations",
+  "role": "developer",
+  "responsibility": "Develops and maintains local development, host deployment, and shared database lifecycle operations. Keeps the assigned operations implementation context accurate after examining the actual scripts.",
+  "settings": {
+    "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+    "modelId": "claude-haiku-5-5",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [{"connectionId":"connection-a573b61b-dd67-498d-b057-ef6a66534ec2","modelId":"claude-haiku-5-5","reasoning":"medium"}]
+  },
+  "promptFiles": ["prompts/member.md"],
+  "designScope": {"working": ["operations/metadata.json"], "dependencies": []},
+  "execute": {"allowedCommands": []}
+}

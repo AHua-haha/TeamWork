@@ -1,0 +1,15 @@
+{
+  "name": "Frontend",
+  "role": "developer",
+  "responsibility": "Develops and maintains the frontend application, including its group-chat subsystem, and keeps implementation context accurate against the accepted designs and actual UI code.",
+  "settings": {
+    "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+    "modelId": "claude-haiku-5-5",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [{"connectionId":"connection-a573b61b-dd67-498d-b057-ef6a66534ec2","modelId":"claude-haiku-5-5","reasoning":"medium"}]
+  },
+  "promptFiles": ["prompts/member.md"],
+  "designScope": {"working": ["frontend/metadata.json"], "dependencies": []},
+  "execute": {"allowedCommands": []}
+}

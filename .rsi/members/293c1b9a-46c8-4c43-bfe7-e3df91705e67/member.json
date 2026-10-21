@@ -1,0 +1,23 @@
+{
+  "name": "Backend Layers",
+  "role": "developer",
+  "responsibility": "Develops and maintains the non-domain backend layers: API transport, Foundation shared types/utilities, Runtime composition and lifecycle, and Storage persistence. Keeps implementation context current for these assigned designs.",
+  "settings": {
+    "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+    "modelId": "claude-haiku-5-5",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [{"connectionId":"connection-a573b61b-dd67-498d-b057-ef6a66534ec2","modelId":"claude-haiku-5-5","reasoning":"medium"}]
+  },
+  "promptFiles": ["prompts/member.md"],
+  "designScope": {
+    "working": [
+      "backend/api/metadata.json",
+      "backend/foundation/metadata.json",
+      "backend/runtime/metadata.json",
+      "backend/storage/metadata.json"
+    ],
+    "dependencies": []
+  },
+  "execute": {"allowedCommands": []}
+}

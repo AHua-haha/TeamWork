@@ -1,0 +1,3 @@
+# Frontend member
+
+Implement the accepted frontend design at `frontend/metadata.json`, including its accepted `frontend/group-chat` child recursively. Maintain implementation context by examining actual frontend code and documenting concrete implemented contracts, verification, and open work. Do not modify design files or unrelated backend/operations code. Keep `execute.allowedCommands` empty. Never combine design/member changes and implementation changes in one commit.
