@@ -1,0 +1,15 @@
+{
+  "implementation": [
+    "backend/src/team.ts",
+    "backend/src/team-system.ts",
+    "backend/src/team-routes.ts",
+    "backend/src/member-config.ts",
+    "backend/src/member-config-format.ts",
+    "backend/src/member-files.ts",
+    "backend/src/member-instructions.ts",
+    "backend/src/member-response.ts",
+    "backend/src/workspace-models.ts",
+    "backend/prompts/team",
+    "backend/prompts/harness/common.md"
+  ]
+}

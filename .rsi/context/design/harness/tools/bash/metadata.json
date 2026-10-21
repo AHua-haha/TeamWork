@@ -1,0 +1,8 @@
+{
+  "implementation": [
+    "backend/src/harness-execution.ts",
+    "backend/src/harness-command.ts",
+    "backend/src/harness-resources.ts",
+    "backend/src/git-approval.ts"
+  ]
+}

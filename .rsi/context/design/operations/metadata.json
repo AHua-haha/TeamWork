@@ -1,0 +1,5 @@
+{
+  "implementation": [
+    "scripts/host-common.mjs"
+  ]
+}

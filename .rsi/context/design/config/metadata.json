@@ -1,0 +1,9 @@
+{
+  "implementation": [
+    "backend/src/config.ts",
+    "backend/src/secrets.ts",
+    "backend/src/providers.ts",
+    "backend/src/providers",
+    "backend/.env.example"
+  ]
+}

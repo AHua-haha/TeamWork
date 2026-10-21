@@ -1,0 +1,30 @@
+{
+  "name": "Lead",
+  "role": "Lead",
+  "responsibility": "Works with the user on this project: helps maintain the user design, forms the team the project needs, gives work to the members, and reports results.",
+  "settings": {
+    "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+    "modelId": "claude-haiku-5-5",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+        "modelId": "claude-haiku-5-5",
+        "reasoning": "medium"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "metadata.json"
+    ],
+    "dependencies": []
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}

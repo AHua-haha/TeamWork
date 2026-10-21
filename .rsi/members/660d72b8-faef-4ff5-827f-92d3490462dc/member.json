@@ -1,0 +1,37 @@
+{
+  "name": "Team",
+  "role": "developer",
+  "responsibility": "Implements and maintains team membership and activation, harnesses and tools, shared group chat, conversation-context assembly and automatic retrieval. Keeps the team, group-chat, conversation-context and harness implementation context current with Implemented contracts.",
+  "settings": {
+    "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+    "modelId": "claude-haiku-5-5",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+        "modelId": "claude-haiku-5-5",
+        "reasoning": "medium"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "workspace-agent/team/metadata.json",
+      "harness/metadata.json"
+    ],
+    "dependencies": [
+      "agent-runtime/metadata.json",
+      "database/metadata.json",
+      "workspace-agent/workspace/metadata.json",
+      "workspace-agent/context-base/metadata.json",
+      "web-tools/metadata.json"
+    ]
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "implementation": [
+    "frontend/src/ui",
+    "frontend/src/client",
+    "frontend/src/adapter",
+    "frontend/src/main.tsx",
+    "frontend/index.html",
+    "frontend/vite.config.ts",
+    "frontend/package.json",
+    "frontend/README.md"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "implementation": [
+    "backend/src/database.ts",
+    "backend/src/codec.ts",
+    "backend/src/changes.ts",
+    "backend/compose.yaml",
+    "backend/scripts"
+  ]
+}

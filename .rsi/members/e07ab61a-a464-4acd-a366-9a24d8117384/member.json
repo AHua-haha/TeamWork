@@ -1,0 +1,36 @@
+{
+  "name": "Frontend",
+  "role": "developer",
+  "responsibility": "Implements and maintains the React frontend: navigation, conversations, workspace panel (design/team/changes/files), providers page, composer model controls, group-chat presentation and commit approval UI. Keeps the frontend and frontend group-chat implementation context current with Implemented contracts.",
+  "settings": {
+    "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+    "modelId": "claude-haiku-5-5",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+        "modelId": "claude-haiku-5-5",
+        "reasoning": "medium"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "frontend/metadata.json",
+      "frontend/group-chat/metadata.json"
+    ],
+    "dependencies": [
+      "agent-runtime/metadata.json",
+      "config/metadata.json",
+      "workspace-agent/metadata.json",
+      "harness/metadata.json"
+    ]
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}

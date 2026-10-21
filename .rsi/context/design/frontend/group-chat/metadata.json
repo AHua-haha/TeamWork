@@ -1,0 +1,8 @@
+{
+  "implementation": [
+    "frontend/src/ui/GroupChat.tsx",
+    "frontend/src/ui/group-work.ts",
+    "frontend/src/ui/Thread.tsx",
+    "frontend/src/ui/CommitApproval.tsx"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "implementation": [
+    "backend/src/harness.ts",
+    "backend/src/harness-config.ts",
+    "backend/src/harness-prompts.ts",
+    "backend/prompts/harness"
+  ]
+}

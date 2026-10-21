@@ -1,0 +1,36 @@
+{
+  "name": "Storage",
+  "role": "developer",
+  "responsibility": "Implements and maintains persistence and host operations: MySQL storage of runtime/config/workspace/context/team records, the web search/fetch tools, and the local development, deployment and shared-database lifecycle scripts. Keeps the database, web-tools and operations implementation context current with Implemented contracts.",
+  "settings": {
+    "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+    "modelId": "claude-haiku-5-5",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-a573b61b-dd67-498d-b057-ef6a66534ec2",
+        "modelId": "claude-haiku-5-5",
+        "reasoning": "medium"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "database/metadata.json",
+      "web-tools/metadata.json",
+      "operations/metadata.json"
+    ],
+    "dependencies": [
+      "agent-runtime/metadata.json",
+      "config/metadata.json",
+      "workspace-agent/metadata.json"
+    ]
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}
