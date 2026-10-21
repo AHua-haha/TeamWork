@@ -36,14 +36,18 @@ The backend is organized into five physical layers under `backend/src/`. Imports
 
 ### Known layering violations (labeled debt)
 
-These exist in the current codebase and are recorded here so members do not silently treat them as intended design:
+These exist in the current codebase and are recorded here so members do not silently treat them as intended design.
 
-1. **`foundation/types.ts` imports `domain/progress.ts`** — creates a Foundation↔Domain cycle. Fix: move `ProgressEvent` type declaration into `types.ts`; `progress.ts` then imports from Foundation only.
-2. **`foundation/codec.ts` imports `domain/context-base.ts`** — Foundation depending on Domain. Fix: move `Author`/`ChangeRecord` type declarations into `foundation/changes.ts`.
-3. **`foundation/tool-result.ts` imports `domain/runtime.ts`** — Foundation depending on Domain. Fix: define `ToolOutput` against a Foundation-local interface rather than the full `RuntimeTool`.
-4. **`storage/database.ts` imports 8 domain modules** (`conversation-context`, `final-answer`, `member-response`, `chat-images`, `group-chat`, `workspace-models`, `member-config-format`, `codec`) — Storage reaching into Domain for deserialization logic. Fix: domain modules register serialization/deserialization functions that storage calls through a protocol interface; storage stores and retrieves opaque JSON.
-5. **`domain/runtime.ts` imports concrete `MySqlStore`** from Storage — Domain bypassing a storage interface. Fix: declare a `Store` interface in Domain; `main.ts` wires the concrete implementation.
-6. **`domain/harness.ts` is a 17-module hub** spanning design, member files, git approval, bash, web tools — harness is a cross-cutting authority service that resists single-layer placement. Fix: split into `harness-authority` (domain) and `harness-execution` (runtime). Deferred; label the debt.
+**Fixed:**
+1. ~~`foundation/types.ts` imports `domain/progress.ts`~~ — **Fixed in Phase 2:** `ProgressEvent` type moved into `types.ts`; cycle broken.
+2. `storage/store.ts` interface extracted — **Fixed in Phase 3:** Domain and Runtime depend on the `Store` interface; `main.ts` wires concrete `MySqlStore`.
+
+**Remaining:**
+3. **`storage/database.ts` imports 8 domain modules** (`chat-images.imageContent`, `chat-images.validateChatImages`, `conversation-context.repairInterruptedTools`, `final-answer.finalAnswer`, `member-response.parseMemberResponse`, `group-chat` validation/types, `workspace-models`, `member-config-format.generatedSource`) — Storage reaching into Domain for deserialization and business logic during reads/recovery. Fix: domain modules register serialization/parsing functions through an interface that storage calls; storage stores and retrieves opaque JSON. Complex refactor; deferred.
+4. **`foundation/codec.ts` imports `domain/context-base.ts`** types — Foundation depending on Domain. Fix: move `Author`/`ChangeRecord` type declarations into `foundation/changes.ts`. Low cost; deferred.
+5. **`foundation/tool-result.ts` imports `domain/runtime.ts`** — Foundation depending on Domain. Fix: define `ToolOutput` against a Foundation-local interface. Low cost; deferred.
+6. **`domain/workspace-reset.ts` accesses `store.pool` directly** — bypassing the storage interface for transaction scoping. Retained as acceptable given workspace reset's special requirements.
+7. **`domain/harness.ts` is a 17-module hub** spanning design, member files, git approval, bash, web tools — harness is a cross-cutting authority service that resists single-layer placement. Fix: split into `harness-authority` (domain) and `harness-execution` (runtime). Deferred.
 
 ## Constraints, specifications and requirements
 
