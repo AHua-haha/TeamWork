@@ -4,7 +4,14 @@
 
 Backend Domain owns all use-case logic, capabilities, and mechanisms. This is where every interesting rule in the backend lives. Domain decides *what can happen* and *when it's allowed*: activation must be atomic and idle, publication must validate mention budget, reset requires idleness, context assembly follows specific precedence, harness authority maps file scopes to permissions.
 
-Domain includes the agent runtime loop mechanism (how requests are constructed, tools dispatched, continuation decided), configuration management (validation, resolution, snapshots), workspace operations (registry, file API, context base), team coordination (member lifecycle, activation, routing, group chat transcript), harness (tool authority, prompt composition, commit approval), and conversation context assembly.
+Domain is now organized into six subsystems, each owning a distinct capability:
+
+- **Config** — deployment/application/agent configuration, provider connections, model catalog, run snapshots
+- **Workspace** — workspace registry, context base (design/impl trees), file versions, change records, project file API
+- **Team** — member lifecycle, group chat, mention routing, activation, conversation context assembly
+- **Harness** — tool selection, file authority, prompt composition, Bash execution, Git commit approval
+- **Agent** — model–tool loop mechanism, progress buffering, run state, follow protocol
+- **Web Tools** — web_search and web_fetch capabilities
 
 Domain declares storage interfaces and calls them; it never writes SQL or imports `MySqlStore` directly. Domain never speaks HTTP, returns status codes, or frames SSE events — those belong to API. Domain contains the rules; API transports them; Storage persists their results.
 
@@ -26,41 +33,21 @@ Domain declares storage interfaces and calls them; it never writes SQL or import
 
 **Failure behavior.** Invalid input, stale revisions, missing records, budget violations, and idleness conflicts fail explicitly with typed errors (`config_conflict`, `workspace_busy`, `member_exists`, etc.). Domain never silently substitutes values or fabricates success. Run failures become terminal run status with error details; persistence failures propagate to callers.
 
-## Current domain modules
+## Subsystems
 
-Domain currently contains 41 files organized by feature, not yet further split into subdirectories:
+Each child subsystem has its own design node with full purpose, interface contract, and constraints:
 
-**Config & providers:**
-- `config.ts`, `secrets.ts`, `providers.ts`, `providers/modelflare.ts`, `providers/modelflare-catalog.ts`
-
-**Runtime & progress:**
-- `runtime.ts` (model loop mechanism), `progress.ts` (FIFO events)
-
-**Workspace & context:**
-- `workspace.ts`, `workspace-bootstrap.ts`, `workspace-layout.ts`, `workspace-models.ts`, `workspace-reset.ts`, `workspace-git.ts`
-- `context-base.ts`, `context-documents.ts`, `context-path.ts`, `design.ts`
-- `project-files.ts`
-
-**Team & chat:**
-- `team.ts`, `team-system.ts`, `team-runner.ts`
-- `group-chat.ts`, `chat-images.ts`, `final-answer.ts`
-- `conversation-context.ts`
-
-**Members:**
-- `member-config.ts`, `member-config-format.ts`, `member-files.ts`, `member-instructions.ts`, `member-response.ts`, `member-tools.ts`
-
-**Harness:**
-- `harness.ts` (hub), `harness-config.ts`, `harness-prompts.ts`, `harness-bases.ts`, `harness-tools.ts`, `harness-execution.ts`, `harness-command.ts`, `harness-resources.ts`, `git-approval.ts`
-
-**Web tools:**
-- `web-tools.ts`
-
-Plus `backend/README.md` and `backend/.env.example`.
+- [Config](config/design.md) — configuration management and provider connections
+- [Workspace](workspace/design.md) — workspace registry, context base, file versions, project file API
+- [Team](team/design.md) — member lifecycle, group chat, activation, conversation context
+- [Harness](harness/design.md) — tool selection, file authority, Bash execution, Git commit approval
+- [Agent](agent/design.md) — model–tool loop mechanism, progress buffering, run state
+- [Web Tools](web-tools/design.md) — web_search and web_fetch capabilities
 
 ## Constraints, specifications and requirements
 
 - Domain imports Foundation and the `Store` interface from Storage. It must never import `MySqlStore` directly or import API.
 - Domain declares storage interfaces; Storage implements them; Runtime wires the concrete implementation.
 - Domain never contains HTTP routing, status codes, or SSE framing logic. Those belong in API.
-- **Further splitting planned:** The user intends to decompose domain into subdirectories (`domain/config/`, `domain/workspace/`, `domain/team/`, `domain/harness/`, `domain/agent/`) in a subsequent design pass. This current node consolidates all 41 domain files as the baseline before that split.
+- Domain is organized into six subsystems; each child design node owns its implementation files.
 - Known violations (see parent backend layering section): `harness.ts` is a 17-module hub resisting single-layer placement; some foundation files still import domain types.

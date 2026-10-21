@@ -1,0 +1,13 @@
+{"implementation": [
+  "backend/src/domain/workspace.ts",
+  "backend/src/domain/workspace-bootstrap.ts",
+  "backend/src/domain/workspace-layout.ts",
+  "backend/src/domain/workspace-reset.ts",
+  "backend/src/domain/workspace-models.ts",
+  "backend/src/domain/workspace-git.ts",
+  "backend/src/domain/project-files.ts",
+  "backend/src/domain/context-base.ts",
+  "backend/src/domain/context-documents.ts",
+  "backend/src/domain/context-path.ts",
+  "backend/src/domain/design.ts"
+]}

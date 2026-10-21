@@ -1,0 +1,6 @@
+{"implementation": [
+  "backend/src/domain/config.ts",
+  "backend/src/domain/secrets.ts",
+  "backend/src/domain/providers.ts",
+  "backend/src/domain/providers"
+]}
