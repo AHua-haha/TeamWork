@@ -1,6 +1,0 @@
-{
-  "implementation": [
-    "scripts/dev.sh",
-    "scripts/develop.mjs"
-  ]
-}

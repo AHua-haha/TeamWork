@@ -1,5 +1,14 @@
 {
   "implementation": [
-    "scripts/host-common.mjs"
+    "scripts/host-common.mjs",
+    "scripts/dev.sh",
+    "scripts/develop.mjs",
+    "scripts/deploy.sh",
+    "scripts/deployment.mjs",
+    "scripts/serve-frontend.mjs",
+    "scripts/database.sh",
+    "scripts/database.mjs",
+    "scripts/test",
+    "backend/compose.yaml"
   ]
 }

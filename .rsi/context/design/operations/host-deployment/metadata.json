@@ -1,8 +1,0 @@
-{
-  "implementation": [
-    "scripts/deploy.sh",
-    "scripts/deployment.mjs",
-    "scripts/serve-frontend.mjs",
-    "scripts/test"
-  ]
-}

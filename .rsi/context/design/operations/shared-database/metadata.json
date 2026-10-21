@@ -1,6 +1,0 @@
-{
-  "implementation": [
-    "scripts/database.sh",
-    "scripts/database.mjs"
-  ]
-}
