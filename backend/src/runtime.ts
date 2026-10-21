@@ -88,7 +88,7 @@ export class AgentRuntime {
 
   constructor(readonly store: MySqlStore, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, options: { progressCapacity?: number; maxSteps?: number } = {}) {
     this.progress = new ProgressStore(options.progressCapacity);
-    this.maxSteps = options.maxSteps ?? 32;
+    this.maxSteps = options.maxSteps ?? 64;
     if (!Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1) throw new AppError('invalid_config', 'Invalid runtime limits');
   }
 

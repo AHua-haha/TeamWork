@@ -22,7 +22,7 @@ Accept input transactionally, run the shared loop independently of frontend conn
 
 ## Decisions and constraints
 
-Node.js/TypeScript and Pi AI 0.87.1 directly; no Agent Core loop. One active run per agent; sequential tools. POST input and GET follow are separate, with the returned run ID joining them. SSE transports JSON envelopes. Partial failed/cancelled model output is transient and discarded. Unexpected shutdown leaves committed records intact and marks abandoned runs interrupted on restart. No provider/tool side effects are automatically retried. Default maximum 32 model calls per run.
+Node.js/TypeScript and Pi AI 0.87.1 directly; no Agent Core loop. One active run per agent; sequential tools. POST input and GET follow are separate, with the returned run ID joining them. SSE transports JSON envelopes. Partial failed/cancelled model output is transient and discarded. Unexpected shutdown leaves committed records intact and marks abandoned runs interrupted on restart. No provider/tool side effects are automatically retried. Default maximum 64 model calls per run.
 
 ## Code map
 
