@@ -1,5 +1,7 @@
 # Bash tool: input, output and execution model
 
+Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
+
 ## Purpose and boundary
 
 Run agent-supplied Bash scripts through one persistent shell per member. Support foreground commands and native background jobs, with readable output followed by execution metadata. The agent manages jobs and any output files through ordinary Bash commands.
@@ -168,3 +170,7 @@ Sandbox rules are fixed for the shell lifetime. Configuration activation/update 
 9. Bash reads system files readable by the host process: the sandbox adds no working-design read restriction. A normal file write outside the workspace and its owned temporary directory is denied.
 10. A command writes to the workspace-owned temporary area or accesses the network: allowed under the configured sandbox resources. No executable allowlist is checked.
 11. A background child attempts a denied host write: it remains subject to the same sandbox boundary; its launch as a job does not grant more access.
+
+## Optional permission bypass
+
+The operator may disable harness permission enforcement using the environment's harnessPermissionsEnabled Boolean in the project configuration; omitted means true. The setting takes effect at backend startup. With false, every active member receives all available tools, native file tools accept paths outside the workspace and through links without assignment checks, Bash runs without the OS sandbox, and explicit Git commits run without classification or user approval (including background commits). Ordinary host OS permissions remain, without administrator privilege. Shells retain host HOME and toolchain PATH without receiving backend credentials. Native tool schemas/truncation, input validation, timeouts, cancellation, persistent session cleanup, maintenance responsibilities and user-only configuration activation remain. Restoring true and restarting restores existing harness rules. This mode changes permissions, not configuration validation or group-chat lifecycle rules.

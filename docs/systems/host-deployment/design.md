@@ -35,3 +35,5 @@ Update acceptance: deploy version A, commit B in the project checkout and run up
 ## Configuration isolation
 
 Launchers pass a clean child-process environment containing explicitly configured application values plus necessary host/toolchain variables. They never edit shell profiles, export variables into the caller, rewrite env files or change Docker global settings. Unrelated processes/ports are never taken over; shared MySQL is managed by its explicit project identity. Editing application configuration requires restarting the affected service. Starting an application never recreates an existing shared MySQL container to apply changed bindings. Protection covers accidental inherited settings and file permissions; another process running as the same OS user can still deliberately edit accessible files or occupy ports.
+
+The environment's optional harnessPermissionsEnabled Boolean defaults to true. false disables runtime harness tool/path/sandbox/commit enforcement; true restores existing rules. Restart the backend after changes; no runtime toggle or member-file permission grant is provided. Launchers pass the value only to their own backend child.

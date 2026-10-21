@@ -1,5 +1,7 @@
 # Bash implementation
 
+Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
+
 ## Contract
 
 [Bash](design.md) defines persistent member shells, native jobs, resource limits and explicit commit approval.
@@ -26,3 +28,9 @@ SRT 0.0.79 profiles permit system reads, workspace/owned-temp writes, networking
 ## Verification
 
 Real shell tests cover persistent state, descriptors, foreground/background output, jobs, sandbox resources, timeout and cleanup. Git approval tests exercise actual sandboxed commits and pending user decisions, including timeout suspension and cancellation. Linux runtime enforcement remains unverified on the macOS host.
+
+## Startup permission mode
+
+Project configuration derives RSI_HARNESS_PERMISSIONS_ENABLED only for the selected backend child. main parses the Boolean strictly (absent means true), passes it through TeamSystem to HarnessService and MemberInstructions, and keeps it immutable for the backend lifetime. Disabled assembly enables all available tools and uses the file-backed permissions-disabled prompt instead of enforcement prompts; assignments/design context still load. fileInvocation resolves native paths without authorization. Management model discovery and file validation omit the lead gate in disabled mode, while semantic validation remains. Bash skips sandbox setup and the Git broker, uses a clean host HOME/PATH environment, and keeps framing, serialization, jobs, timeout and cleanup in the same shell service. The shell registry replaces a session if execution mode differs, so a permissive shell is never reused as an enforced one. No backend credentials are copied into the host shell environment.
+
+[Mode tests](../../../../../../backend/test/harness-permission.test.ts) cover both modes, unrestricted files/commits, unchanged validation, secret isolation, timeout and restoration. Existing sandbox/Git suites continue to verify enabled behavior.

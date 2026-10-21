@@ -40,7 +40,7 @@ export class MemberConfigService {
   }
   async validate(agentId: string, path: unknown): Promise<MemberConfigReview> {
     const lead = await this.team.find(agentId);
-    if (!lead?.value.lead || lead.value.retiredAt !== null) throw new AppError('access_denied', 'Only the lead validates member files', 403);
+    if (!lead || lead.value.retiredAt !== null || (this.harness.permissionsEnabled && !lead.value.lead)) throw new AppError('access_denied', 'Only the lead validates member files', 403);
     if (path !== memberRoot) throw new AppError('invalid_input', `Validate the complete ${memberRoot} change set`);
     return this.harness.operation(agentId, async () => (await this.plan(lead.workspaceId, lead.id, 'pending')).review);
   }

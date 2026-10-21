@@ -1,5 +1,7 @@
 # Lead agent implementation
 
+Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
+
 ## Contract
 
 [Lead](design.md) provides file-based member maintenance with restricted updates and separate user commit/activation. File editing/validation are agent capabilities; user commit and activation remain separate.
@@ -28,3 +30,13 @@ Prompt/tool assembly checks cover valid/forbidden update examples, protected lea
 ## Harness tool integration
 
 HarnessService assembles native Pi factories with default operations and input authorization for write/edit, preserving content/details. The custom Bash service owns persistent shells and background process lifetime. TeamRunner invokes shell reset on idle chat reset, retirement and close; configuration activation resets affected members after successful atomic application. Run completion performs no Git checkpoint and does not stop background jobs. Model-visible Bash results remain plain text plus metadata.
+
+## Operator permission mode
+
+The project environment's harnessPermissionsEnabled setting defaults to true. With false all active members can use the available native file/Bash and management tools; file workspace/assignment/role/link guards, Bash OS sandbox and explicit Git approval/classification are bypassed. Design assignments remain work guidance. Active member identity, file schemas/update constraints and separate atomic idle user activation retain their existing rules. This setting is operator-owned and requires backend restart; member files cannot select it.
+
+## Startup permission mode
+
+Project configuration derives RSI_HARNESS_PERMISSIONS_ENABLED only for the selected backend child. main parses the Boolean strictly (absent means true), passes it through TeamSystem to HarnessService and MemberInstructions, and keeps it immutable for the backend lifetime. Disabled assembly enables all available tools and uses the file-backed permissions-disabled prompt instead of enforcement prompts; assignments/design context still load. fileInvocation resolves native paths without authorization. Management model discovery and file validation omit the lead gate in disabled mode, while semantic validation remains. Bash skips sandbox setup and the Git broker, uses a clean host HOME/PATH environment, and keeps framing, serialization, jobs, timeout and cleanup in the same shell service. The shell registry replaces a session if execution mode differs, so a permissive shell is never reused as an enforced one. No backend credentials are copied into the host shell environment.
+
+[Mode tests](../../../../../backend/test/harness-permission.test.ts) cover both modes, unrestricted files/commits, unchanged validation, secret isolation, timeout and restoration. Existing sandbox/Git suites continue to verify enabled behavior.

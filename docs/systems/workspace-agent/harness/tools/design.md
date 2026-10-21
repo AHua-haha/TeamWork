@@ -1,5 +1,7 @@
 # Harness tools
 
+Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
+
 ## Purpose and boundary
 
 Provide reusable tools for agents assembled by the harness. Reuse Pi's built-in tool contracts and default operations wherever they fit. Customize capabilities that require project-specific behavior, including Bash execution and explicit Git commit approval.
@@ -92,3 +94,7 @@ A failed operation does not imply rollback of filesystem changes already made. I
 6. The built-in edit returns a structured diff in details; recording the result preserves that data instead of discarding it or automatically inserting the full diff into model-visible content.
 7. A custom tool fails, the runtime records an error result and the agent receives an opportunity to recover in the same run.
 8. A worker's edit target is outside its working-design write scope: refuse that file-tool invocation. The same worker can modify that project path through Bash when it is inside the workspace; the distinction is intentional.
+
+## Optional permission bypass
+
+The operator may disable harness permission enforcement using the environment's harnessPermissionsEnabled Boolean in the project configuration; omitted means true. The setting takes effect at backend startup. With false, every active member receives all available tools, native file tools accept paths outside the workspace and through links without assignment checks, Bash runs without the OS sandbox, and explicit Git commits run without classification or user approval (including background commits). Ordinary host OS permissions remain, without administrator privilege. Shells retain host HOME and toolchain PATH without receiving backend credentials. Native tool schemas/truncation, input validation, timeouts, cancellation, persistent session cleanup, maintenance responsibilities and user-only configuration activation remain. Restoring true and restarting restores existing harness rules. This mode changes permissions, not configuration validation or group-chat lifecycle rules.

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { delimiter, dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { sha256 } from './text.js';
 
 const areas = new Map<string, Promise<string>>();
@@ -37,4 +37,11 @@ export async function executionResources(root: string) {
 export async function closeExecutionResources() {
   if (session) await rm(await session, { recursive: true, force: true });
   areas.clear(); session = undefined;
+}
+
+/** Ordinary host tooling without leaking backend database/provider credentials. */
+export function hostShellEnvironment(): NodeJS.ProcessEnv {
+  const names = new Set(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'TERM', 'COLORTERM']);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => names.has(name) || name.startsWith('LC_')));
+  return { ...env, HOME: env.HOME || homedir(), PATH: [dirname(process.execPath), env.PATH || '/usr/bin:/bin'].join(delimiter), TERM: env.TERM || 'dumb' };
 }

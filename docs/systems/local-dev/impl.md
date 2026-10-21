@@ -30,3 +30,7 @@ Common process records use PID, ps start time, entry marker and a configuration 
 ## Project configuration authority
 
 [scripts/host-config.mjs](../../../scripts/host-config.mjs) owns JSON schema validation, one-time import, private atomic creation, shared-address derivation and clean child environments. [Project example](../../../rsi.config.example.json) contains no credentials. Legacy env files are migration inputs only and remain untouched. HOST/PORT/database/key/proxy/output directories are generated from the chosen config section for each child. No process.env mutation or shell-profile write is used. Application readiness bypasses ambient proxies. Service fingerprints cover all passed settings so changed credentials/options require restart; deployment/development and Docker remain separately owned.
+
+## Harness enforcement setting
+
+The environment section accepts optional Boolean harnessPermissionsEnabled (default true). host-config validates the value and emits RSI_HARNESS_PERMISSIONS_ENABLED in backendSettings; inherited RSI_* values and environment-map overrides cannot change it. The backend parses it strictly and injects it into harness assembly. It participates in the existing all-settings service fingerprint; changing it requires restart, never a live in-place policy mutation. Native host config and lifecycle tests verify omitted/enabled/disabled values and independent deployment/development selection.

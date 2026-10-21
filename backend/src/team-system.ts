@@ -34,12 +34,12 @@ export class TeamSystem {
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
 
-  constructor(store: TeamStore & ChatStore & MemberConversationStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools()) {
+  constructor(store: TeamStore & ChatStore & MemberConversationStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
     this.designs = new DesignService(workspaces);
     this.service = new TeamService(store, workspaces, config, this.designs);
-    this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id), web);
+    this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id), web, permissionsEnabled);
     this.conversation = new ConversationContext(store, this.harness);
-    this.instructions = new MemberInstructions(this.service, workspaces, id => this.runner.isRunning(id));
+    this.instructions = new MemberInstructions(this.service, workspaces, id => this.runner.isRunning(id), permissionsEnabled);
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
@@ -126,7 +126,7 @@ export class TeamSystem {
    * just before the call, and its tools. Every other agent is unchanged.
    */
   policy(base: RuntimePolicy): RuntimePolicy {
-    const { management } = teamTools(this.service, this.configuration);
+    const { management } = teamTools(this.service, this.configuration, this.harness.permissionsEnabled);
     return {
       ...base,
       beforeStep: async scope => {
@@ -173,7 +173,7 @@ export class TeamSystem {
         if (request.context.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image')) && !request.model.input.includes('image')) {
           throw new AppError('image_not_supported', 'This context contains pictures; select a model with image input', 409);
         }
-        const prepared = await this.harness.prepare(scope.agentId, member.value.lead ? management : []);
+        const prepared = await this.harness.prepare(scope.agentId, member.value.lead || !this.harness.permissionsEnabled ? management : []);
         const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
         return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };
       },

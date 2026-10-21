@@ -8,7 +8,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { SandboxManager, getDefaultWritePaths, type SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
 import { OperationQueue } from './workspace-git.js';
 import { AppError } from './types.js';
-import { closeExecutionResources, executionResources } from './harness-execution.js';
+import { closeExecutionResources, executionResources, hostShellEnvironment } from './harness-execution.js';
 
 export const commandTimeoutMs = 60_000;
 export const commandOutputBytes = 50 * 1024;
@@ -19,7 +19,7 @@ export interface CommandResult {
 }
 export type GitExecutor = (args:string[],env:NodeJS.ProcessEnv)=>Promise<{output:string;code:number}>;
 type GitOperation = (args: string[], cwd: string, env: NodeJS.ProcessEnv, onWait: (waiting: boolean) => void, signal: AbortSignal, execute: GitExecutor) => Promise<{output: string; code: number}>;
-interface BashEnvironment { memberId: string; root: string; request: BashInput; signal: AbortSignal; git?: GitOperation }
+interface BashEnvironment { memberId: string; root: string; request: BashInput; signal: AbortSignal; git?: GitOperation; permissionsEnabled?: boolean }
 const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 export function parseBashInput(value: unknown): BashInput {
@@ -82,43 +82,48 @@ class MemberShell {
   // Use a high descriptor, leaving ordinary script descriptors (e.g. flock 9)
   // available, while supporting the system Bash 3.2 shipped with macOS.
   private control = randomInt(100, 240);
-  constructor(readonly memberId: string, readonly root: string) {}
+  constructor(readonly memberId: string, readonly root: string, readonly permissionsEnabled: boolean) {}
   get alive() { return !this.dead; }
 
   async open(signal: AbortSignal) {
-    if (!['darwin', 'linux'].includes(process.platform)) throw new AppError('sandbox_unavailable', 'Bash requires macOS sandbox-exec or Linux bubblewrap', 503);
-    if (process.platform === 'linux') { const deps = await SandboxManager.checkDependenciesAsync(); if (deps.errors.length) throw new AppError('sandbox_unavailable', deps.errors.join('; '), 503); }
-    const resources = await executionResources(this.root), shell = await resources.shell();
-    this.shellEnv=shell.env;
-    this.home = shell.home; this.socketPath = join(this.home, 'git.sock');
-    await this.openBroker();
-    const bridge = join(this.home, 'git.mjs');
-    const nativeGit = this.nativeGit = (await runFile('/usr/bin/which', ['git'])).stdout.trim();
-    await writeFile(bridge, `import {connect} from 'node:net';
+    let wrapped = 'exec /bin/bash --noprofile --norc';
+    let env = hostShellEnvironment();
+    if (this.permissionsEnabled) {
+      if (!['darwin', 'linux'].includes(process.platform)) throw new AppError('sandbox_unavailable', 'Bash requires macOS sandbox-exec or Linux bubblewrap', 503);
+      if (process.platform === 'linux') { const deps = await SandboxManager.checkDependenciesAsync(); if (deps.errors.length) throw new AppError('sandbox_unavailable', deps.errors.join('; '), 503); }
+      const resources = await executionResources(this.root), shell = await resources.shell();
+      this.shellEnv=shell.env;
+      this.home = shell.home; this.socketPath = join(this.home, 'git.sock');
+      await this.openBroker();
+      const bridge = join(this.home, 'git.mjs');
+      const nativeGit = this.nativeGit = (await runFile('/usr/bin/which', ['git'])).stdout.trim();
+      await writeFile(bridge, `import {connect} from 'node:net';
 const argv=process.argv.slice(2);let n=0;while(argv[n]==='-C')n+=2;
 if(argv[n]!=='commit'&&!argv.includes('commit')){const {spawnSync}=await import('node:child_process');const r=spawnSync(${JSON.stringify(nativeGit)},argv,{stdio:'inherit'});process.exit(r.status??1);}
 const allowed=['HOME','PATH','LANG','LC_ALL','GIT_AUTHOR_NAME','GIT_AUTHOR_EMAIL','GIT_AUTHOR_DATE','GIT_COMMITTER_NAME','GIT_COMMITTER_EMAIL','GIT_COMMITTER_DATE'];
 const invalid=['GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_COMMON_DIR','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_NAMESPACE'].filter(k=>process.env[k]!==undefined);
 const env=Object.fromEntries(allowed.filter(k=>process.env[k]!==undefined).map(k=>[k,process.env[k]]));
 const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()=>s.write(JSON.stringify({token:process.env.RSI_COMMIT_TOKEN,argv,cwd:process.cwd(),env,invalid})+'\\n'));s.on('data',b=>{raw+=b;const n=raw.indexOf('\\n');if(n<0)return;const r=JSON.parse(raw.slice(0,n));process.stdout.write(r.output);process.exitCode=r.code;s.end();});s.on('error',()=>{process.stderr.write('Git approval session unavailable; commit not executed\\n');process.exitCode=1;});`);
-    await writeFile(join(this.home, '.local/bin/git'), `#!/bin/bash\nif [[ -n "\${RSI_COMMIT_TOKEN:-}" ]]; then exec ${quote(process.execPath)} ${quote(bridge)} "$@"; else exec ${quote(nativeGit)} "$@"; fi\n`, { mode: 0o700 });
-    // Remove SRT convenience write grants outside this workspace's resource area.
-    const denyWrite = getDefaultWritePaths().filter(p => !p.startsWith('/dev/') && !inside(this.root, p) && !inside(resources.area, p));
-    const config: SandboxRuntimeConfig = {
-      filesystem: { denyRead: [], allowWrite: [{ path: this.root, literal: true }, { path: resources.area, literal: true }], denyWrite },
-      network: { allowedDomains: ['*'], deniedDomains: [], allowLocalBinding: true, allowUnixSockets: [this.socketPath], allowAllUnixSockets: process.platform === 'linux', allowMachLookup: ['com.apple.SystemConfiguration.DNSConfiguration'] },
-    };
-    this.profile=config;
-    const wrapped = await wrapping.run('profile', async () => {
-      initialized ??= SandboxManager.initialize(config);
-      try { await initialized; } catch (error) { initialized = undefined; throw error; }
-      // Filesystem overrides are per-wrap, but SRT reads socket allowances
-      // from its global config while generating each immutable OS profile.
-      SandboxManager.updateConfig(config);
-      return SandboxManager.wrapWithSandbox('exec /bin/bash --noprofile --norc', '/bin/bash', config, signal);
-    });
+      await writeFile(join(this.home, '.local/bin/git'), `#!/bin/bash\nif [[ -n "\${RSI_COMMIT_TOKEN:-}" ]]; then exec ${quote(process.execPath)} ${quote(bridge)} "$@"; else exec ${quote(nativeGit)} "$@"; fi\n`, { mode: 0o700 });
+      // Remove SRT convenience write grants outside this workspace's resource area.
+      const denyWrite = getDefaultWritePaths().filter(p => !p.startsWith('/dev/') && !inside(this.root, p) && !inside(resources.area, p));
+      const config: SandboxRuntimeConfig = {
+        filesystem: { denyRead: [], allowWrite: [{ path: this.root, literal: true }, { path: resources.area, literal: true }], denyWrite },
+        network: { allowedDomains: ['*'], deniedDomains: [], allowLocalBinding: true, allowUnixSockets: [this.socketPath], allowAllUnixSockets: process.platform === 'linux', allowMachLookup: ['com.apple.SystemConfiguration.DNSConfiguration'] },
+      };
+      this.profile=config;
+      wrapped = await wrapping.run('profile', async () => {
+        initialized ??= SandboxManager.initialize(config);
+        try { await initialized; } catch (error) { initialized = undefined; throw error; }
+        // Filesystem overrides are per-wrap, but SRT reads socket allowances
+        // from its global config while generating each immutable OS profile.
+        SandboxManager.updateConfig(config);
+        return SandboxManager.wrapWithSandbox('exec /bin/bash --noprofile --norc', '/bin/bash', config, signal);
+      });
+      env = shell.env;
+    }
     signal.throwIfAborted();
-    this.child = spawn('/bin/bash', ['--noprofile', '--norc', '-c', wrapped], { cwd: this.root, env: shell.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = spawn('/bin/bash', ['--noprofile', '--norc', '-c', wrapped], { cwd: this.root, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.stdin.on('error', () => { /* exit event settles an in-flight invocation */ });
     this.child.stdout.on('data', b => this.consume(this.decoder.write(b)));
     this.child.stderr.on('data', b => this.consume(b.toString()));
@@ -126,7 +131,7 @@ const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()
     this.child.once('exit', (code, sig) => this.exited(`Shell exited (${sig ?? code}); its jobs and shell state have been reset`));
     const setup = `exec ${this.control}>&1 2>&1\nset -m`;
     const result = await this.invoke(setup, false, undefined, '', signal, 10_000);
-    if (result.exitCode !== 0) throw new AppError('sandbox_unavailable', result.output || result.error || 'Could not start sandboxed shell', 503);
+    if (result.exitCode !== 0) throw new AppError(this.permissionsEnabled ? 'sandbox_unavailable' : 'shell_unavailable', result.output || result.error || 'Could not start member shell', 503);
   }
   private async openBroker() {
     this.server = createServer(socket => {
@@ -214,7 +219,7 @@ const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()
     } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); }
   }
   async run(request: BashInput, signal: AbortSignal, git?: GitOperation): Promise<CommandResult> {
-    const explicit = /(?:^|[\s;&|()])(?:["']?(?:[^\s;&|()"']*\/)?git["']?)\s+[^\n;&|()]*\bcommit(?:\s|$)/m.test(request.command.replace(/\\\r?\n/g,' '));
+    const explicit = this.permissionsEnabled && /(?:^|[\s;&|()])(?:["']?(?:[^\s;&|()"']*\/)?git["']?)\s+[^\n;&|()]*\bcommit(?:\s|$)/m.test(request.command.replace(/\\\r?\n/g,' '));
     if(explicit && request.background)throw new AppError('command_denied','Explicit Git commits must run in the foreground so approval and execution can be observed');
     const token = explicit && git ? randomUUID() : '';
     if(token && git)this.gitCalls.set(token,{git});
@@ -266,19 +271,19 @@ const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()
 }
 
 export async function executeBash(environment: BashEnvironment): Promise<CommandResult> {
-  const { memberId, request, signal, git } = environment;
+  const { memberId, request, signal, git, permissionsEnabled = true } = environment;
   const root = await realpath(environment.root), key = keyFor(root, memberId);
   return queues.run(key, async () => {
     signal.throwIfAborted();
     let opening = sessions.get(key), shell = opening ? await opening : undefined;
-    if (shell && !shell.alive) { await shell.stop(); sessions.delete(key); restarted.add(key); shell = undefined; opening = undefined; }
+    if (shell && (!shell.alive || shell.permissionsEnabled !== permissionsEnabled)) { await shell.stop(); sessions.delete(key); restarted.add(key); shell = undefined; opening = undefined; }
     if (!shell) {
-      const fresh = new MemberShell(memberId, root);
+      const fresh = new MemberShell(memberId, root, permissionsEnabled);
       opening = fresh.open(signal).then(() => fresh).catch(async error => { await fresh.stop(); sessions.delete(key); throw error; });
       sessions.set(key, opening); shell = await opening;
     }
     const reset = restarted.delete(key);
-    const result = await shell.run(request, signal, git);
+    const result = await shell.run(request, signal, permissionsEnabled ? git : undefined);
     return reset ? { ...result, shellRestarted: true } : result;
   });
 }

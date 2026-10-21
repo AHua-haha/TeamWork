@@ -25,3 +25,5 @@ This command does not build deployment releases, install development packages, r
 ## Acceptance examples
 
 Initialize with current data: deployment retains that database/key and development has a new independent key/database. Start both environments; each frontend reaches its own backend. Stop development repeatedly: deployment/MySQL remain available. A foreign process holding 5273 is left untouched and newly started development backend is stopped. Subsequent development restart preserves development data.
+
+The environment's optional harnessPermissionsEnabled Boolean defaults to true. false disables runtime harness tool/path/sandbox/commit enforcement; true restores existing rules. Restart the backend after changes; no runtime toggle or member-file permission grant is provided. Launchers pass the value only to their own backend child.

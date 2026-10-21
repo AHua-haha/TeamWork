@@ -1,5 +1,7 @@
 # Harness
 
+Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
+
 ## Purpose and boundary
 
 A harness defines tools, permitted resources and maintenance rules for one purpose. Runtime assembles its tools/prompts and runs the agent. Three fixed bases serve design/member management, implementation and execution. All members operate directly on the registered shared workspace; existing single-member execution ordering remains.
@@ -75,3 +77,7 @@ Detection covers explicit git commit commands submitted in Bash requests. Indire
 GET /workspaces/:workspaceId/team/commit-approvals returns {approvals:[{id,workspaceId,memberId,runId,command,directory,message,createdAt}]}; summaries omit diffs. GET the same path plus /:id returns that request with changes [{path,action,patch,truncated}]. POST /:id accepts {action:"accept"|"deny"|"feedback",message?:string}; feedback requires nonempty text, at most 10,000 characters. Resolution returns {resolved:true}; the original tool delivers the eventual execution/refusal result. Unknown or resolved requests return 404. No user-supplied scope, actor, repository, revision or approval flag grants authority.
 
 GET team/changes remains read-only current-versus-committed design/member file review. The old member/harness review/history/restore/commit routes and configuration/commit route are removed. Current configuration inspection and the separate configuration/activate route remain.
+
+## Optional permission bypass
+
+The operator may disable harness permission enforcement using the environment's harnessPermissionsEnabled Boolean in the project configuration; omitted means true. The setting takes effect at backend startup. With false, every active member receives all available tools, native file tools accept paths outside the workspace and through links without assignment checks, Bash runs without the OS sandbox, and explicit Git commits run without classification or user approval (including background commits). Ordinary host OS permissions remain, without administrator privilege. Shells retain host HOME and toolchain PATH without receiving backend credentials. Native tool schemas/truncation, input validation, timeouts, cancellation, persistent session cleanup, maintenance responsibilities and user-only configuration activation remain. Restoring true and restarting restores existing harness rules. This mode changes permissions, not configuration validation or group-chat lifecycle rules.

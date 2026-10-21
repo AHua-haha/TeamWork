@@ -136,11 +136,11 @@ export interface Fixture {
 }
 
 /** A workspace with its team, over a fresh store and a fake runtime. The lead is given a model, so it can run. */
-export function withTeam(run: (fixture: Fixture) => Promise<void>): Promise<void> {
+export function withTeam(run: (fixture: Fixture) => Promise<void>, permissionsEnabled = true): Promise<void> {
   return withFolder(async folder => {
     const store = new MemoryStore();
     const workspaces = new WorkspaceService(store, testModelValidator);
-    const team = new TeamSystem(store, workspaces, stubConfig);
+    const team = new TeamSystem(store, workspaces, stubConfig, undefined, permissionsEnabled);
     const runtime = new FakeRuntime(store);
     team.attach(runtime);
     try {

@@ -89,7 +89,7 @@ export class HarnessService {
   readonly approvals = new GitApprovals();
   private readonly operations = new OperationQueue();
   private readonly shellMembers = new Map<string,string>();
-  constructor(private readonly workspaces:WorkspaceService,readonly designs:DesignService,private readonly member:(id:string)=>Promise<StoredMember|null>,private readonly web:RuntimeTool[]=webTools()){}
+  constructor(private readonly workspaces:WorkspaceService,readonly designs:DesignService,private readonly member:(id:string)=>Promise<StoredMember|null>,private readonly web:RuntimeTool[]=webTools(),readonly permissionsEnabled=true){}
   private async active(id:string){const member=await this.member(id);if(!member||member.value.retiredAt!==null)throw new AppError('not_found','This agent is not an active team member',404);return member;}
   async environment(id:string):Promise<HarnessEnvironment>{
     const member=await this.active(id),resolved=await resolveHarness(this.designs,member.workspaceId,member.value.harness);
@@ -105,6 +105,7 @@ export class HarnessService {
     let path = input.replace(/^@/, '').replace(/[\u00a0\u2007\u202f]/g, ' ');
     if (path === '~' || path.startsWith('~/')) path = homedir() + path.slice(1);
     const absolute = resolve(root, path), local = relative(root, absolute);
+    if (!this.permissionsEnabled) return { root, path: absolute };
     if (isAbsolute(local) || local === '..' || local.startsWith('../')) throw new AppError('access_denied', 'File tool paths must be inside the workspace', 403);
     let ancestor = absolute;
     for (;;) {
@@ -136,7 +137,7 @@ export class HarnessService {
   async bash(id:string,input:unknown,signal:AbortSignal,runId?:string):Promise<CommandResult>{
     const member=await this.active(id),request=parseBashInput(input),root=(await this.workspaces.record(member.workspaceId)).directory;
     this.shellMembers.set(id,root);
-    return executeBash({memberId:id,root,request,signal,git:async(args,cwd,env,onWait,brokerSignal,execute)=>{
+    return executeBash({memberId:id,root,request,signal,permissionsEnabled:this.permissionsEnabled,git:async(args,cwd,env,onWait,brokerSignal,execute)=>{
       const catalog=await this.designs.list(member.workspaceId);
       if(catalog.truncated)throw new AppError('command_denied','Design catalog is truncated; cannot classify commit paths');
       return this.approvals.execute({root,workspaceId:member.workspaceId,memberId:id,runId,command:request.command,args,cwd,env,implementation:[...new Set(catalog.designs.flatMap(d=>d.implementation))],signal:AbortSignal.any([signal,brokerSignal]),onWait,execute});
@@ -157,14 +158,14 @@ export class HarnessService {
     const member = await this.active(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
     const env = await this.operation(id, () => this.environment(id));
-    const available = [...harnessFileTools(this, env.definitions.some(d => d.resources.length > 0)), harnessBashTool(this), ...this.web, ...teamTools];
+    const available = [...harnessFileTools(this, !this.permissionsEnabled || env.definitions.some(d => d.resources.length > 0)), harnessBashTool(this), ...this.web, ...teamTools];
     const selected = new Set(env.definitions.flatMap(d => d.tools));
-    const tools = available.filter(tool => selected.has(tool.definition.name));
+    const tools = available.filter(tool => !this.permissionsEnabled || selected.has(tool.definition.name));
     const parts = [
       '## Your harness',
-      harnessPrompt('common', { workspace: env.root }),
-      `## Resolved permissions\n${JSON.stringify(harnessPermissions(member,resolved),null,2)}`,
-      ...env.definitions.map(d => `## ${d.id} harness\n${d.prompt}\n${d.resources.map(p => `Resource ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
+      harnessPrompt(this.permissionsEnabled ? 'common' : 'permissions-disabled', { workspace: env.root }),
+      `## ${this.permissionsEnabled ? 'Resolved permissions' : 'Design assignments (guidance only)'}\n${JSON.stringify(harnessPermissions(member,resolved),null,2)}`,
+      ...(this.permissionsEnabled ? env.definitions : []).map(d => `## ${d.id} harness\n${d.prompt}\n${d.resources.map(p => `Resource ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
       '## Accepted working designs', await this.designView(resolved.working),
       '## Dependency designs', await this.designView(resolved.dependencies),
     ];

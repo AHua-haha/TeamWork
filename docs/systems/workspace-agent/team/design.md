@@ -1,5 +1,7 @@
 # Team
 
+Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
+
 ## Purpose and boundary
 
 The team belongs to one workspace and has two responsibilities: manage member creation, configuration and retirement; and coordinate work among members. The user and all active members participate in one shared workspace chat. The lead helps maintain the user design, divides work based on that design, configures harnesses and assigns members through shared responses. Members may be created or retired as the work changes. Designs and implementation survive member changes.
@@ -195,3 +197,7 @@ Workspace group input accepts text and ordered image attachments, including imag
 ## Recursive working-design assignments
 
 An active member stores only its explicitly configured working design references. Effective working scope includes each referenced node and all accepted descendant nodes in the design folder hierarchy, including their implementation contexts and mappings. Newly accepted children apply without member reactivation. Dependency references remain explicit; dependency implementation/context stays read-only on overlaps. Member inspection reports effective implementation resources while preserving the configured references.
+
+## Operator permission mode
+
+The project environment's harnessPermissionsEnabled setting defaults to true. With false all active members can use the available native file/Bash and management tools; file workspace/assignment/role/link guards, Bash OS sandbox and explicit Git approval/classification are bypassed. Design assignments remain work guidance. Active member identity, file schemas/update constraints and separate atomic idle user activation retain their existing rules. This setting is operator-owned and requires backend restart; member files cannot select it.

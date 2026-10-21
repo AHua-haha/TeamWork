@@ -1,5 +1,7 @@
 # Harness implementation
 
+Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
+
 ## Contract
 
 [Harness](design.md) composes purpose tools/prompts and enforces explicit commit permission without owning repository history.
@@ -32,3 +34,9 @@ One shared workspace and normal .git eliminate worktree synchronization and dupl
 ## Verification
 
 Git approval tests cover direct/mixed/protected candidates, staged versus unstaged bytes, -a, denial, feedback, user-wait timeout suspension, stale contents, cancellation, renames and explicit overrides. Migration tests preserve accepted and pending data without legacy writes. Native-tool/context/member tests verify recursive working assignment, root coverage, deduplication, pending/accepted changes, exact dependencies, overlapping read-only precedence, inspection and descendant README retrieval. HTTP tests verify summary/detail/decision isolation and absence of retired routes. MySQL tests verify durable context, separate atomic idle activation and successful publication without checkpoints. Frontend tests/browser checks cover popup/right-panel separation.
+
+## Startup permission mode
+
+Project configuration derives RSI_HARNESS_PERMISSIONS_ENABLED only for the selected backend child. main parses the Boolean strictly (absent means true), passes it through TeamSystem to HarnessService and MemberInstructions, and keeps it immutable for the backend lifetime. Disabled assembly enables all available tools and uses the file-backed permissions-disabled prompt instead of enforcement prompts; assignments/design context still load. fileInvocation resolves native paths without authorization. Management model discovery and file validation omit the lead gate in disabled mode, while semantic validation remains. Bash skips sandbox setup and the Git broker, uses a clean host HOME/PATH environment, and keeps framing, serialization, jobs, timeout and cleanup in the same shell service. The shell registry replaces a session if execution mode differs, so a permissive shell is never reused as an enforced one. No backend credentials are copied into the host shell environment.
+
+[Mode tests](../../../../backend/test/harness-permission.test.ts) cover both modes, unrestricted files/commits, unchanged validation, secret isolation, timeout and restoration. Existing sandbox/Git suites continue to verify enabled behavior.

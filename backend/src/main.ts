@@ -6,6 +6,7 @@ import { createAgentServer } from './http.js';
 import { TeamSystem } from './team-system.js';
 import { WorkspaceService } from './workspace.js';
 import { webTools } from './web-tools.js';
+import { harnessPermissionsEnabled } from './harness-policy.js';
 import { closeBashRuntime } from './harness-command.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -14,7 +15,7 @@ const models = createBackendModels();
 const store = new MySqlStore(databaseUrl);
 const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
 const workspaces = new WorkspaceService(store, config);
-const team = new TeamSystem(store, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY));
+const team = new TeamSystem(store, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY), harnessPermissionsEnabled(process.env.RSI_HARNESS_PERMISSIONS_ENABLED));
 const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models));
 team.attach(runtime);
 const server = createAgentServer(runtime, config, workspaces, team);

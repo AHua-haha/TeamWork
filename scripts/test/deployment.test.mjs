@@ -27,7 +27,7 @@ async function fixture(run) {
   await writeFile(join(root, 'backend/.env.example'), 'DATABASE_URL=mysql://rsi_dev:rsi_dev@127.0.0.1:3306/rsi_agent_dev\n');
   const key = randomBytes(32).toString('base64');
   await writeFile(join(root, 'backend/.env'), `DATABASE_URL=mysql://rsi:rsi@127.0.0.1:3306/rsi_agent\nCONFIG_ENCRYPTION_KEY=${key}\nDEEPSEEK_WEB_API_KEY=retained-test-key\n`);
-  await writeFile(join(root, 'backend/main.mjs'), `import{createServer}from'node:http';const s=createServer((q,r)=>{r.setHeader('Content-Type','application/json');r.end(JSON.stringify({database:new URL(process.env.DATABASE_URL).pathname,version:'first',webKey:process.env.DEEPSEEK_WEB_API_KEY??null,unrelated:process.env.UNRELATED_SECRET??null,nodeOptions:process.env.NODE_OPTIONS??null,proxy:process.env.HTTP_PROXY??null}));});s.listen(Number(process.env.PORT),'127.0.0.1');process.on('SIGTERM',()=>{s.close();s.closeAllConnections();});`);
+  await writeFile(join(root, 'backend/main.mjs'), `import{createServer}from'node:http';const s=createServer((q,r)=>{r.setHeader('Content-Type','application/json');r.end(JSON.stringify({database:new URL(process.env.DATABASE_URL).pathname,version:'first',webKey:process.env.DEEPSEEK_WEB_API_KEY??null,unrelated:process.env.UNRELATED_SECRET??null,nodeOptions:process.env.NODE_OPTIONS??null,proxy:process.env.HTTP_PROXY??null,harnessPermissions:process.env.RSI_HARNESS_PERMISSIONS_ENABLED??null}));});s.listen(Number(process.env.PORT),'127.0.0.1');process.on('SIGTERM',()=>{s.close();s.closeAllConnections();});`);
   for (const part of ['backend', 'frontend']) {
     await writeFile(join(root, part, 'package.json'), JSON.stringify({ name: `fixture-${part}`, version: '1.0.0', type: 'module', scripts: { build: 'node build.mjs' } }));
     await writeFile(join(root, part, 'package-lock.json'), JSON.stringify({ name: `fixture-${part}`, version: '1.0.0', lockfileVersion: 3, packages: { '': { name: `fixture-${part}`, version: '1.0.0' } } }));
@@ -71,6 +71,8 @@ test('initialization imports legacy credentials once into a private project file
 }));
 
 test('deploy isolates committed source, preserves running release on build failure, restores it on launch failure, and rebuilds after tmp cleanup', { timeout: 60_000 }, () => fixture(async f => {
+  f.config.deployment.harnessPermissionsEnabled = false;
+  await writeFile(f.configPath, JSON.stringify(f.config));
   const initial = git(f.root, 'rev-parse', 'HEAD');
   await writeFile(join(f.root, 'uncommitted.txt'), 'must not deploy');
   let result = await f.call('deploy', 'deploy', initial); assert.equal(result.code, 0, result.output);
@@ -80,6 +82,7 @@ test('deploy isolates committed source, preserves running release on build failu
   await assert.rejects(readFile(join(active.directory, 'rsi.config.json')));
   const url = `http://127.0.0.1:${f.config.deployment.frontendPort}`;
   assert.match(await (await fetch(url)).text(), /Snapshot/); assert.equal((await (await fetch(url + '/agents')).json()).database, '/rsi_agent');
+  assert.equal((await (await fetch(url + '/agents')).json()).harnessPermissions, 'false');
   const firstPid = await readFile(join(f.state, 'deploy/backend.pid'), 'utf8');
   result = await f.call('deploy', 'start'); assert.equal(result.code, 0, result.output); assert.equal(await readFile(join(f.state, 'deploy/backend.pid'), 'utf8'), firstPid);
   await writeFile(join(f.root, 'backend/build.mjs'), 'process.exit(7)'); git(f.root, 'add', '.'); git(f.root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'bad build');
@@ -167,11 +170,11 @@ test('polluted shell settings and legacy env files cannot override either servic
   await writeFile(join(f.root, 'frontend/node_modules/vite/bin/vite.js'), `const http=require('node:http');const s=http.createServer((q,r)=>r.end(process.env.AGENT_BACKEND_ORIGIN));s.listen(Number(process.env.PORT),'127.0.0.1');process.on('SIGTERM',()=>{s.close();s.closeAllConnections()});`);
   let result = await f.call('deploy', 'deploy', 'HEAD'); assert.equal(result.code, 0, result.output);
   const deployed = () => fetch(`http://127.0.0.1:${f.config.deployment.frontendPort}/agents`).then(r => r.json());
-  assert.deepEqual(await deployed(), { database: '/rsi_agent', version: 'first', webKey: 'retained-test-key', unrelated: null, nodeOptions: null, proxy: null });
+  assert.deepEqual(await deployed(), { database: '/rsi_agent', version: 'first', webKey: 'retained-test-key', unrelated: null, nodeOptions: null, proxy: null, harnessPermissions: 'true' });
   try {
     result = await f.call('dev', 'start'); assert.equal(result.code, 0, result.output);
     const dev = await (await fetch(`http://127.0.0.1:${f.config.development.backendPort}/agents`)).json();
-    assert.deepEqual(dev, { database: '/rsi_agent_dev', version: 'first', webKey: null, unrelated: null, nodeOptions: null, proxy: null });
+    assert.deepEqual(dev, { database: '/rsi_agent_dev', version: 'first', webKey: null, unrelated: null, nodeOptions: null, proxy: null, harnessPermissions: 'true' });
     assert.equal(await (await fetch(`http://127.0.0.1:${f.config.development.frontendPort}`)).text(), `http://127.0.0.1:${f.config.development.backendPort}`);
     assert.equal(await readFile(join(f.root, 'backend/.env'), 'utf8'), oldFile);
     assert.equal(await readFile(profile, 'utf8'), profileText);
