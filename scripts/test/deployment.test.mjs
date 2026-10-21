@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -25,7 +25,7 @@ async function fixture(run) {
   await writeFile(join(root, '.gitignore'), '.env\nnode_modules/\ndist/\n.run/\noperations.config.json\n.operations/\n');
   const key = randomBytes(32).toString('base64');
   const deployRoot = join('/tmp', `rsi-deploy-test-${randomBytes(8).toString('hex')}`);
-  const config = { stateDirectory: '.operations', deployRoot, database: { port: await port(), rootPassword: 'root-secret-test' }, development: { backendPort: await port(), frontendPort: await port(), database: 'rsi_agent_dev', username: 'rsi_dev', password: 'dev-secret-test', encryptionKey: randomBytes(32).toString('base64'), deepseekWebApiKey: '' }, deployment: { backendPort: await port(), frontendPort: await port(), database: 'rsi_agent', username: 'rsi', password: 'prod-secret-test', encryptionKey: key, deepseekWebApiKey: 'retained-test-key' } };
+  const config = { stateDirectory: '.operations', deployRoot, database: { containerName: 'rsi-agent-test-mysql', volumeName: 'rsi-agent-test-mysql-data', image: 'mysql:8.4', port: await port(), rootPassword: 'root-secret-test' }, development: { backendPort: await port(), frontendPort: await port(), database: 'rsi_agent_dev', username: 'rsi_dev', password: 'dev-secret-test', encryptionKey: randomBytes(32).toString('base64'), deepseekWebApiKey: '' }, deployment: { backendPort: await port(), frontendPort: await port(), database: 'rsi_agent', username: 'rsi', password: 'prod-secret-test', encryptionKey: key, deepseekWebApiKey: 'retained-test-key' } };
   await writeFile(join(root, 'operations.config.json'), JSON.stringify(config, null, 2), { mode: 0o600 });
   await writeFile(join(root, 'backend/main.mjs'), `import{createServer}from'node:http';const s=createServer((q,r)=>{r.setHeader('Content-Type','application/json');r.end(JSON.stringify({database:new URL(process.env.DATABASE_URL).pathname,version:'first',foreign:process.env.FOREIGN_SECRET??null}));});s.listen(Number(process.env.PORT),'127.0.0.1');process.on('SIGTERM',()=>{s.close();s.closeAllConnections();});`);
   for (const part of ['backend', 'frontend']) {
@@ -34,7 +34,8 @@ async function fixture(run) {
   }
   await writeFile(join(root, 'backend/build.mjs'), `import{mkdir,copyFile}from'node:fs/promises';await mkdir('dist/src',{recursive:true});await copyFile('main.mjs','dist/src/main.js');`);
   await writeFile(join(root, 'frontend/build.mjs'), `import{mkdir,writeFile}from'node:fs/promises';await mkdir('dist',{recursive:true});await writeFile('dist/index.html','<h1>Snapshot</h1>');`);
-  await writeFile(join(directory, 'bin/docker'), `#!/usr/bin/env node\nif(process.argv.includes('ps'))console.log('mysql');else if(process.argv.includes('exec'))process.stdin.resume();\n`, { mode: 0o755 });
+  const owner = 'sha256:' + createHash('sha256').update(await realpath(root)).digest('hex');
+  await writeFile(join(directory, 'bin/docker'), `#!/usr/bin/env node\nconst a=process.argv.slice(2), c=${JSON.stringify(config)}, owner=${JSON.stringify(owner)}; if(a[0]==='inspect'||(a[0]==='volume'&&a[1]==='inspect')){const isVolume=a[0]==='volume',n=a[isVolume?2:1];if(isVolume)console.log(JSON.stringify([{Name:c.database.volumeName,Labels:{'org.teamwork.operations.owner':owner,'org.teamwork.operations.service':c.database.containerName}}]));else console.log(JSON.stringify([{Config:{Image:c.database.image,Env:['MYSQL_ROOT_PASSWORD='+c.database.rootPassword],Labels:{'org.teamwork.operations.owner':owner,'org.teamwork.operations.service':c.database.containerName}},HostConfig:{PortBindings:{'3306/tcp':[{HostIp:'127.0.0.1',HostPort:String(c.database.port)}]}},Mounts:[{Destination:'/var/lib/mysql',Name:c.database.volumeName}],State:{Running:true,Health:'healthy'}}]));} else if(a[0]==='exec')process.stdin.resume();else if(a[0]==='volume'||a[0]==='run'||a[0]==='start'||a[0]==='stop'){}else process.exit(0);\n`, { mode: 0o755 });
   git(root, 'init', '-q'); git(root, 'add', '.'); git(root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture');
   const env = { PATH: join(directory, 'bin') + ':' + process.env.PATH, HOME: directory, FOREIGN_SECRET: 'must-not-leak', DATABASE_URL: 'mysql://wrong:wrong@localhost/should_not_inherit', CONFIG_ENCRYPTION_KEY: 'wrong', PORT: '1', RSI_STATE_DIR: directory, RSI_DEPLOY_ROOT: directory };
   const call = async (...args) => command(root, env, ...args);

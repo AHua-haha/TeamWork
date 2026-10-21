@@ -2,29 +2,30 @@
 
 ## Result summary
 
-The Operations scripts now use the root `operations.config.json` as their sole tunable-settings input. First use creates the file privately (`0600`) with independent generated development/deployment credentials and encryption keys. The checked-in `operations.config.example.json` documents the full schema, including the database root password field; replace placeholder secrets locally and copy the template to the root config before use. Child app processes get an explicitly assembled environment, not inherited config/port variables. Runtime paths and generated Compose configuration derive from config. Operations does not use `backend/compose.yaml`.
+Operations uses the project-root `operations.config.json` as its sole tunable-settings source. The accepted Operations design now requires a preconfigured, named MySQL container and named persistent volume managed with Docker Engine commands only. The database lifecycle no longer generates Compose YAML or invokes `docker compose`; `backend/compose.yaml` remains untouched.
 
-The dedicated MySQL service is generated with a checkout-specific Compose project and persistent volume. Development/deployment databases and accounts are separate; provisioning only creates/alters/grants and never drops or truncates. App stop leaves MySQL running. Deployment success/status reports frontend and backend URLs. Lifecycle tests now exercise config-only behavior, foreign-port refusal, source export/build and failure preservation/rebuild.
+`database.containerName`, `database.volumeName`, `database.image`, `database.port`, and `database.rootPassword` are explicitly configured. Before any mutation, Operations inspects the exact named container and volume, requiring project-owner/service labels and matching image, port binding, and data mount. A mismatch refuses the operation; it will not adopt, remove, recreate, or replace a resource. A matching existing volume is preserved. The container is created using `docker run`, resumed with `docker start`, stopped with `docker stop`, and inspected using `docker inspect`; database accounts are provisioned with narrowly scoped `docker exec` and SQL stdin. Provisioning uses create/alter/grant only.
 
-**This checkout's private config instance:** `operations.config.json` now exists with mode `0600`. Its MySQL port is `4211`, matching the previously inspected checkout-owned service; the other service `backend-mysql-1` remains on port `3306`. The root password is set to the existing checkout service credential (`local-root`) to preserve access to its existing volume; changing it would prevent MySQL authentication against that persisted data. Development/deployment DB account passwords and encryption keys are newly generated and separate. The old checkout container remains exited; it was not started or otherwise changed. Do not treat this config as a fresh empty database instance until the volume contents and access are verified safely.
+The local root config has explicit names `rsi-agent-0a7750a95bef635f-mysql` and `rsi-agent-0a7750a95bef635f-mysql-data`, image `mysql:8.4`, and port `4211`. I have not started/stopped/provisioned this container or touched its volume as part of this change. The other service `backend-mysql-1` on port 3306 is not targeted. Docker-backed lifecycle behavior remains unverified on this change; the existing configuration may reference a previous container/volume state and will be refused unless ownership/settings match exactly.
 
+Development and deployment use separate databases/accounts and separate encryption keys. App processes receive a deliberately assembled environment. App stop leaves the database running; explicit database stop preserves the named volume. Deployment retains its prior URL/status, recovery and port-conflict behavior.
 
 ## File lookup
 
 | Path | Description |
 |---|---|
-| `.rsi/context/design/operations/design.md` | Accepted Operations contract: root config only, non-interference, isolated DB service and data preservation. |
-| `operations.config.example.json` | Full non-secret config template, including `database.rootPassword`. |
-| `.gitignore` | Excludes local root config and `.operations/` runtime state. |
-| `scripts/host-common.mjs` | Config bootstrap/validation, path and service-setting derivation, generated Compose file, locking, process identity and readiness. |
-| `scripts/develop.mjs` | Development start/stop/status/log lifecycle and configured child environment. |
-| `scripts/deployment.mjs` | Committed-ref build/deploy, URL output, recovery and configured runtime paths. |
-| `scripts/database.mjs` | Dedicated Compose service and non-destructive DB/account provisioning. |
-| `scripts/dev.sh`, `scripts/deploy.sh`, `scripts/database.sh` | Operator entrypoints. |
-| `scripts/serve-frontend.mjs` | Static host and streaming API/upload/SSE proxy. |
-| `scripts/test/deployment.test.mjs` | Config-only lifecycle and deployment regression tests. |
-| `scripts/test/frontend-host.test.mjs` | Static host, streaming, upload, SSE cancellation and path safety tests. |
-| `backend/compose.yaml` | Legacy service; must not be managed by Operations. |
+| `.rsi/context/design/operations/design.md` | Accepted Operations requirements: root config only, plain Docker lifecycle, ownership checks, isolation and preservation. |
+| `operations.config.example.json` | Non-secret configuration template with explicit container/volume/image fields. |
+| `operations.config.json` | Local private config, ignored by Git; contains secrets and explicit identities. |
+| `.gitignore` | Excludes private root config and `.operations/` state. |
+| `scripts/host-common.mjs` | Root config loading/validation, app environment construction, paths, process safety, readiness and lifecycle lock. |
+| `scripts/database.mjs` | Docker Engine identity verification, named container/volume lifecycle and non-destructive DB provisioning. |
+| `scripts/develop.mjs`, `scripts/dev.sh` | Development app lifecycle. |
+| `scripts/deployment.mjs`, `scripts/deploy.sh` | Host deployment, URL reporting, release build/selection and recovery. |
+| `scripts/serve-frontend.mjs` | Static frontend server and streaming API/upload/SSE proxy. |
+| `scripts/test/deployment.test.mjs` | Config/environment, deployment recovery, port safety and Docker mock tests. |
+| `scripts/test/frontend-host.test.mjs` | Static serving, streaming, upload, SSE cancellation and path-safety tests. |
+| `backend/compose.yaml` | Other/legacy service definition; Operations must not use or modify it. |
 
 ## Automatic retrieval
 
@@ -34,44 +35,28 @@ The dedicated MySQL service is generated with a checkout-specific Compose projec
 
 ## Implemented contract
 
-### Configuration
+### Docker database lifecycle
 
-**Input:** `loadConfig({create=true})` reads only `<checkout>/operations.config.json`. It uses `stateDirectory`, `deployRoot`, `database: {port, rootPassword}`, and `development`/`deployment` objects containing app ports, fixed isolated database names, account credentials, 32-byte base64 encryption keys and optional provider key.
+**Input:** Root config supplies container/volume names, the pinned image (`mysql:8.4`), host port and root credential. Docker Engine is installed and reachable.
 
-**Output:** Parsed validated settings, or a non-secret error. On first use, exclusive creation writes generated secrets with mode `0600`. `runtimePaths()` derives local state, deployment and Compose paths. `serviceSettings(kind)` forms the app database URL/settings.
+**Output:** `databaseStatus()` reports whether the verified configured container is running. `startDatabase()` creates a missing named volume with ownership labels and creates a container with explicit port/mount/labels, or starts a matching stopped container. `stopDatabase()` stops only the validated configured container. `provisionEnvironment('development'|'deployment')` starts the service as needed and applies non-destructive SQL through stdin.
 
-**Effect:** No dotenv or environment configuration is read or written. Environment variables such as `DATABASE_URL`, `PORT` and prior RSI overrides do not configure applications. Child app env is explicitly constructed. Config and runtime state are excluded from Git.
+**Effect:** Persistent data remains in the configured named volume. No Compose resources are created. An existing container/volume with missing or mismatching ownership/settings causes safe refusal before mutations. Operations does not list, stop, delete, or mutate arbitrary containers or volumes.
 
-**Usage:** Copy `operations.config.example.json` to `operations.config.json`, replace secret placeholders with local secrets, then run `./scripts/dev.sh init` and/or `./scripts/deploy.sh init`.
+**Usage:** `./scripts/database.sh status`, `./scripts/database.sh start`, `./scripts/database.sh stop`.
 
-### Lifecycle CLIs
+### Application settings and lifecycle
 
-**Input:** `./scripts/dev.sh {init|start|stop|restart|status|logs [backend|frontend]}`, `./scripts/deploy.sh {init|deploy <local-git-ref>|update [local-git-ref]|start|stop|restart|status|logs [backend|frontend]}`, and `./scripts/database.sh {start|stop|status}`.
+**Input:** Only `operations.config.json` specifies tunable values. Environment overrides, dotenv files and other config locations are not read as settings. `development.database` and `deployment.database` are constrained to `rsi_agent_dev` and `rsi_agent`; app encryption keys are separate.
 
-**Output:** Failures are nonzero. Successful deploy and status display frontend/backend URLs. Port conflicts fail without signaling the port owner. Status is read-only. Logs do not need DB connectivity.
+**Output:** Development/deployment commands report status/logs and successful deployment URLs; errors exit nonzero. Occupied app ports are refused without signaling foreign processes.
 
-**Effect:** Apps bind loopback; dev/deploy use separate DBs and encryption keys on this checkout's isolated MySQL service. DB provisioning uses non-destructive `CREATE IF NOT EXISTS`, `ALTER USER`, and `GRANT`. App stop doesn't stop the database. Explicit database stop targets the checkout Compose project and preserves its volume. Deployment builds a locally committed archive before stopping the active app, then attempts previous-release recovery on launch failure.
+**Effect:** App stop does not stop MySQL. Deploy builds committed local refs before replacing a running release and attempts recovery if new startup fails. Neither scripts nor spawned applications export changes to the caller's environment.
 
-**Usage:** `./scripts/dev.sh start`; `./scripts/deploy.sh deploy HEAD`; `./scripts/database.sh status`.
-
-## Implementation notes
-
-- Tool subprocesses use PATH from the invoking process (or a conventional fallback) and HOME set to checkout root. These execution mechanics are not Operations configuration inputs; tunable app/service settings remain explicit.
-- Root password is stored in private generated Compose YAML and not passed as a command-line argument. Provisioning SQL is sent via stdin.
-- Checkout identity is SHA-256 of the absolute checkout path. Moving the checkout yields a new Compose identity rather than silently reusing the old volume.
-- The existing checkout service uses the same checkout-derived Compose project and named volume. Its prior root credential (`local-root`) and host port (`4211`) are preserved in the private config. The generated config path is now under `.operations/`; the old state file remains untouched. Do not delete or reset the existing volume.
+**Usage:** `./scripts/dev.sh start`; `./scripts/deploy.sh deploy HEAD`; `./scripts/deploy.sh status`.
 
 ## Verification and continuation
 
-Passed: JavaScript syntax checks for Operations modules/tests; `git diff --check`; `node --test scripts/test/deployment.test.mjs` (4/4); `node --test scripts/test/frontend-host.test.mjs` (1/1). Tests verify config permissions and precedence, that an inherited sentinel is not leaked into the backend, deployment URL reporting, build failure preserving active process, rebuild after temporary source removal, and foreign-port refusal.
+The deployment lifecycle tests pass (4/4) with a Docker CLI test double; frontend-host test passes (1/1); JavaScript syntax checks and `git diff --check` pass. The test double verifies the exact ownership labels/resource settings but does not execute Docker Engine lifecycle commands. Read-only Docker inspection shows the former Compose-managed checkout container `rsi-agent-0a7750a95bef635f-mysql-1` is running on port 4211, with Compose labels and volume `rsi-agent-0a7750a95bef635f_rsi-agent-0a7750a95bef635f-mysql-data`. It is not the explicit new configured container/volume identity and has no new ownership labels. The script therefore will refuse to manage/adopt it and will not start a second container on the occupied port. `backend-mysql-1` on port 3306 was inspected only; it was not modified. No volumes, containers, databases or data were changed. Safely transitioning the old project-owned Compose resources requires an explicit migration decision; do not remove its volume or stop the service to bypass ownership checks.
 
-Docker inspection succeeded and confirmed the exact project container/volume identities above. The `backend-mysql-1` container was not changed. The checkout container remains exited. Its existing named volume was not altered, and the private config preserves its known root credential and host port. I did not start or provision the service, so startup/authentication, database contents, both DB provisions, persistence and legacy-service non-interference during active DB operations remain open for a safe, data-preserving Docker test. Never run `docker compose down -v` or delete the named volume.
-
-## Changes in this continuation
-
-- `scripts/host-common.mjs` (child PATH derives from available host PATH rather than a fixed platform path)
-- `operations.config.example.json` (required root password field)
-- `scripts/test/deployment.test.mjs` (replaced obsolete env-file/override assertions with config-only fixture tests)
-- `.rsi/context/implement/operations/impl/README.md` (this implementation context)
-
-Pre-existing pending changes to Operations source and `.gitignore` remain. The unrelated `.rsi/context/implement/impl/README.md` modification was left untouched. No commit was made and no database data was reset.
+Follow-up: run the full Operations tests and, on an authorized Docker-enabled host, inspect the configured named resources before startup. The script must refuse old/unlabeled resources; do not delete volumes to bypass that check. Secrets are supplied to the Docker CLI through its process environment rather than command-line values; Docker persists container environment metadata, an inherent limitation to review if stronger secret-at-rest protection is required.

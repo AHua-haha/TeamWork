@@ -9,11 +9,10 @@ export const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const configPath = join(root, 'operations.config.json');
 const checkoutId = createHash('sha256').update(root).digest('hex').slice(0, 16);
 export const databaseProject = `rsi-agent-${checkoutId}`;
-export let composeArgs;
 let loadedConfig;
 const defaultConfig = () => ({
   stateDirectory: '.operations', deployRoot: '/tmp/rsi-agent-deploy',
-  database: { port: 3307 + (parseInt(checkoutId.slice(0, 6), 16) % 1000), rootPassword: randomBytes(24).toString('base64url') },
+  database: { containerName: `rsi-agent-${checkoutId}-mysql`, volumeName: `rsi-agent-${checkoutId}-mysql-data`, image: 'mysql:8.4', port: 3307 + (parseInt(checkoutId.slice(0, 6), 16) % 1000), rootPassword: randomBytes(24).toString('base64url') },
   development: { backendPort: 3000, frontendPort: 5273, database: 'rsi_agent_dev', username: 'rsi_dev', password: randomBytes(24).toString('base64url'), encryptionKey: randomBytes(32).toString('base64'), deepseekWebApiKey: '' },
   deployment: { backendPort: 3001, frontendPort: 5274, database: 'rsi_agent', username: 'rsi', password: randomBytes(24).toString('base64url'), encryptionKey: randomBytes(32).toString('base64'), deepseekWebApiKey: '' }
 });
@@ -27,7 +26,7 @@ export async function loadConfig({ create = true } = {}) {
   }
   let value;
   try { value = JSON.parse(await readFile(configPath, 'utf8')); } catch { throw new Error(`Invalid JSON in ${configPath}`); }
-  const required = [value.stateDirectory, value.deployRoot, value.database?.port, value.database?.rootPassword];
+  const required = [value.stateDirectory, value.deployRoot, value.database?.containerName, value.database?.volumeName, value.database?.image, value.database?.port, value.database?.rootPassword];
   for (const name of ['development', 'deployment']) required.push(value[name]?.backendPort, value[name]?.frontendPort, value[name]?.database, value[name]?.username, value[name]?.password, value[name]?.encryptionKey);
   if (required.some(item => item === undefined || item === null || item === '')) throw new Error(`Operations config is missing required values: ${configPath}`);
   const ports = [value.database.port, value.development.backendPort, value.development.frontendPort, value.deployment.backendPort, value.deployment.frontendPort];
@@ -38,6 +37,8 @@ export async function loadConfig({ create = true } = {}) {
     if (key.length !== 32 || key.toString('base64') !== env.encryptionKey) throw new Error(`Invalid ${label} encryptionKey (expected base64 32-byte key)`);
   }
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(value.development.password) || !/^[A-Za-z0-9_-]{1,128}$/.test(value.deployment.password) || !/^[A-Za-z0-9_-]{1,128}$/.test(value.database.rootPassword)) throw new Error('Database passwords must contain only letters, digits, _ or - (maximum 128 characters)');
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value.database.containerName) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value.database.volumeName) || value.database.image !== 'mysql:8.4') throw new Error('Invalid configured database container/volume identity or image');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value.database.rootPassword)) throw new Error('Database root password must contain only letters, digits, _ or - (maximum 128 characters)');
   const state = resolve(root, value.stateDirectory);
   if (state === root || !state.startsWith(root + '/')) throw new Error('stateDirectory must be inside the checkout and not its root');
   loadedConfig = value;
@@ -45,7 +46,7 @@ export async function loadConfig({ create = true } = {}) {
 }
 export async function runtimePaths() {
   const config = await loadConfig(), state = resolve(root, config.stateDirectory);
-  return { state, deployment: join(state, 'deploy'), developmentRun: join(state, 'dev'), databaseComposeFile: join(state, `compose-${checkoutId}.yaml`), databasePort: config.database.port };
+  return { state, deployment: join(state, 'deploy'), developmentRun: join(state, 'dev'), databasePort: config.database.port };
 }
 export async function serviceSettings(kind) {
   const config = await loadConfig(), values = config[kind], user = encodeURIComponent(values.username), password = encodeURIComponent(values.password);
@@ -54,8 +55,6 @@ export async function serviceSettings(kind) {
 const pathExports = await runtimePaths();
 export const deployment = pathExports.deployment;
 export const developmentRun = pathExports.developmentRun;
-export const databaseComposeFile = pathExports.databaseComposeFile;
-composeArgs = ['compose', '-p', databaseProject, '-f', databaseComposeFile];
 
 export async function exists(path) { try { await access(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 export function databaseName(settings) {
@@ -77,21 +76,10 @@ export async function initializeEnvironments() {
   validateEnvironment(development, 'rsi_agent_dev'); validateEnvironment(production, 'rsi_agent');
   return { development, production };
 }
-export async function ensureDatabaseCompose() {
-  const config = await loadConfig(), paths = await runtimePaths(), volume = `${databaseProject}-mysql-data`, rootPassword = config.database.rootPassword;
-  const yaml = `# Generated for checkout ${root}\nservices:\n  mysql:\n    image: mysql:8.4\n    environment:\n      MYSQL_ROOT_PASSWORD: "${rootPassword}"\n    ports:\n      - "127.0.0.1:${config.database.port}:3306"\n    volumes:\n      - ${volume}:/var/lib/mysql\n    healthcheck:\n      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${rootPassword}"]\n      interval: 2s\n      timeout: 2s\n      retries: 30\nvolumes:\n  ${volume}: {}\n`;
-  await mkdir(dirname(paths.databaseComposeFile), { recursive: true, mode: 0o700 });
-  try { await writeFile(paths.databaseComposeFile, yaml, { flag: 'wx', mode: 0o600 }); }
-  catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    const existing = await readFile(paths.databaseComposeFile, 'utf8');
-    if (existing !== yaml) throw new Error(`Checkout database Compose identity mismatch in ${paths.databaseComposeFile}; refusing to use it`);
-  }
-}
 
-
-const childEnvironment = () => ({ PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', HOME: root });
-export function capture(command, args) { return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnvironment() }).trim(); }
+export const childEnvironment = () => ({ PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', HOME: root });
+export function dockerEnvironment() { return childEnvironment(); }
+export function capture(command, args, env = childEnvironment()) { return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env }).trim(); }
 export async function run(command, args, options = {}) {
   await new Promise((resolveRun, reject) => {
     const child = spawn(command, args, { env: childEnvironment(), stdio: 'inherit', ...options });

@@ -1,7 +1,13 @@
 {
   "stateDirectory": ".operations",
   "deployRoot": "/tmp/rsi-agent-deploy",
-  "database": { "port": 3307, "rootPassword": "REPLACE_WITH_LOCAL_SECRET" },
+  "database": {
+    "port": 3307,
+    "rootPassword": "REPLACE_WITH_LOCAL_SECRET",
+    "containerName": "rsi-agent-0a7750a95bef635f-mysql",
+    "volumeName": "rsi-agent-0a7750a95bef635f-mysql-data",
+    "image": "mysql:8.4"
+  },
   "development": {
     "backendPort": 3000,
     "frontendPort": 5273,
