@@ -1,15 +1,15 @@
 import { seedDesign } from './design-fixture.js';
 import { after } from 'node:test';
-import { closeBashRuntime } from '../src/domain/harness-command.js';
+import { closeBashRuntime } from '../src/domain/harness/harness-command.js';
 import { realpath, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ResolvedRunConfig } from '../src/domain/config.js';
-import type { ConfigService, RunSettings } from '../src/domain/config.js';
-import type { RunHost } from '../src/domain/team-runner.js';
-import { TeamSystem } from '../src/domain/team-system.js';
-import type { MemberView } from '../src/domain/team.js';
+import type { ResolvedRunConfig } from '../src/domain/config/config.js';
+import type { ConfigService, RunSettings } from '../src/domain/config/config.js';
+import type { RunHost } from '../src/domain/team/team-runner.js';
+import { TeamSystem } from '../src/domain/team/team-system.js';
+import type { MemberView } from '../src/domain/team/team.js';
 import { AppError, type RunState } from '../src/foundation/types.js';
-import { WorkspaceService } from '../src/domain/workspace.js';
+import { WorkspaceService } from '../src/domain/workspace/workspace.js';
 import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 
 export const ready: Partial<RunSettings> = { connectionId: 'conn', modelId: 'model' };

@@ -1,8 +1,8 @@
 import type { Pool } from 'mysql2/promise';
 import type { UserMessage } from '@earendil-works/pi-ai';
 import type { CompletedMessage, ContextEntry, ContextHistory, CurrentState, FollowSnapshot, RunState, RunStatus } from '../foundation/types.js';
-import type { ChatAcceptance, ChatPublication, ChatSnapshot } from '../domain/group-chat.js';
-import type { PreparedChatImage } from '../domain/chat-images.js';
+import type { ChatAcceptance, ChatPublication, ChatSnapshot } from '../domain/team/group-chat.js';
+import type { PreparedChatImage } from '../domain/team/chat-images.js';
 
 export type ConfigScope = 'app' | 'agent' | 'connection' | 'catalog' | 'model_cache';
 

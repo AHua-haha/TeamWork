@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
-import { contextInput, parseContextDocument, repairInterruptedTools } from '../src/domain/conversation-context.js';
-import { memberContextPath } from '../src/domain/workspace-layout.js';
+import { contextInput, parseContextDocument, repairInterruptedTools } from '../src/domain/team/conversation-context.js';
+import { memberContextPath } from '../src/domain/workspace/workspace-layout.js';
 import type { ContextEntry } from '../src/foundation/types.js';
 
 const document = (commands: unknown[] = []) => `# Context\n\n## Result summary\nCurrent state.\n\n## File lookup\n| Path | Description |\n| --- | --- |\n| secret.txt | Inspect only when needed |\n\n## Automatic retrieval\n\n\`\`\`json\n${JSON.stringify({ commands })}\n\`\`\`\n`;

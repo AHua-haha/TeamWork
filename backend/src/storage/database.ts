@@ -1,19 +1,19 @@
-import { imageContent, validateChatImages, type PreparedChatImage } from '../domain/chat-images.js';
-import { repairInterruptedTools } from '../domain/conversation-context.js';
-import { finalAnswer } from '../domain/final-answer.js';
-import { parseMemberResponse } from '../domain/member-response.js';
+import { imageContent, validateChatImages, type PreparedChatImage } from '../domain/team/chat-images.js';
+import { repairInterruptedTools } from '../domain/team/conversation-context.js';
+import { finalAnswer } from '../domain/team/final-answer.js';
+import { parseMemberResponse } from '../domain/team/member-response.js';
 import { createHash, randomUUID } from 'node:crypto';
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode, validateAuthor, validateChangeRecord, validateEntries, validateRun } from '../foundation/codec.js';
-import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from '../domain/context-base.js';
-import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../domain/team.js';
-import { defaultRunSettings, workspaceModels, type WorkspaceModels, type StoredWorkspaceModels } from '../domain/workspace-models.js';
-import type { WorkspaceBootstrap } from '../domain/workspace-bootstrap.js';
-import { generatedSource } from '../domain/member-config-format.js';
+import type { Author, ChangeRecord, ContextCommit, ContextStore, FileAction, IndexedFile, StoredVersion, WorkspaceRecord } from '../domain/workspace/context-base.js';
+import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../domain/team/team.js';
+import { defaultRunSettings, workspaceModels, type WorkspaceModels, type StoredWorkspaceModels } from '../domain/workspace/workspace-models.js';
+import type { WorkspaceBootstrap } from '../domain/workspace/workspace-bootstrap.js';
+import { generatedSource } from '../domain/team/member-config-format.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type RunState, type RunStatus } from '../foundation/types.js';
 import type { Store, StoredConfig as StoreConfig } from './store.js';
-import { defaultMentionLimit, groupEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset } from '../domain/group-chat.js';
+import { defaultMentionLimit, groupEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset } from '../domain/team/group-chat.js';
 
 type Db = Pool | PoolConnection;
 export type ConfigScope = 'app' | 'catalog' | 'connection' | 'model_cache' | 'agent';
@@ -943,11 +943,11 @@ export class MySqlStore implements Store, ContextStore, TeamStore, ChatStore {
     return { id: memberId, workspaceId: value.workspaceId, revision: revision + 1, value: decode<MemberRecord>(data, () => undefined) };
   }
 
-  async getGitBaseline(workspaceId: string): Promise<import('../domain/workspace-git.js').GitBaseline | null> {
+  async getGitBaseline(workspaceId: string): Promise<import('../domain/workspace/workspace-git.js').GitBaseline | null> {
     const [row] = await rows(this.pool, 'SELECT data FROM workspace_git_baselines WHERE workspace_id = ?', [workspaceId]);
     return row ? decode(row.data, () => undefined) : null;
   }
-  async initializeGitBaseline(workspaceId: string, baseline: import('../domain/workspace-git.js').GitBaseline) {
+  async initializeGitBaseline(workspaceId: string, baseline: import('../domain/workspace/workspace-git.js').GitBaseline) {
     await this.pool.execute('INSERT IGNORE INTO workspace_git_baselines (workspace_id, data) VALUES (?, ?)', [workspaceId, encode(baseline)]);
     return (await this.getGitBaseline(workspaceId))!;
   }

@@ -1,12 +1,12 @@
 import { createServer } from 'node:http';
-import type { AgentRuntime } from '../domain/runtime.js';
-import type { ConfigService } from '../domain/config.js';
+import type { AgentRuntime } from '../domain/agent/runtime.js';
+import type { ConfigService } from '../domain/config/config.js';
 import { body, fields, json, respond, sse } from './http-helpers.js';
 import { AppError, identity, position } from '../foundation/types.js';
 import { teamRoutes } from './team-routes.js';
-import type { TeamSystem } from '../domain/team-system.js';
+import type { TeamSystem } from '../domain/team/team-system.js';
 import { workspaceRoutes } from './workspace-routes.js';
-import type { WorkspaceService } from '../domain/workspace.js';
+import type { WorkspaceService } from '../domain/workspace/workspace.js';
 
 export function createAgentServer(runtime: AgentRuntime, config: ConfigService, workspaces: WorkspaceService, team: TeamSystem) {
   const workspaceRoute = workspaceRoutes(workspaces);

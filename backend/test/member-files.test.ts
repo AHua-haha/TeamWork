@@ -4,7 +4,7 @@ import { mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createEditTool, createLsTool, createReadTool, createWriteTool } from '@earendil-works/pi-coding-agent';
-import type { MemberFiles } from '../src/domain/member-files.js';
+import type { MemberFiles } from '../src/domain/team/member-files.js';
 import { maxFileBytes } from '../src/foundation/text.js';
 import { configureHarness, withTeam, worker, type Fixture } from './team-fixture.js';
 
@@ -53,7 +53,7 @@ test('file tools read working design and edit implementation while dependencies 
 test('scope hides unrelated implementation and context while exposing ancestors for navigation', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend', ['src/backend.ts']);
   await mkdir(join(fixture.directory, 'src'));
-  await (await import('../src/domain/workspace-git.js')).gitText(fixture.directory,['init','-q']);
+  await (await import('../src/domain/workspace/workspace-git.js')).gitText(fixture.directory,['init','-q']);
   await writeFile(join(fixture.directory, 'src', 'frontend.ts'), 'frontend');
   await writeFile(join(fixture.directory, 'src', 'backend.ts'), 'backend');
   await writeFile(join(fixture.directory, 'README.md'), 'readme');

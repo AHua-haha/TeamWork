@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { TeamSystem } from '../src/domain/team-system.js';
-import { sourceBundle } from '../src/domain/member-config-format.js';
+import { TeamSystem } from '../src/domain/team/team-system.js';
+import { sourceBundle } from '../src/domain/team/member-config-format.js';
 import { code, stubConfig, withTeam, worker } from './team-fixture.js';
 
 const assignment = (member: Awaited<ReturnType<typeof worker>>) => ({ designScope: member.harness.designScope, allowedCommands: member.harness.allowedCommands });

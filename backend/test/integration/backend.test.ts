@@ -1,9 +1,9 @@
 import { acceptFiles,initGit,waitApproval } from '../git-fixture.js';
-import { gitText } from '../../src/domain/workspace-git.js';
+import { gitText } from '../../src/domain/workspace/workspace-git.js';
 import { seedDesign } from '../design-fixture.js';
 import { testModels, testModelValidator } from '../memory-store.js';
-import { emptyHarness } from '../../src/domain/harness-config.js';
-import { closeBashRuntime } from '../../src/domain/harness-command.js';
+import { emptyHarness } from '../../src/domain/harness/harness-config.js';
+import { closeBashRuntime } from '../../src/domain/harness/harness-command.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -16,15 +16,15 @@ import { after, before, test } from 'node:test';
 import { createModels, fauxAssistantMessage, fauxProvider, Type, type AssistantMessageEvent, type Message } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import { MySqlStore } from '../../src/storage/database.js';
-import { ConfigService, emptyRunSettings } from '../../src/domain/config.js';
-import { createBackendModels } from '../../src/domain/providers.js';
-import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/domain/runtime.js';
+import { ConfigService, emptyRunSettings } from '../../src/domain/config/config.js';
+import { createBackendModels } from '../../src/domain/config/providers.js';
+import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/domain/agent/runtime.js';
 import { createAgentServer } from '../../src/api/http.js';
-import { TeamSystem } from '../../src/domain/team-system.js';
-import { webTools } from '../../src/domain/web-tools.js';
-import { newLead } from '../../src/domain/team.js';
-import { WorkspaceService } from '../../src/domain/workspace.js';
-import type { ContextCommit } from '../../src/domain/context-base.js';
+import { TeamSystem } from '../../src/domain/team/team-system.js';
+import { webTools } from '../../src/domain/web-tools/web-tools.js';
+import { newLead } from '../../src/domain/team/team.js';
+import { WorkspaceService } from '../../src/domain/workspace/workspace.js';
+import type { ContextCommit } from '../../src/domain/workspace/context-base.js';
 import { sha256 } from '../../src/foundation/text.js';
 import type { FollowEvent } from '../../src/foundation/types.js';
 
@@ -1798,7 +1798,7 @@ test('fresh bootstrap and administrative reset persist atomic baselines, preserv
   const isolated = new MySqlStore(url.toString()), service = new WorkspaceService(isolated,testModelValidator);
   const folder = await mkdtemp(join(tmpdir(),'bootstrap-reset-'));
   const {mkdir,readdir} = await import('node:fs/promises');
-  const {resetWorkspaceData} = await import('../../src/domain/workspace-reset.js');
+  const {resetWorkspaceData} = await import('../../src/domain/workspace/workspace-reset.js');
   try {
     await isolated.migrate();
     await isolated.createConfig('connection','provider',{label:'Keep',encryptedKey:'opaque-ciphertext'});
@@ -2331,7 +2331,7 @@ test('member context restart recovery retains abandoned private work, repairs mi
 
 test('shared pictures survive reopen, hydrate native model messages, and reset removes all image state', { timeout: 30_000 }, async () => {
   const { png } = await import('../image-fixture.js');
-  const { prepareChatImage } = await import('../../src/domain/chat-images.js');
+  const { prepareChatImage } = await import('../../src/domain/team/chat-images.js');
   const f = await groupFixture();
   try {
     const image = await prepareChatImage(png(), 'screenshot.png');
@@ -2374,7 +2374,7 @@ test('constructed image context fails explicitly when a later model request cann
     return { ...request, model: { ...request.model, input: ['text'] } };
   } });
   try {
-    const { prepareChatImage } = await import('../../src/domain/chat-images.js');
+    const { prepareChatImage } = await import('../../src/domain/team/chat-images.js');
     const { png } = await import('../image-fixture.js');
     const accepted = await f.team.runner.postUser(f.workspaceId, '', [await prepareChatImage(png(), 'picture.png')]);
     const state = await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);

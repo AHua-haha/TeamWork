@@ -1,6 +1,6 @@
-import { readImageSubmission } from '../domain/chat-images.js';
+import { readImageSubmission } from '../domain/team/chat-images.js';
 import { body, fields, json, query, count, sse, type Route } from './http-helpers.js';
-import type { TeamSystem } from '../domain/team-system.js';
+import type { TeamSystem } from '../domain/team/team-system.js';
 import { AppError, identity, position } from '../foundation/types.js';
 
 const maxBodyBytes = 1024 * 1024;

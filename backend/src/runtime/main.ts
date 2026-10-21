@@ -1,12 +1,12 @@
-import { createBackendModels } from '../domain/providers.js';
+import { createBackendModels } from '../domain/config/providers.js';
 import { MySqlStore } from '../storage/database.js';
-import { ConfigService } from '../domain/config.js';
-import { AgentRuntime, configuredPolicy, piModelStream } from '../domain/runtime.js';
+import { ConfigService } from '../domain/config/config.js';
+import { AgentRuntime, configuredPolicy, piModelStream } from '../domain/agent/runtime.js';
 import { createAgentServer } from '../api/http.js';
-import { TeamSystem } from '../domain/team-system.js';
-import { WorkspaceService } from '../domain/workspace.js';
-import { webTools } from '../domain/web-tools.js';
-import { closeBashRuntime } from '../domain/harness-command.js';
+import { TeamSystem } from '../domain/team/team-system.js';
+import { WorkspaceService } from '../domain/workspace/workspace.js';
+import { webTools } from '../domain/web-tools/web-tools.js';
+import { closeBashRuntime } from '../domain/harness/harness-command.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');

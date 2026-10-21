@@ -7,9 +7,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { test } from 'node:test';
-import { designMetadata } from '../src/domain/design.js';
-import { commandArgv, emptyHarness, harnessConfig } from '../src/domain/harness-config.js';
-import { parseBashInput } from '../src/domain/harness-command.js';
+import { designMetadata } from '../src/domain/workspace/design.js';
+import { commandArgv, emptyHarness, harnessConfig } from '../src/domain/harness/harness-config.js';
+import { parseBashInput } from '../src/domain/harness/harness-command.js';
 import { code, configureHarness, withTeam, worker } from './team-fixture.js';
 
 const signal = () => new AbortController().signal;

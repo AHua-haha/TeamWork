@@ -1,5 +1,5 @@
-import type { WorkspaceService } from '../src/domain/workspace.js';
-import { contextPaths, metadataPath } from '../src/domain/workspace-layout.js';
+import type { WorkspaceService } from '../src/domain/workspace/workspace.js';
+import { contextPaths, metadataPath } from '../src/domain/workspace/workspace-layout.js';
 /** Seed actual node files for tests through the ordinary context file API. */
 export async function seedDesign(workspaces:WorkspaceService,workspaceId:string,path:string,value:{content:string;implementation:string[]}) {
   const base=await workspaces.context(workspaceId);

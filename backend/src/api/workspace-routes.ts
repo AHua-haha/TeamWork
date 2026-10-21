@@ -1,7 +1,7 @@
-import { DesignService } from '../domain/design.js';
+import { DesignService } from '../domain/workspace/design.js';
 import { body, count, fields, json, optionalString, query, sse, text, type Route } from './http-helpers.js';
 import { AppError, identity, position } from '../foundation/types.js';
-import type { WorkspaceService } from '../domain/workspace.js';
+import type { WorkspaceService } from '../domain/workspace/workspace.js';
 
 const maxBodyBytes = 4 * 1024 * 1024;
 

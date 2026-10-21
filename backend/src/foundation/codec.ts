@@ -1,5 +1,5 @@
 import type { Message } from '@earendil-works/pi-ai';
-import type { Author, ChangeRecord } from '../domain/context-base.js';
+import type { Author, ChangeRecord } from '../domain/workspace/context-base.js';
 import { AppError, identity, type ContextEntry, type RunState } from './types.js';
 
 function invalid(message: string): never {

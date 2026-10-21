@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { validateToolArguments } from '@earendil-works/pi-ai';
-import type { RuntimeTool, StepScope } from '../src/domain/runtime.js';
-import { webTools } from '../src/domain/web-tools.js';
+import type { RuntimeTool, StepScope } from '../src/domain/agent/runtime.js';
+import { webTools } from '../src/domain/web-tools/web-tools.js';
 
 const key = 'test-web-key-not-a-real-credential';
 const scope = (signal = new AbortController().signal) => ({ signal } as StepScope);
