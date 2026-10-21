@@ -2,19 +2,22 @@
 
 ## Result summary
 
-Operations currently consists of Node.js lifecycle CLIs behind Bash entry points, shared environment/process helpers, and a Docker Compose MySQL lifecycle. The scripts inspected include all mapped parent and child implementation files. No source changes were made. Observed open design/code discrepancies are listed below; no project tests were run.
+Operations implementation context has been consolidated to the accepted single Operations design after commit `f1fcf28` (`Consolidate operations design`). The parent design now owns development lifecycle, host deployment, and checkout-isolated MySQL lifecycle; former child design nodes have been removed. Source code was not modified by this documentation consolidation. Existing scripts implement development/deployment lifecycle and still use the legacy `backend/compose.yaml` service as described in existing child contexts; this does **not** yet satisfy the newly accepted design's requirement for a distinct Compose configuration/project and persistent volume for this checkout. Implementation work remains open. No project tests were run.
 
 ## File lookup
 
 | Path | Description |
 |---|---|
-| `scripts/host-common.mjs` | Shared state/env validation, safe process identity and lifecycle helpers, lock, logging/readiness. |
+| `.rsi/context/design/operations/design.md` | Accepted single Operations design: lifecycle, dedicated service, safety and acceptance requirements. |
+| `.rsi/context/design/operations/metadata.json` | Implementation mapping for the entire Operations system. |
+| `scripts/host-common.mjs` | Shared state/env validation, process identity, lifecycle lock, logging/readiness. |
 | `scripts/dev.sh`, `scripts/develop.mjs` | Development CLI and backend/Vite lifecycle. |
-| `scripts/deploy.sh`, `scripts/deployment.mjs` | Release build, selection, deployment lifecycle and recovery. |
-| `scripts/serve-frontend.mjs` | Static frontend and streaming loopback proxy. |
-| `scripts/database.sh`, `scripts/database.mjs` | Shared MySQL lifecycle and development DB provisioning. |
-| `scripts/test/deployment.test.mjs`, `scripts/test/frontend-host.test.mjs` | Existing deployment/frontend-host test files (not run). |
-| `backend/compose.yaml` | Compose identity/service/volume referenced by operations scripts (not inspected in this pass). |
+| `scripts/deploy.sh`, `scripts/deployment.mjs` | Release build/selection and deployment lifecycle/recovery. |
+| `scripts/serve-frontend.mjs` | Built asset server and streaming backend proxy. |
+| `scripts/database.sh`, `scripts/database.mjs` | MySQL lifecycle and development provisioning; currently needs migration to checkout-specific Compose service. |
+| `backend/compose.yaml` | Legacy service configuration; must remain unaffected by dedicated service implementation. |
+| `scripts/test` | Operations lifecycle test suite; tests not run. |
+| `.rsi/context/implement/operations/{local-dev,host-deployment,shared-database}/impl/README.md` | Prior child-scope inspection notes retained for reference; not separate design assignments now. |
 
 ## Automatic retrieval
 
@@ -24,16 +27,18 @@ Operations currently consists of Node.js lifecycle CLIs behind Bash entry points
 
 ## Implemented contract
 
-**Inputs:** Invoke `scripts/dev.sh {init|start|stop|restart|status|logs [backend|frontend]}`, `scripts/deploy.sh {init|deploy <git-ref>|update [git-ref]|start|stop|restart|status|logs [backend|frontend]}`, or `scripts/database.sh {start|stop|status}` from any directory. Deployment supports `RSI_STATE_DIR`, `XDG_STATE_HOME`, `RSI_DEPLOY_ROOT`, `RSI_DEPLOY_BACKEND_PORT`, and `RSI_DEPLOY_FRONTEND_PORT` as applicable.
+**Inputs:** `scripts/dev.sh` accepts `init`, `start`, `stop`, `restart`, `status`, and `logs [backend|frontend]`. `scripts/deploy.sh` accepts those lifecycle commands plus `deploy <git-ref>` and `update [git-ref]`. `scripts/database.sh` accepts `start`, `stop`, and `status`. Deployment may use `RSI_STATE_DIR`, `XDG_STATE_HOME`, `RSI_DEPLOY_ROOT`, `RSI_DEPLOY_BACKEND_PORT`, and `RSI_DEPLOY_FRONTEND_PORT` as applicable.
 
-**Outputs/errors:** Commands print service states, selected commit/source, readiness URLs and requested log tails. Errors print a message and exit nonzero; secrets are not intentionally printed. Invalid command/arguments, invalid refs/config, occupied ports and startup failures are errors.
+**Outputs:** CLIs report status/readiness/logs or fail with nonzero exit status and an error message. Existing process management checks process identity before signaling; lifecycle mutation locks prevent concurrent operations.
 
-**Effects:** Dev and deploy use separate database URLs and encryption keys, run on distinct loopback ports, and share the Compose MySQL service. Deploy exports committed Git content into a unique temporary release; durable settings, manifest and logs live under the state directory. Explicit database stop stops only the Compose MySQL service, not its volume. No operation here intentionally resets/copies database records or project workspaces.
+**Effects:** Development starts backend/Vite; deployment builds a committed Git revision into a temporary release, runs backend plus static/proxy frontend, and stores state/logs outside that release. Currently database lifecycle uses the legacy Compose service, so the accepted isolated-service behavior is not implemented. No code in this system should reset/copy data or mutate the other branch's legacy service. Exact database and encryption configuration is read from environment files managed by lifecycle scripts.
 
 **Usage:** `scripts/dev.sh start`; `scripts/deploy.sh deploy HEAD`; `scripts/deploy.sh update`; `scripts/database.sh status`.
 
-## Implementation notes / discrepancies
+## Implementation notes
 
-`host-common.mjs` fingerprints managed processes and checks PID start-time plus command marker before signaling. Lifecycle mutations use a durable lock; readiness uses curl with proxy bypass. `initializeEnvironments()` preserves/validates deployment settings then writes development settings. Deployment selection is an atomically renamed `active.json`; builds use `git archive`, npm ci and builds before stopping the old release. Parent design states an active selection is published after readiness; `deploy()` does launch then save manifest, matching that ordering. More thorough failure/concurrency acceptance testing remains open.
+Existing implementation context from the former local-dev, host-deployment and shared-database child nodes is retained in their current files as historical detail, but those paths are no longer design nodes and are not separate assignments. Read them as prior inspection notes only; this README is the entry point for the consolidated system. `host-common.mjs` fingerprints processes and uses a durable lock; development config initialization and deployment manifest/release handling are implemented in `develop.mjs` and `deployment.mjs` respectively. Compose YAML needs direct inspection before implementation planning. Requirements newly accepted—separate Compose file/project/container/volume stable for this checkout, two databases on that service, strict non-interference with the legacy service—are not yet verified or implemented.
 
-The design specifies Node.js 22.19+, but this pass did not verify runtime versions. Compose YAML was referenced but not read; verify exact project, service, port and named-volume identity. Tests were not run. No source was edited.
+## Verification and continuation
+
+No tests run. Next, inspect `scripts/database.mjs`, all Compose arguments in `host-common.mjs`, and `backend/compose.yaml`; determine how this checkout can obtain a stable unique Compose identity without accidental volume reuse after relocation. Then implement only after the user requests implementation (and within mapped source authority), and add lifecycle tests proving legacy service/data are untouched and both environments use the new service. Existing scripts/test cases and the consolidated Operations design define verification targets.
