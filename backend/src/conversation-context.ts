@@ -8,6 +8,7 @@ import type { StepScope } from './runtime.js';
 import type { StoredMember } from './team.js';
 import { AppError, type ContextEntry } from './types.js';
 import { memberContextPath } from './workspace-layout.js';
+import { resolveHarness } from './harness.js';
 
 export interface MemberConversationStore {
   prepareMemberContext(agentId: string, runId: string, documents: ContextEntry[]): Promise<void>;
@@ -82,7 +83,7 @@ export class ConversationContext {
   async prepare(member: StoredMember, scope: StepScope): Promise<void> {
     const documents: ContextEntry[] = [], retrieval: { path: string; commands: BashInput[] }[] = [];
     const files = await this.harness.files(member.id);
-    const designs = await Promise.all(member.value.harness.designScope.working.map(path => this.harness.designs.read(member.workspaceId, path)));
+    const { working: designs } = await resolveHarness(this.harness.designs, member.workspaceId, member.value.harness);
     const paths = [...new Set(designs.map(design => memberContextPath(design.path)))].sort();
     for (const path of paths) {
       scope.signal.throwIfAborted();

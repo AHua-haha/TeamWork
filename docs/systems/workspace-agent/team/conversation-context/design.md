@@ -147,3 +147,7 @@ Startup initializes new member-boundary records for existing members from their 
 ## Shared user pictures
 
 Shared user messages can contain ordered pictures alongside text. Construct the corresponding user context entry from its group text/identity/mention information and the same prepared native image blocks. Resolve picture references from durable storage during context preparation; never replace pictures with generated text descriptions. Preserve the group message position and image order across subsequent runs/restart. These shared pictures are separate from private tool-read image results. A model request containing images requires an image-capable model and otherwise fails explicitly.
+
+## Working subtree documents
+
+Member result context and automatic retrieval include one impl/README.md for every effective working-design node: explicitly assigned roots and all recursively nested accepted children. Deduplicate overlapping assignments and order document paths lexically. Dependency descendants are not implicitly loaded. Missing/malformed documents keep the existing repair-diagnostic behavior.

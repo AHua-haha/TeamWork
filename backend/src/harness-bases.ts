@@ -40,10 +40,10 @@ export function purposeHarnesses(member: StoredMember, implementation: Implement
     },
   ];
 }
-export function inspectHarnesses(member: StoredMember, implementation: ImplementationScope): HarnessDefinition[] {
+export function inspectHarnesses(member: StoredMember, implementation: ImplementationScope, working: string[]): HarnessDefinition[] {
   // Invalid references stay visible in member issues/source, never as derived context authority.
   const valid=(paths:string[])=>paths.flatMap(path=>{try{return [nodeReference(path)];}catch{return [];}});
-  const scope={working:valid(member.value.harness.designScope.working),dependencies:valid(member.value.harness.designScope.dependencies)};
+  const scope={working,dependencies:valid(member.value.harness.designScope.dependencies)};
   const definitions = purposeHarnesses(member, implementation, scope), writable = definitions.some(d => d.resources.length);
   return definitions.map(d => ({ ...d, tools: d.tools.filter(name => writable || !['write', 'edit'].includes(name)) }));
 }

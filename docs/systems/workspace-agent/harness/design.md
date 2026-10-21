@@ -8,7 +8,7 @@ The agent manages ordinary project Git history. Harness responsibility for Git i
 
 ## Inputs and preconditions
 
-Member designScope has working and dependency design-node metadata references. Implementation context and project implementation paths derive from accepted design mappings; agents cannot configure independent source authority. Pending design edits grant no new file-tool authority.
+Member designScope has working and dependency design-node metadata references. Implementation context and project implementation paths derive from accepted design mappings; agents cannot configure independent source authority. Each working reference includes that node and all recursively nested accepted design nodes, following the design folder hierarchy. Overlapping parent/child references resolve each node once. The root metadata.json covers the entire accepted design tree. Dependency references remain explicit and do not expand. Pending child designs grant no authority; newly accepted descendants enter effective working scope on subsequent resolution without changing or reactivating member files. An invalid accepted descendant or incomplete catalog scan refuses resolution rather than silently granting a partial subtree. Pending design edits grant no new file-tool authority.
 
 Pi read/ls/grep/find/write/edit retain default operations, schemas, content/details and truncation. Invocation checks retain workspace path boundaries; write/edit retain working/dependency assignment checks. Management tools remain lead-only. Existing Bash input, persistent member shells, stdout/stderr behavior, timeouts, background jobs, lifecycle and sandbox resource policy remain, except obsolete Git-scope selection is removed.
 
@@ -20,7 +20,7 @@ An explicit Git commit request is evaluated against the actual contents it would
 
 Management provides lead-only design/member file edits, model discovery, member-file validation and maintenance prompts. Implementation provides working-node implementation-context and accepted mapped-source edits. Execute provides persistent Bash and web tools. Required base prompts remain backend-owned Markdown files, assembled into the system prompt with member instructions. Tools are reusable and deduplicated; prompt changes cannot grant authority.
 
-Permissions remain organized as working scope and dependencies, each with design context, implementation context and implementation. Lead can read/edit all design context and member files; other members read/follow designs without file-tool edits. Both roles edit exact working implementation context and mapped implementation files. Dependency implementation/context is read-only for file tools, with read-only precedence on overlaps. Lead design-management permission grants no extra implementation access. Read tools can inspect the workspace.
+Permissions remain organized as working scope and dependencies, each with design context, implementation context and implementation. Lead can read/edit all design context and member files; other members read/follow designs without file-tool edits. Both roles edit effective working-node implementation context and mapped implementation files. Dependency implementation/context is read-only for file tools, with read-only precedence on overlaps. Lead design-management permission grants no extra implementation access. Read tools can inspect the workspace.
 
 Bash retains system reads, whole-workspace and workspace-owned temporary writes, networking and no executable allowlist. Existing OS permissions apply. Bash assignment boundaries are instructions rather than filesystem restrictions; this commit gate does not become a complete security boundary.
 
@@ -68,6 +68,7 @@ Detection covers explicit git commit commands submitted in Bash requests. Indire
 4. Deny or send feedback: no commit occurs; the agent receives the decision/text and can continue.
 5. Modify the candidate after review: an earlier Accept cannot commit the new candidate.
 6. Finish or fail a run: preserve ordinary pending files without harness checkpoints or a second Git history.
+7. Assign backend/metadata.json: include backend/auth/metadata.json and every deeper accepted child; load their design/context and grant their mapped implementation edits. Do not include sibling backend-extra or children of a dependency. An explicit dependency inside the working subtree keeps read-only precedence for its implementation/context.
 
 ## Approval and review API
 

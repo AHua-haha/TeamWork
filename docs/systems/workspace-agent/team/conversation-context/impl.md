@@ -14,7 +14,7 @@ Admission stores an immutable group upper bound and private history start. Prepa
 
 ## Decisions and constraints
 
-One selected document per assigned working node, impl/README.md, normalized lexical order; references in lookup tables are not loaded. Exact designated sections and JSON command configuration; ordinary Bash inputs/outputs and authority. Recoverable diagnostics permit file repair. Missing tool results become context-only error messages; never replay commands. Existing private streaming deltas remain transient. No per-member shared-message delivery copies or compatibility loop.
+One selected document per effective working node (explicit roots and accepted recursive descendants from resolveHarness), impl/README.md, normalized lexical order; references in lookup tables are not loaded. Exact designated sections and JSON command configuration; ordinary Bash inputs/outputs and authority. Recoverable diagnostics permit file repair. Missing tool results become context-only error messages; never replay commands. Existing private streaming deltas remain transient. No per-member shared-message delivery copies or compatibility loop.
 
 ## Code map
 

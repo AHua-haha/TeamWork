@@ -24,7 +24,7 @@ const covers = (scope: string, path: string) => scope === '.' || path.toLowerCas
 const ancestor = (path: string, scope: string) => !path || scope === '.' || scope.toLowerCase().startsWith(path.toLowerCase() + '/');
 
 export async function resolveHarness(designs: DesignService, workspaceId: string, config: HarnessConfig): Promise<ResolvedHarness> {
-  const working = await Promise.all(config.designScope.working.map(path => designs.read(workspaceId, path)));
+  const working = await designs.working(workspaceId, config.designScope.working);
   const dependencies = await Promise.all(config.designScope.dependencies.map(path => designs.read(workspaceId, path)));
   for (const design of [...working, ...dependencies]) implementationContextPath(design.path);
   const writable = [...new Set(working.flatMap(d => d.implementation))], readonly = [...new Set(dependencies.flatMap(d => d.implementation))];

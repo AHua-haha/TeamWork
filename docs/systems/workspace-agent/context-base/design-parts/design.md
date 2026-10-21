@@ -24,7 +24,7 @@ Unsafe references, invalid/missing metadata, unsafe mappings, absent/empty or am
 
 ## Guarantees and limits
 
-Design identity is independent of member identity and file/directory document form. Only an explicit node metadata record with valid design content creates a catalog system; files inside design/ or impl/ do not. Working assignments derive implementation authority from accepted metadata. Dependency mappings remain read-only. An implementation-context path or ordinary Markdown file is not a node reference. Safe unresolved stored assignments grant no authority and remain visible as readiness issues.
+Design identity is independent of member identity and file/directory document form. Only an explicit node metadata record with valid design content creates a catalog system; files inside design/ or impl/ do not. A working assignment includes the named node and every accepted descendant design node in its folder subtree; metadata.json at the root includes all accepted nodes. Working assignments derive implementation authority from each effective node’s accepted metadata. Dependency references remain explicit. Markdown topic directories do not introduce child nodes. Dependency mappings remain read-only. An implementation-context path or ordinary Markdown file is not a node reference. Safe unresolved stored assignments grant no authority and remain visible as readiness issues.
 
 ## Acceptance examples
 

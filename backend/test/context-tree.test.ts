@@ -38,7 +38,7 @@ test('invalid metadata, mixed document forms and missing directory entries never
  assert.match((await f.team.designs.inspect(f.workspaceId,'missing/metadata.json')).designIssue!,/README/);
 }));
 
-test('exact-node authority covers both forms without inheriting children or editable dependencies',()=>withTeam(async f=>{
+test('working subtree authority covers both forms and children without editable dependencies',()=>withTeam(async f=>{
  const parent=await worker(f,'Parent',[]),reference=parent.harness.designScope.working[0]!;
  const prefix=reference.slice(0,-'metadata.json'.length);
  await seedDesign(f.workspaces,f.workspaceId,prefix+'child/metadata.json',{content:'# Child',implementation:[]});
@@ -48,7 +48,8 @@ test('exact-node authority covers both forms without inheriting children or edit
  await files.write.mkdir(join(files.root,'.rsi/context/implement',prefix,'impl'));
  await files.write.writeFile(join(files.root,'.rsi/context/implement',prefix,'impl/README.md'),'# Implemented contract');
  await files.write.writeFile(join(files.root,'.rsi/context/implement',prefix,'impl/runtime.md'),'Runtime facts');
- await assert.rejects(files.write.writeFile(join(files.root,'.rsi/context/implement',prefix,'child/impl.md'),'no'),code('not_found'));
+ await files.write.mkdir(join(files.root,'.rsi/context/implement',prefix,'child'));
+ await files.write.writeFile(join(files.root,'.rsi/context/implement',prefix,'child/impl.md'),'# Child implementation');
  const depPrefix=dependency.harness.designScope.working[0]!.slice(0,-'metadata.json'.length);
  await assert.rejects(files.write.mkdir(join(files.root,'.rsi/context/implement',depPrefix,'impl')),code('access_denied'));
  await initGit(f);

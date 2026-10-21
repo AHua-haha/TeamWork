@@ -191,3 +191,7 @@ GET configuration?source=committed supplies the separate approved-configuration 
 ## Shared user pictures
 
 Workspace group input accepts text and ordered image attachments, including image-only messages. Successful publication stores pictures and shared references durably with response admission. Malformed images or a triggered model without image capability refuse the whole publication. Shared images are available to later members through group context, survive restart and are removed by chat reset. Member final publications remain text.
+
+## Recursive working-design assignments
+
+An active member stores only its explicitly configured working design references. Effective working scope includes each referenced node and all accepted descendant nodes in the design folder hierarchy, including their implementation contexts and mappings. Newly accepted children apply without member reactivation. Dependency references remain explicit; dependency implementation/context stays read-only on overlaps. Member inspection reports effective implementation resources while preserving the configured references.

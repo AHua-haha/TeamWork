@@ -5,7 +5,7 @@ import { AppError } from './types.js';
 import { sha256 } from './text.js';
 import type { WorkspaceService } from './workspace.js';
 import { committedFiles, gitText } from './workspace-git.js';
-import { contextPaths, contextRoot, nodeReference, metadataPath } from './workspace-layout.js';
+import { contextPaths, contextRoot, nodeReference, nodePrefix, metadataPath } from './workspace-layout.js';
 
 export interface DesignMetadata { implementation: string[] }
 export interface DesignDocument { path: string; content: string }
@@ -78,7 +78,10 @@ export class DesignService {
     return {designs:designs.sort((a,b)=>a.path.localeCompare(b.path)),truncated:listing.truncated};
   }
   async inspect(workspaceId:string,input:unknown):Promise<ContextFile & {design:DesignPart|null;designIssue:string|null}>{
-    const path=designPath(input),history=await this.accepted(workspaceId),metadata=await this.file(workspaceId,metadataPath(path),history);
+    return this.inspectAccepted(workspaceId,input,await this.accepted(workspaceId));
+  }
+  private async inspectAccepted(workspaceId:string,input:unknown,history:Awaited<ReturnType<DesignService['accepted']>>):Promise<ContextFile & {design:DesignPart|null;designIssue:string|null}>{
+    const path=designPath(input),metadata=await this.file(workspaceId,metadataPath(path),history);
     try{
       const base=await this.workspaces.context(workspaceId),[single,directory]=contextPaths(metadata.path,'design');
       const overview=await base.overview();
@@ -96,8 +99,33 @@ export class DesignService {
     }catch(error){if(!(error instanceof AppError)||error.status>=500)throw error;return {...metadata,design:null,designIssue:error.message};}
   }
   async read(workspaceId:string,input:unknown):Promise<ResolvedDesign>{
-    const file=await this.inspect(workspaceId,input);
+    return this.readAccepted(workspaceId,input,await this.accepted(workspaceId));
+  }
+  private async readAccepted(workspaceId:string,input:unknown,history:Awaited<ReturnType<DesignService['accepted']>>):Promise<ResolvedDesign>{
+    const file=await this.inspectAccepted(workspaceId,input,history);
     if(!file.design)throw new AppError('invalid_design',file.designIssue??'Invalid system design');
     return {...file.design,path:nodeReference(file.path),revision:file.revision};
+  }
+
+  /** Working roots include all accepted descendant nodes, never Markdown topic directories. */
+  async working(workspaceId:string,references:readonly string[]):Promise<ResolvedDesign[]>{
+    if(!references.length)return [];
+    const history=await this.accepted(workspaceId);
+    const roots=await Promise.all(references.map(path=>this.readAccepted(workspaceId,path,history)));
+    const selected=new Map(roots.map(design=>[design.path.toLowerCase(),design]));
+    const prefixes=roots.map(design=>nodePrefix(design.path).toLowerCase());
+    const listing=await (await this.workspaces.context(workspaceId)).tree('design',16);
+    if(listing.truncated)throw new AppError('invalid_design','Working design subtree listing exceeds the context listing limit');
+    const candidates=new Set([...listing.entries.filter(entry=>entry.type==='file').map(entry=>entry.path),...Object.keys(history.files).map(path=>path.slice(contextRoot.length+1))]);
+    for(const path of [...candidates].sort()){
+      if(!path.toLowerCase().startsWith('design/')||path.split('/').at(-1)?.toLowerCase()!=='metadata.json')continue;
+      let reference:string;
+      try{reference=nodeReference(path);}catch(error){if(!(error instanceof AppError)||error.code!=='invalid_path')throw error;continue;}
+      const key=reference.toLowerCase();
+      if(selected.has(key)||!prefixes.some(prefix=>key.startsWith(prefix)))continue;
+      try{const design=await this.readAccepted(workspaceId,reference,history);selected.set(key,design);}
+      catch(error){if(!(error instanceof AppError)||error.code!=='not_found')throw error;}
+    }
+    return [...selected.values()].sort((a,b)=>a.path.localeCompare(b.path));
   }
 }

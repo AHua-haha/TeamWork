@@ -31,3 +31,7 @@ Pending approval endpoints operate directly on the pending request store, outsid
 Member activation/configuration tests cover create/update/delete, immutable assignment/model identity, malformed files, separate commit/activation, newer pending edits, whole-workspace idle gates, stale reviews and atomic rollback. Inspection/HTTP tests cover ordinary file diffs/native history, active source durability and removed scope endpoints. Runtime/MySQL tests retain shared publication, waiting-run cancellation, failed private history, handoff ordering and restart recovery without Git checkpoints.
 
 TeamRunner removes settled job/admission bookkeeping directly from the shared runtime completion promise. It retains genuine finalization exclusion without a duplicate SQL completion-read race after ordinary runtime.finished() callers return.
+
+## Effective working subtrees
+
+Member readiness, derived implementation mappings and configuration-review design revisions use resolveHarness, which expands working roots through DesignService.working. TeamSystem inspection uses those effective paths for harness resources while retaining the original assignment in member/configuration data. Conversation preparation uses the same resolver for each effective node README. No assignment rewriting or extra activation is introduced.

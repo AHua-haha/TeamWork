@@ -7,7 +7,7 @@ import { AppError } from './types.js';
 import type { ConfigService } from './config.js';
 import { MemberConfigService } from './member-config.js';
 import { DesignService } from './design.js';
-import { HarnessService } from './harness.js';
+import { HarnessService, resolveHarness } from './harness.js';
 import { inspectHarnesses } from './harness-bases.js';
 import { MemberInstructions } from './member-instructions.js';
 import { ConversationContext, type MemberConversationStore } from './conversation-context.js';
@@ -74,7 +74,10 @@ export class TeamSystem {
   }
   async inspect(workspaceId: string, memberId: string) {
     const { stored, member } = await this.service.inspect(workspaceId, memberId);
-    return { member: this.status(member), configuration: stored.value.configuration ?? null, harnesses: inspectHarnesses(stored, member.harness.implementationScope) };
+    let working: string[] = [];
+    try { working = (await resolveHarness(this.designs, workspaceId, stored.value.harness)).working.map(design => design.path); }
+    catch (error) { if (!(error instanceof AppError) || error.status >= 500) throw error; }
+    return { member: this.status(member), configuration: stored.value.configuration ?? null, harnesses: inspectHarnesses(stored, member.harness.implementationScope, working) };
   }
 
   async create(workspaceId: string, input: unknown): Promise<MemberStatus> {
