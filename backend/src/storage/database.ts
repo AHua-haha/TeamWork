@@ -12,12 +12,12 @@ import { defaultRunSettings, workspaceModels, type WorkspaceModels, type StoredW
 import type { WorkspaceBootstrap } from '../domain/workspace-bootstrap.js';
 import { generatedSource } from '../domain/member-config-format.js';
 import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type RunState, type RunStatus } from '../foundation/types.js';
-
+import type { Store, StoredConfig as StoreConfig } from './store.js';
 import { defaultMentionLimit, groupEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset } from '../domain/group-chat.js';
 
 type Db = Pool | PoolConnection;
 export type ConfigScope = 'app' | 'catalog' | 'connection' | 'model_cache' | 'agent';
-export interface StoredConfig<T = unknown> { id: string; revision: number; value: T }
+export interface StoredConfig<T = unknown> { scope: ConfigScope; id: string; revision: number; value: T }
 async function rows(db: Db, sql: string, values: (string | number | null)[] = []): Promise<RowDataPacket[]> {
   return (await db.execute<RowDataPacket[]>(sql, values))[0];
 }
@@ -223,7 +223,7 @@ const schema = [
 ];
 
 /** All writers lock the agent row first. Follow reads use a repeatable-read snapshot. */
-export class MySqlStore implements ContextStore, TeamStore, ChatStore {
+export class MySqlStore implements Store, ContextStore, TeamStore, ChatStore {
   readonly pool: Pool;
   private lease?: PoolConnection;
   private leaseError?: Error;
@@ -352,20 +352,20 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
     return result.map(row => row.id as string);
   }
 
-  private configRow<T>(row: RowDataPacket): StoredConfig<T> {
-    return { id: row.id as string, revision: row.revision as number, value: decode<T>(row.data, () => undefined) };
+  private configRow<T>(row: RowDataPacket, scope: ConfigScope): StoredConfig<T> {
+    return { scope, id: row.id as string, revision: row.revision as number, value: decode<T>(row.data, () => undefined) };
   }
 
   async getConfig<T>(scope: ConfigScope, id: string): Promise<StoredConfig<T>> {
     identity(id, 'config id');
     const [row] = await rows(this.pool, 'SELECT id, revision, data FROM config_records WHERE scope = ? AND id = ?', [scope, id]);
     if (!row) throw new AppError('not_found', 'Config record not found', 404);
-    return this.configRow<T>(row);
+    return this.configRow<T>(row, scope);
   }
 
   async listConfigs<T>(scope: ConfigScope): Promise<StoredConfig<T>[]> {
     const result = await rows(this.pool, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', [scope]);
-    return result.map(row => this.configRow<T>(row));
+    return result.map(row => this.configRow<T>(row, scope));
   }
 
   async createConfig<T>(scope: ConfigScope, id: string, value: T): Promise<StoredConfig<T>> {
@@ -384,7 +384,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ER_DUP_ENTRY') throw new AppError('config_conflict', 'Config record already exists', 409);
       throw error;
     }
-    return { id, revision: 0, value: decode<T>(data, () => undefined) };
+    return { scope, id, revision: 0, value: decode<T>(data, () => undefined) };
   }
 
   async updateConfig<T>(scope: ConfigScope, id: string, revision: number, value: T, clearModelCache = false): Promise<StoredConfig<T>> {
@@ -400,7 +400,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       const [existing] = await rows(db, 'SELECT id FROM config_records WHERE scope = ? AND id = ?', [scope, id]);
       throw new AppError(existing ? 'config_conflict' : 'not_found', existing ? 'Config revision changed' : 'Config record not found', existing ? 409 : 404);
     });
-    return { id, revision: revision + 1, value: decode<T>(data, () => undefined) };
+    return { scope, id, revision: revision + 1, value: decode<T>(data, () => undefined) };
   }
 
   async deleteConfig(scope: ConfigScope, id: string, revision: number, clearModelCache = false): Promise<void> {
@@ -426,7 +426,7 @@ export class MySqlStore implements ContextStore, TeamStore, ChatStore {
       const catalog = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['catalog']);
       const connections = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['connection']);
       const modelCaches = await rows(db, 'SELECT id, revision, data FROM config_records WHERE scope = ? ORDER BY id', ['model_cache']);
-      return { app: app ? this.configRow(app) : null, agent: agent ? this.configRow(agent) : null, catalog: catalog.map(row => this.configRow(row)), connections: connections.map(row => this.configRow(row)), modelCaches: modelCaches.map(row => this.configRow(row)) };
+      return { app: app ? this.configRow(app, 'app') : null, agent: agent ? this.configRow(agent, 'agent') : null, catalog: catalog.map(row => this.configRow(row, 'catalog')), connections: connections.map(row => this.configRow(row, 'connection')), modelCaches: modelCaches.map(row => this.configRow(row, 'model_cache')) };
     });
   }
 

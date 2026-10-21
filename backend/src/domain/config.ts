@@ -3,7 +3,7 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
 import { createHash } from 'node:crypto';
-import { MySqlStore, type StoredConfig } from '../storage/database.js';
+import type { Store, StoredConfig } from '../storage/store.js';
 import type { RuntimeTool } from './runtime.js';
 import { ConfigSecrets } from './secrets.js';
 import { AppError, identity } from '../foundation/types.js';
@@ -169,7 +169,7 @@ function connectionInput(value: unknown, previous: ProviderConnection | null, se
 }
 function publicConnection(record: StoredConfig<ProviderConnection>): StoredConfig<ConnectionView> {
   const { label, provider, baseUrl, api, encryptedKey } = record.value;
-  return { id: record.id, revision: record.revision, value: { label, provider, baseUrl, api, keyConfigured: encryptedKey !== null } };
+  return { scope: record.scope, id: record.id, revision: record.revision, value: { label, provider, baseUrl, api, keyConfigured: encryptedKey !== null } };
 }
 function reasoningChoices(model: Model<Api>): Pick<ModelChoice, 'reasoningLevels' | 'defaultReasoning' | 'reasoningSentAs'> {
   if (!model.reasoning) return { reasoningLevels: [], defaultReasoning: null, reasoningSentAs: {} };
@@ -190,7 +190,7 @@ function cacheMatches(connection: ProviderConnection, cache?: ModelCache): cache
 export class ConfigService {
   private readonly tools: ReadonlyMap<string, RuntimeTool>;
   private readonly secrets: ConfigSecrets;
-  constructor(readonly store: MySqlStore, readonly models: Models, registeredTools: readonly RuntimeTool[] = [], encryptionKey?: string) {
+  constructor(readonly store: Store, readonly models: Models, registeredTools: readonly RuntimeTool[] = [], encryptionKey?: string) {
     this.tools = new Map(registeredTools.map(tool => [tool.definition.name, tool]));
     if (this.tools.size !== registeredTools.length) throw new AppError('invalid_config', 'Duplicate registered tool name');
     this.secrets = new ConfigSecrets(encryptionKey);
@@ -431,7 +431,7 @@ export class ConfigService {
   async resolveSettings(settings: unknown, revision: number): Promise<ResolvedRunConfig> {
     return this.resolve(await this.store.configBundle(null), validateRunSettings(settings), revision);
   }
-  private resolve(bundle: Awaited<ReturnType<MySqlStore['configBundle']>>, settings: RunSettings, revision: number): ResolvedRunConfig {
+  private resolve(bundle: Awaited<ReturnType<Store['configBundle']>>, settings: RunSettings, revision: number): ResolvedRunConfig {
     if (!bundle.app) throw new AppError('invalid_agent_config', 'App or agent config is missing', 409);
     validateAppSettings(bundle.app.value);
     const catalog = new Map(bundle.catalog.filter(item => (item.value as {kind?:string}).kind !== 'model').map(item => [item.id, item as StoredConfig<CatalogOption>]));

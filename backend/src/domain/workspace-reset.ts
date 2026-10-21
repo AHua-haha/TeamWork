@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { MySqlStore } from '../storage/database.js';
+import type { Store } from '../storage/store.js';
 import { missing, sha256 } from '../foundation/text.js';
 
 const tables = ['chat_changes', 'chat_entries', 'chat_clock', 'member_context_runs', 'member_contexts', 'chat_runs', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_settings', 'messages', 'runs', 'members', 'workspace_git_baselines', 'member_activation', 'context_files', 'context_versions', 'context_blobs', 'context_records', 'workspace_models', 'workspaces', 'agents'];
 /** Administrative reset, never an agent or HTTP capability. Requires exclusive database ownership. */
-export async function resetWorkspaceData(store: MySqlStore) {
+export async function resetWorkspaceData(store: Store) {
   await store.acquireRuntime(() => {});
   const moved: { from: string; to: string }[] = [];
   try {

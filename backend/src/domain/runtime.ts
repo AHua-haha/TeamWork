@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AssistantMessageFrameEncoder, getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type AssistantMessageEvent, type Context, type JsonObject, type Message, type Model, type Models, type SimpleStreamOptions, type Tool, type ToolCall, type ToolResultMessage, type UserMessage } from '@earendil-works/pi-ai';
-import { MySqlStore } from '../storage/database.js';
+import type { Store } from '../storage/store.js';
 import type { ResolvedRunConfig } from './config.js';
 import { encode, validateMessage } from '../foundation/codec.js';
 import { ProgressStore } from './progress.js';
@@ -86,7 +86,7 @@ export class AgentRuntime {
   private readonly maxSteps: number;
   private pendingStarts = new Set<Promise<RunState>>();
 
-  constructor(readonly store: MySqlStore, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, options: { progressCapacity?: number; maxSteps?: number } = {}) {
+  constructor(readonly store: Store, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, options: { progressCapacity?: number; maxSteps?: number } = {}) {
     this.progress = new ProgressStore(options.progressCapacity);
     this.maxSteps = options.maxSteps ?? 64;
     if (!Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1) throw new AppError('invalid_config', 'Invalid runtime limits');
