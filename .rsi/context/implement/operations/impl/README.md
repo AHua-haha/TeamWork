@@ -17,7 +17,6 @@ Operations now uses a checkout-specific Compose project and generated, mode-0600
 | `scripts/database.sh`, `scripts/database.mjs` | Checkout-specific MySQL lifecycle and development provisioning; Compose settings and volume are stored under durable state. |
 | `backend/compose.yaml` | Other/legacy Compose configuration; untouched and not passed to operations Compose commands. |
 | `scripts/test` | Operations lifecycle tests; limited host tests run, with sandbox-dependent failures noted below. |
-| `.rsi/context/implement/operations/{local-dev,host-deployment,shared-database}/impl/README.md` | Prior child-scope inspection notes retained for reference; not separate design assignments now. |
 
 ## Automatic retrieval
 
@@ -37,7 +36,7 @@ Operations now uses a checkout-specific Compose project and generated, mode-0600
 
 ## Implementation notes
 
-`host-common.mjs` derives database identity from the absolute resolved checkout path and generates a durable Compose config rather than reusing or altering `backend/compose.yaml`. This ensures a moved checkout selects a different project/volume instead of silently attaching to the former identity; users must intentionally retain the old checkout location to resume its service. Port collisions cause Compose startup to fail without taking over the listener. A collision-resistant identity or assigned port is not enforced by a host-level reservation service; verify port availability on target hosts. The database relies on Docker Compose and its stable named volume for persistence. Tests attempted: syntax checks passed; `scripts/test/frontend-host.test.mjs` passed with workspace-owned TMPDIR. Deployment suite attempted but fails in this sandbox due child process inspection/launch restrictions (`ps EPERM`/process exited); Docker was not used, so service isolation and actual database provisioning remain to be verified on a supported host. The existing child implementation-context documents are retained as historical reference, not separate design assignments.
+`host-common.mjs` derives database identity from the absolute resolved checkout path and generates a durable Compose config rather than reusing or altering `backend/compose.yaml`. This ensures a moved checkout selects a different project/volume instead of silently attaching to the former identity; users must intentionally retain the old checkout location to resume its service. Port collisions cause Compose startup to fail without taking over the listener. A collision-resistant identity or assigned port is not enforced by a host-level reservation service; verify port availability on target hosts. The database relies on Docker Compose and its stable named volume for persistence. Tests attempted: syntax checks passed; `scripts/test/frontend-host.test.mjs` passed with workspace-owned TMPDIR. Deployment suite attempted but fails in this sandbox due child process inspection/launch restrictions (`ps EPERM`/process exited); Docker was not used, so service isolation and actual database provisioning remain to be verified on a supported host. Legacy child implementation-context entry points were removed after consolidation; this README is the sole Operations implementation context.
 
 ## Verification and continuation
 
