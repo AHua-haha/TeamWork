@@ -74,7 +74,7 @@ async function deploy(ref) {
     }
     throw error;
   }
-  console.log(`Deployed commit ${commit}\nSource: ${selected.directory}\nState: ${deployment}`);
+  console.log(`Deployed commit ${commit}\nFrontend: http://127.0.0.1:${frontendPort}/\nBackend: http://127.0.0.1:${backendPort}/agents\nSource: ${selected.directory}\nState: ${deployment}`);
 }
 async function update(ref = 'HEAD') {
   const previous = await manifest();
@@ -92,6 +92,7 @@ try {
   const [command, argument] = process.argv.slice(2);
   if (command === 'status') {
     const selected = await manifest(); console.log(`Selected commit: ${selected?.commit ?? 'none'}\nSource: ${selected?.directory ?? 'none'}\nState: ${deployment}`);
+    console.log(`Frontend URL: http://127.0.0.1:${frontendPort}/\nBackend URL: http://127.0.0.1:${backendPort}/agents`);
     for (const [name, path] of [['Backend', backPid], ['Frontend', frontPid]]) { const record = await processRecord(path); console.log(`Deployed ${name}: ${record ? `running (PID ${record.pid})` : 'stopped'}`); }
   } else if (command === 'logs') await showLogs(deployment, argument);
   else if (['init', 'start', 'stop', 'restart', 'deploy', 'update'].includes(command)) await withLock(async () => {

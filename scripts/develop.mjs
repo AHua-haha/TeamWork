@@ -9,11 +9,6 @@ async function stop() {
   await stopService('Development backend', backPid, backend);
 }
 async function start() {
-  // Old script PID records lack an environment fingerprint and may still own production data.
-  for (const [name, file, marker] of [['frontend', frontPid, frontend], ['backend', backPid, backend]]) {
-    const record = await processRecord(file, marker);
-    if (record && !record.configId) await stopService(`Legacy development ${name}`, file, marker);
-  }
   const { development } = await initializeEnvironments();
   if (!await exists(join(root, 'backend/node_modules/tsx')) || !await exists(frontend)) throw new Error('Install development dependencies with npm ci in backend/ and frontend/');
   await startDatabase(); await provisionDevelopment(development);
