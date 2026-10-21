@@ -3,8 +3,8 @@ import { watch } from 'node:fs';
 import { mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ContextBase, contextPath, validSegment, type ContextEvent, type WorkspaceRecord } from '../src/context-base.js';
-import { newLead } from '../src/team.js';
+import { ContextBase, contextPath, validSegment, type ContextEvent, type WorkspaceRecord } from '../src/domain/context-base.js';
+import { newLead } from '../src/domain/team.js';
 import { MemoryStore, withFolder } from './memory-store.js';
 
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;

@@ -5,7 +5,7 @@ import { rm, mkdir, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { withTeam, worker, configureHarness, code } from './team-fixture.js';
 import { seedDesign } from './design-fixture.js';
-import { implementationContextResource } from '../src/harness-bases.js';
+import { implementationContextResource } from '../src/domain/harness-bases.js';
 const signal=()=>new AbortController().signal;
 
 test('a system can use multiple design documents without creating subdesign systems; revisions cover all documents',()=>withTeam(async f=>{

@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { mkdir,writeFile,readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withTeam } from './team-fixture.js';
-import { gitText } from '../src/workspace-git.js';
-import { sha256 } from '../src/text.js';
+import { gitText } from '../src/domain/workspace-git.js';
+import { sha256 } from '../src/foundation/text.js';
 test('legacy accepted files import once into a durable baseline without restoring pending files or writing private history',()=>withTeam(async f=>{
  const source=join(f.directory,'.rsi/harness/repository.git');await mkdir(source,{recursive:true});await gitText(f.directory,['init','--bare',source]);
  const path='.rsi/context/design/design.md',blob=await gitText(f.directory,['--git-dir',source,'hash-object','-w','--stdin'],{},'Accepted legacy design\n');

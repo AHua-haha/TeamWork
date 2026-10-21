@@ -6,9 +6,9 @@ import { text } from 'node:stream/consumers';
 import { test } from 'node:test';
 import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
-import { createAgentServer } from '../src/http.js';
-import type { AgentRuntime } from '../src/runtime.js';
-import { emptyHarness } from '../src/harness-config.js';
+import { createAgentServer } from '../src/api/http.js';
+import type { AgentRuntime } from '../src/domain/runtime.js';
+import { emptyHarness } from '../src/domain/harness-config.js';
 import { stubConfig, withTeam, worker, configureHarness, type Fixture } from './team-fixture.js';
 
 type Body = Record<string, any>;
@@ -216,7 +216,7 @@ test('multipart HTTP publication stores scoped pictures, preserves image-only in
 }));
 
 test('commit approval endpoints expose pending command and right-panel diff; decisions are workspace-bound and old scope APIs are absent',()=>withServer(async(call,f)=>{
- await initGit(f);const {gitText}=await import('../src/workspace-git.js');await gitText(f.directory,['add','-f','.rsi/members']);
+ await initGit(f);const {gitText}=await import('../src/domain/workspace-git.js');await gitText(f.directory,['add','-f','.rsi/members']);
  const running=f.team.harness.bash(f.lead.memberId,{command:'git commit -m "Review members"'},new AbortController().signal);const request=await waitApproval(f);
  const base=`/workspaces/${f.workspaceId}/team/commit-approvals`;
  f.team.team=async()=>{throw new Error('Approval polling must not inspect the entire team');};

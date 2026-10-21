@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { TeamSystem } from '../src/team-system.js';
+import { TeamSystem } from '../src/domain/team-system.js';
 import { code, stubConfig, withTeam } from './team-fixture.js';
 
 test('new workspace has a ready root-design lead, exact active files and clean bootstrap history before any agent runs', () => withTeam(async f => {

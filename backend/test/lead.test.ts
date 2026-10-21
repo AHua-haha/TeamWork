@@ -1,7 +1,7 @@
 import {acceptFiles} from './git-fixture.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { StepScope } from '../src/runtime.js';
+import type { StepScope } from '../src/domain/runtime.js';
 import { withTeam } from './team-fixture.js';
 
 const scope = (agentId: string) => ({ agentId, runId: 'lead-run', signal: new AbortController().signal } as StepScope);

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdir, writeFile, readFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { StepScope } from '../src/runtime.js';
+import type { StepScope } from '../src/domain/runtime.js';
 import { code, withTeam, worker } from './team-fixture.js';
-import { teamTools } from '../src/member-tools.js';
+import { teamTools } from '../src/domain/member-tools.js';
 
 const scope = (agentId: string) => ({ agentId, runId: 'tools-run', signal: new AbortController().signal } as StepScope);
 const text = (result: { content: { type: string; text?: string }[] }) => result.content.map(b => b.type === 'text' ? b.text : '').join('');

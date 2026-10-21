@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { duplexPair } from 'node:stream';
 import { text } from 'node:stream/consumers';
 import { test } from 'node:test';
-import type { ConfigService } from '../src/config.js';
-import { createAgentServer } from '../src/http.js';
-import type { AgentRuntime } from '../src/runtime.js';
-import type { TeamSystem } from '../src/team-system.js';
-import { WorkspaceService } from '../src/workspace.js';
+import type { ConfigService } from '../src/domain/config.js';
+import { createAgentServer } from '../src/api/http.js';
+import type { AgentRuntime } from '../src/domain/runtime.js';
+import type { TeamSystem } from '../src/domain/team-system.js';
+import { WorkspaceService } from '../src/domain/workspace.js';
 import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 
 type Body = Record<string, any>;
