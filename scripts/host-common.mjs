@@ -13,7 +13,11 @@ export const deployment = join(state, 'deploy');
 export const deploymentEnv = join(deployment, 'backend.env');
 export const developmentEnv = join(root, 'backend/.env');
 export const developmentRun = join(root, '.run');
-export const composeArgs = ['compose', '-p', 'backend', '-f', join(root, 'backend/compose.yaml')];
+const checkoutId = createHash('sha256').update(root).digest('hex').slice(0, 16);
+export const databaseProject = `rsi-agent-${checkoutId}`;
+export const databasePort = 3307 + (parseInt(checkoutId.slice(0, 6), 16) % 1000);
+export const databaseComposeFile = join(state, `compose-${checkoutId}.yaml`);
+export const composeArgs = ['compose', '-p', databaseProject, '-f', databaseComposeFile];
 export async function exists(path) { try { await access(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 export async function envFile(path) { return parseEnv(await readFile(path, 'utf8')); }
 export function databaseName(settings) {
@@ -48,23 +52,48 @@ export async function initializeEnvironments() {
   const example = await envFile(join(root, 'backend/.env.example'));
   if (!await exists(deploymentEnv)) {
     if (current && databaseName(current) !== 'rsi_agent') throw new Error(`Restore deployment settings in ${deploymentEnv} before initializing development`);
-    const preserved = current ?? { ...example, DATABASE_URL: 'mysql://rsi:rsi@127.0.0.1:3306/rsi_agent', CONFIG_ENCRYPTION_KEY: randomBytes(32).toString('base64') };
+    const preserved = current ?? { ...example, DATABASE_URL: `mysql://rsi:rsi@127.0.0.1:${databasePort}/rsi_agent`, CONFIG_ENCRYPTION_KEY: randomBytes(32).toString('base64') };
     validateEnvironment(preserved, 'rsi_agent');
     await saveEnv(deploymentEnv, preserved);
     console.log(`Preserved deployment configuration: ${deploymentEnv}`);
   }
-  const production = await envFile(deploymentEnv); validateEnvironment(production, 'rsi_agent');
+  let production = await envFile(deploymentEnv); validateEnvironment(production, 'rsi_agent');
+  const productionUrl = new URL(production.DATABASE_URL);
+  if (productionUrl.hostname !== '127.0.0.1' || productionUrl.port !== String(databasePort)) {
+    productionUrl.hostname = '127.0.0.1'; productionUrl.port = String(databasePort);
+    production = { ...production, DATABASE_URL: productionUrl.href };
+    await saveEnv(deploymentEnv, production);
+  }
   if (!current || databaseName(current) === 'rsi_agent') {
-    if (current && (current.DATABASE_URL !== production.DATABASE_URL || current.CONFIG_ENCRYPTION_KEY !== production.CONFIG_ENCRYPTION_KEY)) throw new Error('Legacy and saved deployment settings differ; review them before switching development');
-    const url = new URL(production.DATABASE_URL); url.pathname = '/rsi_agent_dev'; url.username = 'rsi_dev'; url.password = 'rsi_dev';
+    if (current && current.CONFIG_ENCRYPTION_KEY !== production.CONFIG_ENCRYPTION_KEY) throw new Error('Legacy and saved deployment encryption keys differ; review them before switching development');
+    const url = new URL(production.DATABASE_URL); url.hostname = '127.0.0.1'; url.port = String(databasePort); url.pathname = '/rsi_agent_dev'; url.username = 'rsi_dev'; url.password = 'rsi_dev';
     await saveEnv(developmentEnv, { ...example, DATABASE_URL: url.href, CONFIG_ENCRYPTION_KEY: randomBytes(32).toString('base64') });
     console.log('Initialized development settings for rsi_agent_dev; existing database data were retained.');
   }
-  const development = await envFile(developmentEnv); validateEnvironment(development, 'rsi_agent_dev');
+  let development = await envFile(developmentEnv);
+  const developmentUrl = new URL(development.DATABASE_URL);
+  if (developmentUrl.hostname !== '127.0.0.1' || developmentUrl.port !== String(databasePort)) {
+    developmentUrl.hostname = '127.0.0.1'; developmentUrl.port = String(databasePort);
+    development = { ...development, DATABASE_URL: developmentUrl.href };
+    await saveEnv(developmentEnv, development);
+  }
+  validateEnvironment(development, 'rsi_agent_dev');
   const devUrl = new URL(development.DATABASE_URL), prodUrl = new URL(production.DATABASE_URL);
-  if (devUrl.host !== prodUrl.host || devUrl.username !== 'rsi_dev' || development.CONFIG_ENCRYPTION_KEY === production.CONFIG_ENCRYPTION_KEY) throw new Error('Development requires the shared server, rsi_dev account and its own encryption key');
+  if (devUrl.host !== prodUrl.host || prodUrl.port !== String(databasePort) || devUrl.username !== 'rsi_dev' || development.CONFIG_ENCRYPTION_KEY === production.CONFIG_ENCRYPTION_KEY) throw new Error('Development requires the checkout database service, rsi_dev account and its own encryption key');
   return { development, production };
 }
+export async function ensureDatabaseCompose() {
+  const volume = `${databaseProject}-mysql-data`;
+  const yaml = `# Generated for checkout ${root}\nservices:\n  mysql:\n    image: mysql:8.4\n    environment:\n      MYSQL_ROOT_PASSWORD: local-root\n      MYSQL_DATABASE: rsi_agent\n      MYSQL_USER: rsi\n      MYSQL_PASSWORD: rsi\n    ports:\n      - "127.0.0.1:${databasePort}:3306"\n    volumes:\n      - ${volume}:/var/lib/mysql\n    healthcheck:\n      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-plocal-root"]\n      interval: 2s\n      timeout: 2s\n      retries: 30\nvolumes:\n  ${volume}: {}\n`;
+  await mkdir(dirname(databaseComposeFile), { recursive: true, mode: 0o700 });
+  try { await writeFile(databaseComposeFile, yaml, { flag: 'wx', mode: 0o600 }); }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    const existing = await readFile(databaseComposeFile, 'utf8');
+    if (existing !== yaml) throw new Error(`Checkout database Compose identity mismatch in ${databaseComposeFile}; refusing to use it`);
+  }
+}
+
 export function capture(command, args) { return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
 export async function run(command, args, options = {}) {
   await new Promise((resolveRun, reject) => {
