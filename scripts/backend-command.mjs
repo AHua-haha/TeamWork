@@ -7,7 +7,7 @@ try {
   const [command, ...arguments_] = process.argv.slice(2);
   if (!['dev', 'start', 'reset'].includes(command)) throw new Error('Expected backend command dev, start or reset');
   const config = await initializeConfiguration();
-  const entry = join(root, 'backend', command === 'reset' ? 'scripts/reset-workspace-data.mjs' : command === 'dev' ? 'src/main.ts' : 'dist/src/main.js');
+  const entry = join(root, 'backend', command === 'reset' ? 'scripts/reset-workspace-data.mjs' : command === 'dev' ? 'src/runtime/main.ts' : 'dist/src/runtime/main.js');
   const child = spawn(process.execPath, [...(command === 'start' ? [] : ['--import', 'tsx']), entry, ...arguments_], { cwd: join(root, 'backend'), env: { ...hostEnvironment(), ...backendSettings(config, 'development') }, stdio: 'inherit' });
   const handlers = new Map(['SIGINT', 'SIGTERM'].map(signal => [signal, () => child.kill(signal)]));
   for (const [signal, handler] of handlers) process.on(signal, handler);

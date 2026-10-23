@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { TeamSystem } from '../src/team-system.js';
+import { TeamSystem } from '../src/core/team-system.js';
 import { code, stubConfig, withTeam, worker, type Fixture } from './team-fixture.js';
 
 async function accept(f:Fixture,message='Accept member files'){await acceptFiles(f,'.rsi/members',message);return f.team.currentConfiguration(f.workspaceId);}

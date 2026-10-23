@@ -1,5 +1,5 @@
-import { gitText, git } from '../src/workspace-git.js';
-import type { TeamSystem } from '../src/team-system.js';
+import { gitText, git } from '../src/core/workspace-git.js';
+import type { TeamSystem } from '../src/core/team-system.js';
 type Fixture={team:TeamSystem;workspaceId:string;lead:{memberId:string};directory?:string};
 const root=async(f:Fixture)=>f.directory??(await f.team.harness.environment(f.lead.memberId)).root;
 export async function initGit(f:Fixture){await gitText(await root(f),['init','-q']);await gitText(await root(f),['config','user.name','Test']);await gitText(await root(f),['config','user.email','test@example.invalid']);}

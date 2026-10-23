@@ -4,7 +4,7 @@ import { writeFile,mkdir,rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withTeam,code } from './team-fixture.js';
 import { acceptFiles,initGit } from './git-fixture.js';
-import { gitText } from '../src/workspace-git.js';
+import { gitText } from '../src/core/workspace-git.js';
 test('Changes reads ordinary committed-to-current files without staging, checkpoints or full configuration validation',()=>withTeam(async f=>{
  await acceptFiles(f,'.rsi/context/design');await initGit(f);
  await writeFile(join(f.directory,'.rsi/context/design/design.md'),'Pending');await gitText(f.directory,['add','-f','.rsi/context/design/design.md']);const index=await gitText(f.directory,['write-tree']);

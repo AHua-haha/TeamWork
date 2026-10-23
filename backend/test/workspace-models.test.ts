@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { WorkspaceService } from '../src/workspace.js';
-import { TeamService, newLead } from '../src/team.js';
-import { DesignService } from '../src/design.js';
-import { emptyRunSettings } from '../src/config.js';
-import { workspaceModels } from '../src/workspace-models.js';
+import { WorkspaceService } from '../src/core/workspace.js';
+import { TeamService, newLead } from '../src/core/team.js';
+import { DesignService } from '../src/core/design.js';
+import { emptyRunSettings } from '../src/core/config.js';
+import { workspaceModels } from '../src/core/workspace-models.js';
 import { MemoryStore, testModels, testModelValidator, withFolder } from './memory-store.js';
 import { code, stubConfig } from './team-fixture.js';
 

@@ -32,7 +32,7 @@ async function fixture(run) {
     await writeFile(join(root, part, 'package.json'), JSON.stringify({ name: `fixture-${part}`, version: '1.0.0', type: 'module', scripts: { build: 'node build.mjs' } }));
     await writeFile(join(root, part, 'package-lock.json'), JSON.stringify({ name: `fixture-${part}`, version: '1.0.0', lockfileVersion: 3, packages: { '': { name: `fixture-${part}`, version: '1.0.0' } } }));
   }
-  await writeFile(join(root, 'backend/build.mjs'), `import{mkdir,copyFile}from'node:fs/promises';await mkdir('dist/src',{recursive:true});await copyFile('main.mjs','dist/src/main.js');`);
+  await writeFile(join(root, 'backend/build.mjs'), `import{mkdir,copyFile}from'node:fs/promises';await mkdir('dist/src/runtime',{recursive:true});await copyFile('main.mjs','dist/src/runtime/main.js');`);
   await writeFile(join(root, 'frontend/build.mjs'), `import{mkdir,writeFile}from'node:fs/promises';await mkdir('dist',{recursive:true});await writeFile('dist/index.html','<h1>Snapshot</h1>');`);
   await writeFile(join(directory, 'bin/docker'), `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(join(directory,'docker-calls.jsonl'))},JSON.stringify({args:process.argv.slice(2),composeProject:process.env.COMPOSE_PROJECT_NAME??null,dockerContext:process.env.DOCKER_CONTEXT??null,nodeOptions:process.env.NODE_OPTIONS??null,mysqlPort:process.env.RSI_MYSQL_PORT??null})+'\\n');if(process.argv.includes('context'))console.log('fixture-context');else if(process.argv.includes('ps'))console.log('mysql');else if(process.argv.includes('exec'))process.stdin.resume();\n`, { mode: 0o755 });
   git(root, 'init', '-q'); git(root, 'add', '.'); git(root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture');
@@ -114,7 +114,7 @@ test('foreign process ownership and a conflicting port are never taken over; sta
 
 
 test('lifecycle mutations exclude one another and stale lock owners recover without signaling them', { timeout: 30_000 }, () => fixture(async f => {
-  await writeFile(join(f.root, 'backend/build.mjs'), `import{setTimeout}from'node:timers/promises';import{mkdir,copyFile}from'node:fs/promises';await setTimeout(800);await mkdir('dist/src',{recursive:true});await copyFile('main.mjs','dist/src/main.js');`);
+  await writeFile(join(f.root, 'backend/build.mjs'), `import{setTimeout}from'node:timers/promises';import{mkdir,copyFile}from'node:fs/promises';await setTimeout(800);await mkdir('dist/src/runtime',{recursive:true});await copyFile('main.mjs','dist/src/runtime/main.js');`);
   git(f.root, 'add', '.'); git(f.root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'slow build');
   const deploying = f.call('deploy', 'deploy', 'HEAD');
   const lock = join(f.root, '.run/manage.lock');
@@ -162,10 +162,10 @@ test('polluted shell settings and legacy env files cannot override either servic
   await writeFile(join(f.root, 'backend/.env'), legacy + 'PORT=1\nCOMPOSE_PROJECT_NAME=foreign\n');
   const oldFile = await readFile(join(f.root, 'backend/.env'), 'utf8');
   const main = await readFile(join(f.root, 'backend/main.mjs'), 'utf8');
-  await mkdir(join(f.root, 'backend/src'), { recursive: true });
+  await mkdir(join(f.root, 'backend/src/runtime'), { recursive: true });
   await mkdir(join(f.root, 'backend/node_modules'), { recursive: true });
   await symlink(join(project, 'backend/node_modules/tsx'), join(f.root, 'backend/node_modules/tsx'));
-  await writeFile(join(f.root, 'backend/src/main.ts'), main);
+  await writeFile(join(f.root, 'backend/src/runtime/main.ts'), main);
   await mkdir(join(f.root, 'frontend/node_modules/vite/bin'), { recursive: true });
   await writeFile(join(f.root, 'frontend/node_modules/vite/bin/vite.js'), `const http=require('node:http');const s=http.createServer((q,r)=>r.end(process.env.AGENT_BACKEND_ORIGIN));s.listen(Number(process.env.PORT),'127.0.0.1');process.on('SIGTERM',()=>{s.close();s.closeAllConnections()});`);
   let result = await f.call('deploy', 'deploy', 'HEAD'); assert.equal(result.code, 0, result.output);
@@ -225,8 +225,8 @@ test('invalid or publicly readable project configuration refuses startup without
 }));
 
 test('foreground backend commands use the project development configuration from any working directory', () => fixture(async f => {
-  await mkdir(join(f.root, 'backend/dist/src'), { recursive: true });
-  await writeFile(join(f.root, 'backend/dist/src/main.js'), `console.log(JSON.stringify({database:new URL(process.env.DATABASE_URL).pathname,port:process.env.PORT,unrelated:process.env.UNRELATED_SECRET??null,nodeOptions:process.env.NODE_OPTIONS??null}));`);
+  await mkdir(join(f.root, 'backend/dist/src/runtime'), { recursive: true });
+  await writeFile(join(f.root, 'backend/dist/src/runtime/main.js'), `console.log(JSON.stringify({database:new URL(process.env.DATABASE_URL).pathname,port:process.env.PORT,unrelated:process.env.UNRELATED_SECRET??null,nodeOptions:process.env.NODE_OPTIONS??null}));`);
   const result = await new Promise(resolve => {
     const child = spawn('env', ['-u','NODE_OPTIONS','-u','NODE_PATH',process.execPath,join(f.root,'scripts/backend-command.mjs'),'start'], { cwd: f.directory, env: f.env });
     let output='';child.stdout.on('data',bytes=>output+=bytes);child.stderr.on('data',bytes=>output+=bytes);child.once('exit',code=>resolve({code,output}));
@@ -242,4 +242,19 @@ test('deployment refuses a revision containing the private project config before
   assert.notEqual(result.code, 0); assert.match(result.output, /private rsi.config.json/);
   assert.ok(!result.output.includes(f.key));
   await assert.rejects(readFile(join(f.state, 'deploy/active.json')));
+}));
+
+test('a previously selected release with the old compiled entry can restart after source migration', { timeout: 30_000 }, () => fixture(async f => {
+  let result = await f.call('deploy', 'deploy', 'HEAD');
+  assert.equal(result.code, 0, result.output);
+  result = await f.call('deploy', 'stop'); assert.equal(result.code, 0, result.output);
+  const active = JSON.parse(await readFile(join(f.state, 'deploy/active.json'), 'utf8'));
+  const entry = join(active.directory, 'backend/dist/src');
+  await cp(join(entry, 'runtime/main.js'), join(entry, 'main.js'));
+  await rm(join(entry, 'runtime'), { recursive: true });
+  result = await f.call('deploy', 'start');
+  assert.equal(result.code, 0, result.output);
+  const output = await (await fetch(`http://127.0.0.1:${f.config.deployment.backendPort}/agents`)).json();
+  assert.equal(output.version, 'first');
+  assert.equal(JSON.parse(await readFile(join(f.state, 'deploy/active.json'), 'utf8')).directory, active.directory);
 }));

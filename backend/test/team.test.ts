@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { DesignService } from '../src/design.js';
-import { emptyHarness } from '../src/harness-config.js';
-import { teamTools } from '../src/member-tools.js';
-import type { StepScope } from '../src/runtime.js';
-import { maxMembers, newLead, TeamService } from '../src/team.js';
-import { WorkspaceService } from '../src/workspace.js';
+import { DesignService } from '../src/core/design.js';
+import { emptyHarness } from '../src/core/harness-config.js';
+import { teamTools } from '../src/core/member-tools.js';
+import type { StepScope } from '../src/core/agent-runtime.js';
+import { maxMembers, newLead, TeamService } from '../src/core/team.js';
+import { WorkspaceService } from '../src/core/workspace.js';
 import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 import { code, stubConfig, withTeam, worker } from './team-fixture.js';
 

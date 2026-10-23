@@ -43,13 +43,18 @@ async function build(commit) {
   } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
   finally { await rm(archive, { force: true }); }
 }
+// Prior selected releases retain their original entry for restart and failed-update recovery.
+async function backendEntry(directory) {
+  const entry = join(directory, 'backend/dist/src/runtime/main.js');
+  return await exists(entry) ? entry : join(directory, 'backend/dist/src/main.js');
+}
 async function launch(release) {
   const settings = backendSettings(config, 'deployment');
   const { backendPort, frontendPort } = config.deployment;
   await startDatabase(config);
   let startedBackend = false;
   try {
-    startedBackend = await startService({ name: 'Deployed backend', entry: join(release.directory, 'backend/dist/src/main.js'), cwd: join(release.directory, 'backend'), env: { ...hostEnvironment(), ...settings, HOST: '127.0.0.1', PORT: String(backendPort), NODE_ENV: 'production' }, port: backendPort, url: `http://127.0.0.1:${backendPort}/agents`, pidFile: backPid, log: join(deployment, 'backend.log') });
+    startedBackend = await startService({ name: 'Deployed backend', entry: await backendEntry(release.directory), cwd: join(release.directory, 'backend'), env: { ...hostEnvironment(), ...settings, HOST: '127.0.0.1', PORT: String(backendPort), NODE_ENV: 'production' }, port: backendPort, url: `http://127.0.0.1:${backendPort}/agents`, pidFile: backPid, log: join(deployment, 'backend.log') });
     await startService({ name: 'Deployed frontend', entry: join(release.directory, 'scripts/serve-frontend.mjs'), cwd: release.directory, env: { ...hostEnvironment(), PORT: String(frontendPort), FRONTEND_DIST: join(release.directory, 'frontend/dist'), AGENT_BACKEND_ORIGIN: `http://127.0.0.1:${backendPort}`, NODE_ENV: 'production' }, port: frontendPort, url: `http://127.0.0.1:${frontendPort}/`, pidFile: frontPid, log: join(deployment, 'frontend.log') });
   } catch (error) { if (startedBackend) await stopService('Deployed backend', backPid); throw error; }
 }
@@ -57,7 +62,7 @@ async function start() {
   config = await initializeConfiguration();
   let selected = await manifest();
   if (!selected) throw new Error('No deployment selected; run scripts/deploy.sh deploy <git-ref>');
-  if (!await exists(join(selected.directory, 'backend/dist/src/main.js')) || !await exists(join(selected.directory, 'frontend/dist/index.html'))) {
+  if (!await exists(await backendEntry(selected.directory)) || !await exists(join(selected.directory, 'frontend/dist/index.html'))) {
     // An existing process may still be alive after /tmp cleanup; do not run a second database owner.
     await stop(); selected = await build(selected.commit);
   }

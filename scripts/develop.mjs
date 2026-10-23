@@ -7,7 +7,7 @@ let config;
 try { config = await readConfiguration(); } catch (error) { console.error(error.message); process.exit(1); }
 const { developmentRun } = locations(config);
 
-const backend = join(root, 'backend/src/main.ts'), frontend = join(root, 'frontend/node_modules/vite/bin/vite.js');
+const backend = join(root, 'backend/src/runtime/main.ts'), frontend = join(root, 'frontend/node_modules/vite/bin/vite.js');
 const backPid = join(developmentRun, 'backend.pid'), frontPid = join(developmentRun, 'frontend.pid');
 async function stop() {
   await stopService('Development frontend', frontPid, frontend);

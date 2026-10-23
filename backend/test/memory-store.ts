@@ -1,17 +1,17 @@
-import { imageContent, type PreparedChatImage } from '../src/chat-images.js';
+import { imageContent, type PreparedChatImage } from '../src/core/chat-images.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/context-base.js';
-import type { WorkspaceBootstrap } from '../src/workspace-bootstrap.js';
-import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../src/team.js';
+import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/core/context-base.js';
+import type { WorkspaceBootstrap } from '../src/core/workspace-bootstrap.js';
+import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../src/core/team.js';
 import { randomUUID } from 'node:crypto';
-import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/group-chat.js';
-import type { ContextEntry, RunState } from '../src/types.js';
-import { AppError } from '../src/types.js';
-import { defaultRunSettings, type WorkspaceModels, type StoredWorkspaceModels } from '../src/workspace-models.js';
-import { generatedSource } from '../src/member-config-format.js';
-import type { RunSettings } from '../src/config.js';
+import { groupEntry, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/core/group-chat.js';
+import type { ContextEntry, RunState } from '../src/core/types.js';
+import { AppError } from '../src/core/types.js';
+import { defaultRunSettings, type WorkspaceModels, type StoredWorkspaceModels } from '../src/core/workspace-models.js';
+import { generatedSource } from '../src/core/member-config-format.js';
+import type { RunSettings } from '../src/core/config.js';
 
 export const testModels = (connectionId = 'conn', modelId = 'model'): WorkspaceModels => ({ models: [{ connectionId, modelId }], defaultModel: { connectionId, modelId } });
 export const testModelValidator = { issuesFor: async (settings: readonly RunSettings[]) => settings.map(s => s.connectionId && s.modelId ? [] : ['Select a provider and model']) };
@@ -20,9 +20,9 @@ interface Stored { record: WorkspaceRecord; key: string; seq: number; blobs: Map
 
 /** The MySQL store's context semantics in memory. `failNextCommit` makes the next commit fail before it applies. */
 export class MemoryStore implements ContextStore, TeamStore, ChatStore {
-  readonly gitBaselines = new Map<string, import('../src/workspace-git.js').GitBaseline>();
+  readonly gitBaselines = new Map<string, import('../src/core/workspace-git.js').GitBaseline>();
   async getGitBaseline(id: string) { return structuredClone(this.gitBaselines.get(id) ?? null); }
-  async initializeGitBaseline(id: string, value: import('../src/workspace-git.js').GitBaseline) { if(!this.gitBaselines.has(id))this.gitBaselines.set(id,structuredClone(value));return (await this.getGitBaseline(id))!; }
+  async initializeGitBaseline(id: string, value: import('../src/core/workspace-git.js').GitBaseline) { if(!this.gitBaselines.has(id))this.gitBaselines.set(id,structuredClone(value));return (await this.getGitBaseline(id))!; }
   readonly workspaces = new Map<string, Stored>();
   readonly members = new Map<string, { member: StoredMember; lead: boolean; nameKey: string | null; ordinal: number }>();
   readonly workspaceModels = new Map<string, StoredWorkspaceModels>();

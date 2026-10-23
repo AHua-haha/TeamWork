@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AssistantMessageFrameEncoder, fauxAssistantMessage } from '@earendil-works/pi-ai';
-import { ProgressStore } from '../src/progress.js';
+import { ProgressStore } from '../src/core/progress.js';
 
 const delta = (text: string) => ({ type: 'text_delta' as const, contentIndex: 0, delta: text });
 test('per-member FIFO overlaps completed messages, evicts without readers, and preserves start boundaries', () => {

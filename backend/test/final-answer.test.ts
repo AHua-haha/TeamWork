@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
-import { finalAnswer, textPhase } from '../src/final-answer.js';
+import { finalAnswer, textPhase } from '../src/core/final-answer.js';
 
 const text = (value: string, phase?: string) => ({ type: 'text' as const, text: value, ...(phase ? { textSignature: JSON.stringify({ v: 1, id: 'native', phase }) } : {}) });
 

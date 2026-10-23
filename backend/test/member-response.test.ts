@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseMemberResponse } from '../src/member-response.js';
+import { parseMemberResponse } from '../src/core/member-response.js';
 
 test('omitted and empty headers select nobody while all body @ text stays ordinary', () => {
   const body = '# Report\n\n@Backend @joplin/lib @{unfinished\n<mentions>not routing here</mentions>';

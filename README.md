@@ -88,4 +88,4 @@ Lifecycle tests use isolated Git repositories, temporary state and a fake Docker
 - [Backend](backend/README.md): TypeScript agent runtime, Pi AI integration, MySQL persistence and API.
 - [Frontend](frontend/README.md): React and assistant-ui client.
 
-System contracts and task records live under [docs](docs/).
+System contracts and task records live under [docs](docs).

@@ -70,7 +70,7 @@ Both return a single text block containing Markdown core information followed by
 
 Requests have a 30-second deadline and a 4 MiB response-body limit. Core Markdown is capped at 64 KiB of UTF-8 text with visible truncation. No matches is successful; missing credentials, invalid input and provider failures return recoverable error tool results for the agent to handle without stopping its loop. No automatic retry is performed. Cancellation aborts HTTP. Credentials and raw provider error bodies are excluded from results.
 
-[Web tool contract](../docs/systems/web-tools/design.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
+[Web tool contract](../.rsi/context/implement/backend/core/impl/reference/web-tools/design.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
 
 ## Workspace models
 
@@ -131,7 +131,7 @@ The sandbox permits system reads, workspace/owned-temp writes, networking/local 
 
 The backend registers `modelflare` at startup alongside Pi's built-in providers. Select it in the existing provider connection form and supply your API key. No model-definition UI or discovery refresh is required for its 32 predefined agent chat models, including Claude Haiku 5.5, Sonnet 5.5 and GPT-6.1 Sol.
 
-Use `https://modelflare.dev` for Anthropic Messages, or `https://modelflare.dev/v1` for OpenAI Chat Completions / Responses. Model choices are filtered by the model's documented protocol support; use separate connections for different protocols. Use Responses for GPT-6.1 tool calling. Catalog metadata does not establish your key's routing-group access. The dated [complete inventory and metadata sources](../docs/tasks/2026-10-19-modelflare-provider/models.md) covers all 76 observed IDs, including media and specialized models outside the agent chat runtime. Gateway cost rates are unpriced, not copied from upstream billing.
+Use `https://modelflare.dev` for Anthropic Messages, or `https://modelflare.dev/v1` for OpenAI Chat Completions / Responses. Model choices are filtered by the model's documented protocol support; use separate connections for different protocols. Use Responses for GPT-6.1 tool calling. Catalog metadata does not establish your key's routing-group access. The dated [complete inventory and metadata sources](../.rsi/context/implement/backend/core/impl/reference/modelflare-inventory.md) covers all 76 observed IDs, including media and specialized models outside the agent chat runtime. Gateway cost rates are unpriced, not copied from upstream billing.
 
 Existing connections are preserved: a connection whose provider is still `anthropic` uses that catalog until you explicitly change it to `modelflare`.
 
@@ -155,10 +155,10 @@ Example policy customization:
 ```ts
 import { Type } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
-import { AgentRuntime, ConfigService, MySqlStore, configuredPolicy, piModelStream, type RuntimeTool } from './src/index.js';
+import { AgentRuntime, ConfigService, CoreData, MySqlStorage, configuredPolicy, piModelStream, type RuntimeTool } from './src/api/index.js';
 
 const models = builtinModels();
-const store = new MySqlStore(process.env.DATABASE_URL!);
+const store = new CoreData(new MySqlStorage(process.env.DATABASE_URL!));
 const tools: RuntimeTool[] = [{
   definition: {
     name: 'echo', description: 'Return the supplied text',
@@ -202,7 +202,7 @@ Defaults: maximum 64 model calls per run; sequential tools; retain at most 1,024
 Set `VERIFY_TASK_ID` to the task whose test log should receive the result:
 
 ```sh
-export VERIFY_TASK_ID=2026-09-30-config-system
+export VERIFY_TASK_ID=2026-10-23-backend-boundaries
 node scripts/verify.mjs npm run check
 node scripts/verify.mjs npm test
 # Creates and removes its own disposable MySQL container; Docker must be running.
@@ -221,10 +221,12 @@ Integration tests create agents, write data, and intentionally corrupt one test 
 
 ## Contracts and implementation
 
-- [Database contract](../docs/systems/database/design.md) and [implementation](../docs/systems/database/impl.md)
-- [Agent runtime and HTTP protocol](../docs/systems/agent-runtime/design.md) and [implementation](../docs/systems/agent-runtime/impl.md)
-- [Task decisions and verification evidence](../docs/tasks/2026-09-29-agent-platform/task.md)
-- [Frontend proposal](../docs/tasks/2026-09-29-agent-platform/drafts/frontend/design.md)
+- [Backend design](../.rsi/context/design/backend/design.md) and [implementation context](../.rsi/context/implement/backend/impl/README.md).
+- [Core](../.rsi/context/design/backend/core/design.md) owns business behavior, data models, SQL and migrations. Its current internals remain aggregated.
+- [API](../.rsi/context/design/backend/api/design.md) owns HTTP/SSE/multipart transport.
+- [Storage](../.rsi/context/design/backend/storage/design.md) supplies MySQL resources and generic transactions, with no business schema.
+- [Runtime](../.rsi/context/design/backend/runtime/design.md) hosts and wires the backend; the agent loop is inside Core.
+- [Task and verification](../.rsi/work/tasks/2026-10-23-backend-boundaries/task.md).
 
 ### Group response timeline for the frontend
 
