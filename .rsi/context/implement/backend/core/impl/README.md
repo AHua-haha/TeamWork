@@ -2,58 +2,39 @@
 
 ## Result summary
 
-All current agent-system behavior lives together in `backend/src/core`. Business persistence moved from database.ts to core-data.ts; the agent loop moved from runtime.ts to agent-runtime.ts. Internal decomposition is deliberately deferred.
+Core now composes Agent, Harness, Workspace and Team. Persistence is an explicitly assigned responsibility: Agent can execute entirely in memory; Team is the durable application caller. Workspace maintains project information through a database-neutral persistence port.
 
 Design: [Core](../../../../design/backend/core/design.md).
 
 ### Coordination and ownership
 
-ConfigService resolves settings/providers. WorkspaceService and TeamSystem coordinate workspaces, members, design, harness, group chat and approvals. AgentRuntime runs models/tools; ConversationContext assembles member context. CoreData owns SQL, schemas, codecs, concurrency, record queries and runtime ownership. API consumes these Core operations; it never issues SQL.
+Runtime constructs the shared technical MySqlStorage and TeamData durable adapter, then services and TeamRuntime. TeamRuntime creates AgentExecution instances and acknowledges their events. Workspace registration invokes parent Core bootstrap to prepare the root context and initial Team lead; TeamData commits registration atomically. The parent also coordinates administrative filesystem reset with Team-owned record deletion.
 
 ### Implemented contract
 
-**Input:** Core service method arguments: IDs, input values, expected revisions/cursors and decisions. CoreData takes one dedicated MySqlStorage instance. AgentRuntime takes Core persistence, config, policy and model stream dependencies.
+**Input:** Application service inputs, the technical storage resource and operator settings.
 
-**Output:** Service records, run identities, consistent history/progress, review data or AppError failures. CoreData methods return application records interpreted/validated inside Core.
+**Output:** The composed existing Core service interfaces, run/history/progress and explicit failures.
 
-**Effect and failure:** Core owns business memory and durable formats, migrations, admission, lease/recovery and transactions. CoreData.close releases its runtime lease and closes its dedicated Storage resource. Duplicate-key engine errors become business conflicts here, not in Storage.
+**Effect and failure:** SQL and durable codecs belong to Team, optional in-memory execution to Agent, tool authority/environment to Harness, project information management to Workspace. Core common helpers define no extra design system.
 
-**Usage example:** `const storage = new MySqlStorage(databaseUrl); const data = new CoreData(storage); await data.migrate();` Construct ConfigService/WorkspaceService/TeamSystem/AgentRuntime as shown in the backend README. Close runs and workspace resources before `await data.close()`. Do not create a second runtime owner for the same database.
+**Usage example:** Use Runtime composition in backend/src/runtime/main.ts. Start with MySqlStorage and TeamData, construct ConfigService, WorkspaceService, TeamSystem and TeamRuntime, attach the team, initialize and open.
 
 ## File lookup
 
-- [backend/src/core](../../../../../../backend/src/core): owned implementation.
-- [backend/prompts](../../../../../../backend/prompts): owned implementation.
-- [reference/agent-runtime/design.md](reference/agent-runtime/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/agent-runtime/impl.md](reference/agent-runtime/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/config/design.md](reference/config/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/config/impl.md](reference/config/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/database/design.md](reference/database/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/database/impl.md](reference/database/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/web-tools/design.md](reference/web-tools/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/web-tools/impl.md](reference/web-tools/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/context-base/design-parts/design.md](reference/workspace-agent/context-base/design-parts/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/context-base/design-parts/impl.md](reference/workspace-agent/context-base/design-parts/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/context-base/design.md](reference/workspace-agent/context-base/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/context-base/impl.md](reference/workspace-agent/context-base/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/harness/design.md](reference/workspace-agent/harness/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/harness/impl.md](reference/workspace-agent/harness/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/harness/tools/bash/design.md](reference/workspace-agent/harness/tools/bash/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/harness/tools/bash/impl.md](reference/workspace-agent/harness/tools/bash/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/harness/tools/design.md](reference/workspace-agent/harness/tools/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/harness/tools/impl.md](reference/workspace-agent/harness/tools/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/team/conversation-context/design.md](reference/workspace-agent/team/conversation-context/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/team/conversation-context/impl.md](reference/workspace-agent/team/conversation-context/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/team/design.md](reference/workspace-agent/team/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/team/group-chat/design.md](reference/workspace-agent/team/group-chat/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/team/group-chat/impl.md](reference/workspace-agent/team/group-chat/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/team/impl.md](reference/workspace-agent/team/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/team/lead/design.md](reference/workspace-agent/team/lead/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/team/lead/impl.md](reference/workspace-agent/team/lead/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/workspace/design.md](reference/workspace-agent/workspace/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/workspace-agent/workspace/impl.md](reference/workspace-agent/workspace/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/modelflare-inventory.md](reference/modelflare-inventory.md): migrated existing behavior/code reference, not a child design.
-- [Backend tests](../../../../../../backend/test): deterministic/unit/HTTP and disposable MySQL verification.
+- [backend/src/core/errors.ts](../../../../../../backend/src/core/errors.ts): common application errors and identifier validation.
+
+- [backend/src/core/codec.ts](../../../../../../backend/src/core/codec.ts): owned source.
+- [backend/src/core/text.ts](../../../../../../backend/src/core/text.ts): owned source.
+- [backend/src/core/changes.ts](../../../../../../backend/src/core/changes.ts): owned source.
+- [backend/src/core/validation.ts](../../../../../../backend/src/core/validation.ts): owned source.
+- [backend/src/core/workspace-bootstrap.ts](../../../../../../backend/src/core/workspace-bootstrap.ts): owned source.
+- [backend/src/core/workspace-reset.ts](../../../../../../backend/src/core/workspace-reset.ts): owned source.
+- [agent](../agent/impl/README.md): child implementation.
+- [harness](../harness/impl/README.md): child implementation.
+- [workspace](../workspace/impl/README.md): child implementation.
+- [team](../team/impl/README.md): child implementation.
+- [Backend tests](../../../../../../backend/test): unit/HTTP, in-memory execution, boundary and disposable SQL integration checks.
 
 ## Automatic retrieval
 

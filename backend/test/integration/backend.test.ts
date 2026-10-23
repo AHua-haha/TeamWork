@@ -1,10 +1,10 @@
 import { MySqlStorage } from '../../src/storage/mysql.js';
 import { acceptFiles,initGit,waitApproval } from '../git-fixture.js';
-import { gitText } from '../../src/core/workspace-git.js';
+import { gitText } from '../../src/core/workspace/workspace-git.js';
 import { seedDesign } from '../design-fixture.js';
 import { testModels, testModelValidator } from '../memory-store.js';
-import { emptyHarness } from '../../src/core/harness-config.js';
-import { closeBashRuntime } from '../../src/core/harness-command.js';
+import { emptyHarness } from '../../src/core/harness/harness-config.js';
+import { closeBashRuntime } from '../../src/core/harness/harness-command.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -16,22 +16,22 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createModels, fauxAssistantMessage, fauxProvider, Type, type AssistantMessageEvent, type Message } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
-import { CoreData } from '../../src/core/core-data.js';
-import { ConfigService, emptyRunSettings } from '../../src/core/config.js';
-import { createBackendModels } from '../../src/core/providers.js';
-import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/core/agent-runtime.js';
+import { TeamData } from '../../src/core/team/data.js';
+import { ConfigService, emptyRunSettings } from '../../src/core/team/config.js';
+import { createBackendModels } from '../../src/core/agent/providers.js';
+import { TeamRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/core/team/runtime.js';
 import { createAgentServer } from '../../src/api/http.js';
-import { TeamSystem } from '../../src/core/team-system.js';
-import { webTools } from '../../src/core/web-tools.js';
-import { newLead } from '../../src/core/team.js';
-import { WorkspaceService } from '../../src/core/workspace.js';
-import type { ContextCommit } from '../../src/core/context-base.js';
+import { TeamSystem } from '../../src/core/team/team-system.js';
+import { webTools } from '../../src/core/harness/web-tools.js';
+import { newLead } from '../../src/core/team/team.js';
+import { WorkspaceService } from '../../src/core/workspace/workspace.js';
+import type { ContextCommit } from '../../src/core/workspace/context-base.js';
 import { sha256 } from '../../src/core/text.js';
-import type { FollowEvent } from '../../src/core/types.js';
+import type { FollowEvent } from '../../src/core/agent/types.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a disposable MySQL 8.4 database (see README)');
-const store = new CoreData(new MySqlStorage(databaseUrl));
+const store = new TeamData(new MySqlStorage(databaseUrl));
 const config = new ConfigService(store, createModels());
 const workspaces = new WorkspaceService(store, testModelValidator);
 const testEncryptionKey = Buffer.alloc(32, 7).toString('base64');
@@ -42,7 +42,7 @@ before(async () => {
 after(async () => { await closeBashRuntime(); await workspaces.close(); await store.close(); });
 const unconfigured = ['Select a provider and model'];
 /** A team over the store for an HTTP server whose runtime is `runtime`. */
-function teamFor(runtime: AgentRuntime): TeamSystem {
+function teamFor(runtime: TeamRuntime): TeamSystem {
   const team = new TeamSystem(store, workspaces, config);
   team.attach(runtime);
   return team;
@@ -68,7 +68,7 @@ const user = { role: 'user' as const, content: 'hello', timestamp: 1 };
 
 async function fixture(options: { policy?: RuntimePolicy; progressCapacity?: number; maxSteps?: number } = {}) {
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
-  const runtime = new AgentRuntime(store, staticConfig, options.policy ?? fixedPolicy(model), request => {
+  const runtime = new TeamRuntime(store, staticConfig, options.policy ?? fixedPolicy(model), request => {
     const events = new Queue<AssistantMessageEvent>();
     requests.push({ request, events });
     return events;
@@ -141,7 +141,7 @@ test('MySQL stores completed messages and run markers without transient chunk ta
   await store.finishRun(agentId, run.runId, 'completed');
 });
 
-test('real Pi provider collection drives shared loop, validates and executes tool, then rereads persisted compacted context', { timeout: 15_000 }, async () => {
+test('real Pi provider collection drives shared loop, validates and executes tool, uses in-memory compaction with caller persistence', { timeout: 15_000 }, async () => {
   const faux = fauxProvider({ tokensPerSecond: Infinity });
   const models = createModels();
   models.setProvider(faux.provider);
@@ -153,7 +153,7 @@ test('real Pi provider collection drives shared loop, validates and executes too
   let executed = 0;
   const echo: RuntimeTool = { definition: { name: 'echo', description: 'Echo input', parameters: Type.Object({ value: Type.String() }) }, execute: async args => { executed++; return { content: [{ type: 'text', text: String(args.value) }], isError: false }; } };
   const base = fixedPolicy(faux.getModel(), [echo]);
-  const runtime = new AgentRuntime(store, staticConfig, {
+  const runtime = new TeamRuntime(store, staticConfig, {
     ...base,
     beforeStep: async scope => {
       if (scope.step === 2) {
@@ -164,6 +164,8 @@ test('real Pi provider collection drives shared loop, validates and executes too
     },
   }, piModelStream(models));
   await runtime.open();
+  const readContext = store.getContext; let contextReads = 0;
+  store.getContext = async agentId => { contextReads++; return readContext.call(store, agentId); };
   try {
     const { agentId } = await store.createAgent();
     const run = await runtime.start(agentId, 'go');
@@ -176,8 +178,9 @@ test('real Pi provider collection drives shared loop, validates and executes too
     if (final.type === 'end') assert.equal(final.run?.status, 'completed');
     const history = events.filter(event => event.type === 'message');
     assert.deepEqual(history.map(event => event.record.message.role), ['user', 'assistant', 'toolResult', 'assistant']);
+    assert.equal(contextReads, 1, 'Team restores once; the Agent maintains later model context in memory');
     assert.deepEqual((await store.getContext(agentId)).entries.map(entry => entry.message.role), ['user', 'assistant']);
-  } finally { await runtime.close(); }
+  } finally { store.getContext = readContext; await runtime.close(); }
 });
 
 test('live Pi chunks keep stable identity; disconnect/reconnect gets complete record without chunk replay', { timeout: 15_000 }, async () => {
@@ -364,14 +367,14 @@ test('database commit failure is never announced as completed and terminal failu
 });
 
 test('runtime owner lock excludes second owner and startup recovers abandoned runs', { timeout: 15_000 }, async () => {
-  const other = new CoreData(new MySqlStorage(databaseUrl!));
+  const other = new TeamData(new MySqlStorage(databaseUrl!));
   const f = await fixture();
   try {
     await assert.rejects(other.acquireRuntime(() => {}), /Another runtime/);
   } finally { await other.close(); await f.runtime.close(); }
   const abandoned = await store.startRun(f.agentId, user);
   await store.beginMessage(f.agentId, abandoned.runId, randomUUID(), 1);
-  const recovered = new AgentRuntime(store, staticConfig, fixedPolicy(model), () => new Queue());
+  const recovered = new TeamRuntime(store, staticConfig, fixedPolicy(model), () => new Queue());
   await recovered.open();
   try {
     const state = await recovered.getState(f.agentId);
@@ -469,7 +472,7 @@ test('multiple followers see same identities; aborting one follow leaves others 
 });
 
 test('EOF without Pi done is a failed run, and cancel interrupts a running tool', { timeout: 15_000 }, async () => {
-  const runtime = new AgentRuntime(store, staticConfig, fixedPolicy(model), async function* () {
+  const runtime = new TeamRuntime(store, staticConfig, fixedPolicy(model), async function* () {
     yield { type: 'start', partial: message() };
   });
   await runtime.open();
@@ -560,7 +563,7 @@ test('provider and agent config snapshots survive edits while each next run reso
   assert.ok((await service.modelChoices(connectionId)).some(item => item.modelId === firstModel.id));
   await assert.rejects(service.updateConnection(connectionId, 10, connectionValue), /revision changed/);
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
-  const runtime = new AgentRuntime(store, service, { ...configuredPolicy(), shouldContinue: scope => scope.step === 1 }, request => {
+  const runtime = new TeamRuntime(store, service, { ...configuredPolicy(), shouldContinue: scope => scope.step === 1 }, request => {
     const events = new Queue<AssistantMessageEvent>(); requests.push({ request, events }); return events;
   });
   await runtime.open();
@@ -682,7 +685,7 @@ test('configured requests use selected prompt, registered tool and permitted rea
     name: 'Configured', connectionId, modelId: 'gpt-5', toolOptionIds: [toolId], prompt: 'Agent prompt', promptOptionIds: [promptId], modelOptions: [{ connectionId, modelId: 'gpt-5', reasoning: 'high', maxTokens: 100 }],
   });
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
-  const runtime = new AgentRuntime(store, service, configuredPolicy(), request => {
+  const runtime = new TeamRuntime(store, service, configuredPolicy(), request => {
     const events = new Queue<AssistantMessageEvent>();
     requests.push({ request, events });
     return events;
@@ -863,7 +866,7 @@ test('backend discovers a custom model ID and calls its endpoint through Pi with
   const service = new ConfigService(store, models, [], testEncryptionKey);
   const connectionId = `custom-${randomUUID()}`;
   const connection = await service.createConnection(connectionId, { label: 'Local custom', provider: 'local-custom', baseUrl, api: 'openai-completions', apiKey: 'custom-secret' });
-  let runtime: AgentRuntime | undefined;
+  let runtime: TeamRuntime | undefined;
   try {
     const choices = await service.modelChoices(connectionId, true);
     assert.deepEqual(choices.map(item => item.label), ['Discovered model']);
@@ -879,7 +882,7 @@ test('backend discovers a custom model ID and calls its endpoint through Pi with
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
     await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: choices[0]!.modelId });
-    runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
+    runtime = new TeamRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
     const events = await collect(runtime.follow(agentId, { runId: run.runId }));
@@ -942,7 +945,7 @@ test('Anthropic Messages connection discovers paged models and streams through P
   const models = builtinModels();
   const service = new ConfigService(store, models, [], testEncryptionKey);
   const connectionId = `anthropic-custom-${randomUUID()}`;
-  let runtime: AgentRuntime | undefined;
+  let runtime: TeamRuntime | undefined;
   try {
     await service.createConnection(connectionId, { label: 'Anthropic-compatible', provider: 'custom-anthropic', baseUrl, api: 'anthropic-messages', apiKey: 'anthropic-test-key' });
     const choices = await service.modelChoices(connectionId, true);
@@ -955,7 +958,7 @@ test('Anthropic Messages connection discovers paged models and streams through P
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
     await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'custom-claude-b' });
-    runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
+    runtime = new TeamRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
     const events = await collect(runtime.follow(agentId, { runId: run.runId }));
@@ -1004,7 +1007,7 @@ test('known DeepSeek model follows the connection protocol instead of its Pi def
   const models = builtinModels();
   const service = new ConfigService(store, models, [], testEncryptionKey);
   const connectionId = `deepseek-anthropic-${randomUUID()}`;
-  let runtime: AgentRuntime | undefined;
+  let runtime: TeamRuntime | undefined;
   try {
     await service.createConnection(connectionId, { label: 'DeepSeek via Anthropic', provider: 'deepseek',
       baseUrl: `http://127.0.0.1:${address.port}/anthropic`, api: 'anthropic-messages', apiKey: 'deepseek-test-key' });
@@ -1017,7 +1020,7 @@ test('known DeepSeek model follows the connection protocol instead of its Pi def
     const { agentId } = await store.createAgent();
     const initial = await service.getAgent(agentId);
     await service.updateAgent(agentId, initial.revision, { ...initial.value, connectionId, modelId: 'deepseek-v4-pro', modelOptions: [{ connectionId, modelId: 'deepseek-v4-pro', reasoning: 'high' }] });
-    runtime = new AgentRuntime(store, service, configuredPolicy(), piModelStream(models));
+    runtime = new TeamRuntime(store, service, configuredPolicy(), piModelStream(models));
     await runtime.open();
     const run = await runtime.start(agentId, 'Hello');
     const events = await collect(runtime.follow(agentId, { runId: run.runId }));
@@ -1037,7 +1040,7 @@ test('known DeepSeek model follows the connection protocol instead of its Pi def
 test('config HTTP exposes app, catalog and agent edits without accepting invalid run input', { timeout: 20_000 }, async () => {
   const models = builtinModels();
   const service = new ConfigService(store, models, [], testEncryptionKey);
-  const runtime = new AgentRuntime(store, service, configuredPolicy(), async function* () { yield { type: 'done', reason: 'stop', message: message() }; });
+  const runtime = new TeamRuntime(store, service, configuredPolicy(), async function* () { yield { type: 'done', reason: 'stop', message: message() }; });
   await runtime.open();
   const server = createAgentServer(runtime, service, workspaces, teamFor(runtime));
   server.listen(0, '127.0.0.1');
@@ -1087,7 +1090,7 @@ test('config HTTP exposes app, catalog and agent edits without accepting invalid
 test('persisted context survives reopening the pool; corrupt stored schema fails explicitly', { timeout: 15_000 }, async () => {
   const { agentId } = await store.createAgent();
   await store.replaceContext(agentId, 0, [{ messageId: 'opaque', message: user, metadata: { hidden: true, nested: [1, 'x'] } }]);
-  const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+  const reopened = new TeamData(new MySqlStorage(databaseUrl!));
   try {
     assert.deepEqual(await reopened.getContext(agentId), await store.getContext(agentId));
     await reopened.pool.execute('UPDATE agents SET context = ? WHERE id = ?', ['{"version":999,"data":[]}', agentId]);
@@ -1103,7 +1106,7 @@ test('members edit the shared project, checkpoint runs and separate project comm
   const service = new ConfigService(store, builtinModels());
   const team = new TeamSystem(store, workspaceService, service);
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
-  const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), request => {
+  const runtime = new TeamRuntime(store, team.runConfig, team.policy(configuredPolicy()), request => {
     const events = new Queue<AssistantMessageEvent>();
     requests.push({ request, events });
     return events;
@@ -1198,7 +1201,7 @@ test('members edit the shared project, checkpoint runs and separate project comm
 
 test('workspace registry refuses duplicates; context commits reload with history and refuse a stale sequence', { timeout: 15_000 }, async () => {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'workspace-')));
-  const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+  const reopened = new TeamData(new MySqlStorage(databaseUrl!));
   try {
     const directory = join(folder, 'project');
     const { workspaceId } = await workspaces.create({ name: 'Integration', directory, models: testModels(), adopt: false });
@@ -1291,7 +1294,7 @@ test('workspace model SQL persistence initializes leads atomically and default e
     assert.deepEqual(await team.service.find(lead.id), lead);
     const member = await team.service.create(created.workspaceId, { name: 'Worker', role: 'developer' });
     assert.equal(member.settings.modelId, second.modelId);
-    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    const reopened = new TeamData(new MySqlStorage(databaseUrl!));
     try { assert.deepEqual(await reopened.getWorkspaceModels(created.workspaceId), { revision: initial.revision + 1, value: { ...pool, defaultModel: second } }); }
     finally { await reopened.close(); }
     const legacyId = randomUUID();
@@ -1318,7 +1321,7 @@ async function groupFixture(basePolicy: RuntimePolicy = configuredPolicy()) {
   const service = new ConfigService(store, builtinModels());
   const team = new TeamSystem(store, workspaceService, service);
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
-  const runtime = new AgentRuntime(store, team.runConfig, team.policy(basePolicy), request => {
+  const runtime = new TeamRuntime(store, team.runConfig, team.policy(basePolicy), request => {
     const events = new Queue<AssistantMessageEvent>(); requests.push({ request, events }); return events;
   });
   team.attach(runtime);
@@ -1398,7 +1401,7 @@ test('agent headers route atomically and persist only the referenced body while 
     const context = await store.getContext(f.lead.memberId);
     await store.replaceContext(f.lead.memberId, context.revision, [{ messageId: 'header-summary', message: { role: 'user', content: 'Compacted context.', timestamp: 1 }, metadata: {} }]);
     assert.deepEqual(await store.runMessages(f.lead.memberId, accepted.runs[0]!.runId), history);
-    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    const reopened = new TeamData(new MySqlStorage(databaseUrl!));
     try { assert.equal((await reopened.chatSnapshot(f.workspaceId)).messages.at(-1)!.text, body); }
     finally { await reopened.close(); }
     answer(left.events, message('<mentions>\n</mentions>\n\nFinished @Lead @Nobody'));
@@ -1538,7 +1541,7 @@ test('group chat SQL/runtime: sequential execution, private feedback and activat
     await f.runtime.finished(f.backend.memberId, next.runs[0]!.runId);
     const newcomer = await f.team.create(f.workspaceId, { name: 'New Member', role: 'developer' });
     assert.equal((await store.getContext(newcomer.memberId)).entries.length, 0);
-    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    const reopened = new TeamData(new MySqlStorage(databaseUrl!));
     try { assert.deepEqual(await reopened.chatSnapshot(f.workspaceId), await store.chatSnapshot(f.workspaceId)); }
     finally { await reopened.close(); }
     // History query needs neither a running member nor a model call.
@@ -1592,7 +1595,7 @@ test('group SQL publication is atomic; restart preserves shared history without 
     assert.deepEqual((await store.getContext(f.backend.memberId)).entries, []);
     let recoveredFinalization = false;
     const recoveryPolicy = f.team.policy(configuredPolicy());
-    const recovery = new AgentRuntime(store, f.team.runConfig, { ...recoveryPolicy, afterRun: async run => {
+    const recovery = new TeamRuntime(store, f.team.runConfig, { ...recoveryPolicy, afterRun: async run => {
       assert.equal(run.status, 'interrupted');
       assert.equal((await store.getState(run.agentId)).run?.status, 'running');
       await recoveryPolicy.afterRun?.(run);
@@ -1620,7 +1623,7 @@ test('shutdown waits for in-flight solo input acceptance, registers its run, the
   let entered!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const preparing = new Promise<void>(resolve => { entered = resolve; });
-  const runtime = new AgentRuntime(store, { resolveForRun: async () => { entered(); await gate; return staticConfig.resolveForRun(); } }, fixedPolicy(model), async function* () {
+  const runtime = new TeamRuntime(store, { resolveForRun: async () => { entered(); await gate; return staticConfig.resolveForRun(); } }, fixedPolicy(model), async function* () {
     await new Promise<void>(() => undefined);
     yield { type: 'done', reason: 'stop', message: message('unreachable') };
   });
@@ -1675,7 +1678,7 @@ test('group timeline reserves deterministic positions, pins final references and
     const [publicRows] = await store.pool.execute<any[]>('SELECT entry FROM chat_messages WHERE workspace_id = ?', [f.workspaceId]);
     const storedFinals = publicRows.map(row => typeof row.entry === 'string' ? JSON.parse(row.entry).data : row.entry.data).filter(entry => entry.author.type === 'member');
     assert.ok(storedFinals.every(entry => entry.finalRef && entry.text === undefined), 'public history stores references, not duplicate final text');
-    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    const reopened = new TeamData(new MySqlStorage(databaseUrl!));
     try { await reopened.migrate(); assert.deepEqual(await reopened.chatTimeline(f.workspaceId), snapshot); } finally { await reopened.close(); }
   } finally { await f.close(); }
 });
@@ -1696,7 +1699,7 @@ test('group timeline refusal creates no reservation, and cancellation/restart fi
     if (entry.kind === 'member') { assert.equal(entry.run.status, 'cancelled'); assert.equal(entry.finalRef, null); assert.equal(entry.position, 2); assert.equal(entry.working.through, 0); }
     const input = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'abandoned work', recipients: [f.frontend.memberId] });
     await f.runtime.close(); // Persisted but unlaunched work remains abandoned until recovery.
-    const reopened = new AgentRuntime(store, teamFor(f.runtime).runConfig, configuredPolicy(), () => { throw new Error('Recovery must not run a model'); });
+    const reopened = new TeamRuntime(store, teamFor(f.runtime).runConfig, configuredPolicy(), () => { throw new Error('Recovery must not run a model'); });
     await reopened.open();
     try {
       const recovered = (await store.chatTimeline(f.workspaceId)).changes.at(-1)!.entry;
@@ -1757,7 +1760,7 @@ test('member file activation atomically replaces/updates the team, retains histo
     const replacement = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
     const marker = await store.getMemberActivation(f.workspaceId);
     assert.equal(marker!.revision, review.revision);
-    const reopenedStore = new CoreData(new MySqlStorage(databaseUrl!));
+    const reopenedStore = new TeamData(new MySqlStorage(databaseUrl!));
     try { assert.deepEqual(await reopenedStore.getMemberActivation(f.workspaceId), marker); }
     finally { await reopenedStore.close(); }
     assert.notEqual(replacement.id, f.backend.memberId); assert.equal(replacement.value.settings.prompt, 'Accepted prompt');
@@ -1796,7 +1799,7 @@ test('member activation store rejects busy/stale state and rolls back earlier me
 test('fresh bootstrap and administrative reset persist atomic baselines, preserve providers/files and roll back failed cleanup', {timeout:30_000}, async () => {
   const database = `bootstrap_${randomUUID().replaceAll('-','')}`, url = new URL(databaseUrl!); url.pathname = `/${database}`;
   await store.pool.query(`CREATE DATABASE ${database}`);
-  const isolated = new CoreData(new MySqlStorage(url.toString())), service = new WorkspaceService(isolated,testModelValidator);
+  const isolated = new TeamData(new MySqlStorage(url.toString())), service = new WorkspaceService(isolated,testModelValidator);
   const folder = await mkdtemp(join(tmpdir(),'bootstrap-reset-'));
   const {mkdir,readdir} = await import('node:fs/promises');
   const {resetWorkspaceData} = await import('../../src/core/workspace-reset.js');
@@ -1812,7 +1815,7 @@ test('fresh bootstrap and administrative reset persist atomic baselines, preserv
     const lead = (await isolated.listMembers('fresh'))[0]!;
     assert.deepEqual(lead.value.harness.designScope.working,['metadata.json']);
     assert.equal((await isolated.getMemberActivation('fresh'))!.revision,lead.value.configuration!.acceptedRevision);
-    const reopened = new CoreData(new MySqlStorage(url.toString()));
+    const reopened = new TeamData(new MySqlStorage(url.toString()));
     try { assert.deepEqual(await reopened.getMemberActivation('fresh'),await isolated.getMemberActivation('fresh')); assert.deepEqual((await reopened.loadContext('fresh')).files.map(f=>f.path).sort(),['design/design.md','design/metadata.json','implement/impl/README.md']);
       const changes = await reopened.records('fresh',0,10);
       assert.equal(changes.length,1); assert.equal(changes[0]!.files.length,3);
@@ -1826,7 +1829,7 @@ test('fresh bootstrap and administrative reset persist atomic baselines, preserv
     assert.equal(await isolated.getWorkspace('failed'),null); assert.equal(await isolated.getMemberActivation('failed'),null);
     assert.deepEqual(await isolated.listMembers('failed'),[]); assert.deepEqual(await readdir(failed),['code.ts']); isolated.createWorkspace = original;
     await service.close();
-    const blocker = new CoreData(new MySqlStorage(url.toString())); await blocker.acquireRuntime(()=>{});
+    const blocker = new TeamData(new MySqlStorage(url.toString())); await blocker.acquireRuntime(()=>{});
     try {await assert.rejects(resetWorkspaceData(isolated),code('runtime_conflict'));} finally {await blocker.close();}
     await isolated.pool.query('CREATE TABLE reset_failure (workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))');
     await isolated.pool.query("INSERT INTO reset_failure VALUES ('fresh')");
@@ -1935,7 +1938,7 @@ test('workspace chat reset atomically clears member conversation storage and sta
     assert.equal(await readFile(file, 'utf8'), 'Keep project implementation');
     assert.deepEqual(await store.followSnapshot(solo.agentId, undefined, 0), soloBefore);
     assert.equal((await store.chatSnapshot(otherId)).messages[0]!.messageId, other.message.messageId);
-    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    const reopened = new TeamData(new MySqlStorage(databaseUrl!));
     try { await reopened.migrate(); assert.deepEqual(await reopened.chatTimeline(f.workspaceId), timeline); assert.deepEqual((await reopened.getContext(f.lead.memberId)).entries, []); }
     finally { await reopened.close(); }
     const fresh = await f.team.runner.postUser(f.workspaceId, 'Fresh conversation');
@@ -2229,7 +2232,7 @@ test('member conversation: retained failure ranges survive reopen, accumulate on
     failing.events.push({ type: 'error', reason: 'error', error: { ...message(), stopReason: 'error', errorMessage: 'first failure' } });
     assert.equal((await f.runtime.finished(f.backend.memberId, first.runs[0]!.runId)).status, 'failed');
     const firstHistory = await store.runMessages(f.backend.memberId, first.runs[0]!.runId);
-    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    const reopened = new TeamData(new MySqlStorage(databaseUrl!));
     try {
       await reopened.migrate();
       const [state] = await reopened.pool.execute<any[]>('SELECT group_position, success_position FROM member_contexts WHERE member_id = ?', [f.backend.memberId]);
@@ -2252,7 +2255,7 @@ test('member conversation: retained failure ranges survive reopen, accumulate on
     await writeFile(doc, memberDocument('Maintained successful implementation result'));
     answer(thirdStep.events, message('Public final answer'));
     assert.equal((await f.runtime.finished(f.backend.memberId, third.runs[0]!.runId)).status, 'completed');
-    const restart = new CoreData(new MySqlStorage(databaseUrl!));
+    const restart = new TeamData(new MySqlStorage(databaseUrl!));
     try { await restart.migrate(); const [rows] = await restart.pool.execute<any[]>('SELECT success_position FROM member_contexts WHERE member_id = ?', [f.backend.memberId]); assert.ok(rows[0].success_position > 0); }
     finally { await restart.close(); }
     const next = await f.team.runner.postUser(f.workspaceId, '@Backend fresh task');
@@ -2301,7 +2304,7 @@ test('member retrieval uses full Bash inputs in member shell order and persists 
 
 test('member context restart recovery retains abandoned private work, repairs missing tools without replay, and reset removes boundaries', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
-  let recovery: AgentRuntime | undefined;
+  let recovery: TeamRuntime | undefined;
   try {
     await f.runtime.close();
     const admitted = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: '@Backend interrupted', recipients: [f.backend.memberId] });
@@ -2312,7 +2315,7 @@ test('member context restart recovery retains abandoned private work, repairs mi
     await store.commitMessage(f.backend.memberId, run.runId, { messageId: id, message: fauxAssistantMessage([{ type: 'toolCall', id: 'unresolved-tool', name: 'bash', arguments: { command: 'may have effects' } }], { stopReason: 'toolUse' }), metadata: {} });
     const original = await store.runMessages(f.backend.memberId, run.runId);
     const policy = f.team.policy(configuredPolicy());
-    recovery = new AgentRuntime(store, f.team.runConfig, policy, () => { throw new Error('Startup must not run model'); });
+    recovery = new TeamRuntime(store, f.team.runConfig, policy, () => { throw new Error('Startup must not run model'); });
     await recovery.open();
     assert.equal((await recovery.getState(f.backend.memberId)).run?.status, 'interrupted');
     const next = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'Next trigger', recipients: [f.backend.memberId] });
@@ -2332,7 +2335,7 @@ test('member context restart recovery retains abandoned private work, repairs mi
 
 test('shared pictures survive reopen, hydrate native model messages, and reset removes all image state', { timeout: 30_000 }, async () => {
   const { png } = await import('../image-fixture.js');
-  const { prepareChatImage } = await import('../../src/core/chat-images.js');
+  const { prepareChatImage } = await import('../../src/core/team/chat-images.js');
   const f = await groupFixture();
   try {
     const image = await prepareChatImage(png(), 'screenshot.png');
@@ -2349,7 +2352,7 @@ test('shared pictures survive reopen, hydrate native model messages, and reset r
     const [count] = await store.pool.execute<any[]>('SELECT COUNT(*) AS n FROM chat_images WHERE workspace_id = ?', [f.workspaceId]); assert.equal(count[0].n, 1);
     answer(step.events, message('Image understood'));
     await f.runtime.finished(f.lead.memberId, first.runs[0]!.runId);
-    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    const reopened = new TeamData(new MySqlStorage(databaseUrl!));
     try {
       const snapshot = await reopened.chatSnapshot(f.workspaceId);
       assert.deepEqual(snapshot.messages[0]!.attachments, [image.metadata]);
@@ -2375,7 +2378,7 @@ test('constructed image context fails explicitly when a later model request cann
     return { ...request, model: { ...request.model, input: ['text'] } };
   } });
   try {
-    const { prepareChatImage } = await import('../../src/core/chat-images.js');
+    const { prepareChatImage } = await import('../../src/core/team/chat-images.js');
     const { png } = await import('../image-fixture.js');
     const accepted = await f.team.runner.postUser(f.workspaceId, '', [await prepareChatImage(png(), 'picture.png')]);
     const state = await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);

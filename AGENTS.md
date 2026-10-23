@@ -13,4 +13,4 @@ Use the full protocol and task prompt for development work. For unrelated questi
 
 ## Context and ownership
 
-Use the RSI context roots as the only maintained project context. Frontend, Backend and Operations are the top-level systems; Backend contains aggregate Core, API, Storage and Runtime. Core owns business models and their durable schemas/SQL/migrations. Storage provides engine resources without business schema knowledge. Keep Core aggregated until its internal design is discussed. Add only intended `.rsi/context` and task records to Git, never member/runtime metadata or secrets.
+Use the RSI context roots as the only maintained project context. Frontend, Backend and Operations are the top-level systems; Backend contains Core, API, Storage and Runtime. Core owns business models and their durable schemas/SQL/migrations. Storage provides engine resources without business schema knowledge. Use the agreed Agent, Harness, Workspace and Team child boundaries. A business system need not own persistence; its caller may persist public in-memory data. Add only intended `.rsi/context` and task records to Git, never member/runtime metadata or secrets.

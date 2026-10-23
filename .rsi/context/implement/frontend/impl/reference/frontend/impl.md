@@ -4,7 +4,7 @@
 
 ## Contract
 
-[Frontend design](design.md). The agent client owns backend requests, Pi data, synchronization and recovery. The assistant-ui adapter derives display messages and actions without becoming another source of history. The workspace client owns workspace, current-design, team, project-file and context-base requests and the context change feed; the workspace panel derives its current Design/Team and Changes tabs, trees and file viewer from those responses. It uses the operations of the [Workspace design](../../../../backend/core/impl/reference/workspace-agent/workspace/design.md), the [Team design](../../../../backend/core/impl/reference/workspace-agent/team/design.md), and the [Context base design](../../../../backend/core/impl/reference/workspace-agent/context-base/design.md).
+[Frontend design](design.md). The agent client owns backend requests, Pi data, synchronization and recovery. The assistant-ui adapter derives display messages and actions without becoming another source of history. The workspace client owns workspace, current-design, team, project-file and context-base requests and the context change feed; the workspace panel derives its current Design/Team and Changes tabs, trees and file viewer from those responses. It uses the operations of the [Workspace design](../../../../backend/core/workspace/impl/reference/workspace-agent/workspace/design.md), the [Team design](../../../../backend/core/team/impl/reference/workspace-agent/team/design.md), and the [Context base design](../../../../backend/core/workspace/impl/reference/workspace-agent/context-base/design.md).
 
 ## Responsibilities and decomposition
 
@@ -118,7 +118,7 @@ Verification exercises frontend client contracts, design/member matching includi
 
 ## Workspace group chat code and verification
 
-The [group chat UI child](group-chat/design.md) owns group-client.ts, GroupChat.tsx and group-work.ts. It composes backend [group chat](../../../../backend/core/impl/reference/workspace-agent/team/group-chat/design.md) persistence/observation with private agent inspection. MemberInspector.tsx reads the consolidated member inspection API; the old MemberRunSettings editor and member write client are removed. WorkspacePage mounts the group component; solo ChatPage remains unchanged.
+The [group chat UI child](group-chat/design.md) owns group-client.ts, GroupChat.tsx and group-work.ts. It composes backend [group chat](../../../../backend/core/team/impl/reference/workspace-agent/team/group-chat/design.md) persistence/observation with private agent inspection. MemberInspector.tsx reads the consolidated member inspection API; the old MemberRunSettings editor and member write client are removed. WorkspacePage mounts the group component; solo ChatPage remains unchanged.
 
 Client tests in frontend/test/group.test.ts cover acknowledgement/feed races, contiguous replay, in-place updates, refusal, run-range filtering and final-text deduplication. Controlled browser fixture and recorded review in the historical frontend-group-chat task (Git b3daf6767b1ecaeb87da55eb316831d1303ea5a2:docs/tasks/2026-10-14-frontend-group-chat) cover layout, folded work, settings, mentions, cancellation and reload. MySQL integration verifies the corresponding persisted contract.
 

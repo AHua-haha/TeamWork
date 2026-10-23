@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { WorkspaceService } from '../src/core/workspace.js';
+import { WorkspaceService } from '../src/core/workspace/workspace.js';
 import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;

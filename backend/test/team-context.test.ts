@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import type { ModelRequest, RuntimePolicy, StepScope } from '../src/core/agent-runtime.js';
-import { viewBudget } from '../src/core/harness.js';
+import type { ModelRequest, RuntimePolicy, StepScope } from '../src/core/team/runtime.js';
+import { viewBudget } from '../src/core/harness/harness.js';
 import { configureHarness, withTeam, worker } from './team-fixture.js';
 
 const names = (request: ModelRequest) => request.tools.map(tool => tool.definition.name);

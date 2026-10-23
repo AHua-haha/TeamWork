@@ -2,13 +2,13 @@
 
 ## Result summary
 
-The backend source now follows four high-level ownership directories. Core remains aggregated. Existing public HTTP/SSE and persisted data formats are preserved.
+The backend source now follows four high-level ownership directories. Core contains Agent, Harness, Workspace and Team. Agent execution is in memory; Team supplies durable hosting. Existing public HTTP/SSE and persisted data formats are preserved.
 
 Design: [Backend](../../../design/backend/design.md).
 
 ### Coordination and ownership
 
-Runtime creates MySqlStorage, injects it into CoreData, constructs Core services and API, then initializes Core and binds HTTP. API forwards application operations to Core. Core controls semantic validation and business transactions.
+Runtime creates MySqlStorage, injects it into TeamData, constructs Core services and API, then initializes Core and binds HTTP. API forwards application operations to Core. Core controls semantic validation and business transactions.
 
 ### Implemented contract
 

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { CoreData } from './core-data.js';
+import { TeamData } from './team/data.js';
 import { missing, sha256 } from './text.js';
 
-const tables = ['chat_changes', 'chat_entries', 'chat_clock', 'member_context_runs', 'member_contexts', 'chat_runs', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_settings', 'messages', 'runs', 'members', 'workspace_git_baselines', 'member_activation', 'context_files', 'context_versions', 'context_blobs', 'context_records', 'workspace_models', 'workspaces', 'agents'];
+
 /** Administrative reset, never an agent or HTTP capability. Requires exclusive database ownership. */
-export async function resetWorkspaceData(store: CoreData) {
+export async function resetWorkspaceData(store: TeamData) {
   await store.acquireRuntime(() => {});
   const moved: { from: string; to: string }[] = [];
   try {
@@ -23,12 +23,9 @@ export async function resetWorkspaceData(store: CoreData) {
         const to = `${from}.reset-${randomUUID()}`;
         await rename(from, to); moved.push({ from, to });
       }
-      const [existing] = await db.query('SHOW TABLES');
-      const available = new Set((existing as Record<string, string>[]).flatMap(row => Object.values(row)));
       store.assertRuntime();
       await db.beginTransaction();
-      for (const table of tables.filter(table=>available.has(table))) await db.query(`DELETE FROM ${table}`);
-      await db.execute("DELETE FROM config_records WHERE scope = 'agent'");
+      await store.resetRuntimeRecords(db);
       store.assertRuntime();
       await db.commit();
     } catch (error) {

@@ -70,7 +70,7 @@ Both return a single text block containing Markdown core information followed by
 
 Requests have a 30-second deadline and a 4 MiB response-body limit. Core Markdown is capped at 64 KiB of UTF-8 text with visible truncation. No matches is successful; missing credentials, invalid input and provider failures return recoverable error tool results for the agent to handle without stopping its loop. No automatic retry is performed. Cancellation aborts HTTP. Credentials and raw provider error bodies are excluded from results.
 
-[Web tool contract](../.rsi/context/implement/backend/core/impl/reference/web-tools/design.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
+[Web tool contract](../.rsi/context/implement/backend/core/harness/impl/reference/web-tools/design.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
 
 ## Workspace models
 
@@ -131,34 +131,36 @@ The sandbox permits system reads, workspace/owned-temp writes, networking/local 
 
 The backend registers `modelflare` at startup alongside Pi's built-in providers. Select it in the existing provider connection form and supply your API key. No model-definition UI or discovery refresh is required for its 32 predefined agent chat models, including Claude Haiku 5.5, Sonnet 5.5 and GPT-6.1 Sol.
 
-Use `https://modelflare.dev` for Anthropic Messages, or `https://modelflare.dev/v1` for OpenAI Chat Completions / Responses. Model choices are filtered by the model's documented protocol support; use separate connections for different protocols. Use Responses for GPT-6.1 tool calling. Catalog metadata does not establish your key's routing-group access. The dated [complete inventory and metadata sources](../.rsi/context/implement/backend/core/impl/reference/modelflare-inventory.md) covers all 76 observed IDs, including media and specialized models outside the agent chat runtime. Gateway cost rates are unpriced, not copied from upstream billing.
+Use `https://modelflare.dev` for Anthropic Messages, or `https://modelflare.dev/v1` for OpenAI Chat Completions / Responses. Model choices are filtered by the model's documented protocol support; use separate connections for different protocols. Use Responses for GPT-6.1 tool calling. Catalog metadata does not establish your key's routing-group access. The dated [complete inventory and metadata sources](../.rsi/context/implement/backend/core/agent/impl/reference/modelflare-inventory.md) covers all 76 observed IDs, including media and specialized models outside the agent chat runtime. Gateway cost rates are unpriced, not copied from upstream billing.
 
 Existing connections are preserved: a connection whose provider is still `anthropic` uses that catalog until you explicitly change it to `modelflare`.
 
 ## Customize the runtime
 
-The exported `AgentRuntime` always owns the loop. `RuntimePolicy` supplies:
+`AgentExecution` owns the in-memory loop; the exported `TeamRuntime` hosts it and supplies persistence/recovery. `RuntimePolicy` supplies:
 
 | Hook | Responsibility |
 | --- | --- |
-| `beforeStep(scope)` | Read/replace canonical stored context, including compaction |
+| `beforeStep(scope)` | Read/replace working context, including compaction; Team acknowledges durable changes |
 | `buildRequest(scope, history)` | Choose model, exact Pi context/messages, declared tools, options and executable handlers for each call |
 | `executeTool(tool, args, scope, call)` | Optional centralized tool execution hook |
 | `shouldContinue(scope, response, results)` | Decide whether the loop makes another call |
 | `afterRun(run)` | Finalize harness/file effects after pending operations settle; also invoked before interrupted-run recovery |
 | `messageMetadata(scope, message)` | Attach JSON metadata to completed model/tool records |
 
-`configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the canonical context history for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. Solo agents have no built-in catalog tools; register them in a custom entry point. Workspace members receive their tools from the harness, including lead design and team operations.
+`configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the Agent working context for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. Solo agents have no built-in catalog tools; register them in a custom entry point. Workspace members receive their tools from the harness, including lead design and team operations.
 
-Example policy customization:
+`AgentExecution` is also usable without persistence: supply run/context/settings, policy and model stream, then call `run(signal)` and inspect `snapshot()`. Its optional `AgentObserver` lets a caller acknowledge message start, completed messages, context changes and completion. Team uses that interface to persist data; Agent has no database dependency. See the [Agent implemented contract](../.rsi/context/implement/backend/core/agent/impl/README.md).
+
+Example durable-host policy customization:
 
 ```ts
 import { Type } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
-import { AgentRuntime, ConfigService, CoreData, MySqlStorage, configuredPolicy, piModelStream, type RuntimeTool } from './src/api/index.js';
+import { TeamRuntime, ConfigService, TeamData, MySqlStorage, configuredPolicy, piModelStream, type RuntimeTool } from './src/api/index.js';
 
 const models = builtinModels();
-const store = new CoreData(new MySqlStorage(process.env.DATABASE_URL!));
+const store = new TeamData(new MySqlStorage(process.env.DATABASE_URL!));
 const tools: RuntimeTool[] = [{
   definition: {
     name: 'echo', description: 'Return the supplied text',
@@ -169,7 +171,7 @@ const tools: RuntimeTool[] = [{
   }),
 }];
 const config = new ConfigService(store, models, tools);
-const runtime = new AgentRuntime(store, config, configuredPolicy(), piModelStream(models));
+const runtime = new TeamRuntime(store, config, configuredPolicy(), piModelStream(models));
 await store.migrate();
 await config.initialize();
 await runtime.open();
@@ -193,7 +195,7 @@ try {
 }
 ```
 
-Context replacement uses `{revision, entries}` from `scope.readContext()` and `scope.replaceContext(revision, entries)`. It changes actual stored context and never edits display history. An update after a provider request was constructed affects subsequent calls. Metadata and compaction policy are application-defined.
+Context replacement uses `{revision, entries}` from `scope.readContext()` and `scope.replaceContext(revision, entries)`. Agent maintains working context in memory. In the Team host, its acknowledgement also persists the replacement; immutable display history is unchanged. An update after a provider request was constructed affects subsequent calls. Metadata and compaction policy are application-defined.
 
 Defaults: maximum 64 model calls per run; sequential tools; retain at most 1,024 compact progress events per member in memory (`progressCapacity` is the constructor option). FIFO eviction is independent of readers and completed SQL history. Recoverable tool errors remain recorded results and allow normal continuation; fatal model/protocol/persistence errors fail the run; completed records survive. Cancelled or failed partial model output is discarded. Restart marks unfinished runs interrupted; it does not replay external tool effects. Tools and hooks must honor cancellation.
 
@@ -202,7 +204,7 @@ Defaults: maximum 64 model calls per run; sequential tools; retain at most 1,024
 Set `VERIFY_TASK_ID` to the task whose test log should receive the result:
 
 ```sh
-export VERIFY_TASK_ID=2026-10-23-backend-boundaries
+export VERIFY_TASK_ID=2026-10-23-core-systems
 node scripts/verify.mjs npm run check
 node scripts/verify.mjs npm test
 # Creates and removes its own disposable MySQL container; Docker must be running.
@@ -222,11 +224,11 @@ Integration tests create agents, write data, and intentionally corrupt one test 
 ## Contracts and implementation
 
 - [Backend design](../.rsi/context/design/backend/design.md) and [implementation context](../.rsi/context/implement/backend/impl/README.md).
-- [Core](../.rsi/context/design/backend/core/design.md) owns business behavior, data models, SQL and migrations. Its current internals remain aggregated.
+- [Core](../.rsi/context/design/backend/core/design.md) owns business behavior, data models, SQL and migrations. Its child systems are Agent, Harness, Workspace and Team; persistence is optional per system and currently assigned to Team.
 - [API](../.rsi/context/design/backend/api/design.md) owns HTTP/SSE/multipart transport.
 - [Storage](../.rsi/context/design/backend/storage/design.md) supplies MySQL resources and generic transactions, with no business schema.
 - [Runtime](../.rsi/context/design/backend/runtime/design.md) hosts and wires the backend; the agent loop is inside Core.
-- [Task and verification](../.rsi/work/tasks/2026-10-23-backend-boundaries/task.md).
+- [Task and verification](../.rsi/work/tasks/2026-10-23-core-systems/task.md).
 
 ### Group response timeline for the frontend
 

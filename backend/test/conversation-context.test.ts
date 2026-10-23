@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
-import { contextInput, parseContextDocument, repairInterruptedTools } from '../src/core/conversation-context.js';
-import { memberContextPath } from '../src/core/workspace-layout.js';
-import type { ContextEntry } from '../src/core/types.js';
+import { contextInput, parseContextDocument, repairInterruptedTools } from '../src/core/team/conversation-context.js';
+import { memberContextPath } from '../src/core/workspace/workspace-layout.js';
+import type { ContextEntry } from '../src/core/agent/types.js';
 
 const document = (commands: unknown[] = []) => `# Context\n\n## Result summary\nCurrent state.\n\n## File lookup\n| Path | Description |\n| --- | --- |\n| secret.txt | Inspect only when needed |\n\n## Automatic retrieval\n\n\`\`\`json\n${JSON.stringify({ commands })}\n\`\`\`\n`;
 

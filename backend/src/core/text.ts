@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { AppError } from './types.js';
+import { AppError } from './agent/types.js';
 
 /** Text files served by the context base and the project-file API. */
 export const maxFileBytes = 1024 * 1024;

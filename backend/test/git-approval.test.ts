@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withTeam, worker, code } from './team-fixture.js';
 import { initGit, waitApproval, acceptFiles } from './git-fixture.js';
-import { gitText, currentFiles } from '../src/core/workspace-git.js';
+import { gitText, currentFiles } from '../src/core/workspace/workspace-git.js';
 
 const signal=()=>new AbortController().signal;
 test('ordinary implementation commits preserve branch, staged bytes and unstaged files without harness history',()=>withTeam(async f=>{

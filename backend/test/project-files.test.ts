@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ProjectFiles, projectPath } from '../src/core/project-files.js';
+import { ProjectFiles, projectPath } from '../src/core/workspace/project-files.js';
 import { sha256 } from '../src/core/text.js';
 import { withFolder } from './memory-store.js';
 

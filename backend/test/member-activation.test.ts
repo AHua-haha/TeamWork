@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { TeamSystem } from '../src/core/team-system.js';
+import { TeamSystem } from '../src/core/team/team-system.js';
 import { code, settle, stubConfig, withTeam, worker, type Fixture } from './team-fixture.js';
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };

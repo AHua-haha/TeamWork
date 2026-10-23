@@ -8,7 +8,7 @@ Design: [API](../../../../design/backend/api/design.md).
 
 ### Coordination and ownership
 
-createAgentServer receives AgentRuntime and configuration/workspace/team services and returns an unbound Node HTTP server. HTTP handlers call Core operations, map errors and stream Core history/progress. readImageSubmission parses multipart requests; Core prepares/validates image blocks.
+createAgentServer receives TeamRuntime and configuration/workspace/team services and returns an unbound Node HTTP server. HTTP handlers call Core operations, map errors and stream Core history/progress. readImageSubmission parses multipart requests; Core prepares/validates image blocks.
 
 ### Implemented contract
 

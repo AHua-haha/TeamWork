@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
-import { AppError } from '../core/types.js';
-import { maxChatImages, maxImageBytes, prepareChatImage, type PreparedChatImage } from '../core/chat-images.js';
+import { AppError } from '../core/agent/types.js';
+import { maxChatImages, maxImageBytes, prepareChatImage, type PreparedChatImage } from '../core/team/chat-images.js';
 import { rawBody } from './http-helpers.js';
 
 /** Bounded multipart parsing; all validation/preparation completes before publication. */

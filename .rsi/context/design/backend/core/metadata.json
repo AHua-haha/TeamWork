@@ -1,6 +1,11 @@
 {
   "implementation": [
-    "backend/src/core",
-    "backend/prompts"
+    "backend/src/core/codec.ts",
+    "backend/src/core/text.ts",
+    "backend/src/core/changes.ts",
+    "backend/src/core/validation.ts",
+    "backend/src/core/workspace-bootstrap.ts",
+    "backend/src/core/workspace-reset.ts",
+    "backend/src/core/errors.ts"
   ]
 }

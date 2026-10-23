@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createModels, clampThinkingLevel, type AnthropicMessagesCompat, type OpenAICompletionsCompat } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
-import { createBackendModels } from '../src/core/providers.js';
-import { bindModelflareModel, modelflareProvider, modelflareSupportsModel } from '../src/core/providers/modelflare.js';
-import { inheritedModels, supportedModelApis, unsupportedModels } from '../src/core/providers/modelflare-catalog.js';
+import { createBackendModels } from '../src/core/agent/providers.js';
+import { bindModelflareModel, modelflareProvider, modelflareSupportsModel } from '../src/core/agent/providers/modelflare.js';
+import { inheritedModels, supportedModelApis, unsupportedModels } from '../src/core/agent/providers/modelflare-catalog.js';
 
 const registered = createBackendModels();
 

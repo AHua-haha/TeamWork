@@ -2,13 +2,13 @@
 
 ## Result summary
 
-`backend/src/runtime/main.ts` is the process composition root. The model/tool execution loop is Core AgentRuntime, not this hosting system.
+`backend/src/runtime/main.ts` is the process composition root. The model/tool execution loop is Core AgentExecution, hosted durably by TeamRuntime, not this hosting system.
 
 Design: [Runtime](../../../../design/backend/runtime/design.md).
 
 ### Coordination and ownership
 
-Read child-process settings; construct MySqlStorage and CoreData; construct Core services, policies and API; initialize Core schema/config/team; acquire runtime ownership/recover abandoned runs; bind HTTP. Signals close HTTP admission/runs, persistent shells, workspace resources and the Core persistence/Storage lifetime.
+Read child-process settings; construct MySqlStorage and TeamData; construct Core services, policies and API; initialize Core schema/config/team; acquire runtime ownership/recover abandoned runs; bind HTTP. Signals close HTTP admission/runs, persistent shells, workspace resources and the Core persistence/Storage lifetime.
 
 ### Implemented contract
 

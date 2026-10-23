@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { once } from 'node:events';
-import { AppError } from '../core/types.js';
+import { AppError } from '../core/agent/types.js';
 
 export const maxInputBytes = 2 * 1024 * 1024;
 

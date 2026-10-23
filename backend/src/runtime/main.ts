@@ -1,24 +1,24 @@
 import { MySqlStorage } from '../storage/mysql.js';
-import { createBackendModels } from '../core/providers.js';
-import { CoreData } from '../core/core-data.js';
-import { ConfigService } from '../core/config.js';
-import { AgentRuntime, configuredPolicy, piModelStream } from '../core/agent-runtime.js';
+import { createBackendModels } from '../core/agent/providers.js';
+import { TeamData } from '../core/team/data.js';
+import { ConfigService } from '../core/team/config.js';
+import { TeamRuntime, configuredPolicy, piModelStream } from '../core/team/runtime.js';
 import { createAgentServer } from '../api/http.js';
-import { TeamSystem } from '../core/team-system.js';
-import { WorkspaceService } from '../core/workspace.js';
-import { webTools } from '../core/web-tools.js';
-import { harnessPermissionsEnabled } from '../core/harness-policy.js';
-import { closeBashRuntime } from '../core/harness-command.js';
+import { TeamSystem } from '../core/team/team-system.js';
+import { WorkspaceService } from '../core/workspace/workspace.js';
+import { webTools } from '../core/harness/web-tools.js';
+import { harnessPermissionsEnabled } from '../core/harness/harness-policy.js';
+import { closeBashRuntime } from '../core/harness/harness-command.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
 const models = createBackendModels();
 const storage = new MySqlStorage(databaseUrl);
-const store = new CoreData(storage);
+const store = new TeamData(storage);
 const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
 const workspaces = new WorkspaceService(store, config);
 const team = new TeamSystem(store, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY), harnessPermissionsEnabled(process.env.RSI_HARNESS_PERMISSIONS_ENABLED));
-const runtime = new AgentRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models));
+const runtime = new TeamRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models));
 team.attach(runtime);
 const server = createAgentServer(runtime, config, workspaces, team);
 try {

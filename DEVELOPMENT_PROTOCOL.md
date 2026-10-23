@@ -22,6 +22,10 @@ This project follows its RSI context model. There is one maintained context tree
         core/                 # API, Storage and Runtime are siblings
           metadata.json
           design.md
+          agent/              # each child has metadata.json + design.md
+          harness/
+          workspace/
+          team/
       frontend/               # metadata.json + design.md
       operations/             # metadata.json + design.md
     implement/
@@ -43,9 +47,9 @@ This project follows its RSI context model. There is one maintained context tree
 
 Design content uses `design.md` or `design/README.md` plus Markdown topic documents, never both forms. Implementation context uses `impl/README.md` plus optional Markdown references. Multiple documents inside design/ or impl/ still describe the same system. They do not create child systems. Keep context separate from source files, members and backend-managed runtime metadata.
 
-The agreed top-level systems are Frontend, Backend and Operations. Backend has Core, API, Storage and Runtime. Core remains aggregated until its internal design is discussed. Core owns business models, memory, serialization, persistence schemas, SQL, queries, migrations and invariants. Storage supplies technical engine resources and transaction mechanics without business schema knowledge. API owns transport. Runtime owns process hosting and wiring; agent execution belongs to Core.
+The agreed top-level systems are Frontend, Backend and Operations. Backend has Core, API, Storage and Runtime. Core contains Agent, Harness, Workspace and Team. Agent maintains in-memory execution; Team supplies durable persistence through Agent public interfaces. Persistence is an explicitly assigned, optional business responsibility. Core owns business models, memory, serialization, persistence schemas, SQL, queries, migrations and invariants. Storage supplies technical engine resources and transaction mechanics without business schema knowledge. API owns transport. Runtime owns process hosting and wiring; agent execution belongs to Core.
 
-Do not create a parallel docs/ context. Root and package READMEs are entry guides that link to canonical context. Prior docs/tasks history remains available in Git; provenance is recorded in the migration task. Existing detailed behavior references live inside aggregate implementation context until a future agreed design reorganizes them.
+Do not create a parallel docs/ context. Root and package READMEs are entry guides that link to canonical context. Prior docs/tasks history remains available in Git; provenance is recorded in the migration task. Detailed behavior references live inside their owning system implementation context.
 
 ## Design document
 
@@ -73,7 +77,7 @@ Keep canonical implementation context current and enduring. Keep proposals, task
 - Prefer cohesive modules, explicit ownership and one straightforward flow. Remove superseded logic and duplication created by the change.
 - Preserve unchanged agreed guarantees, including failure behavior. Introduce fallbacks only for an explicit contract, such as restarting a previously selected deployment release.
 - Do not silently weaken contracts. Surface material behavioral ambiguity or inability to meet the design at the selected boundary. Routine implementation decisions belong to the agent.
-- Decompose only when a child has a coherent responsibility and useful contract. Do not subdivide Core during the current boundary migration.
+- Decompose only when a child has a coherent responsibility and useful contract. Do not add further child systems without a meaningful agreed boundary.
 
 ## Workflow
 
@@ -110,3 +114,7 @@ Do not rewrite failures. Append corrections identifying the original record when
 - Relevant meaningful checks pass after final behavior-affecting edits, against the exact candidate.
 - Task and test evidence are complete and carry full starting SHAs.
 - Handoff states delivered changes, verification, starting/resulting commits and remaining limitations. No requirement to read intermediate updates to understand the result.
+
+## In-memory and durable ownership
+
+A business system may maintain its data only in memory. Its caller may persist information from its public state/change interface. Persistence is optional and explicitly assigned; it is not a requirement attached to business ownership. AgentExecution is usable without persistence; Team supplies the current acknowledged durable host. Workspace supplies a public persistence port, currently implemented by Team. The persistence owner defines its own durable representation and mapping without making the model owner depend on SQL or storage lifecycle.

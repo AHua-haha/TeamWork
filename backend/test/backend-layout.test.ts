@@ -30,6 +30,12 @@ test('backend source follows the four agreed boundaries and imports only permitt
       }
     }
   }
+  const core = await readdir(join(source, 'core'), { withFileTypes: true });
+  assert.deepEqual(core.filter(entry => entry.isDirectory()).map(entry => entry.name).sort(), ['agent', 'harness', 'team', 'workspace']);
+  for (const path of await files(join(source, 'core/agent'))) {
+    const text = await readFile(path, 'utf8');
+    assert.doesNotMatch(text, /mysql2|storage\/mysql|team\/|harness\/|workspace\/|CREATE TABLE|this\.store|from ['"]\.\.\/codec/, `${path} must execute independently of persistence/business hosts`);
+  }
   const storage = await readFile(join(source, 'storage/mysql.ts'), 'utf8');
   assert.doesNotMatch(storage, /CREATE\s+TABLE|ALTER\s+TABLE|AppError|config_records|chat_messages|member_contexts/i);
 });

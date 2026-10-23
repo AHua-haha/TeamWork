@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { join } from 'node:path';
-import { implementationContextResource } from '../src/core/harness-bases.js';
-import { memberContextPath } from '../src/core/workspace-layout.js';
+import { implementationContextResource } from '../src/core/harness/harness-bases.js';
+import { memberContextPath } from '../src/core/workspace/workspace-layout.js';
 import { withTeam,worker,configureHarness,code } from './team-fixture.js';
 import { initGit } from './git-fixture.js';
 

@@ -2,20 +2,12 @@
 
 ## Purpose, responsibilities and boundaries
 
-Core aggregates the actual agent-system logic. It owns workspace/design/context handling, team/member configuration and cooperation, group chat and member context construction, the agent model/tool loop, harness/tools/permissions, provider/model configuration and application settings. Internal decomposition is deferred.
-
-Core completely owns its data model: runtime memory, serialization, SQL tables/keys/indexes, queries, validation, schema/data migrations and concurrency rules. Its persistence code is part of Core and uses Storage's technical resources. Other systems interact through Core interfaces rather than knowing its records or querying its tables.
+Compose Agent, Harness, Workspace and Team. Coordinate workflows spanning them, including workspace/lead bootstrap and atomic group publication/run admission. Own common error/serialization/transaction plumbing; do not centralize child business schemas.
 
 ## Interface contract
 
-Core accepts validated-shape requests for agent/workspace/configuration/team/chat and execution control. It checks semantic validity, revisions, admission and authority; returns public records, asynchronous run identities, consistent read results, ordered history/progress and explicit errors. Existing callable behavior is retained.
-
-It performs atomic business updates, including group publication/reservations and member activation, through transactions it owns. Member activation remains separate from commit and requires the entire workspace idle. Shared group context and private working history remain distinct. Completed messages are durable and immutable relative to mutable model context; compact progress is memory-only. Recoverable tool failures return tool results and allow the loop to continue.
-
-Working design roots include all accepted descendant designs recursively; dependencies remain exact. Harness enforcement defaults enabled and may be disabled by the operator startup setting. Disabled mode removes file/tool role/sandbox/explicit Git gates, with ordinary OS authority; input validation, timeout/cancellation and member activation retain their rules. No automatic Git checkpoints or member worktrees are introduced.
+Provide the existing application capabilities through composed services. Cross-system mutations preserve existing atomicity, lock order, conflict behavior and rollback through explicit owner interfaces. In-memory and durable ownership may differ: Agent maintains execution in memory and Team persists the required information from its public interface. Core composes these responsibilities; clients do not query another owner's tables.
 
 ## Constraints, specifications and requirements
 
-- Preserve existing accepted observable behavior, record formats, revisions/cursors, API payloads and lifecycle guarantees during this migration.
-- Refusals and failures remain explicit. Database transactions provide their agreed atomicity; executed tools/filesystem operations may leave earlier effects on failure.
-- This document is the design; matching implementation context documents exact inputs, outputs, effects and usage.
+Preserve existing public HTTP/SSE payloads, stable SQL/JSON formats, ordering, authority and lifecycle behavior. In-memory model ownership and durable persistence ownership are separate responsibilities and may belong to different systems. The persistence owner defines its durable representation, schema, mapping, validation and queries using the model owner's public interface. Technical Storage supplies engine resources only. Share explicit interface values and lifecycle notifications; keep private runtime state and SQL schemas inside their respective owners. Filesystem/tool effects can precede failures and are never automatically replayed.

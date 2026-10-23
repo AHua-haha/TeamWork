@@ -1,0 +1,6 @@
+{
+  "implementation": [
+    "backend/src/core/harness",
+    "backend/prompts/harness"
+  ]
+}

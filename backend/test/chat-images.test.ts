@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Readable } from 'node:stream';
 import type { IncomingMessage } from 'node:http';
-import { prepareChatImage, maxImageBytes, imageContent } from '../src/core/chat-images.js';
-import { chatText, groupEntry } from '../src/core/group-chat.js';
+import { prepareChatImage, maxImageBytes, imageContent } from '../src/core/team/chat-images.js';
+import { chatText, groupEntry } from '../src/core/team/group-chat.js';
 import { png } from './image-fixture.js';
 
 async function multipart(form: FormData): Promise<IncomingMessage> {
