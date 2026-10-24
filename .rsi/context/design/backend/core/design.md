@@ -2,12 +2,20 @@
 
 ## Purpose, responsibilities and boundaries
 
-Compose Agent, Harness, Workspace and Team. Coordinate workflows spanning them, including workspace/lead bootstrap and atomic group publication/run admission. Own common error/serialization/transaction plumbing; do not centralize child business schemas.
+Compose Agent, Harness, Workspace and Team through their public contracts. Coordinate cross-system workflows without moving a child's business state or policy into the parent. In-memory ownership and persistence ownership are assigned separately.
+
+For member conversations, Team owns authoritative shared group context; Agent owns its assembled message context and the state needed to consume group messages. Harness supplies capabilities and context-maintenance instructions. Team durably hosts Agent using its exposed values rather than deciding Agent context-retention rules.
 
 ## Interface contract
 
-Provide the existing application capabilities through composed services. Cross-system mutations preserve existing atomicity, lock order, conflict behavior and rollback through explicit owner interfaces. In-memory and durable ownership may differ: Agent maintains execution in memory and Team persists the required information from its public interface. Core composes these responsibilities; clients do not query another owner's tables.
+Team admits/schedules a member and provides a group-context read reference. Agent uses its own state to obtain and incorporate incoming shared messages, then runs the model/tool loop. No activation or compaction boundary is selected by Team and passed as an additional input. Agent context survives terminal success, failure, cancellation and restart restoration. Terminal status does not implicitly clear context or select history ranges for reconstruction.
+
+Shared group inputs and private execution messages extend the Agent context chronologically. Every incorporated group message retains sender-visible content and source identity. Incoming shared messages are incorporated at safe boundaries after current work finishes, not between an in-flight tool call and its result. Team persists Agent-owned consumption state and context together through public acknowledgements.
+
+Team continues to own mention routing, scheduling, publication, response reservations and stable history. Agent context changes do not rewrite shared or private stable message history. Workspace documents remain independently maintained project information. Harness authority and external tool effects retain their existing responsibilities.
 
 ## Constraints, specifications and requirements
 
-Preserve existing public HTTP/SSE payloads, stable SQL/JSON formats, ordering, authority and lifecycle behavior. In-memory model ownership and durable persistence ownership are separate responsibilities and may belong to different systems. The persistence owner defines its durable representation, schema, mapping, validation and queries using the model owner's public interface. Technical Storage supplies engine resources only. Share explicit interface values and lifecycle notifications; keep private runtime state and SQL schemas inside their respective owners. Filesystem/tool effects can precede failures and are never automatically replayed.
+Preserve public HTTP/SSE presentation, shared-workspace single-member execution, mention/publication refusal behavior, image semantics, idle reset and member configuration rules. No new public context-edit endpoint or frontend UI is required by this design.
+
+Future compaction will organize Team-provided group context followed by Agent-prepared private working context. Team owns the shared representation; Agent owns private retention and its consumption/retention boundaries. This direction does not authorize implementing compaction, automatic triggers, group summarization, model-generated structured group information or per-member group views now. Context-window exhaustion may still fail explicitly until compaction is designed.

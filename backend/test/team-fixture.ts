@@ -47,6 +47,7 @@ export class FakeRuntime implements RunHost {
   async prepareRun(): Promise<ResolvedRunConfig> { return { model: { input: ['text', 'image'] } } as ResolvedRunConfig; }
   launch(run: RunState): void { void this.start(run.agentId, undefined, run.runId); }
   clearProgress(): void {}
+  async syncGroupContext(agentId: string): Promise<void> { if (!this.active(agentId)) await this.store?.syncMemberContext(agentId); }
   async feedback(): Promise<void> {}
   private readonly startWaiters = new Map<string, (() => void)[]>();
   started(agentId: string): Promise<void> {
@@ -57,7 +58,7 @@ export class FakeRuntime implements RunHost {
   async start(agentId: string, input: unknown, persistedId?: string): Promise<RunState> {
     if (this.active(agentId)) throw new AppError('agent_busy', 'Agent already has an active run', 409);
     const store = this.store;
-    if (store && persistedId) void store.prepareMemberContext(agentId, persistedId, []);
+    if (store && persistedId) void store.syncMemberContext(agentId);
     let end!: () => void;
     const done = new Promise<void>(resolve => { end = resolve; });
     const run: FakeRun = {
@@ -70,7 +71,7 @@ export class FakeRuntime implements RunHost {
         const stored = store?.chatRuns.get(run.runId)?.run;
         if (stored) Object.assign(stored, stateOf(run));
         store?.finishEntry(stateOf(run));
-        store?.finishContext(run.agentId, run.runId);
+        void store?.syncMemberContext(run.agentId);
         end();
       },
     };

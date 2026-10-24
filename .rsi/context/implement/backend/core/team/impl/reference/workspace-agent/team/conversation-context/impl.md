@@ -1,42 +1,32 @@
-> Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
-
-# Conversation context implementation
+# Continuous conversation context implementation
 
 ## Contract
 
-[Design](design.md): authoritative group context, document result context and Bash retrieval, durable failed working ranges, successful cleanup without history deletion.
+Team provides only GroupContextReference; Agent owns incorporation and continuous context. Team is its durable caller, not the context retention policy owner. See the linked owning contracts and code.
 
-## Responsibilities and decomposition
+## Data flow and implemented interfaces
 
-Conversation context parses assigned implementation README documents and runs retrieval through the existing Bash tool. TeamData owns admission snapshots, per-member processed group/successful-history boundaries and immutable private history. TeamSystem initializes context once before the first model step. TeamRuntime remains the single loop.
+1. TeamSystem.policy.groupContext(agentId) returns {id: workspaceId, read: after => store.readGroupContext(workspaceId, after)}. No admission-through/retention position is supplied.
+2. TeamRuntime acquires execution authority and restores agents.context once. AgentExecution uses AgentMessageContext.incoming to choose after from existing entry metadata and propose new entries. Optional observer.contextChanged acknowledges CAS replacement before dependent work.
+3. Group entries include groupContextId, groupPosition and groupMessageId. These markers and message content are one persisted context snapshot, without a separate processed-prefix table. Native pictures remain content blocks. Own finals retain their original assistant blocks and add sender/provenance without duplicating the answer.
+4. No shared input is inserted between model/tool steps. After pending work/afterRun settles, Agent catches up through its reference before the host finishes. Unmentioned idle members use the same Agent context owner through runtime.syncGroupContext, without model calls.
+5. Message commits append immutable history and current context. Terminal state does not clear current context. Startup interrupts abandoned runs; the next synchronization repairs missing tool results without replay. Explicit reset deletes context/history together and preserves project documents.
 
-## Coordination and data flow
+## Migration and failures
 
-Admission stores an immutable group upper bound and private history start. Preparation loads group records through that upper bound, splits at the prior processed group boundary, and inserts document text plus failed history before new group messages. Retrieval results are recorded private user messages. Runtime private messages append normally. Terminal publication/failure updates the processed group boundary and successful-history boundary in the same SQL transaction as run completion. Clearing a successful context removes only model-context references; immutable messages remain. Restart recovery completes abandoned runs through this same terminal path.
+A backend context_format marker makes legacy adoption once-only. Agent's adoption helper combines recorded private work and original shared messages, keeping tool/result groups intact. SQL persists the resulting snapshot/marker transactionally, then retires legacy member_contexts/member_context_runs. It never edits stable history or project files. Old per-run document parsing, retrieval and success/failure retention rules are removed.
 
-## Decisions and constraints
+Context persistence refusal prevents acknowledged consumption advancement. Idle synchronization failures remain observable via runtime.getState; later successful synchronization or activation can recover. External effects are never automatically replayed. Compaction is not implemented.
 
-One selected document per effective working node (explicit roots and accepted recursive descendants from resolveHarness), impl/README.md, normalized lexical order; references in lookup tables are not loaded. Exact designated sections and JSON command configuration; ordinary Bash inputs/outputs and authority. Recoverable diagnostics permit file repair. Missing tool results become context-only error messages; never replay commands. Existing private streaming deltas remain transient. No per-member shared-message delivery copies or compatibility loop.
+## Code and verification
 
-## Code map
-
-- [Conversation context](../../../../../../../../../../../backend/src/core/team/conversation-context.ts): document parser, interrupted-exchange repair and run preparation.
-- [Database](../../../../../../../../../../../backend/src/core/team/data.ts): durable boundaries and context composition.
-- [Team policy](../../../../../../../../../../../backend/src/core/team/team-system.ts) and [runtime](../../../../../../../../../../../backend/src/core/team/runtime.ts): initialization hook and recorded retrieval input.
-- [Implementation rules](../../../../../../../../../../../backend/prompts/harness/implementation-context.md): template and maintenance rules.
-
-## Verification
-
-Parser tests cover fenced examples, lookup non-expansion and full Bash inputs. MySQL/runtime tests cover ordered composition, failed chains, success cleanup, reopen/restart interruption, retrieval errors, cancellation and reset. Existing group publication, harness, stable history and frontend builds remain required gates.
-
-## Durable boundaries
-
-member_contexts.group_position is the previous processed shared prefix and success_position is the private-history exclusion boundary. member_context_runs freezes group_through/history_after on publication and prepared on context initialization. prepareMemberContext reads retained private messages directly from messages using (success_position, history_after]. Terminal writes update the processed prefix and clear the live assembled context; success advances the exclusion boundary. Both terminal entry completion and these updates share one transaction. Reset deletes admission rows before runs and resets boundaries. Migration initializes missing member state from prior completed successful runs and leaves old project documents untouched.
-
-## Prototype repair policy
-
-Missing/invalid documents generate private context diagnostics, with no retrieval from that document. Parsing validates the complete commands array with parseBashInput before execution. Recoverable invocation errors are recorded private user input and allow the model to repair. Store/ownership failures remain terminal. repairInterruptedTools adds only missing results to constructed context; no completed stable record is changed. The module consumes accepted canonical working-design paths for casing/authority, then reads the current shared README bytes. No recursive lookup-target reading or source-code preloading remains.
-
-## Image attachment integration
-
-During prepareMemberContext, shared user attachment references are loaded from chat_images through the same SQL transaction. groupEntry builds a user content array containing the existing author/recipient-prefixed text followed by ordered ImageContent; text-only entries keep their existing string representation. Summary/retrieval/private-history ordering and boundary semantics are unchanged. No caption generation or file lookup expansion is introduced. The team request policy checks image input capability against the final constructed messages before invoking a provider.
+- [Agent context ownership and legacy adoption](../../../../../../../../../../../backend/src/core/agent/context.ts)
+- [Execution boundaries and acknowledgements](../../../../../../../../../../../backend/src/core/agent/agent.ts)
+- [Durable host and original group reads](../../../../../../../../../../../backend/src/core/team/data.ts)
+- [Read reference policy](../../../../../../../../../../../backend/src/core/team/team-system.ts)
+- [Restoration and idle synchronization](../../../../../../../../../../../backend/src/core/team/runtime.ts)
+- [Publication and synchronization notification](../../../../../../../../../../../backend/src/core/team/team-runner.ts)
+- [Implementation maintenance instructions](../../../../../../../../../../../backend/prompts/harness/implementation.md)
+- [Context ownership tests](../../../../../../../../../../../backend/test/conversation-context.test.ts)
+- [In-memory execution and acknowledgement tests](../../../../../../../../../../../backend/test/agent-execution.test.ts)
+- [Disposable MySQL/restart/migration/reset/image tests](../../../../../../../../../../../backend/test/integration/backend.test.ts)

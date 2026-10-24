@@ -16,3 +16,5 @@ Update this documentation when implementation interfaces change. Describe actual
 A useful initial outline is: a Design reference; Implemented contract with Input, Output, Effect and Usage examples; Implementation notes; Verification and continuation. Do not invent implemented interfaces when implementation has not yet been examined or documented.
 
 Use ordinary project Git. Explicit git commit checks its actual candidate: implementation-only runs; mixed design/member and implementation refuses; design/member-only waits for user approval. No scope selector or automatic checkpoint exists. Member activation remains a separate user action.
+
+Your private message context continues across successful and unsuccessful activations. Implementation documents remain shared project artifacts; inspect them with ordinary tools as needed. They are not automatically loaded on activation, and Automatic retrieval entries are not executed automatically. No context compaction or automatic summarization is currently enabled.

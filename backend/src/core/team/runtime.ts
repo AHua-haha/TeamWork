@@ -9,8 +9,9 @@ import { AppError, type ContextEntry, type ContextHistory, type CurrentState, ty
 
 export { configuredPolicy, fixedPolicy, piModelStream } from '../agent/agent.js';
 export type * from '../agent/contracts.js';
+import { AgentMessageContext } from '../agent/context.js';
 import { AgentExecution } from '../agent/agent.js';
-import type { RuntimePolicy, ModelStream, StepScope } from '../agent/contracts.js';
+import type { RuntimePolicy, ModelStream } from '../agent/contracts.js';
 
 interface Job { execution?: AgentExecution; agentId: string; controller: AbortController; done: Promise<void> }
 
@@ -20,6 +21,8 @@ export class TeamRuntime {
   private readonly jobs = new Map<string, Job>();
   private readonly finalizationFailures = new Map<string, unknown>();
   private accepting = false;
+  private readonly contextUpdates = new Map<string, Promise<void>>();
+  private readonly contextFailures = new Map<string, unknown>();
   private readonly maxSteps: number;
   private pendingStarts = new Set<Promise<RunState>>();
 
@@ -53,6 +56,7 @@ export class TeamRuntime {
   async close(): Promise<void> {
     this.accepting = false;
     await Promise.allSettled(this.pendingStarts);
+    await Promise.allSettled(this.contextUpdates.values());
     for (const job of this.jobs.values()) job.controller.abort();
     this.progress.close();
     await Promise.allSettled([...this.jobs.values()].map(job => job.done));
@@ -87,7 +91,11 @@ export class TeamRuntime {
     this.store.assertRuntime();
     if (this.jobs.has(run.runId)) throw new AppError('agent_busy', 'Run already launched', 409);
     const controller = new AbortController();
-    const done = Promise.resolve().then(() => this.runLoop(run, config, controller.signal)).finally(() => this.jobs.delete(run.runId));
+    const done = Promise.resolve().then(() => this.runLoop(run, config, controller.signal)).finally(async () => {
+      this.jobs.delete(run.runId);
+      // Close the notification race between the last busy read and becoming idle.
+      await this.syncGroupContext(run.agentId);
+    });
     this.jobs.set(run.runId, { agentId: run.agentId, controller, done });
     this.progress.changed(run.agentId);
   }
@@ -135,10 +143,11 @@ export class TeamRuntime {
     return '';
   }
 
-  clearProgress(agentId: string): void { this.progress.clear(agentId); }
+  clearProgress(agentId: string): void { this.progress.clear(agentId); this.contextFailures.delete(agentId); }
 
   async getState(agentId: string): Promise<CurrentState> {
     this.available();
+    if (this.contextFailures.has(agentId)) throw new AppError('persistence_failure', 'Group context synchronization failed; retry or trigger the member to restore its context', 503);
     const state = await this.store.getState(agentId);
     this.checkFinalization(state.run?.runId);
     return state;
@@ -152,6 +161,23 @@ export class TeamRuntime {
     return result;
   }
 
+  /** Idle delivery uses Agent's context owner, never a Team-selected range. Busy executions catch up themselves. */
+  async syncGroupContext(agentId: string): Promise<void> {
+    const previous = this.contextUpdates.get(agentId) ?? Promise.resolve();
+    const update = previous.then(async () => {
+      if (!this.accepting || [...this.jobs.values()].some(job => job.agentId === agentId)) return;
+      const reference = await this.policy.groupContext?.(agentId);
+      if (!reference) return;
+      const history = await this.store.getContext(agentId);
+      const entries = await new AgentMessageContext(agentId, history).incoming(reference);
+      if (entries) await this.store.replaceContext(agentId, history.revision, entries);
+      this.contextFailures.delete(agentId);
+    }).catch(error => { this.contextFailures.set(agentId, error); });
+    this.contextUpdates.set(agentId, update);
+    try { await update; }
+    finally { if (this.contextUpdates.get(agentId) === update) this.contextUpdates.delete(agentId); }
+  }
+
   private checkFinalization(runId?: string): void {
     if (runId && this.finalizationFailures.has(runId)) throw new AppError('persistence_failure', 'Run stopped but terminal state could not be persisted; restart runtime after database recovery', 503);
   }
@@ -161,22 +187,14 @@ export class TeamRuntime {
       let execution: AgentExecution;
       const policy: RuntimePolicy = {
         ...this.policy,
-        beforeStep: async scope => {
-          // Persistence belongs to the caller. The Agent receives only the refreshed public snapshot.
-          const callerScope: StepScope = { ...scope,
-            readContext: () => this.store.getContext(run.agentId),
-            replaceContext: (revision, entries) => this.replaceContext(run.agentId, revision, entries),
-            recordInput: async (text, metadata) => {
-              signal.throwIfAborted(); this.store.assertRuntime();
-              const record = await this.store.commitMessage(run.agentId, run.runId, { messageId: randomUUID(), message: { role: 'user', content: text, timestamp: Date.now() }, metadata });
-              execution.receive(record); this.progress.changed(run.agentId);
-            },
-          };
-          if (scope.step === 1) {
-            // Restore once after admission/context preparation. Subsequent steps use Agent memory.
-            await this.policy.beforeStep?.(callerScope);
+        acquireRun: async (state, activeSignal) => {
+          const release = await this.policy.acquireRun?.(state, activeSignal);
+          try {
+            await this.contextUpdates.get(run.agentId);
             execution.restoreContext(await this.store.getContext(run.agentId));
-          } else await this.policy.beforeStep?.(scope);
+            this.contextFailures.delete(run.agentId);
+            return release ?? (() => {});
+          } catch (error) { release?.(); throw error; }
         },
       };
       execution = new AgentExecution(run, { revision: 0, entries: [] }, 0, config, policy, this.stream, {

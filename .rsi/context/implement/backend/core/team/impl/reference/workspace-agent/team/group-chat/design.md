@@ -24,11 +24,11 @@ This is the agreed group-chat behavior with the prototype conventions recorded d
 ## Outputs and observable effects
 
 - A shared transcript contains user messages and published member final responses, attributed to their authors.
-- Group context is one authoritative ordered sequence of accepted user messages and member final responses, with sender, recipient and message metadata. Members consume it without per-member delivery copies.
-- Admission freezes the shared prefix for that activation. Later accepted messages remain available for the next activation and do not enter ongoing model requests. Receiving shared messages does not trigger execution by itself.
-- At execution start, assemble earlier group messages through the member's processed boundary, its assigned impl/README.md result summary/file lookup, retained failed working messages, incoming group messages through admission, and fresh automatic Bash retrieval results. Lookup targets are not loaded. Each assigned working-design README is read in normalized path order.
-- Every executed stopped run advances the processed group boundary through its supplied prefix. Failure/cancellation/interruption retains recorded private working messages since the last success; success clears those ranges from future model input and relies on the maintained document. Private stable history remains inspectable. Waiting runs cancelled before construction process no group input.
-- The [conversation context contract](../conversation-context/design.md) specifies member documents, retrieval and durable restart behavior. No automatic replay or summary model call is introduced.
+- Group context is one authoritative ordered sequence of accepted user messages and member final responses, with sender-visible content and structured metadata. Members read it through the same Team-provided reference.
+- Team admits recipients without choosing a shared-context boundary. Agent chooses incoming messages through its reference at execution start. Later messages are appended after current work finishes; synchronization itself triggers no model call.
+- At execution start, Agent uses its own incorporation state to append incoming shared messages to retained context. Private working messages continue across activations; no README loading or automatic retrieval reconstructs context.
+- Agent context and consumption markers persist after both successful and unsuccessful stops. There is no success-only history exclusion or terminal clearing. Immutable history remains independent and inspectable.
+- The [conversation context contract](../conversation-context/design.md) specifies continuous state, durable restart and interrupted-tool repair without replay. Compaction and trigger policy are deferred.
 - Reasoning, model/tool steps, tool results, and intermediate assistant messages belong to private execution context and are not copied into the group transcript.
 - A final response is a new group message. Its mentions can trigger subsequent member activations under the same rule.
 - The lead can assign work by addressing members in a shared message. A member can address a colleague or ask the lead for a design decision through a shared response.
@@ -54,8 +54,8 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 - Shared context availability is separate from trigger scheduling. Busy mentions are still refused without queuing; accepted messages remain available to every member on its next activation.
 - Sharing a transcript does not expand a member's harness permissions or give it lead management/design-editing capabilities.
 - Shared chat publication and private execution are distinct. This distinction does not prevent members from reporting relevant results in their final responses.
-- Failed private working ranges support continuity until success. Project context stays organized by design; agents maintain assigned implementation README summaries using common file tools. Automatic retrieval uses existing Bash inputs and results.
-- History retention and private-history maintenance remain open.
+- Continuous Agent context retains recorded private work across success/failure/restart. Project documents remain design-organized artifacts maintained with ordinary tools, not implicit activation inputs or commands.
+- Compaction process/trigger policy and future Team-owned group summarization or member-specific views remain deferred.
 - The new design replaces the private blocking-call mechanism; implementation must derive cooperation from shared messages and triggering rules.
 
 ## Acceptance examples
@@ -67,9 +67,9 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 5. The user posts a message without mentions. The lead is activated.
 6. A message mentions Backend and Frontend. For user input both are admitted in mention order and execute sequentially. An agent response naming both is refused atomically.
 7. Backend is working when another sender mentions it. The publication is refused and no later activation is queued. The sending agent receives private feedback and must make a new attempt when Backend is free.
-8. Frontend publishes without mentioning Backend. The response is stored once as group context. Backend sees it on its next activation; no idle context copy or mid-run insertion is made.
+8. Frontend publishes without mentioning Backend. The response is stored once as group context. Backend incorporates it while idle or after current work finishes, without another activation or a mid-loop insertion.
 9. A candidate mentions busy Backend and free Frontend. Refuse the whole publication; neither is activated by that attempt. The sender can revise its recipients or try again later.
-10. Backend is activated again. Shared history is split around its processed boundary, with document result context and any retained failed private work before incoming messages and fresh retrieval. After a successful run, previous private work is excluded. Frontend sees only Backend's published reports.
+10. Backend is activated again. It retains prior shared/private context and appends incoming group messages using its own state. Success does not discard recorded private work; Frontend still receives only accepted shared reports.
 11. Under the budget rules, one slot remains when a response mentions two distinct members. Refuse the whole publication without consuming the remaining slot. The sender can revise to one recipient or publish a response without mentions.
 12. A message mentions only Backend. Frontend remains idle with shared history available for its next activation. Backend is activated by the mention.
 

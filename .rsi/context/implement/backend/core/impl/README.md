@@ -8,7 +8,7 @@ Design: [Core](../../../../design/backend/core/design.md).
 
 ### Coordination and ownership
 
-Runtime constructs the shared technical MySqlStorage and TeamData durable adapter, then services and TeamRuntime. TeamRuntime creates AgentExecution instances and acknowledges their events. Workspace registration invokes parent Core bootstrap to prepare the root context and initial Team lead; TeamData commits registration atomically. The parent also coordinates administrative filesystem reset with Team-owned record deletion.
+Runtime constructs the shared technical MySqlStorage and TeamData durable adapter, then services and TeamRuntime. TeamRuntime creates AgentExecution instances and acknowledges their events. Team supplies only the original group-context reference; Agent owns consumption and continuous message state. The host restores context after admission, and normal terminal status never clears it. Workspace registration invokes parent Core bootstrap to prepare the root context and initial Team lead; TeamData commits registration atomically. The parent also coordinates administrative filesystem reset with Team-owned record deletion.
 
 ### Implemented contract
 

@@ -48,7 +48,7 @@ User-authorized Git commit and member activation remain separate. Committing mem
 
 ### Workspace storage
 
-.rsi/context/design contains design Markdown and metadata. .rsi/context/implement contains implementation context, including each assigned node's impl/README.md result summary, file lookup and automatic retrieval configuration. .rsi/members contains member manifests and prompt files. These structures retain their existing meaning.
+.rsi/context/design contains design Markdown and metadata. .rsi/context/implement contains implementation context, including each assigned node's impl/README.md result summary, file lookup and a reserved Automatic retrieval section (not automatically executed). .rsi/members contains member manifests and prompt files. These structures retain their existing meaning.
 
 No mandatory .rsi/harness directory is needed for this design. Ordinary history/index/objects belong to the project .git. Backend approval records are control state, not another Git history; they are session-bound backend state exposed by the team approval endpoints; no new approval files are written under .rsi. Persistent shell homes, caches and temporary files remain in the existing backend-session workspace temporary area outside .rsi. Rule prompt files stay in the backend source, not copied into .rsi/harness.
 
@@ -62,7 +62,7 @@ Unrecognized paths refuse. Renames are evaluated as deletion plus addition, so b
 
 ## Guarantees and limits
 
-Detection covers explicit git commit commands submitted in Bash requests. Indirect commits inside scripts/programs are outside this prototype's detection contract. This is a workflow guard, not comprehensive Git or filesystem enforcement. Shared files remain visible immediately; no member checkout synchronization is introduced. Completed SQL chat history and retained failed working history are unrelated to Git checkpoints and remain durable.
+Detection covers explicit git commit commands submitted in Bash requests. Indirect commits inside scripts/programs are outside this prototype's detection contract. This is a workflow guard, not comprehensive Git or filesystem enforcement. Shared files remain visible immediately; no member checkout synchronization is introduced. Completed SQL chat history and continuous private working context are unrelated to Git checkpoints and remain durable.
 
 ## Acceptance examples
 

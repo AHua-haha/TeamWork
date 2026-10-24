@@ -2,16 +2,10 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { ConversationContext } from '../src/core/team/conversation-context.js';
 import { resolveHarness } from '../src/core/harness/harness.js';
-import type { StepScope } from '../src/core/team/runtime.js';
-import type { ContextEntry } from '../src/core/agent/types.js';
-import { memberContextPath } from '../src/core/workspace/workspace-layout.js';
 import { seedDesign } from './design-fixture.js';
 import { acceptFiles } from './git-fixture.js';
 import { code, configureHarness, withTeam, worker } from './team-fixture.js';
-
-const summary = (text: string, commands: unknown[] = []) => `# Context\n\n## Result summary\n${text}\n\n## File lookup\n| Path | Description |\n| --- | --- |\n| never-read.txt | Lookup only |\n\n## Automatic retrieval\n\n\`\`\`json\n${JSON.stringify({ commands })}\n\`\`\`\n`;
 
 test('working roots inherit recursive nodes once with canonical casing, mapped writes and matching inspection', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['parent-src']);
@@ -84,24 +78,6 @@ test('accepted malformed descendants refuse effective scope instead of silently 
   assert.equal(view.ready, false); assert.match(view.issues.join('\n'), /metadata.json/);
   await assert.rejects(f.team.harness.files(member.memberId), code('invalid_design'));
 }));
-
-test('member context and retrieval load descendant READMEs once, without expanding lookup paths', () => withTeam(async f => {
-  const member = await worker(f, 'Backend', []), child = 'systems/backend/child/metadata.json';
-  await seedDesign(f.workspaces, f.workspaceId, child, { content: '# Child', implementation: [] });
-  await configureHarness(f, 'Backend', { designScope: { working: [member.harness.designScope.working[0], child], dependencies: [] }, allowedCommands: [] });
-  for (const [path, text] of [[memberContextPath(member.harness.designScope.working[0]!), summary('Parent result')], [memberContextPath(child), summary('Child result', [{ command: 'printf child-retrieval' }])]]) {
-    await mkdir(dirname(join(f.directory, path!)), { recursive: true }); await writeFile(join(f.directory, path!), text!);
-  }
-  let documents: ContextEntry[] = [];
-  const retrieved: string[] = [];
-  const context = new ConversationContext({ prepareMemberContext: async (_agent, _run, entries) => { documents = entries; } }, f.team.harness);
-  await context.prepare((await f.team.service.find(member.memberId))!, { agentId: member.memberId, runId: 'test-run', step: 1, signal: new AbortController().signal, readContext: async () => { throw new Error('Unused'); }, replaceContext: async () => { throw new Error('Unused'); }, config: {} as StepScope['config'], recordInput: async text => { retrieved.push(text); } });
-  assert.equal(documents.length, 2);
-  assert.match(JSON.stringify(documents), /Parent result/); assert.match(JSON.stringify(documents), /Child result/);
-  assert.ok(documents.every(entry => entry.metadata.source === 'member-context'), 'lookup targets were not loaded');
-  assert.equal(retrieved.length, 1); assert.match(retrieved[0]!, /child-retrieval/);
-}));
-
 
 test('a truncated design scan refuses resolution rather than granting a partial working subtree', () => withTeam(async f => {
   const member = await worker(f, 'Backend', []), base = await f.workspaces.context(f.workspaceId);

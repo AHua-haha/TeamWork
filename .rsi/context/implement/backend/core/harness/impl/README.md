@@ -8,7 +8,7 @@ Design: [Harness](../../../../../design/backend/core/harness/design.md).
 
 ### Coordination and ownership
 
-HarnessService obtains public member configuration and Workspace design/file information, resolves effective grants, and supplies tools/prompts to the Agent request assembled by Team. Native Pi read/search tools retain their implementations; write/edit gates use accepted scope. Custom Bash owns one member shell and sandbox policy. Team signals lifecycle cleanup.
+HarnessService obtains public member configuration and Workspace design/file information, resolves effective grants, and supplies tools/prompts to the Agent request assembled by Team. Native Pi read/search tools retain their implementations; write/edit gates use accepted scope. Custom Bash owns one member shell and sandbox policy. Team signals lifecycle cleanup. Prompts require maintaining shared implementation documents and explain continuous private context; documents/retrieval entries are not implicitly loaded/executed on activation. No compaction policy or context-management tool is added.
 
 ### Implemented contract
 

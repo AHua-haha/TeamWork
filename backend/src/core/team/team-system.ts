@@ -11,7 +11,6 @@ import { DesignService } from '../workspace/design.js';
 import { HarnessService, resolveHarness } from '../harness/harness.js';
 import { inspectHarnesses } from '../harness/harness-bases.js';
 import { MemberInstructions } from './member-instructions.js';
-import { ConversationContext, type MemberConversationStore } from './conversation-context.js';
 import { teamTools } from './member-tools.js';
 import type { RuntimePolicy, RuntimeTool } from '../agent/contracts.js';
 import { webTools } from '../harness/web-tools.js';
@@ -28,18 +27,16 @@ export class TeamSystem {
   readonly service: TeamService;
   readonly runner: TeamRunner;
   readonly instructions: MemberInstructions;
-  readonly conversation: ConversationContext;
   readonly configuration: MemberConfigService;
   readonly designs: DesignService;
   readonly harness: HarnessService;
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
 
-  constructor(store: TeamStore & ChatStore & MemberConversationStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
+  constructor(private readonly store: TeamStore & ChatStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
     this.designs = new DesignService(workspaces);
     this.service = new TeamService(store, workspaces, config, this.designs);
     this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id), web, permissionsEnabled);
-    this.conversation = new ConversationContext(store, this.harness);
     this.instructions = new MemberInstructions(this.service, workspaces, id => this.runner.isRunning(id), permissionsEnabled);
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
@@ -130,12 +127,10 @@ export class TeamSystem {
     const { management } = teamTools(this.service, this.configuration, this.harness.permissionsEnabled);
     return {
       ...base,
-      beforeStep: async scope => {
-        if (scope.step === 1) {
-          const member = await this.service.find(scope.agentId);
-          if (member) await this.conversation.prepare(member, scope);
-        }
-        await base.beforeStep?.(scope);
+      groupContext: async agentId => {
+        const member = await this.service.find(agentId);
+        if (!member) return base.groupContext?.(agentId);
+        return { id: member.workspaceId, read: after => this.store.readGroupContext(member.workspaceId, after) };
       },
       acquireRun: async (run, signal) => {
         const release = await this.runner.acquireExecution(run.agentId, signal);

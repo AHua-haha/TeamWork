@@ -1,3 +1,4 @@
+import { AgentMessageContext, type GroupContextReference } from './context.js';
 import { randomUUID } from 'node:crypto';
 import { AssistantMessageFrameEncoder, getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type Model, type Models, type SimpleStreamOptions, type ToolResultMessage, type JsonObject } from '@earendil-works/pi-ai';
 import { validateEntries, validateRun } from './message-validation.js';
@@ -56,6 +57,11 @@ export class AgentExecution {
     let failure: RunState['error'] = null;
     let release: (() => void) | undefined;
     let entered = !this.policy.acquireRun;
+    let group: GroupContextReference | undefined;
+    const synchronize = async () => {
+      const entries = await new AgentMessageContext(run.agentId, this.context).incoming(group);
+      if (entries) await this.replaceContext(this.context.revision, entries);
+    };
     const pendingEffects = new Set<Promise<unknown>>();
     const track = <T>(operation: Promise<T>): Promise<T> => {
       pendingEffects.add(operation);
@@ -65,6 +71,8 @@ export class AgentExecution {
     try {
       if (this.policy.acquireRun) { release = await this.policy.acquireRun(run, signal); entered = true; }
       signal.throwIfAborted();
+      group = await this.policy.groupContext?.(run.agentId);
+      await synchronize();
       for (let step = 1; ; step++) {
         signal.throwIfAborted();
         this.observer.assertActive?.();
@@ -162,7 +170,10 @@ export class AgentExecution {
     // Cancellation stops observation promptly, but finalization must wait for tool effects to stop.
     await Promise.allSettled([...pendingEffects]);
     try {
-      if (entered) await this.policy.afterRun?.({ agentId: run.agentId, runId: run.runId, status });
+      if (entered) {
+        await this.policy.afterRun?.({ agentId: run.agentId, runId: run.runId, status });
+        await synchronize();
+      }
     } catch (error) {
       status = 'failed';
       failure = { code: error instanceof AppError ? error.code : 'harness_finalization_failed', message: error instanceof Error ? error.message : 'Run finalization failed' };

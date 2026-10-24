@@ -73,21 +73,21 @@ test('shared messages stay authoritative and user mentions preserve multi-recipi
   assert.equal(result.runs.length, 2);
   assert.ok(f.runtime.active(backend.memberId) && f.runtime.active(frontend.memberId));
   assert.equal(f.runtime.active(f.lead.memberId), undefined);
-  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 0);
+  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 1);
   for (const member of [backend, frontend]) assert.equal(f.store.agentContexts.get(member.memberId)?.length, 1);
   const firstRun = f.runtime.active(backend.memberId)!.runId;
   await f.team.runner.publishFinal(backend.memberId, firstRun, 'Backend done without mentions', 'final');
   assert.equal(f.runtime.active(backend.memberId), undefined);
-  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 0);
+  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 2);
   assert.equal(f.store.agentContexts.get(frontend.memberId)?.length, 1);
   f.runtime.end(frontend.memberId);
   await settle();
-  assert.equal(f.store.agentContexts.get(frontend.memberId)?.length, 0);
+  assert.equal(f.store.agentContexts.get(frontend.memberId)?.length, 2);
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).messages.length, 2);
   assert.equal(f.runtime.runs.length, 2, 'context bookkeeping starts no run');
 }));
 
-test('group updates do not insert into ongoing working context or idle member context', () => withTeam(async f => {
+test('group updates append after work and synchronize idle context without triggering a run', () => withTeam(async f => {
   const backend = await worker(f, 'Backend');
   await f.team.runner.postUser(f.workspaceId, '@Backend start');
   const context = f.store.agentContexts.get(backend.memberId)!;
@@ -97,7 +97,8 @@ test('group updates do not insert into ongoing working context or idle member co
   assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 2);
   f.runtime.end(backend.memberId); await settle();
   assert.equal(context.length, 2);
-  assert.ok(!textOf(context).some(text => text.includes('@Lead discuss')));
+  assert.ok(textOf(f.store.agentContexts.get(backend.memberId)!).some(text => text.includes('@Lead discuss')));
+  assert.equal(f.store.agentContexts.get(backend.memberId)!.length,3);
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).messages.length, 2);
   assert.equal(f.runtime.runs.length, 2);
 }));
@@ -110,7 +111,7 @@ test('busy, unknown, self and unready recipients refuse entire publications with
   await assert.rejects(f.team.runner.publishFinal(backend.memberId, first.runs[0]!.runId, '<mentions>["Backend"]</mentions>\nAgain', 'final'), code('self_mention'));
   assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 1);
   assert.equal(f.runtime.active(frontend.memberId), undefined);
-  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 0);
+  assert.equal(f.store.agentContexts.get(f.lead.memberId)?.length, 1);
 }));
 
 test('default lead routing, return mentions, and limit count accepted activations only', () => withTeam(async f => {

@@ -1,4 +1,5 @@
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, JsonObject, Message, Model, Models, SimpleStreamOptions, Tool, ToolCall, ToolResultMessage } from '@earendil-works/pi-ai';
+import type { GroupContextReference } from './context.js';
 import type { CompletedMessage, ContextEntry, ContextHistory, RunState } from './types.js';
 
 export interface AgentConfiguration {
@@ -31,6 +32,8 @@ export interface ModelRequest {
 }
 
 export interface RuntimePolicy {
+  /** Read reference only; Agent selects incoming messages using its own state. */
+  groupContext?(agentId: string): Promise<GroupContextReference | undefined>;
   /** Acquire execution authority before any model/tool work; release after terminal finalization. */
   acquireRun?(run: RunState, signal: AbortSignal): Promise<() => void>;
   /** Caller policy may update the in-memory working context before the next request. */

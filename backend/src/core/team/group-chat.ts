@@ -1,3 +1,4 @@
+import type { GroupContextMessage } from '../agent/context.js';
 import type { ImageContent } from '@earendil-works/pi-ai';
 import { validateChatImages, type ChatImage, type PreparedChatImage, type ChatImageStore } from './chat-images.js';
 import { validateRun } from '../codec.js';
@@ -55,6 +56,7 @@ export interface ChatPublication {
   workspaceId: string; author: ChatAuthor; text: string; images?: PreparedChatImage[]; recipients: string[]; exchangeId?: string; finalMessageId?: string;
 }
 export interface ChatStore extends ChatImageStore {
+  readGroupContext(workspaceId: string, after: number): Promise<GroupContextMessage[]>;
   publishChat(input: ChatPublication): Promise<ChatAcceptance>;
   chatSnapshot(workspaceId: string, after?: number, limit?: number): Promise<ChatSnapshot>;
   chatTimeline(workspaceId: string, after?: number, limit?: number): Promise<TimelineSnapshot>;
@@ -103,9 +105,12 @@ export function userMentions(text: string): string[] {
   return [...result.values()];
 }
 
+export function groupSender(message: ChatMessage): string {
+  return message.author.type === 'user' ? 'Sender: User [user]' : `Sender: ${message.author.name} [member: ${message.author.memberId}]`;
+}
+
 export function groupEntry(message: ChatMessage, images: ImageContent[] = []): ContextEntry {
-  const author = message.author.type === 'user' ? 'User' : message.author.name;
-  const text = `[Group message ${message.position} from ${author}]\n${message.recipients.length ? `[Mentioned members: ${message.recipients.join(', ')}]\n` : ''}${message.text}`;
+  const text = `[Group message ${message.position}]\n${groupSender(message)}\n${message.recipients.length ? `[Mentioned members: ${message.recipients.join(', ')}]\n` : ''}${message.text}`;
   return {
     messageId: message.messageId,
     message: { role: 'user', content: images.length ? [{ type: 'text', text }, ...images] : text, timestamp: message.time },

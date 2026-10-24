@@ -2,23 +2,27 @@
 
 ## Result summary
 
-Team owns membership, active configuration, shared chat/context, triggering/scheduling and construction of member context. TeamRuntime is the durable host for member and solo HTTP agents; TeamData owns durable application schemas/queries/migrations. Business systems do not each require persistence.
+Team owns authoritative original group messages, membership/cooperation and durable application state. TeamRuntime hosts AgentExecution; TeamData maps public context/history values to SQL. Consumption and private-retention semantics belong to Agent.
 
 Design: [Team](../../../../../design/backend/core/team/design.md).
 
 ### Coordination and ownership
 
-TeamRuntime prepares settings/admission and creates AgentExecution. It restores working context once after admission/preparation, then Agent maintains it in memory. Explicit caller replacements and publication feedback update the live execution through its public interface. It acknowledges message start/message/context/terminal events through TeamData. Persisted records precede visible completion. TeamData also implements Workspace's public persistence port. Existing atomic publication/reservation/admission and activation transactions stay together here. TeamRuntime owns database lease checks, failed finalization reporting, restart recovery, durable follow and the live execution registry.
+TeamSystem.policy supplies only a group-context reference. TeamData.readGroupContext(workspaceId, after) resolves the original shared inputs, authoritative sender text, native pictures and final origins in one repeatable-read snapshot. Agent selects after. TeamRuntime restores context once after execution admission and acknowledges Agent context changes. TeamRunner notifies idle members after publication through syncGroupContext; busy/queued workers synchronize at their Agent work boundary. No implicit document loading/retrieval or terminal context clearing remains.
 
 ### Implemented contract
 
-**Input:** TeamData(MySqlStorage); TeamRuntime(store, configSource, policy, stream, {progressCapacity?,maxSteps?}); TeamSystem(store, workspaces, config, webTools?, permissionsEnabled?); existing member/chat/config/review operations.
+**Input:** TeamData(MySqlStorage), TeamRuntime(store, configSource, policy, stream, limits?), TeamSystem(store, workspaces, config, webTools?, permissionsEnabled?). Existing member/chat/review/settings operations are unchanged. syncGroupContext(agentId) schedules idle context synchronization; Agent callbacks acknowledge completed messages, context replacements and terminal state.
 
-**Output:** Durable run/message/config/workspace-context records, shared response timeline and final references, inspection/settings, run/history/delta follow and explicit revision/busy/persistence failures.
+**Output:** Existing HTTP/SSE history/timeline/progress envelopes. readGroupContext returns Agent GroupContextMessage values including prepared image blocks and optional private-final origin. SQL getContext/replaceContext returns/acknowledges the Agent-owned snapshot, including its incorporation markers.
 
-**Effect and failure:** Team owns its durable format, SQL mappings and cleanup; Agent owns the meaning of its public execution values. Active source bytes, retained failure ranges, history cursors and schemas are preserved. Whole-workspace idle activation, single-member execution, user Git approval and durable interrupted recovery remain. Solo agents retain their existing API without joining a member roster.
+**Effect and failure:** SQL CAS replacement stores the full context and incorporation state atomically. Private completed history, shared final references and UI working-history ranges remain independent. Publication finalizes sender and reserves recipient runs atomically but does not clear context or freeze a context-retention boundary. Idle synchronization failures are retained for getState to report as persistence_failure; a subsequent synchronization or admitted run can restore context. Startup interrupts abandoned runs without replay. Explicit idle reset clears contexts and histories while preserving project files. Other member/config/workspace persistence responsibilities remain.
 
-**Usage example:** const store = new TeamData(new MySqlStorage(databaseUrl)); await store.migrate(); const runtime = new TeamRuntime(store, config, configuredPolicy(), piModelStream(models)); await runtime.open(); await runtime.start(agentId, text); Follow through runtime.follow; close runs/workspaces before store.close().
+**Usage example:** Create TeamData and TeamRuntime, attach TeamSystem and open. Publish via team.runner.postUser; the runner schedules mentioned members and synchronizes unmentioned idle members without model calls. Call runtime.finished to await work and context finalization; read stable history through existing APIs.
+
+### Durable transition
+
+agents.context_format is a backend migration marker. Fresh rows use 1. When upgrading an older schema, existing rows receive 0 and member records are adopted once using Agent's public adoption procedure with recorded private history and resolved shared context. The updated snapshot/format marker commit together. Successful retries skip completed rows. Old member_contexts/member_context_runs tables are dropped after adoption; ordinary execution no longer uses success_position, group_through or retained-range selection. Stable history/project files are not deleted. A restored historical context can be larger; compaction remains deferred.
 
 ## File lookup
 

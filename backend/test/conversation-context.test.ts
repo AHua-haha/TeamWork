@@ -1,34 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
-import { contextInput, parseContextDocument, repairInterruptedTools } from '../src/core/team/conversation-context.js';
-import { memberContextPath } from '../src/core/workspace/workspace-layout.js';
+import { AgentMessageContext, adoptRecordedContext, repairInterruptedTools, type GroupContextMessage } from '../src/core/agent/context.js';
+import { groupEntry, groupSender, type ChatMessage } from '../src/core/team/group-chat.js';
 import type { ContextEntry } from '../src/core/agent/types.js';
-
-const document = (commands: unknown[] = []) => `# Context\n\n## Result summary\nCurrent state.\n\n## File lookup\n| Path | Description |\n| --- | --- |\n| secret.txt | Inspect only when needed |\n\n## Automatic retrieval\n\n\`\`\`json\n${JSON.stringify({ commands })}\n\`\`\`\n`;
-
-test('context document selects prose/table without expanding lookup or including retrieval configuration', () => {
-  const inputs = [{ command: 'echo ready', cwd: '/project', timeout: 3, background: true, metadata: {} }];
-  const parsed = parseContextDocument(document(inputs));
-  assert.deepEqual(parsed.commands, inputs);
-  assert.match(parsed.text, /Current state/); assert.match(parsed.text, /secret.txt/);
-  assert.doesNotMatch(parsed.text, /echo ready|Automatic retrieval/);
-  assert.equal(memberContextPath('backend/metadata.json'), '.rsi/context/implement/backend/impl/README.md');
-  assert.equal(memberContextPath('metadata.json'), '.rsi/context/implement/impl/README.md');
-});
-
-test('context parser ignores reserved headings and commands inside ordinary fenced examples', () => {
-  const text = document().replace('Current state.', 'Current state.\n````markdown\n## Automatic retrieval\n```json\n{"commands":[{"command":"never run"}]}\n```\n````');
-  const parsed = parseContextDocument(text);
-  assert.deepEqual(parsed.commands, []); assert.match(parsed.text, /never run/);
-});
-
-test('invalid JSON, duplicate sections, unclosed fences and unsupported Bash inputs are repairable parse errors', () => {
-  for (const text of [document().replace('"commands":[]', '"commands":'), document() + '\n## File lookup\nDuplicate', document().replace(/```\n$/, ''), document([{ command: 'ok' }, { command: 'bad', authority: 'admin' }]), document(['npm test']), document([{ command: 'x', timeout: -1 }]), document([{ command: 'x', metadata: { approval: true } }]), document().replace('## File lookup', '## Files')]) {
-    assert.throws(() => parseContextDocument(text));
-  }
-});
-
+const contextInput = (text: string, metadata = {}): ContextEntry => ({ messageId: text.replace(/[^A-Za-z0-9_-]/g, '-'), message: { role: 'user', content: text, timestamp: 1 }, metadata });
 test('interrupted tool exchange gets context-only missing results without modifying original history', () => {
   const assistant: ContextEntry = { messageId: 'calls', message: fauxAssistantMessage([{ type: 'toolCall', id: 'a', name: 'bash', arguments: { command: 'work' } }, { type: 'toolCall', id: 'b', name: 'read', arguments: { path: 'file' } }], { stopReason: 'toolUse' }), metadata: {} };
   const result: ContextEntry = { messageId: 'result', message: { role: 'toolResult', toolCallId: 'a', toolName: 'bash', content: [{ type: 'text', text: 'done' }], isError: false, timestamp: 1 }, metadata: {} };
@@ -46,5 +22,71 @@ test('interrupted tool exchange gets context-only missing results without modify
 test('complete tool results are kept exactly without synthetic errors', () => {
   const entries = [contextInput('No tools were interrupted', {})];
   assert.deepEqual(repairInterruptedTools(entries), entries);
-  assert.deepEqual(parseContextDocument(document()).commands, []);
+});
+
+const group = (position: number, text: string, origin?: {agentId: string; messageId: string}): GroupContextMessage => {
+  const message: ChatMessage = { workspaceId: 'workspace', messageId: `g${position}`, position, exchangeId: 'exchange', author: origin ? {type: 'member', memberId: origin.agentId, name: 'Lead', runId: 'run'} : {type: 'user'}, text, recipients: [], time: position };
+  return {position, entry: groupEntry(message), sender: groupSender(message), ...(origin ? {origin} : {})};
+};
+
+test('Agent selects incoming shared messages using its own context, preserving chronology and source state', async () => {
+  const g1 = group(1, 'First'), g2 = group(2, 'Next');
+  const reads: number[] = [];
+  const reference = {id: 'workspace', read: async (after: number) => { reads.push(after); return [g1,g2].filter(g => g.position > after); }};
+  const first = await new AgentMessageContext('member', {revision:0,entries:[]}).incoming({...reference,read:async () => [g1]});
+  const working = contextInput('Private result');
+  const next = await new AgentMessageContext('member',{revision:1,entries:[...first!,working]}).incoming(reference);
+  assert.deepEqual(reads,[1]);
+  assert.deepEqual(next!.map(e => e.messageId),['g1','Private-result','g2']);
+  assert.match(JSON.stringify(next![0]!.message), /Sender: User/);
+  assert.equal(await new AgentMessageContext('member',{revision:2,entries:next!}).incoming(reference),undefined);
+  assert.deepEqual(reads,[1,2]);
+});
+
+test('own accepted final retains signed original blocks and adds attribution/provenance without duplicating answer', async () => {
+  const original: ContextEntry = {messageId:'final',message:fauxAssistantMessage([{type:'thinking',thinking:'private reasoning',thinkingSignature:'signed-reasoning'},{type:'text',text:'Done',textSignature:'opaque'}]),metadata:{}};
+  const copy = structuredClone(original);
+  const shared = group(1,'Done',{agentId:'lead',messageId:'final'});
+  const reference = {id:'workspace',read:async (after: number) => after ? [] : [shared]};
+  const entries = await new AgentMessageContext('lead',{revision:0,entries:[original]}).incoming(reference);
+  assert.equal(entries!.length,1);
+  assert.match(JSON.stringify(entries![0]!.message),/Sender: Lead/);
+  assert.deepEqual((entries![0]!.message.content as unknown[])[0],(copy.message.content as unknown[])[0], 'thinking remains first and signed');
+  assert.deepEqual((entries![0]!.message.content as unknown[]).at(-1),(copy.message.content as unknown[]).at(-1));
+  assert.deepEqual(original,copy,'history/source values are untouched');
+  assert.equal(entries![0]!.metadata.groupMessageId,'g1');
+  assert.equal(await new AgentMessageContext('lead',{revision:1,entries:entries!}).incoming(reference),undefined);
+  const other = await new AgentMessageContext('other',{revision:0,entries:[]}).incoming(reference);
+  assert.equal(other![0]!.message.role,'user');
+});
+
+test('invalid group ordering refuses incorporation and does not mutate existing state', async () => {
+  const context = {revision:0,entries:[contextInput('private')]};
+  const before = structuredClone(context);
+  await assert.rejects(new AgentMessageContext('member',context).incoming({id:'w',read:async () => [group(2,'two'),group(1,'one')]}),/strictly ordered/);
+  assert.deepEqual(context,before);
+});
+
+test('one-time legacy adoption preserves recorded private work and original group provenance', () => {
+  const final: ContextEntry={messageId:'final',message:fauxAssistantMessage('Done',{timestamp:2}),metadata:{}};
+  const context=adoptRecordedContext('lead','workspace',[],[final],[group(1,'request'),group(3,'Done',{agentId:'lead',messageId:'final'})]);
+  assert.deepEqual(context.map(e=>e.messageId),['g1','final']);
+  assert.equal(context[1]!.metadata.groupPosition,3);
+});
+
+test('legacy adoption preserves tool/result pairing while group publications overlap private execution', () => {
+  const call:ContextEntry={messageId:'call',message:fauxAssistantMessage([{type:'toolCall',id:'a',name:'bash',arguments:{command:'work'}}],{stopReason:'toolUse',timestamp:1}),metadata:{}};
+  const result:ContextEntry={messageId:'result',message:{role:'toolResult',toolCallId:'a',toolName:'bash',content:[{type:'text',text:'done'}],isError:false,timestamp:3},metadata:{}};
+  const adopted=adoptRecordedContext('member','workspace',[],[call,result],[group(2,'incoming')]);
+  assert.deepEqual(adopted.map(entry=>entry.messageId),['call','result','g2']);
+  assert.equal(adopted.some(entry=>entry.metadata.source==='interrupted-tool-result'),false);
+});
+
+test('legacy adoption regenerates context-only interrupted results once in the correct place', () => {
+  const call:ContextEntry={messageId:'unfinished',message:fauxAssistantMessage([{type:'toolCall',id:'lost',name:'bash',arguments:{command:'work'}}],{stopReason:'toolUse',timestamp:1}),metadata:{}};
+  const later=contextInput('later');
+  const existing=repairInterruptedTools([call,later]);
+  const adopted=adoptRecordedContext('member','workspace',existing,[call,later],[]);
+  assert.equal(adopted.filter(entry=>entry.message.role==='toolResult').length,1);
+  assert.deepEqual(adopted.map(entry=>entry.message.role),['assistant','toolResult','user']);
 });

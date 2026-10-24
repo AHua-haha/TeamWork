@@ -1,3 +1,5 @@
+import { AgentMessageContext } from '../../src/core/agent/context.js';
+import { encode } from '../../src/core/codec.js';
 import { MySqlStorage } from '../../src/storage/mysql.js';
 import { acceptFiles,initGit,waitApproval } from '../git-fixture.js';
 import { gitText } from '../../src/core/workspace/workspace-git.js';
@@ -1488,7 +1490,7 @@ test('truncated member text remains private and ends with an explicit incomplete
   } finally { await f.close(); }
 });
 
-test('group chat SQL/runtime: sequential execution, private feedback and activation-local context with stable history', { timeout: 30_000 }, async () => {
+test('group chat SQL/runtime: sequential execution, private feedback and continuous context with stable history', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
     const start = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');
@@ -1498,9 +1500,9 @@ test('group chat SQL/runtime: sequential execution, private feedback and activat
     const frontendRun = start.runs.find(run => run.agentId === f.frontend.memberId)!;
     assert.equal((await f.runtime.getState(f.backend.memberId)).run?.status, 'running');
     assert.equal((await f.runtime.getState(f.frontend.memberId)).run?.status, 'running');
-    assert.equal((await store.getContext(f.lead.memberId)).entries.length, 0);
+    assert.equal((await store.getContext(f.lead.memberId)).entries.length, 1, 'idle Lead synchronized without a run');
     const user = await f.team.runner.postUser(f.workspaceId, '@Lead discuss');
-    assert.equal((await store.getContext(f.backend.memberId)).entries.length, 2, 'group and document are fixed during work');
+    assert.equal((await store.getContext(f.backend.memberId)).entries.length, 1, 'only admitted shared input is incorporated during work');
     answer(backendStep.events, message('<mentions>["Lead"]</mentions>\n\nPRIVATE CANDIDATE: please review'));
     const revision = await f.requests.next();
     assert.match(revision.request.context.systemPrompt!, /You are Backend,/);
@@ -1510,11 +1512,14 @@ test('group chat SQL/runtime: sequential execution, private feedback and activat
     answer(revision.events, message('Backend finished without mentions.'));
     await f.runtime.finished(f.backend.memberId, backendRun.runId);
     const entries = (await store.getContext(f.backend.memberId)).entries;
-    assert.deepEqual(entries, [], 'finished working context is reconstructed on the next activation');
+    assert.match(JSON.stringify(entries), /PRIVATE CANDIDATE/);
+    assert.match(JSON.stringify(entries), /@Lead discuss/);
+    assert.equal(JSON.stringify(entries).split('Backend finished without mentions.').length - 1, 1, 'sender sees its accepted final once');
     assert.deepEqual((await store.runMessages(f.backend.memberId, backendRun.runId)).map(record => record.metadata.source ?? record.message.role), ['assistant', 'publication-feedback', 'assistant']);
-    assert.equal((await store.getContext(f.frontend.memberId)).entries.length, 0, 'waiting runs have not constructed context');
     const frontendStep = await f.requests.next();
     assert.match(frontendStep.request.context.systemPrompt!, /You are Frontend,/);
+    assert.match(JSON.stringify(frontendStep.request.context.messages), /Backend finished without mentions/);
+    assert.match(JSON.stringify(frontendStep.request.context.messages), /@Lead discuss/, 'queued member chooses current shared input itself');
     answer(frontendStep.events, message('Frontend finished.'));
     await f.runtime.finished(f.frontend.memberId, frontendRun.runId);
     const leadStep = await f.requests.next();
@@ -1526,15 +1531,13 @@ test('group chat SQL/runtime: sequential execution, private feedback and activat
     assert.ok(!transcript.messages.some(item => item.text.includes('PRIVATE CANDIDATE')));
     const frontendContext = (await store.getContext(f.frontend.memberId)).entries;
     assert.ok(!frontendContext.some(entry => entry.metadata.source === 'publication-feedback'));
-    assert.deepEqual(frontendContext, [], 'idle members do not store shared-message copies');
+    assert.equal(frontendContext.filter(entry => entry.metadata.groupContextId === f.workspaceId).length, 5, 'idle members catch up without another activation');
     const originalHistory = await store.runMessages(f.backend.memberId, backendRun.runId);
-    const context = await store.getContext(f.backend.memberId);
-    await store.replaceContext(f.backend.memberId, context.revision, [{ messageId: 'compacted-group', message: { role: 'user', content: 'Summary of my work', timestamp: 1 }, metadata: {} }]);
     assert.deepEqual(await store.runMessages(f.backend.memberId, backendRun.runId), originalHistory);
     assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 5);
     const next = await f.team.runner.postUser(f.workspaceId, '@Backend continue');
     const nextStep = await f.requests.next();
-    assert.ok(!JSON.stringify(nextStep.request.context.messages).includes('Summary of my work'));
+    assert.ok(JSON.stringify(nextStep.request.context.messages).includes('PRIVATE CANDIDATE'), 'private work survives successful completion');
     assert.ok(JSON.stringify(nextStep.request.context.messages).includes('@Backend continue'));
     assert.ok(JSON.stringify(nextStep.request.context.messages).includes('Backend finished without mentions.'));
     answer(nextStep.events, message('Continued.'));
@@ -1592,7 +1595,7 @@ test('group SQL publication is atomic; restart preserves shared history without 
     // Simulate a crash after durable acceptance, before the model worker launches.
     const abandoned = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: '@Backend abandoned', recipients: [f.backend.memberId] });
     await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'Shared while Backend is working', recipients: [] });
-    assert.deepEqual((await store.getContext(f.backend.memberId)).entries, []);
+    assert.equal((await store.getContext(f.backend.memberId)).entries.length, 1, 'recorded context survives cancellation');
     let recoveredFinalization = false;
     const recoveryPolicy = f.team.policy(configuredPolicy());
     const recovery = new TeamRuntime(store, f.team.runConfig, { ...recoveryPolicy, afterRun: async run => {
@@ -1605,7 +1608,9 @@ test('group SQL publication is atomic; restart preserves shared history without 
     try {
       assert.equal((await recovery.getState(f.backend.memberId)).run?.status, 'interrupted');
       assert.equal(recoveredFinalization, true);
-      assert.deepEqual((await store.getContext(f.backend.memberId)).entries, []);
+      assert.equal((await store.getContext(f.backend.memberId)).entries.length, 1, 'startup does not reconstruct context');
+      await recovery.syncGroupContext(f.backend.memberId);
+      assert.equal((await store.getContext(f.backend.memberId)).entries.length, 3, 'Agent-owned idle synchronization catches up without model execution');
       assert.equal((await store.runMessages(f.backend.memberId, abandoned.runs[0]!.runId)).length, 0);
       assert.equal((await store.chatSnapshot(f.workspaceId)).position, 3);
     } finally { await recovery.close(); }
@@ -1613,7 +1618,7 @@ test('group SQL publication is atomic; restart preserves shared history without 
     await f.team.service.retire(f.workspaceId, f.backend.memberId, f.backend.revision);
     await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'After Backend retired', recipients: [] });
     assert.deepEqual(await store.getContext(f.backend.memberId), retained, 'retirement excludes later messages even on explicit delivery');
-    assert.deepEqual((await store.getContext(f.frontend.memberId)).entries, []);
+    assert.equal((await store.getContext(f.frontend.memberId)).entries.length, 1, 'direct SQL publication does not run member synchronization');
   } finally { await f.close(); }
 });
 
@@ -1946,7 +1951,7 @@ test('workspace chat reset atomically clears member conversation storage and sta
     assert.ok(fresh.entries[0]!.revision > result.resetCursor);
     assert.equal(fresh.entries[1]!.kind === 'member' && fresh.entries[1]!.working.after, 0);
     const request = await f.requests.next();
-    assert.equal(request.request.context.messages.length, 2);
+    assert.equal(request.request.context.messages.length, 1);
     assert.ok(JSON.stringify(request.request.context.messages).includes('Fresh conversation'));
     assert.ok(!JSON.stringify(request.request.context.messages).includes('original conversation'));
     answer(request.events, message('Fresh answer'));
@@ -2216,121 +2221,166 @@ ${JSON.stringify({ commands })}
 \`\`\`
 `;
 
-test('member conversation: retained failure ranges survive reopen, accumulate once, and clear only from context on success', { timeout: 45_000 }, async () => {
+test('continuous member context survives failure, success and runtime restart without document reconstruction', { timeout: 45_000 }, async () => {
   const f = await groupFixture();
+  let restarted: TeamRuntime | undefined;
   try {
     const root = (await f.team.harness.environment(f.backend.memberId)).root;
-    const doc = join(root, '.rsi/context/implement/impl/README.md');
-    await writeFile(doc, memberDocument('Initial implementation result'));
+    await writeFile(join(root, '.rsi/context/implement/impl/README.md'), memberDocument('DOCUMENT IS NOT AUTOMATIC INPUT'));
     const first = await f.team.runner.postUser(f.workspaceId, '@Backend first attempt');
-    const step = await f.requests.next();
-    const texts = (request: ModelRequest) => request.context.messages.map(m => m.role === 'user' && typeof m.content === 'string' ? m.content : JSON.stringify(m));
-    assert.ok(texts(step.request).findIndex(t => t.includes('Initial implementation result')) < texts(step.request).findIndex(t => t.includes('first attempt')));
-    assert.equal(texts(step.request).some(t => t.includes('SECRET CONTENT')), false);
-    answer(step.events, fauxAssistantMessage([{ type: 'text', text: 'First attempt useful private information', textSignature: JSON.stringify({ v: 1, id: 'private1', phase: 'commentary' }) }]));
+    const firstStep = await f.requests.next();
+    assert.doesNotMatch(JSON.stringify(firstStep.request.context.messages), /DOCUMENT IS NOT AUTOMATIC INPUT/);
+    answer(firstStep.events, fauxAssistantMessage([{ type: 'text', text: 'Useful private work', textSignature: JSON.stringify({v:1,id:'private',phase:'commentary'}) }]));
     const failing = await f.requests.next();
-    failing.events.push({ type: 'error', reason: 'error', error: { ...message(), stopReason: 'error', errorMessage: 'first failure' } });
-    assert.equal((await f.runtime.finished(f.backend.memberId, first.runs[0]!.runId)).status, 'failed');
-    const firstHistory = await store.runMessages(f.backend.memberId, first.runs[0]!.runId);
-    const reopened = new TeamData(new MySqlStorage(databaseUrl!));
-    try {
-      await reopened.migrate();
-      const [state] = await reopened.pool.execute<any[]>('SELECT group_position, success_position FROM member_contexts WHERE member_id = ?', [f.backend.memberId]);
-      assert.equal(state[0].group_position, first.message.position); assert.equal(state[0].success_position, 0);
-      assert.deepEqual(await reopened.runMessages(f.backend.memberId, first.runs[0]!.runId), firstHistory);
-    } finally { await reopened.close(); }
-    const second = await f.team.runner.postUser(f.workspaceId, '@Backend second attempt');
-    const secondStep = await f.requests.next();
-    const ordered = texts(secondStep.request);
-    assert.ok(ordered.findIndex(t => t.includes('first attempt')) < ordered.findIndex(t => t.includes('Initial implementation result')));
-    assert.ok(ordered.findIndex(t => t.includes('First attempt useful')) < ordered.findIndex(t => t.includes('second attempt')));
-    answer(secondStep.events, fauxAssistantMessage([{ type: 'text', text: 'Second attempt useful private information', textSignature: JSON.stringify({ v: 1, id: 'private2', phase: 'commentary' }) }]));
-    const secondFailing = await f.requests.next();
-    secondFailing.events.push({ type: 'error', reason: 'error', error: { ...message(), stopReason: 'error', errorMessage: 'second failure' } });
-    await f.runtime.finished(f.backend.memberId, second.runs[0]!.runId);
-    const third = await f.team.runner.postUser(f.workspaceId, '@Backend finish');
-    const thirdStep = await f.requests.next();
-    assert.equal(texts(thirdStep.request).filter(t => t.includes('First attempt useful')).length, 1);
-    assert.equal(texts(thirdStep.request).filter(t => t.includes('Second attempt useful')).length, 1);
-    await writeFile(doc, memberDocument('Maintained successful implementation result'));
-    answer(thirdStep.events, message('Public final answer'));
-    assert.equal((await f.runtime.finished(f.backend.memberId, third.runs[0]!.runId)).status, 'completed');
-    const restart = new TeamData(new MySqlStorage(databaseUrl!));
-    try { await restart.migrate(); const [rows] = await restart.pool.execute<any[]>('SELECT success_position FROM member_contexts WHERE member_id = ?', [f.backend.memberId]); assert.ok(rows[0].success_position > 0); }
-    finally { await restart.close(); }
-    const next = await f.team.runner.postUser(f.workspaceId, '@Backend fresh task');
-    const fresh = await f.requests.next();
-    const content = texts(fresh.request).join('\n');
-    assert.match(content, /Maintained successful implementation result/);
-    assert.doesNotMatch(content, /First attempt useful|Second attempt useful/);
-    assert.deepEqual(await store.runMessages(f.backend.memberId, first.runs[0]!.runId), firstHistory);
-    answer(fresh.events, message('Fresh result'));
-    await f.runtime.finished(f.backend.memberId, next.runs[0]!.runId);
-  } finally { await f.close(); }
+    failing.events.push({type:'error',reason:'error',error:{...message(),stopReason:'error',errorMessage:'provider failed'}});
+    assert.equal((await f.runtime.finished(f.backend.memberId, first.runs[0]!.runId)).status,'failed');
+    const history = await store.runMessages(f.backend.memberId, first.runs[0]!.runId);
+    const second = await f.team.runner.postUser(f.workspaceId, '@Backend continue');
+    const continued = await f.requests.next();
+    const contents = JSON.stringify(continued.request.context.messages);
+    assert.ok(contents.indexOf('first attempt') < contents.indexOf('Useful private work'));
+    assert.ok(contents.indexOf('Useful private work') < contents.indexOf('@Backend continue'));
+    answer(continued.events,message('Accepted public result'));
+    await f.runtime.finished(f.backend.memberId,second.runs[0]!.runId);
+    const before = await store.getContext(f.backend.memberId);
+    assert.match(JSON.stringify(before.entries),/Useful private work/);
+    assert.equal(JSON.stringify(before.entries).split('Accepted public result').length-1,1,'own accepted answer appears once');
+    assert.match(JSON.stringify(before.entries),/Sender: Backend/);
+    await f.runtime.close();
+    restarted = new TeamRuntime(store, f.team.runConfig, f.team.policy(configuredPolicy()), request => {
+      const events = new Queue<AssistantMessageEvent>(); f.requests.push({request,events}); return events;
+    });
+    f.team.attach(restarted); await restarted.open();
+    const third = await f.team.runner.postUser(f.workspaceId,'@Backend after restart');
+    const resumed = await f.requests.next();
+    assert.match(JSON.stringify(resumed.request.context.messages),/Useful private work/);
+    assert.equal(JSON.stringify(resumed.request.context.messages).split('Accepted public result').length-1,1);
+    assert.doesNotMatch(JSON.stringify(resumed.request.context.messages),/DOCUMENT IS NOT AUTOMATIC INPUT/);
+    answer(resumed.events,message('Restored continuously'));
+    await restarted.finished(f.backend.memberId,third.runs[0]!.runId);
+    assert.deepEqual(await store.runMessages(f.backend.memberId,first.runs[0]!.runId),history,'stable private history unchanged');
+  } finally { await restarted?.close(); await f.close(); }
 });
 
-test('member retrieval uses full Bash inputs in member shell order and persists normal/error results before model calls', { timeout: 30_000 }, async () => {
+test('idle synchronization failure is observable and recoverable without rejecting an accepted publication', {timeout:30_000}, async()=>{
+  const f=await groupFixture();const replace=store.replaceContext.bind(store);
+  store.replaceContext=async(agentId,revision,entries)=>{
+    if(agentId===f.frontend.memberId)throw new Error('injected idle context write failure');
+    return replace(agentId,revision,entries);
+  };
+  try{
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend continue');
+    assert.equal((await store.chatSnapshot(f.workspaceId)).position,1);
+    await assert.rejects(f.runtime.getState(f.frontend.memberId),code('persistence_failure'));
+    assert.deepEqual((await store.getContext(f.frontend.memberId)).entries,[],'refused acknowledgement advances no consumption state');
+    store.replaceContext=replace;
+    await f.runtime.syncGroupContext(f.frontend.memberId);
+    assert.equal((await f.runtime.getState(f.frontend.memberId)).run,null,'idle catch-up triggers no model');
+    assert.equal((await store.getContext(f.frontend.memberId)).entries.length,1);
+    answer((await f.requests.next()).events,message('Recovered publication'));
+    await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
+  }finally{store.replaceContext=replace;await f.close();}
+});
+
+test('shared input arriving after the terminal read is caught up when the member becomes idle', {timeout:30_000}, async()=>{
+  let memberId = '', finalizing = false;
+  const f=await groupFixture({...configuredPolicy(), afterRun: async run => { if (run.agentId === memberId) finalizing = true; }});
+  memberId = f.backend.memberId;
+  const original=store.readGroupContext.bind(store);
+  let ready!:()=>void, resume!:()=>void;
+  const terminalRead=new Promise<void>(resolve=>ready=resolve), release=new Promise<void>(resolve=>resume=resolve);
+  let paused=false;
+  store.readGroupContext=async(workspaceId,after)=>{
+    const snapshot=await original(workspaceId,after);
+    if(finalizing&&workspaceId===f.workspaceId&&after===1&&!paused){paused=true;ready();await release;}
+    return snapshot;
+  };
+  try{
+    const first=await f.team.runner.postUser(f.workspaceId,'@Backend initial');
+    answer((await f.requests.next()).events,message('Backend final'));
+    await terminalRead;
+    const newer=await f.team.runner.postUser(f.workspaceId,'@Lead late shared input');
+    resume();
+    await f.runtime.finished(f.backend.memberId,first.runs[0]!.runId);
+    assert.match(JSON.stringify((await store.getContext(f.backend.memberId)).entries),/late shared input/);
+    const lead=await f.requests.next();answer(lead.events,message('Lead received it'));
+    await f.runtime.finished(f.lead.memberId,newer.runs[0]!.runId);
+  }finally{resume();store.readGroupContext=original;await f.close();}
+});
+
+test('implementation documents and retrieval commands are ordinary files, never implicit activation effects', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
     const root = (await f.team.harness.environment(f.backend.memberId)).root;
-    const inputs = [{ command: 'validate', cwd: root, timeout: 2, metadata: {} }, { command: 'background validate', background: true }];
-    await writeFile(join(root, '.rsi/context/implement/impl/README.md'), memberDocument('Retrieval-enabled result', inputs));
-    await writeFile(join(root, 'never-load-this.txt'), 'SECRET CONTENT MUST NOT BE IN REQUEST');
-    const invocations: unknown[] = [];
-    f.team.harness.bash = async (id, input, signal, runId) => {
-      assert.equal(id, f.backend.memberId); assert.equal(signal.aborted, false); assert.ok(runId); invocations.push(input);
-      return { output: 'Validation failed usefully', exitCode: invocations.length === 1 ? 1 : 0, durationMs: 5, truncated: false, timedOut: false, ...(invocations.length === 2 ? { jobId: 9 } : {}) };
-    };
-    const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend retrieve');
-    const step = await f.requests.next();
-    assert.deepEqual(invocations, inputs);
-    const text = JSON.stringify(step.request.context.messages);
-    assert.doesNotMatch(step.request.context.systemPrompt!, /SECRET CONTENT/);
-    assert.doesNotMatch(text, /SECRET CONTENT/); assert.match(text, /Validation failed usefully/); assert.match(text, /job_id/);
-    const history = await store.runMessages(f.backend.memberId, accepted.runs[0]!.runId);
-    assert.equal(history.filter(r => r.metadata.source === 'context-retrieval').length, 2);
-    assert.ok(text.indexOf('retrieve') < text.indexOf('Validation failed usefully'));
-    answer(step.events, message('Handled validation result'));
-    assert.equal((await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId)).status, 'completed');
-    await writeFile(join(root, '.rsi/context/implement/impl/README.md'), memberDocument('Invalid retrieval', [{ command: 'must not run' }, { command: 'bad', unknown: true }]));
-    const repair = await f.team.runner.postUser(f.workspaceId, '@Backend repair document');
-    const repairing = await f.requests.next();
-    assert.equal(invocations.length, 2, 'invalid document runs no prefix of its commands');
-    assert.match(JSON.stringify(repairing.request.context.messages), /No commands from this document were executed/);
-    answer(repairing.events, message('Reported invalid document'));
-    await f.runtime.finished(f.backend.memberId, repair.runs[0]!.runId);
+    const doc = join(root,'.rsi/context/implement/impl/README.md');
+    await writeFile(doc,memberDocument('NOT AUTOMATICALLY LOADED',[{command:'unexpected command'}]));
+    let calls = 0;
+    f.team.harness.bash = async () => { calls++; throw new Error('must only execute requested tools'); };
+    for (const input of ['@Backend first','@Backend second']) {
+      const publication=await f.team.runner.postUser(f.workspaceId,input);
+      const step=await f.requests.next();
+      assert.doesNotMatch(JSON.stringify(step.request.context.messages),/NOT AUTOMATICALLY LOADED|unexpected command/);
+      answer(step.events,message('Use ordinary tools when needed'));
+      await f.runtime.finished(f.backend.memberId,publication.runs[0]!.runId);
+      await writeFile(doc,'malformed documentation is not a runtime reconstruction input');
+    }
+    assert.equal(calls,0);
   } finally { await f.close(); }
 });
 
-test('member context restart recovery retains abandoned private work, repairs missing tools without replay, and reset removes boundaries', { timeout: 30_000 }, async () => {
-  const f = await groupFixture();
-  let recovery: TeamRuntime | undefined;
+test('restart restores interrupted working context, repairs missing results without replay, and reset clears consumption', { timeout: 30_000 }, async () => {
+  const f=await groupFixture(); let recovery: TeamRuntime | undefined;
   try {
     await f.runtime.close();
-    const admitted = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: '@Backend interrupted', recipients: [f.backend.memberId] });
-    const run = admitted.runs[0]!;
-    await store.prepareMemberContext(f.backend.memberId, run.runId, []);
-    const id = randomUUID();
-    await store.beginMessage(f.backend.memberId, run.runId, id, 1);
-    await store.commitMessage(f.backend.memberId, run.runId, { messageId: id, message: fauxAssistantMessage([{ type: 'toolCall', id: 'unresolved-tool', name: 'bash', arguments: { command: 'may have effects' } }], { stopReason: 'toolUse' }), metadata: {} });
-    const original = await store.runMessages(f.backend.memberId, run.runId);
-    const policy = f.team.policy(configuredPolicy());
-    recovery = new TeamRuntime(store, f.team.runConfig, policy, () => { throw new Error('Startup must not run model'); });
-    await recovery.open();
-    assert.equal((await recovery.getState(f.backend.memberId)).run?.status, 'interrupted');
-    const next = await store.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'Next trigger', recipients: [f.backend.memberId] });
-    await store.prepareMemberContext(f.backend.memberId, next.runs[0]!.runId, []);
-    const context = await store.getContext(f.backend.memberId);
-    assert.ok(context.entries.some(e => e.metadata.source === 'interrupted-tool-result'));
-    assert.deepEqual(await store.runMessages(f.backend.memberId, run.runId), original);
-    await store.finishRun(f.backend.memberId, next.runs[0]!.runId, 'cancelled');
-    await store.resetChat(f.workspaceId);
-    const [states] = await store.pool.execute<any[]>('SELECT success_position, group_position FROM member_contexts WHERE member_id = ?', [f.backend.memberId]);
-    assert.equal(states[0].success_position, 0);
-    assert.ok(states[0].group_position > admitted.message.position);
-    const [ranges] = await store.pool.execute<any[]>('SELECT COUNT(*) AS n FROM member_context_runs JOIN runs ON runs.id = member_context_runs.run_id WHERE runs.agent_id = ?', [f.backend.memberId]);
-    assert.equal(ranges[0].n, 0);
-  } finally { await recovery?.close(); await f.close(); }
+    const admitted=await store.publishChat({workspaceId:f.workspaceId,author:{type:'user'},text:'@Backend interrupted',recipients:[f.backend.memberId]});
+    const run=admitted.runs[0]!;
+    const context=await store.getContext(f.backend.memberId);
+    const entries=await new AgentMessageContext(f.backend.memberId,context).incoming({id:f.workspaceId,read:after=>store.readGroupContext(f.workspaceId,after)});
+    await store.replaceContext(f.backend.memberId,context.revision,entries!);
+    const id=randomUUID(); await store.beginMessage(f.backend.memberId,run.runId,id,1);
+    await store.commitMessage(f.backend.memberId,run.runId,{messageId:id,message:fauxAssistantMessage([{type:'toolCall',id:'uncertain',name:'bash',arguments:{command:'may have effects'}}],{stopReason:'toolUse'}),metadata:{}});
+    const original=await store.runMessages(f.backend.memberId,run.runId);
+    recovery=new TeamRuntime(store,f.team.runConfig,f.team.policy(configuredPolicy()),request=>{const events=new Queue<AssistantMessageEvent>();f.requests.push({request,events});return events;});
+    f.team.attach(recovery); await recovery.open();
+    assert.equal((await recovery.getState(f.backend.memberId)).run?.status,'interrupted');
+    const next=await f.team.runner.postUser(f.workspaceId,'@Backend next trigger');
+    const step=await f.requests.next();
+    assert.match(JSON.stringify(step.request.context.messages),/not replayed/);
+    assert.equal(step.request.context.messages.filter(m=>m.role==='toolResult'&&m.toolCallId==='uncertain').length,1);
+    assert.deepEqual(await store.runMessages(f.backend.memberId,run.runId),original);
+    answer(step.events,message('Inspected uncertain work'));
+    await recovery.finished(f.backend.memberId,next.runs[0]!.runId);
+    await f.team.runner.reset(f.workspaceId);
+    assert.deepEqual((await store.getContext(f.backend.memberId)).entries,[]);
+    const [tables]=await store.pool.query<any[]>("SHOW TABLES LIKE 'member_context%'");
+    assert.deepEqual(tables,[],'obsolete retention/admission tables are retired');
+  } finally {await recovery?.close();await f.close();}
+});
+
+test('legacy adoption restores recorded work once without rewriting stable history or reexecuting commands', { timeout: 30_000 }, async () => {
+  const f=await groupFixture();
+  try {
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend migration');
+    answer((await f.requests.next()).events,message('Durable legacy result'));
+    await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
+    const history=await store.runMessages(f.backend.memberId,accepted.runs[0]!.runId);
+    await f.runtime.close();
+    await store.pool.execute('UPDATE agents SET context = ? WHERE id = ?',[encode([]),f.backend.memberId]);
+    await store.pool.query('ALTER TABLE agents DROP COLUMN context_format');
+    const reopened=new TeamData(new MySqlStorage(databaseUrl!));
+    try {
+      await reopened.migrate();
+      const adopted=await reopened.getContext(f.backend.memberId);
+      assert.match(JSON.stringify(adopted.entries),/Durable legacy result/);
+      assert.equal(JSON.stringify(adopted.entries).split('Durable legacy result').length-1,1);
+      assert.match(JSON.stringify(adopted.entries),/Sender: Backend/);
+      assert.deepEqual(await reopened.runMessages(f.backend.memberId,accepted.runs[0]!.runId),history);
+      await reopened.pool.query('ALTER TABLE agents ALTER COLUMN context_format SET DEFAULT 0');
+      await reopened.migrate();assert.deepEqual(await reopened.getContext(f.backend.memberId),adopted,'migration is idempotent');
+      const [columns]=await reopened.pool.query<any[]>("SHOW COLUMNS FROM agents LIKE 'context_format'");
+      assert.equal(String(columns[0].Default),'1','recover a schema upgrade interrupted before default change');
+    } finally {await reopened.close();}
+  } finally {await f.close();}
 });
 
 test('shared pictures survive reopen, hydrate native model messages, and reset removes all image state', { timeout: 30_000 }, async () => {

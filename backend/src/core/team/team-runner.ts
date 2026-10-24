@@ -7,7 +7,7 @@ import { chatText, userMentions, mentionLimit, type ChatStore, type ChatMessage,
 import { parseMemberResponse } from './member-response.js';
 import { AppError, type RunState } from '../agent/types.js';
 
-export type RunHost = Pick<TeamRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback' | 'clearProgress'>;
+export type RunHost = Pick<TeamRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback' | 'clearProgress' | 'syncGroupContext'>;
 
 /** Shared publication and independent member activations. Private calls and call chains do not exist here. */
 export class TeamRunner {
@@ -102,6 +102,7 @@ export class TeamRunner {
       void this.runtime().finished(run.agentId, run.runId).then(settled, settled);
     }
     this.changes.publish();
+    await Promise.all(roster.map(member => this.runtime().syncGroupContext(member.id)));
     return result;
   }
 

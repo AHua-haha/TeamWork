@@ -32,7 +32,7 @@ export * from '../core/agent/final-answer.js';
 export * from '../core/harness/web-tools.js';
 export * from '../core/team/member-response.js';
 export * from '../core/agent/progress.js';
-export * from '../core/team/conversation-context.js';
+export * from '../core/agent/context.js';
 export * from '../core/team/chat-images.js';
 export * from './chat-images.js';
 export * from '../storage/mysql.js';
