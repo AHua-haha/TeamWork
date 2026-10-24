@@ -35,9 +35,9 @@ Compile Bash sandbox policy to system read access, whole-workspace and workspace
 Implementation map:
 
 - [Native Pi tools](../../../../../../../../../../../backend/src/core/harness/harness-tools.ts): native Pi tool factories and complete native results after invocation authorization.
-- [Harness assembly](../../../../../../../../../../../backend/src/core/harness/harness.ts) and [Purpose bases](../../../../../../../../../../../backend/src/core/harness/harness-bases.ts): assembly, broad read availability, mutation authority and prompts.
+- [Harness assembly](../../../../../../../../../../../backend/src/core/harness/harness.ts) and [Purpose bases](../../../../../../../../../../../backend/src/core/harness/data/bases.ts): assembly, broad read availability, mutation authority and prompts.
 - [Internal backend files](../../../../../../../../../../../backend/src/core/harness/member-files.ts): internal backend file management; not injected into agent tools.
-- [Runtime recording](../../../../../../../../../../../backend/src/core/team/runtime.ts) and [Tool result types](../../../../../../../../../../../backend/src/core/harness/tool-result.ts): preserve native results and recoverable failures.
+- [Runtime recording](../../../../../../../../../../../backend/src/core/agent/runtime.ts) and [Tool result types](../../../../../../../../../../../backend/src/core/harness/tool-result.ts): preserve native results and recoverable failures.
 - [Management tools](../../../../../../../../../../../backend/src/core/team/member-tools.ts) and [Web tools](../../../../../../../../../../../backend/src/core/harness/web-tools.ts): custom readable content and tool-owned limits.
 - [Persistent shell service](../../../../../../../../../../../backend/src/core/harness/harness-command.ts) and [Temporary resources](../../../../../../../../../../../backend/src/core/harness/harness-execution.ts): persistent shell/process/broker service and workspace temporary resources.
 - [Rule prompts](../../../../../../../../../../../backend/prompts/harness): file-backed instructions for native tools and the separate file/Bash boundaries.

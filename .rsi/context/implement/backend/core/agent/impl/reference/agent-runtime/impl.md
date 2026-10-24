@@ -1,4 +1,4 @@
-> AgentExecution now owns the reusable in-memory loop. TeamRuntime supplies durable hosting, follow/history and restart recovery described in this reference.
+> AgentExecution now owns the reusable in-memory loop. AgentRuntime supplies durable hosting, follow/history and restart recovery described in this reference.
 
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
@@ -30,14 +30,14 @@ Node.js/TypeScript and Pi AI 0.87.1 directly; no Agent Core loop. One active run
 
 ## Code map
 
-- [core/agent-runtime.ts](../../../../../../../../../backend/src/core/team/runtime.ts): shared loop, policy hooks, Pi provider adapter, cancellation, follow generator.
-- [src/progress.ts](../../../../../../../../../backend/src/core/agent/progress.ts): fixed-count FIFO, per-member notifications and active start/history boundary.
+- [core/agent-runtime.ts](../../../../../../../../../backend/src/core/agent/runtime.ts): shared loop, policy hooks, Pi provider adapter, cancellation, follow generator.
+- [src/progress.ts](../../../../../../../../../backend/src/core/agent/data/progress.ts): fixed-count FIFO, per-member notifications and active start/history boundary.
 - [src/changes.ts](../../../../../../../../../backend/src/core/changes.ts): versioned notification shared with the context base.
 - [Config service](../../../../team/impl/reference/config/impl.md): editable choices, validation, and consistent run resolution.
 - [src/http.ts](../../../../../../../../../backend/src/api/http.ts): agent and config endpoints, and routing of `/workspaces` to the [workspace routes](../../../../workspace/impl/reference/workspace-agent/workspace/impl.md).
 - [src/http-helpers.ts](../../../../../../../../../backend/src/api/http-helpers.ts): request validation, bounded body reads, JSON/SSE transport, heartbeat comments, socket backpressure, and connection abort handling.
 - [runtime/main.ts](../../../../../../../../../backend/src/runtime/main.ts): environment configuration, provider catalog, workspace service, team system, initialization and graceful shutdown.
-- [src/types.ts](../../../../../../../../../backend/src/core/agent/types.ts): records, errors and versioned backend protocol.
+- [src/types.ts](../../../../../../../../../backend/src/core/agent/data/model.ts): records, errors and versioned backend protocol.
 - [api/index.ts](../../../../../../../../../backend/src/api/index.ts): in-process exports.
 - [README.md](../../../../../../../../../backend/README.md): setup and caller examples.
 - [package.json](../../../../../../../../../backend/package.json), [tsconfig.json](../../../../../../../../../backend/tsconfig.json): pinned Pi version and build commands.
@@ -53,7 +53,7 @@ Config integration tests in [backend.test.ts](../../../../../../../../../backend
 
 Failed terminal persistence is remembered locally and exposed as unavailable, not a fabricated durable state. The next runtime owner recovers unfinished durable runs as interrupted. Tools, custom hooks and custom streams must honor the run abort signal; their external effects are not transactional with MySQL. The default executable registers no solo-agent catalog tools and supplies the shared token threshold plus Harness instruction to Agent’s compaction mechanism. Workspace member tools are supplied by the harness, with lead design/team tools eligible by role. HTTP exposes new input and observation, while context replacement is an in-process backend operation.
 
-TeamRuntime restores Agent context once after execution admission. Agent maintains subsequent steps in memory and synchronizes its shared reference at work boundaries. Idle Agent synchronization starts no run. StepScope.recordInput retains private inputs through the normal acknowledged history path. Shared/private stable history remains independent of mutable context. Shutdown settles publication and context updates before releasing runtime ownership.
+AgentRuntime restores Agent context once after execution admission. Agent maintains subsequent steps in memory and synchronizes its shared reference at work boundaries. Idle Agent synchronization starts no run. StepScope.recordInput retains private inputs through the normal acknowledged history path. Shared/private stable history remains independent of mutable context. Shutdown settles publication and context updates before releasing runtime ownership.
 
 Continuation policies receive the committed assistant record as their fourth argument. Team policy passes its messageId to final publication; it does not infer identity from response text or the member’s latest history. Database terminal writes finalize any associated group entry and its working range. Private follow can start at the group entry’s history start boundary; shared messages are read from authoritative group storage through the Agent-owned reference at work boundaries.
 

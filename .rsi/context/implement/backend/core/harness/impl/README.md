@@ -2,7 +2,7 @@
 
 ## Result summary
 
-Harness owns reusable tools, available capabilities, scope enforcement, execution resources, explicit Git approval and backend-owned maintenance prompts. Its source and policy behavior are unchanged apart from owner paths.
+Harness owns reusable tools, available capabilities, scope enforcement, execution resources, explicit Git approval and backend-owned maintenance prompts. Its tool and permission behavior is unchanged; data definitions and related operations are now aggregated under data/.
 
 Design: [Harness](../../../../../design/backend/core/harness/design.md).
 
@@ -24,7 +24,17 @@ HarnessService obtains public member configuration and Workspace design/file inf
 
 harnessPrompt('context-compaction') loads required backend/prompts/harness/context-compaction.md. The build copies the complete harness prompt directory beside compiled code. The instruction describes the private replacement boundary, retention of every new assistant/tool message, separately preserved original group context and Next steps for unfinished work. Runtime supplies this string in Agent compaction settings; Harness does not select a token threshold or persist compaction state.
 
+### Harness data model
+
+**Input:** data/config.ts validates configured design scope; data/bases.ts and resources.ts define purpose/resource grants; data/model.ts defines resolved scopes/permissions/environment; data/bash.ts defines Bash input/output and parsing. data/approvals.ts owns pending CommitApproval values and ApprovalRequests list/read/decide/wait operations.
+
+**Output/effect:** HarnessService.approvals is the same public inspection/decision surface backed by ApprovalRequests. GitCommitControl consumes that data interface for staged-tree validation and approved execution; it no longer stores approval state itself. Approvals and shell/job resources remain session-local and are cancelled/reset under existing lifecycle rules. No new durable Harness table or tool/input/output/permission policy is added.
+
+**Usage example:** use harness.approvals.list(workspaceId), read(workspaceId,id) and decide(workspaceId,id,action,message). Git execution uses the same injected ApprovalRequests.wait mechanism, without changing the HTTP review contract.
+
 ## File lookup
+
+- [backend/src/core/harness/data](../../../../../../../backend/src/core/harness/data): scope, tool input and approval model operations.
 
 - [backend/src/core/harness](../../../../../../../backend/src/core/harness): owned source.
 - [reference/web-tools/design.md](reference/web-tools/design.md): detailed existing behavior and code map.

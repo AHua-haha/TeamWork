@@ -83,7 +83,7 @@ workspace-models.ts owns the strict model-list/default shape and projects a sele
 
 Startup initializes missing legacy workspace_models once from active members' selected models in lead-first order, retaining selected per-model options; no selections yield an empty repairable record. Existing records are never overwritten by discovery. Model records are read independently of context files and additional checkout creation.
 
-[Workspace models](../../../../../../../../../../backend/src/core/workspace/workspace-models.ts), [model tests](../../../../../../../../../../backend/test/workspace-models.test.ts), [HTTP tests](../../../../../../../../../../backend/test/workspace-routes.test.ts), and [SQL integration](../../../../../../../../../../backend/test/integration/backend.test.ts) cover invalid input without side effects, atomic lead initialization, conflicts, preservation and reopen durability.
+[Workspace models](../../../../../../../../../../backend/src/core/workspace/data/models.ts), [model tests](../../../../../../../../../../backend/test/workspace-models.test.ts), [HTTP tests](../../../../../../../../../../backend/test/workspace-routes.test.ts), and [SQL integration](../../../../../../../../../../backend/test/integration/backend.test.ts) cover invalid input without side effects, atomic lead initialization, conflicts, preservation and reopen durability.
 
 
 ## Bootstrap coordination

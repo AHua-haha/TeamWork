@@ -32,10 +32,24 @@ test('backend source follows the four agreed boundaries and imports only permitt
   }
   const core = await readdir(join(source, 'core'), { withFileTypes: true });
   assert.deepEqual(core.filter(entry => entry.isDirectory()).map(entry => entry.name).sort(), ['agent', 'harness', 'team', 'workspace']);
+  for(const owner of ['agent','team','workspace','harness'])assert.ok((await stat(join(source,`core/${owner}/data`))).isDirectory());
   for (const path of await files(join(source, 'core/agent'))) {
     const text = await readFile(path, 'utf8');
-    assert.doesNotMatch(text, /mysql2|storage\/mysql|team\/|harness\/|workspace\/|CREATE TABLE|this\.store|from ['"]\.\.\/codec/, `${path} must execute independently of persistence/business hosts`);
+    assert.doesNotMatch(text, /from ['"][^'"]*(?:team|harness|workspace)\//, `${path} must not depend on another business's private model`);
+    if(path.endsWith('/agent.ts')||path.endsWith('/contracts.ts'))assert.doesNotMatch(text,/mysql2|storage\/mysql|CREATE TABLE|this\.store/,`${path} keeps the in-memory execution mechanism reusable`);
   }
+  const owned={agent:['agents','runs','messages','context_compactions'],team:['members','member_activation','config_records','chat_images','chat_settings','chat_exchanges','chat_messages','chat_runs','chat_clock','chat_entries','chat_changes'],workspace:['workspaces','workspace_models','workspace_git_baselines','context_blobs','context_versions','context_files','context_records']};
+  for(const [owner,tables]of Object.entries(owned)){
+    for(const path of await files(join(source,`core/${owner}/data`))){
+      const text=await readFile(path,'utf8');
+      for(const match of text.matchAll(/(?:FROM|JOIN|INTO|UPDATE(?!\s+[a-z_]+\s*=)|CREATE TABLE IF NOT EXISTS|ALTER TABLE)\s+([a-z_]+)/g)){
+        if(match[1]==='IF')continue;
+        assert.ok(tables.includes(match[1]!),`${path} reaches foreign table ${match[1]}`);
+      }
+    }
+  }
+  const composition=await readFile(join(source,'core/data.ts'),'utf8');
+  assert.doesNotMatch(composition,/\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE TABLE)\b/,'Core composes owner operations, not a new schema-aware store');
   const storage = await readFile(join(source, 'storage/mysql.ts'), 'utf8');
   assert.doesNotMatch(storage, /CREATE\s+TABLE|ALTER\s+TABLE|AppError|config_records|chat_messages|member_contexts/i);
 });

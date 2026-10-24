@@ -2,7 +2,7 @@
 import { AppError } from './errors.js';
 
 import { invalid, object, jsonValue } from './validation.js';
-export { validateMessage, validateEntries, validateRun } from './agent/message-validation.js';
+
 
 export function encode(value: unknown): string {
   jsonValue(value);
@@ -21,5 +21,3 @@ export function decode<T>(raw: unknown, validate: (value: unknown) => void): T {
     throw new AppError('corrupt_data', `Cannot deserialize stored record: ${error instanceof Error ? error.message : 'invalid data'}`, 500);
   }
 }
-
-export { validateAuthor, validateChangeRecord } from './workspace/context-validation.js';

@@ -1,7 +1,7 @@
-import type { TeamService } from './team.js';
+import type { TeamService } from './data/members.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
 import { readFileSync } from 'node:fs';
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 
 const responseRules = readFileSync(new URL('../../../prompts/team/group-chat.md', import.meta.url), 'utf8').trim();
 if (!responseRules) throw new AppError('invalid_config', 'Required team group-chat prompt is empty', 500);

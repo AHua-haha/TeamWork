@@ -23,7 +23,7 @@ One metadata reference survives document representation changes and member repla
 ## Code map
 
 - [Semantic catalog](../../../../../../../../../../../backend/src/core/workspace/design.ts): DesignMetadata, resolveDesign, DesignService list/inspect/read.
-- [Document format](../../../../../../../../../../../backend/src/core/workspace/context-documents.ts): file/directory structural validation and limits.
+- [Document format](../../../../../../../../../../../backend/src/core/workspace/data/documents.ts): file/directory structural validation and limits.
 - [Layout](../../../../../../../../../../../backend/src/core/workspace/workspace-layout.ts): nodeReference, contextPaths and contextLocation.
 - [Ordinary Git utilities](../../../../../../../../../../../backend/src/core/workspace/workspace-git.ts): committed control-file reads and one-time baseline import.
 

@@ -2,14 +2,14 @@ import { legacyBaseline, type GitBaseline } from './workspace-git.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
-import { ContextBase, type ContextOverview, type ContextStore, type WorkspaceRecord } from './context-base.js';
+import { ContextBase, type ContextOverview, type ContextStore, type WorkspaceRecord } from './data/context-base.js';
 import { ProjectFiles } from './project-files.js';
 import { prepareWorkspace } from '../workspace-bootstrap.js';
 import { managedRoot, rootDesignPath } from './workspace-layout.js';
 import { missing, sha256 } from '../text.js';
-import { AppError, identity } from '../agent/types.js';
-import type { RunSettings } from '../team/config.js';
-import { defaultRunSettings, emptyWorkspaceModels, modelRunSettings, workspaceModels, type WorkspaceModelsView } from './workspace-models.js';
+import { AppError, identity } from '../agent/data/model.js';
+import type { RunSettings } from '../team/data/config.js';
+import { defaultRunSettings, emptyWorkspaceModels, modelRunSettings, workspaceModels, type WorkspaceModelsView } from './data/models.js';
 
 export interface Workspace extends WorkspaceRecord { context: ContextOverview }
 export interface WorkspaceInput { workspaceId?: unknown; name: unknown; directory: unknown; adopt: unknown; models: unknown }
@@ -46,8 +46,7 @@ export class WorkspaceService {
     const members=legacy?.members ?? {};
     if(!Object.keys(members).length){
       // Existing active bundles are a bootstrap fallback, not a live mirror.
-      const store=this.store as ContextStore & {listMembers?(id:string):Promise<import('../team/team.js').StoredMember[]>};
-      for(const member of await store.listMembers?.(workspaceId)??[])if(member.value.retiredAt===null&&member.value.configuration){const source=member.value.configuration;for(const [path,content]of Object.entries(source.files))members[`${dirname(source.path)}/${path}`]=content;}
+      Object.assign(members,await this.store.initialMemberFiles?.(workspaceId)??{});
     }
     return this.store.initializeGitBaseline(workspaceId,{time:legacy?.time??record.createdAt,design,members});
   }

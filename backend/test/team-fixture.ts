@@ -3,12 +3,12 @@ import { after } from 'node:test';
 import { closeBashRuntime } from '../src/core/harness/harness-command.js';
 import { realpath, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ResolvedRunConfig } from '../src/core/team/config.js';
-import type { ConfigService, RunSettings } from '../src/core/team/config.js';
+import type { ResolvedRunConfig } from '../src/core/team/data/config.js';
+import type { ConfigService, RunSettings } from '../src/core/team/data/config.js';
 import type { RunHost } from '../src/core/team/team-runner.js';
 import { TeamSystem } from '../src/core/team/team-system.js';
-import type { MemberView } from '../src/core/team/team.js';
-import { AppError, type RunState } from '../src/core/agent/types.js';
+import type { MemberView } from '../src/core/team/data/members.js';
+import { AppError, type RunState } from '../src/core/agent/data/model.js';
 import { WorkspaceService } from '../src/core/workspace/workspace.js';
 import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
 

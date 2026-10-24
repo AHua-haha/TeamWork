@@ -1,6 +1,6 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
-> Ownership after migration: TeamData owns all application schemas, SQL, records and migrations. MySqlStorage only provides the pool, generic transaction mechanics and shutdown. TeamData is constructed with an injected MySqlStorage.
+> Ownership after migration: Each business owns its in-memory/durable schemas and operations. AgentData owns private context/history/runs/compaction; TeamData/ConfigData own member/config/shared chat; WorkspaceData owns registry/context/models/baseline. CoreData composes owner transaction operations; MySqlStorage only provides engine resources, transactions and shutdown. The schema details below describe their existing relations, not a central store.
 
 # Team durable persistence implementation
 
@@ -54,11 +54,11 @@ Context paths are ASCII by the path rules and are stored with a binary collation
 
 ## Code map
 
-- [core/core-data.ts](../../../../../../../../../backend/src/core/team/data.ts): Core schema, repository, session ownership, business transactions, and context records.
+- [core/core-data.ts](../../../../../../../../../backend/src/core/data.ts): Core schema, repository, session ownership, business transactions, and context records.
 - [Config service](../config/impl.md): interpretation and resolution of these stored values.
 - [Context base](../../../../workspace/impl/reference/workspace-agent/context-base/impl.md): the changes stored in the context tables.
 - [src/codec.ts](../../../../../../../../../backend/src/core/codec.ts): supported serialization and validation, including change authors and records.
-- [src/types.ts](../../../../../../../../../backend/src/core/agent/types.ts): runtime-owned shared records and errors used by persistence.
+- [src/types.ts](../../../../../../../../../backend/src/core/agent/data/model.ts): runtime-owned shared records and errors used by persistence.
 - [compose.yaml](../../../../../../../../../backend/compose.yaml): optional local MySQL service.
 
 ## Verification
@@ -77,7 +77,7 @@ Shared storage uses chat_settings, chat_messages, chat_exchanges and chat_runs. 
 
 Publication locks the workspace and active agents in ID order, validates recipients/budget and stores the shared record/recipient runs atomically. Successful publication completes the sender's run/timeline but leaves current context intact. TeamRunner then schedules Agent-owned synchronization for idle members. Busy execution receives no mid-loop insertion.
 
-readGroupContext reads the original messages after the Agent-requested position, resolves final references and hydrates images in one repeatable-read snapshot. TeamRuntime restores context once after acquiring execution authority. AgentMessageContext determines incoming messages, reconciles own finals and proposes an acknowledged context replacement. SQL is the persistence mapping, not the retention policy owner.
+readGroupContext reads the original messages after the Agent-requested position, resolves final references and hydrates images in one repeatable-read snapshot. AgentRuntime restores context once after acquiring execution authority. AgentMessageContext determines incoming messages, reconciles own finals and proposes an acknowledged context replacement. SQL is the persistence mapping, not the retention policy owner.
 
 finishRun and accepted final publication no longer clear agents.context or maintain success-only private retention. Recorded working messages and incorporation metadata survive success/failure/restart. Context-only missing-result repair belongs to Agent and never changes immutable messages. Explicit reset clears model context and history together.
 
@@ -106,7 +106,7 @@ Add member_activation state keyed by workspace ID. Read it through TeamStore and
 
 ## Workspace bootstrap transaction
 
-createWorkspace accepts prepared bootstrap activation/context state and persists both before commit. writeContext contains the shared context mutation body for both bootstrap and normal context commits; it runs on the caller's transaction connection. Filesystem preparation/rollback is owned by WorkspaceService. The administrative reset module owns ordered dependent-table deletion and provider/config preservation, using TeamData ownership and one transactional connection. The SQL integration suite injects a bootstrap context insert failure and reset foreign-key failure to verify rollback and source-file preservation.
+WorkspaceData.createWorkspace accepts prepared bootstrap context state; Core’s public callback persists Team activation before the shared transaction commits. writeContext contains the shared context mutation body for both bootstrap and normal context commits; it runs on the caller's transaction connection. Filesystem preparation/rollback is owned by WorkspaceService. The administrative reset module owns ordered dependent-table deletion and provider/config preservation, through the owner data-model operations on one transactional connection. The SQL integration suite injects a bootstrap context insert failure and reset foreign-key failure to verify rollback and source-file preservation.
 
 Workspace bootstrap now supplies three context files (design/metadata.json, design/design.md and implement/impl/README.md) in one sequence-1 ContextCommit. writeContext stores all three versions/blobs/index rows and the single three-entry change record with the workspace, models, lead and activation marker. The same transaction also writes the static workspace_git_baselines JSON row. Reopen assertions and injected context-insert failure verify the baseline’s durability and rollback. Implementation-context files are now edited in the shared workspace and observed by ContextBase; accepted design/member reads use ordinary project commits and a static bootstrap/import baseline. Agent publications with multiple recipients refuse before transaction mutation.
 
@@ -118,7 +118,7 @@ Member publication parses the leading routing header from the immutable finalAns
 
 ## Workspace conversation reset
 
-chat_settings adds reset_cursor and reset_position with zero defaults; migrate inspects existing columns and adds absent columns before serving. resetChat takes workspace, sorted member-agent and clock locks in publication order, rejects active runs, deletes chat changes/entries/messages, chat-run links and exchanges, deletes context_compactions journals and private messages/runs, then clears model contexts/incorporation markers/current-run pointers and advances context revisions. It preserves member/settings rows, all filesystem/context-base state and monotonic chat clocks. The transaction returns durable reset boundaries; snapshots clamp pagination to these boundaries and expose them to TeamRunner followers.
+chat_settings adds reset_cursor and reset_position with zero defaults; migrate inspects existing columns and adds absent columns before serving. TeamData.resetChat takes a Workspace lock through WorkspaceData, sorted Agent locks through AgentData and its own clock lock in publication order, rejects active runs, deletes chat changes/entries/messages, chat-run links and exchanges, calls AgentData.resetConversations to delete context_compactions/private history/runs and clear model contexts/incorporation markers/current-run pointers and advances context revisions. It preserves member/settings rows, all filesystem/context-base state and monotonic chat clocks. The transaction returns durable reset boundaries; snapshots clamp pagination to these boundaries and expose them to TeamRunner followers.
 
 ## Transient progress removal
 
@@ -140,4 +140,4 @@ writeChatEntry acquires the existing workspace clock row with an exclusive upser
 
 ### Agent compaction journal
 
-context_compactions records id, agent_id, run_id, unique nullable active_agent_id, history_after and versioned lifecycle state. Tentative completed records append immutable messages under their owning run without changing current context. finishCompaction CAS-replaces agents.context and marks the lifecycle terminal atomically. recoverCompactions retains old context plus recorded preparation/uncertainty and marks runtime_restarted without replay; it runs before ordinary interrupted-run recovery. Public final references/end bounds stay pinned. Reset deletes journals before their message/run owners.
+AgentData owns context_compactions, which records id, agent_id, run_id, unique nullable active_agent_id, history_after and versioned lifecycle state. Tentative completed records append immutable messages under their owning run without changing current context. finishCompaction CAS-replaces agents.context and marks the lifecycle terminal atomically. recoverCompactions retains old context plus recorded preparation/uncertainty and marks runtime_restarted without replay; it runs before ordinary interrupted-run recovery. Public final references/end bounds stay pinned. Reset deletes journals before their message/run owners.

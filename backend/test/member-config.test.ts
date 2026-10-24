@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { TeamSystem } from '../src/core/team/team-system.js';
-import { sourceBundle } from '../src/core/team/member-config-format.js';
+import { sourceBundle } from '../src/core/team/data/member-config.js';
 import { code, stubConfig, withTeam, worker } from './team-fixture.js';
 
 const assignment = (member: Awaited<ReturnType<typeof worker>>) => ({ designScope: member.harness.designScope, allowedCommands: member.harness.allowedCommands });

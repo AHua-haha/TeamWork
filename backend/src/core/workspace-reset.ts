@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { TeamData } from './team/data.js';
+import { CoreData } from './data.js';
 import { missing, sha256 } from './text.js';
 
 
 /** Administrative reset, never an agent or HTTP capability. Requires exclusive database ownership. */
-export async function resetWorkspaceData(store: TeamData) {
-  await store.acquireRuntime(() => {});
+export async function resetWorkspaceData(store: CoreData) {
+  await store.agents.acquireRuntime(() => {});
   const moved: { from: string; to: string }[] = [];
   try {
-    const workspaces = await store.listWorkspaces();
+    const workspaces = await store.workspaces.listWorkspaces();
     const paths = [...new Set(workspaces.flatMap(workspace => [
       ...['.rsi', '.context', '.team'].map(name => join(workspace.directory, name)),
       join(dirname(workspace.directory), '.rsi-harness', sha256(workspace.directory)),
@@ -23,10 +23,10 @@ export async function resetWorkspaceData(store: TeamData) {
         const to = `${from}.reset-${randomUUID()}`;
         await rename(from, to); moved.push({ from, to });
       }
-      store.assertRuntime();
+      store.agents.assertRuntime();
       await db.beginTransaction();
       await store.resetRuntimeRecords(db);
-      store.assertRuntime();
+      store.agents.assertRuntime();
       await db.commit();
     } catch (error) {
       await db.rollback();
@@ -36,5 +36,5 @@ export async function resetWorkspaceData(store: TeamData) {
     // Database is now empty of runtime state. Failure here retains quarantined files for explicit cleanup.
     for (const path of moved) await rm(path.to, { recursive: true, force: true });
     return { workspaces: workspaces.length, removed: moved.map(path => path.from), preserved: 'Provider connections, credentials, app settings and catalogs; project implementation and Git checkouts' };
-  } finally { await store.releaseRuntime(); }
+  } finally { await store.agents.releaseRuntime(); }
 }

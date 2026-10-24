@@ -2,39 +2,29 @@
 
 ## Result summary
 
-Team owns authoritative original group messages, membership/cooperation and durable application state. TeamRuntime hosts AgentExecution; TeamData maps public context/history values to SQL. Consumption and private-retention semantics belong to Agent.
+Team owns membership, provider/application/member configuration, shared chat and presentation data. Its data/ part aggregates models, validation, file serialization, schemas, SQL repositories and transient coordination state. Agent owns its own private context/history/run/compaction persistence; Workspace owns its own registry/context/models persistence.
 
 Design: [Team](../../../../../design/backend/core/team/design.md).
 
-### Coordination and ownership
-
-TeamSystem.policy supplies only a group-context reference. TeamData.readGroupContext(workspaceId, after) resolves the original shared inputs, authoritative sender text, native pictures and final origins in one repeatable-read snapshot. Agent selects after. TeamRuntime restores context once after execution admission and acknowledges Agent context changes. TeamRunner notifies idle members after publication through syncGroupContext; busy/queued workers synchronize at their Agent work boundary. No implicit document loading/retrieval or terminal context clearing remains.
-
 ### Implemented contract
 
-**Input:** TeamData(MySqlStorage), TeamRuntime(store, configSource, policy, stream, limits?), TeamSystem(store, workspaces, config, webTools?, permissionsEnabled?). Existing member/chat/review/settings operations are unchanged. syncGroupContext(agentId) schedules idle context synchronization; Agent callbacks acknowledge completed messages, context replacements and terminal state.
+**Input:** TeamData(storage,agentData,workspaceData,connection?), ConfigData(storage,agentData,membership,connection?), ConfigService(configData,models,tools?,key?), TeamSystem(teamData,workspaceService,configService,...). TeamExecutionData owns transient active member/run and finalizing job references used by TeamRunner.
 
-**Output:** Existing HTTP/SSE history/timeline/progress envelopes. readGroupContext returns Agent GroupContextMessage values including prepared image blocks and optional private-final origin. SQL getContext/replaceContext returns/acknowledges the Agent-owned snapshot, including its incorporation markers.
+**Output:** Existing member/configuration/chat/snapshot/timeline interfaces and original GroupContextReference. readGroupContext(workspaceId,after) resolves sender text, native pictures and accepted private origin records in one repeatable-read snapshot. ConfigData returns application/provider/catalog/saved solo-agent model profiles; these are Team-managed user configuration, distinct from Agent execution state.
 
-**Effect and failure:** SQL CAS replacement stores the full context and incorporation state atomically. Private completed history, shared final references and UI working-history ranges remain independent. Publication finalizes sender and reserves recipient runs atomically but does not clear context or freeze a context-retention boundary. Idle synchronization failures are retained for getState to report as persistence_failure; a subsequent synchronization or admitted run can restore context. Startup interrupts abandoned runs without replay. Explicit idle reset clears contexts and histories while preserving project files. Other member/config/workspace persistence responsibilities remain.
+**Effect and failure:** schema.ts owns members, member_activation, config_records, chat_images/settings/exchanges/messages/runs/clock/entries/changes. TeamData writes only these tables. Agent/Workspace data is read or changed through their public transaction-scoped operations. Team still owns final-text selection, mention parsing, publication refusal, reservations and shared-workspace sequential execution. Stable SQL/JSON formats and HTTP/SSE payloads do not change. TeamExecutionData keeps an accepted sender’s finalizing job until Agent finishes maintenance; settling an old job cannot remove a successor activation.
 
-**Usage example:** Create TeamData and TeamRuntime, attach TeamSystem and open. Publish via team.runner.postUser; the runner schedules mentioned members and synchronizes unmentioned idle members without model calls. Call runtime.finished to await work and context finalization; read stable history through existing APIs.
+**Usage example:** const data = new CoreData(storage); construct ConfigService(data.config,...), WorkspaceService(data.workspaces,config), TeamSystem(data.team,workspaces,config); attach new AgentRuntime(data.agents,team.runConfig,team.policy(...),stream). Publish via team.runner.postUser and await runtime.finished for private finalization.
 
-### Durable transition
+### Transaction and lifecycle coordination
 
-agents.context_format is a backend migration marker. Fresh rows use 1. When upgrading an older schema, existing rows receive 0 and member records are adopted once using Agent's public adoption procedure with recorded private history and resolved shared context. The updated snapshot/format marker commit together. Successful retries skip completed rows. Old member_contexts/member_context_runs tables are dropped after adoption; ordinary execution no longer uses success_position, group_through or retained-range selection. Stable history/project files are not deleted. A restored historical context can be larger; configured Agent compaction now handles its private continuation at the next applicable checkpoint.
+TeamData.inTransaction(connection) and ConfigData.inTransaction(connection) join the existing transaction. Publication locks Workspace through its public port, gets narrow Agent execution states, validates an immutable completed final through AgentData, then commits its shared record/reference together with Agent sender completion and recipient admission. Team never reads agents/runs/messages/context_compactions SQL directly. Snapshot/stop run lookups use Agent-owned batch reads rather than a query per linked run. Presentation completion callbacks remain atomic with Agent terminal state. Member activation obtains Workspace model revision and Agent idle checks through owner interfaces. Chat reset deletes Team references then asks Agent to clear member conversations on the same transaction. Core’s administrative reset uses owner deletion operations in dependency order.
 
-### Durable compaction hosting
-
-**Input:** TeamRuntime options.compaction?: {thresholdTokens,prompt}; validated once and supplied to Agent. TeamData.beginCompaction(state), commitCompactionMessage(record), finishCompaction(state,revision,entries), recoverCompactions(). The Agent chooses trigger, retained trace and shared coverage. Low-level callers can omit settings; managed Runtime supplies them.
-
-**Storage/effect:** context_compactions stores the lifecycle JSON, owning agent/run, history_after and nullable unique active_agent_id. begin locks the agent and records the immutable-history boundary. Tentative messages tagged source=context-compaction and compactionId append to messages and advance history_position without changing agents.context. finish replaces context under revision CAS and marks the journal terminal in one transaction. The run may already be completed by final publication; maintenance is part of its private lifetime, never a new run/mention. finalText excludes preparation messages; public finalRef/endPosition/working ranges stay pinned to accepted ordinary output. No private preparation chunks are emitted as ordinary live output. Before-call preparation records can appear in private working history.
-
-**Failure/recovery:** Startup recovers preparing journals before interrupted ordinary runs, using Agent’s recovery composer. Preserve old context and recorded preparation, repair unknown tool outcomes, mark failed/runtime_restarted and never execute tools. Atomic cutover refusal rolls back context and lifecycle together. An uncertain lifecycle/message/cutover acknowledgement surfaces as persistence_failure even if the ordinary run is already completed, leaving its journal for startup recovery. Stop includes finalizing jobs even after publication; idle reset/activation waits for them. Chat/admin reset deletes journals before message/run owners.
-
-**Usage example:** new TeamRuntime(store,source,policy,stream,{compaction:{thresholdTokens:64000,prompt}}). open() acquires runtime ownership then recovers journals/runs. runtime.finished(agentId,runId) waits for private maintenance; stable shared publication remains readable during it.
+TeamRunner supplies original shared references and idle synchronization notifications to AgentRuntime; it neither restores nor persists Agent context. Busy members buffer shared updates until Agent work boundaries. Restart recovery of private context/compaction belongs to Agent. Team’s importChatHistory migration reads old linked runs/history through Agent operations and owns the resulting shared presentation changes. Group summarization/structured extraction/member-specific views remain deferred.
 
 ## File lookup
+
+- [backend/src/core/team/data](../../../../../../../backend/src/core/team/data): member/config/chat models and owned repositories.
 
 - [backend/src/core/team](../../../../../../../backend/src/core/team): owned source.
 - [reference/config/design.md](reference/config/design.md): detailed existing behavior and code map.

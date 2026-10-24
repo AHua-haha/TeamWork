@@ -34,10 +34,10 @@ The initial app record contains `title`, `maxInputBytes`, and `allowAgentCreatio
 - [backend/src/core/agent/providers/modelflare.ts](../../../../../../../../../backend/src/core/agent/providers/modelflare.ts) and [catalog](../../../../../../../../../backend/src/core/agent/providers/modelflare-catalog.ts): provider-owned model definitions, metadata reuse, and API registration.
 - [Modelflare inventory](../../../../agent/impl/reference/modelflare-inventory.md): researched model list and provenance.
 
-- [backend/src/core/team/config.ts](../../../../../../../../../backend/src/core/team/config.ts): validation, capabilities, CRUD coordination, run settings, issues, run resolution for agents and team members.
-- [backend/src/core/team/secrets.ts](../../../../../../../../../backend/src/core/team/secrets.ts): authenticated encryption for connection API keys.
-- [backend/src/core/team/data.ts](../../../../../../../../../backend/src/core/team/data.ts): versioned scoped MySQL records and the repeatable-read bundle.
-- [backend/src/core/team/runtime.ts](../../../../../../../../../backend/src/core/team/runtime.ts): run-start resolution and snapshot-bearing policy scope.
+- [backend/src/core/team/data/config.ts](../../../../../../../../../backend/src/core/team/data/config.ts): validation, capabilities, CRUD coordination, run settings, issues, run resolution for agents and team members.
+- [backend/src/core/team/data/secrets.ts](../../../../../../../../../backend/src/core/team/data/secrets.ts): authenticated encryption for connection API keys.
+- [backend/src/core/data.ts](../../../../../../../../../backend/src/core/data.ts): versioned scoped MySQL records and the repeatable-read bundle.
+- [backend/src/core/agent/runtime.ts](../../../../../../../../../backend/src/core/agent/runtime.ts): run-start resolution and snapshot-bearing policy scope.
 - [backend/src/api/http.ts](../../../../../../../../../backend/src/api/http.ts): config API, agent summaries, app-controlled creation/input size.
 - [backend/src/runtime/main.ts](../../../../../../../../../backend/src/runtime/main.ts): deployment config, Pi catalog, startup initialization.
 

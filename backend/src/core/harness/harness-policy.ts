@@ -1,4 +1,4 @@
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 
 /** Operator-owned startup setting; never read from agent/member configuration. */
 export function harnessPermissionsEnabled(value: string | undefined): boolean {

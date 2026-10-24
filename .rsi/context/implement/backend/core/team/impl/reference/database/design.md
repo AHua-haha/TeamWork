@@ -1,6 +1,6 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
-> Ownership after migration: TeamData owns all application schemas, SQL, records and migrations. MySqlStorage only provides the pool, generic transaction mechanics and shutdown. TeamData is constructed with an injected MySqlStorage.
+> Ownership after migration: Each business owns its in-memory/durable schemas and operations. AgentData owns private context/history/runs/compaction; TeamData/ConfigData own member/config/shared chat; WorkspaceData owns registry/context/models/baseline. CoreData composes owner transaction operations; MySqlStorage only provides engine resources, transactions and shutdown. The schema details below describe their existing relations, not a central store.
 
 # Team durable persistence system
 

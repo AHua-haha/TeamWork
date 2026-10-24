@@ -1,4 +1,4 @@
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 
 export interface MemberResponse { body: string; names: string[]; bodyOffset: number }
 

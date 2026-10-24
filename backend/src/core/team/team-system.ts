@@ -1,21 +1,21 @@
-import type { RunConfigSource } from './config.js';
+import type { RunConfigSource } from './data/config.js';
 import { mkdir,writeFile } from 'node:fs/promises';
 import { dirname,join } from 'node:path';
 import { filesRevision } from '../workspace/workspace-git.js';
 import { finalAnswer, textPhase } from '../agent/final-answer.js';
-import type { ChatStore } from './group-chat.js';
-import { AppError } from '../agent/types.js';
-import type { ConfigService } from './config.js';
+import type { ChatStore } from './data/group-chat.js';
+import { AppError } from '../agent/data/model.js';
+import type { ConfigService } from './data/config.js';
 import { MemberConfigService } from './member-config.js';
 import { DesignService } from '../workspace/design.js';
 import { HarnessService, resolveHarness } from '../harness/harness.js';
-import { inspectHarnesses } from '../harness/harness-bases.js';
+import { inspectHarnesses } from '../harness/data/bases.js';
 import { MemberInstructions } from './member-instructions.js';
 import { teamTools } from './member-tools.js';
 import type { RuntimePolicy, RuntimeTool } from '../agent/contracts.js';
 import { webTools } from '../harness/web-tools.js';
 import { TeamRunner, type RunHost } from './team-runner.js';
-import { TeamService, teamRunConfig, type MemberView, type TeamStore, type TeamView } from './team.js';
+import { TeamService, teamRunConfig, type MemberView, type TeamStore, type TeamView } from './data/members.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
 
 /** A member as the team's callers see it: its record, and whether it has a run in progress. */

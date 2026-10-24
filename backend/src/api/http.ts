@@ -1,14 +1,14 @@
 import { createServer } from 'node:http';
-import type { TeamRuntime } from '../core/team/runtime.js';
-import type { ConfigService } from '../core/team/config.js';
+import type { AgentRuntime } from '../core/agent/runtime.js';
+import type { ConfigService } from '../core/team/data/config.js';
 import { body, fields, json, respond, sse } from './http-helpers.js';
-import { AppError, identity, position } from '../core/agent/types.js';
+import { AppError, identity, position } from '../core/agent/data/model.js';
 import { teamRoutes } from './team-routes.js';
 import type { TeamSystem } from '../core/team/team-system.js';
 import { workspaceRoutes } from './workspace-routes.js';
 import type { WorkspaceService } from '../core/workspace/workspace.js';
 
-export function createAgentServer(runtime: TeamRuntime, config: ConfigService, workspaces: WorkspaceService, team: TeamSystem) {
+export function createAgentServer(runtime: AgentRuntime, config: ConfigService, workspaces: WorkspaceService, team: TeamSystem) {
   const workspaceRoute = workspaceRoutes(workspaces);
   const teamRoute = teamRoutes(team);
   return createServer(respond(async route => {
@@ -142,7 +142,7 @@ export function createAgentServer(runtime: TeamRuntime, config: ConfigService, w
       const input = await body(request, (await config.getApp()).value.maxInputBytes);
       fields(input, ['input']);
       // The runtime validates Pi's user-content shape and assigns role/time itself.
-      const run = await team.runner.startUser(agentId, input.input as Parameters<TeamRuntime['start']>[1]);
+      const run = await team.runner.startUser(agentId, input.input as Parameters<AgentRuntime['start']>[1]);
       json(response, 202, { runId: run.runId, run, followUrl: `/agents/${agentId}/follow?runId=${run.runId}` });
     } else if (path.length === 5 && path[2] === 'runs' && path[4] === 'cancel' && request.method === 'POST') {
       const runId = path[3];

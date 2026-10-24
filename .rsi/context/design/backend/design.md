@@ -8,7 +8,7 @@ Backend owns the application's agent-system capabilities and durable application
 
 Callers create/list agents and workspaces, configure providers/models, submit or cancel work, follow message history/progress, inspect design/member state and request review/activation/reset operations. Inputs carry user content, identifiers, expected revisions and cursors. Results contain domain records, stable ordered history, progress, review data or explicit failures.
 
-Core owns complete business data and behavior, including persistence schema and migrations. API owns HTTP/SSE representations. Storage provides generic database access and transaction capabilities. Runtime constructs/initializes these components and hosts the process. One backend owns a database at a time. Restart preserves durable data, loses transient chunks and marks abandoned runs interrupted without replay.
+Core’s business systems each own a cohesive data-model part: in-memory schema, durable representation and related operations. Agent owns its persistence; Team and Workspace own theirs. Core coordinates cross-owner atomic work through public interfaces. API owns HTTP/SSE representations. Storage provides generic database access and transaction capabilities. Runtime constructs/initializes these components and hosts the process. One backend owns a database at a time. Restart preserves durable data, loses transient chunks and marks abandoned runs interrupted without replay.
 
 ## Constraints, specifications and requirements
 

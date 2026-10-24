@@ -1,4 +1,4 @@
-> AgentExecution now owns the reusable in-memory loop. TeamRuntime supplies durable hosting, follow/history and restart recovery described in this reference.
+> AgentExecution now owns the reusable in-memory loop. AgentRuntime supplies durable hosting, follow/history and restart recovery described in this reference.
 
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
@@ -18,7 +18,7 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 - Input submission supplies the new user input and routing identifiers. The runtime obtains the model-context history from its own storage rather than requiring the frontend to submit that history.
 - Multiple frontends may follow an agent. Their connection state does not determine whether the agent run continues or when temporary chunks are removed.
 - Before accepting input, the runtime resolves that agent's run snapshot from its config source: the [config system](../../../../team/impl/reference/config/design.md) for an agent outside any team, or the member's settings for a [team](../../../../team/impl/reference/workspace-agent/team/design.md) member, which the team supplies by the same rules. The agent must explicitly select a resolvable provider connection and model; selected tools, prompt templates, instructions, and call options must be valid.
-- A team member retains durable private execution history for inspection; Agent owns continuous model context and compaction while Team persists its exposed values. The team admits activations from its group chat and supplies already-persisted run records and resolved configuration snapshots for execution. The runtime enforces one active model/tool run per agent.
+- A team member retains durable private execution history for inspection; Agent owns continuous model context and compaction and persists its own state. The team admits activations from its group chat and supplies already-persisted run records and resolved configuration snapshots for execution. The runtime enforces one active model/tool run per agent.
 
 ## Outputs and observable effects
 
@@ -139,4 +139,4 @@ A response requests three fetches. The second returns a timeout error result. Pe
 
 ## Member conversation context integration
 
-Team supplies only the group-context reference. Agent synchronizes incoming shared inputs before model work and after work settles, selecting its own consumption boundary from its context. Team persists Agent snapshots and completed private records. Success/failure never clears context; there is no per-run document reconstruction or automatic retrieval. StepScope.recordInput remains available for private policy feedback. Solo execution remains supported.
+Team supplies only the group-context reference. Agent synchronizes incoming shared inputs before model work and after work settles, selecting its own consumption boundary from its context. AgentData persists Agent snapshots and completed private records. Success/failure never clears context; there is no per-run document reconstruction or automatic retrieval. StepScope.recordInput remains available for private policy feedback. Solo execution remains supported.

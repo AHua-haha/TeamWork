@@ -1,7 +1,7 @@
-import type { ContextFile } from './context-base.js';
-import { contextDocuments } from './context-documents.js';
+import type { ContextFile } from './data/context-base.js';
+import { contextDocuments } from './data/documents.js';
 import { projectPath } from './project-files.js';
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 import { sha256 } from '../text.js';
 import type { WorkspaceService } from './workspace.js';
 import { committedFiles, gitText } from './workspace-git.js';

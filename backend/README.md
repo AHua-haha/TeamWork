@@ -137,11 +137,11 @@ Existing connections are preserved: a connection whose provider is still `anthro
 
 ## Customize the runtime
 
-`AgentExecution` owns the in-memory loop; the exported `TeamRuntime` hosts it and supplies persistence/recovery. `RuntimePolicy` supplies:
+`AgentExecution` owns the in-memory loop; the exported `AgentRuntime` hosts it and supplies persistence/recovery. `RuntimePolicy` supplies:
 
 | Hook | Responsibility |
 | --- | --- |
-| `beforeStep(scope)` | Read/replace working context, including compaction; Team acknowledges durable changes |
+| `beforeStep(scope)` | Read/replace working context, including compaction; Agent acknowledges durable changes |
 | `buildRequest(scope, history)` | Choose model, exact Pi context/messages, declared tools, options and executable handlers for each call |
 | `executeTool(tool, args, scope, call)` | Optional centralized tool execution hook |
 | `shouldContinue(scope, response, results)` | Decide whether the loop makes another call |
@@ -150,17 +150,17 @@ Existing connections are preserved: a connection whose provider is still `anthro
 
 `configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the Agent working context for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. Solo agents have no built-in catalog tools; register them in a custom entry point. Workspace members receive their tools from the harness, including lead design and team operations.
 
-`AgentExecution` is also usable without persistence: supply run/context/settings, policy and model stream, then call `run(signal)` and inspect `snapshot()`. Its optional `AgentObserver` lets a caller acknowledge message start, completed messages, context changes and completion. Team uses that interface to persist data; Agent has no database dependency. See the [Agent implemented contract](../.rsi/context/implement/backend/core/agent/impl/README.md).
+`AgentExecution` is also usable without persistence: supply run/context/settings, policy and model stream, then call `run(signal)` and inspect `snapshot()`. Its optional `AgentObserver` lets a caller acknowledge message start, completed messages, context changes and completion. AgentRuntime uses that interface with AgentData for Agent-owned persistence; the reusable execution mechanism remains usable without a database. See the [Agent implemented contract](../.rsi/context/implement/backend/core/agent/impl/README.md).
 
 Example durable-host policy customization:
 
 ```ts
 import { Type } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
-import { TeamRuntime, ConfigService, TeamData, MySqlStorage, configuredPolicy, piModelStream, type RuntimeTool } from './src/api/index.js';
+import { AgentRuntime, ConfigService, CoreData, MySqlStorage, configuredPolicy, piModelStream, type RuntimeTool } from './src/api/index.js';
 
 const models = builtinModels();
-const store = new TeamData(new MySqlStorage(process.env.DATABASE_URL!));
+const store = new CoreData(new MySqlStorage(process.env.DATABASE_URL!));
 const tools: RuntimeTool[] = [{
   definition: {
     name: 'echo', description: 'Return the supplied text',
@@ -170,13 +170,13 @@ const tools: RuntimeTool[] = [{
     content: [{ type: 'text', text: String(args.text) }], isError: false,
   }),
 }];
-const config = new ConfigService(store, models, tools);
-const runtime = new TeamRuntime(store, config, configuredPolicy(), piModelStream(models));
+const config = new ConfigService(store.config, models, tools);
+const runtime = new AgentRuntime(store.agents, config, configuredPolicy(), piModelStream(models));
 await store.migrate();
 await config.initialize();
 await runtime.open();
 try {
-  const { agentId } = await store.createAgent();
+  const { agentId } = await store.agents.createAgent();
   await config.createConnection('openai-main', {
     label: 'OpenAI', provider: 'openai', baseUrl: 'https://api.openai.com/v1',
     api: 'openai-responses', apiKey: process.env.OPENAI_API_KEY,
@@ -195,7 +195,7 @@ try {
 }
 ```
 
-Context replacement uses `{revision, entries}` from `scope.readContext()` and `scope.replaceContext(revision, entries)`. Agent maintains working context in memory. In the Team host, its acknowledgement also persists the replacement; immutable display history is unchanged. An update after a provider request was constructed affects subsequent calls. Metadata and compaction policy are application-defined.
+Context replacement uses `{revision, entries}` from `scope.readContext()` and `scope.replaceContext(revision, entries)`. Agent maintains working context in memory. In AgentRuntime, AgentData acknowledges and persists the replacement; immutable display history is unchanged. An update after a provider request was constructed affects subsequent calls. Metadata and compaction policy are application-defined.
 
 Defaults: maximum 64 model calls per run; sequential tools; retain at most 1,024 compact progress events per member in memory (`progressCapacity` is the constructor option). FIFO eviction is independent of readers and completed SQL history. Recoverable tool errors remain recorded results and allow normal continuation; fatal model/protocol/persistence errors fail the run; completed records survive. Cancelled or failed partial model output is discarded. Restart marks unfinished runs interrupted; it does not replay external tool effects. Tools and hooks must honor cancellation.
 
@@ -287,7 +287,7 @@ Changes displays files immediately, coalesces overlapping refreshes and retains 
 
 Agent context continues chronologically across activations. Team provides only a group-context read reference; Agent tracks incorporated messages in its context entries and selects incoming messages itself. Shared message content includes sender identity and native image blocks. Idle members synchronize without activation; busy members append shared inputs only after current work finishes. Own accepted final responses retain provenance without a second model-visible answer.
 
-Success, failure and cancellation preserve recorded private context. Team persists and restores Agent snapshots; interrupted calls receive explicit context-only missing-result errors without replay. Implementation README files and their Automatic retrieval entries are ordinary project artifacts, not implicit per-run input or commands. Existing databases adopt recorded member history once without resetting workspaces. Explicit chat reset remains the operation that clears context/history. Agent compaction now checks one token threshold before ordinary model calls and after work, retaining all newly prepared private messages plus original shared history. Team journals preparation and atomically acknowledges context replacement, with restart recovery and no extra run/publication. HTTP/SSE envelopes are unchanged.
+Success, failure and cancellation preserve recorded private context. AgentRuntime persists and restores Agent snapshots through AgentData; interrupted calls receive explicit context-only missing-result errors without replay. Implementation README files and their Automatic retrieval entries are ordinary project artifacts, not implicit per-run input or commands. Existing databases adopt recorded member history once without resetting workspaces. Explicit chat reset remains the operation that clears context/history. Agent compaction now checks one token threshold before ordinary model calls and after work, retaining all newly prepared private messages plus original shared history. AgentData journals preparation and atomically acknowledges context replacement, with restart recovery and no extra run/publication. HTTP/SSE envelopes are unchanged.
 
 
 ### Workspace group pictures
@@ -309,3 +309,7 @@ Working design assignments include the named node and all accepted descendant de
 ## Harness permission switch
 
 Set `development.harnessPermissionsEnabled` or `deployment.harnessPermissionsEnabled` in project-root `rsi.config.json`. The optional Boolean defaults to true. false grants all active members the available native file and management tools, permits outside-workspace/link file targets, and starts ordinary host Bash without the OS sandbox or Git commit approval broker. Host HOME and installed toolchains remain available; backend database/provider secrets are not injected into the shell environment. Commands have the backend account's OS authority, not administrator privilege. Input validation, result limits, timeouts, shell/job cleanup and semantic member validation/separate idle user activation remain. Operator config derives a child-only RSI_HARNESS_PERMISSIONS_ENABLED startup value; agents cannot change this setting through their member files. Restart with true to restore existing rules. A deployed release must contain the switch implementation; merely restarting an older release does not add it.
+
+## Business data ownership
+
+Each Core business aggregates its in-memory schema, durable representation and related operations under `data/`. Agent owns context/history/run/compaction persistence and its AgentRuntime host. Team owns member/provider/configuration/shared-chat data; Workspace owns registry/context/model/history data; Harness owns its scope/tool-input/approval data. CoreData exposes owner instances and coordinates transactional lifecycle hooks without business SQL. Existing database rows and HTTP/SSE contracts are preserved; no workspace reset is required.

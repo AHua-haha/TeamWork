@@ -1,25 +1,27 @@
+import type { ResolvedHarness, PermissionScope, HarnessPermissions, HarnessEnvironment } from './data/model.js';
+export type { ResolvedHarness, PermissionScope, HarnessPermissions, HarnessEnvironment } from './data/model.js';
 import { harnessPrompt } from './harness-prompts.js';
-import { purposeHarnesses } from './harness-bases.js';
+import { purposeHarnesses } from './data/bases.js';
 import { lstat, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { DesignService, type ResolvedDesign } from '../workspace/design.js';
-import type { HarnessConfig } from './harness-config.js';
+import type { HarnessConfig } from './data/config.js';
 import { executeBash, parseBashInput, resetMemberShell, type CommandResult } from './harness-command.js';
 import { harnessBashTool, harnessFileTools } from './harness-tools.js';
-import { resourceOwns, type HarnessDefinition } from './harness-resources.js';
+import { resourceOwns, type HarnessDefinition } from './data/resources.js';
 import { OperationQueue, committedFiles, currentFiles, filesRevision, fileChanges } from '../workspace/workspace-git.js';
-import { GitApprovals } from './git-approval.js';
+import { GitCommitControl } from './git-approval.js';
+import { ApprovalRequests } from './data/approvals.js';
 import { MemberFiles, type FileAccess } from './member-files.js';
 import type { RuntimeTool } from '../agent/contracts.js';
-import type { StoredMember } from '../team/team.js';
-import { AppError } from '../agent/types.js';
+import type { StoredMember } from '../team/data/members.js';
+import { AppError } from '../agent/data/model.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
 import { contextRoot, designRoot, implementationContextPath, contextPaths, contextLocation, designContextPaths } from '../workspace/workspace-layout.js';
 import { webTools } from './web-tools.js';
 
 export const viewBudget = 64 * 1024;
-export interface ResolvedHarness { working: ResolvedDesign[]; dependencies: ResolvedDesign[]; readable: string[]; writable: string[]; readonly: string[] }
 const covers = (scope: string, path: string) => scope === '.' || path.toLowerCase() === scope.toLowerCase() || path.toLowerCase().startsWith(scope.toLowerCase() + '/');
 const ancestor = (path: string, scope: string) => !path || scope === '.' || scope.toLowerCase().startsWith(path.toLowerCase() + '/');
 
@@ -31,8 +33,6 @@ export async function resolveHarness(designs: DesignService, workspaceId: string
   return { working, dependencies, readable: [...new Set([...writable, ...readonly])], writable, readonly };
 }
 
-export interface PermissionScope { designContext: string[]; implementationContext: string[]; implementation: string[] }
-export interface HarnessPermissions { working: PermissionScope; dependencies: PermissionScope }
 /** Resolve the three resource components independently in working and dependency scope. */
 export function harnessPermissions(member: StoredMember, resolved: ResolvedHarness): HarnessPermissions {
   const physical = (paths: string[]) => paths.map(path => `${contextRoot}/${path}`);
@@ -83,10 +83,10 @@ export function harnessAccess(member: StoredMember, resolved: ResolvedHarness): 
   }};
 }
 
-export interface HarnessEnvironment { root: string; definitions: HarnessDefinition[] }
 /** Purpose bundles, current file authority and explicit commit permission. No Git history ownership. */
 export class HarnessService {
-  readonly approvals = new GitApprovals();
+  readonly approvals = new ApprovalRequests();
+  private readonly gitControl = new GitCommitControl(this.approvals);
   private readonly operations = new OperationQueue();
   private readonly shellMembers = new Map<string,string>();
   constructor(private readonly workspaces:WorkspaceService,readonly designs:DesignService,private readonly member:(id:string)=>Promise<StoredMember|null>,private readonly web:RuntimeTool[]=webTools(),readonly permissionsEnabled=true){}
@@ -140,7 +140,7 @@ export class HarnessService {
     return executeBash({memberId:id,root,request,signal,permissionsEnabled:this.permissionsEnabled,git:async(args,cwd,env,onWait,brokerSignal,execute)=>{
       const catalog=await this.designs.list(member.workspaceId);
       if(catalog.truncated)throw new AppError('command_denied','Design catalog is truncated; cannot classify commit paths');
-      return this.approvals.execute({root,workspaceId:member.workspaceId,memberId:id,runId,command:request.command,args,cwd,env,implementation:[...new Set(catalog.designs.flatMap(d=>d.implementation))],signal:AbortSignal.any([signal,brokerSignal]),onWait,execute});
+      return this.gitControl.execute({root,workspaceId:member.workspaceId,memberId:id,runId,command:request.command,args,cwd,env,implementation:[...new Set(catalog.designs.flatMap(d=>d.implementation))],signal:AbortSignal.any([signal,brokerSignal]),onWait,execute});
     }});
   }
   async controlFiles(id:string,origin:'pending'|'committed',prefix:'.rsi/members'|'.rsi/context/design'){

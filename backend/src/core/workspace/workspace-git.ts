@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 import { decodeText, sha256 } from '../text.js';
 
 export interface GitBaseline { time?: number; design: Record<string,string>; members: Record<string,string> }

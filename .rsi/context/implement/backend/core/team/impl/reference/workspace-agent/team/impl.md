@@ -26,9 +26,9 @@ Pending approval endpoints operate directly on the pending request store, outsid
 
 ## Code map
 
-- [Team](../../../../../../../../../../backend/src/core/team/team.ts), [composition/policy](../../../../../../../../../../backend/src/core/team/team-system.ts), [runner](../../../../../../../../../../backend/src/core/team/team-runner.ts).
-- [Member files/activation](../../../../../../../../../../backend/src/core/team/member-config.ts), [source format](../../../../../../../../../../backend/src/core/team/member-config-format.ts), [instructions](../../../../../../../../../../backend/src/core/team/member-instructions.ts).
-- [Git reads/initial import](../../../../../../../../../../backend/src/core/workspace/workspace-git.ts), [approval](../../../../../../../../../../backend/src/core/harness/git-approval.ts), [routes](../../../../../../../../../../backend/src/api/team-routes.ts), [SQL](../../../../../../../../../../backend/src/core/team/data.ts).
+- [Team](../../../../../../../../../../backend/src/core/team/data/members.ts), [composition/policy](../../../../../../../../../../backend/src/core/team/team-system.ts), [runner](../../../../../../../../../../backend/src/core/team/team-runner.ts).
+- [Member files/activation](../../../../../../../../../../backend/src/core/team/member-config.ts), [source format](../../../../../../../../../../backend/src/core/team/data/member-config.ts), [instructions](../../../../../../../../../../backend/src/core/team/member-instructions.ts).
+- [Git reads/initial import](../../../../../../../../../../backend/src/core/workspace/workspace-git.ts), [approval](../../../../../../../../../../backend/src/core/harness/git-approval.ts), [routes](../../../../../../../../../../backend/src/api/team-routes.ts), [SQL](../../../../../../../../../../backend/src/core/data.ts).
 
 ## Verification
 

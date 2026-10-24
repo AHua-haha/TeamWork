@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { duplexPair } from 'node:stream';
 import { text } from 'node:stream/consumers';
 import { test } from 'node:test';
-import type { ConfigService } from '../src/core/team/config.js';
+import type { ConfigService } from '../src/core/team/data/config.js';
 import { createAgentServer } from '../src/api/http.js';
-import type { TeamRuntime } from '../src/core/team/runtime.js';
+import type { AgentRuntime } from '../src/core/agent/runtime.js';
 import type { TeamSystem } from '../src/core/team/team-system.js';
 import { WorkspaceService } from '../src/core/workspace/workspace.js';
 import { testModels, testModelValidator, MemoryStore, withFolder } from './memory-store.js';
@@ -30,7 +30,7 @@ function send(server: Server, path: string, method = 'GET', data?: unknown): Pro
 function withServer(run: (call: Call, server: Server, folder: string) => Promise<void>): Promise<void> {
   return withFolder(async folder => {
     const service = new WorkspaceService(new MemoryStore(), testModelValidator);
-    const server = createAgentServer({} as TeamRuntime, {} as ConfigService, service, {} as TeamSystem);
+    const server = createAgentServer({} as AgentRuntime, {} as ConfigService, service, {} as TeamSystem);
     const call: Call = async (path, { method = 'GET', data, status = 200 } = {}) => {
       const response = await send(server, path, method, data);
       const body = JSON.parse(await text(response)) as Body;

@@ -2,7 +2,7 @@
 
 ## Purpose, responsibilities and boundaries
 
-Storage supplies technical storage-engine access and resource management. It does not know Core's or another business system's models, schemas, record serialization, table names, queries, activation rules or application migrations. Each business owner supplies its own persistence implementation and uses this infrastructure.
+Storage supplies technical storage-engine access and resource management. It does not know Core's or another business system's models, schemas, record serialization, table names, queries, activation rules or application migrations. Each business aggregates its in-memory schema, durable model and related operations in its own data-model part and uses this infrastructure. Storage does not supply a shared business repository.
 
 ## Interface contract
 

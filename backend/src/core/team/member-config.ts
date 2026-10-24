@@ -2,14 +2,14 @@ import { fileChanges, configurationCommits } from '../workspace/workspace-git.js
 import { memberRoot } from '../workspace/workspace-layout.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { keys, obj, validateRunSettings } from './config.js';
+import { keys, obj, validateRunSettings } from './data/config.js';
 import { resolveHarness, type HarnessService } from '../harness/harness.js';
-import { harnessConfig } from '../harness/harness-config.js';
-import { sourceBundle, type MemberConfigSource } from './member-config-format.js';
-import { memberFields, maxMembers, type MemberFields, type MemberActivationState, type NewMember, type StoredMember, type TeamService } from './team.js';
-import { modelRunSettings } from '../workspace/workspace-models.js';
+import { harnessConfig } from '../harness/data/config.js';
+import { sourceBundle, type MemberConfigSource } from './data/member-config.js';
+import { memberFields, maxMembers, type MemberFields, type MemberActivationState, type NewMember, type StoredMember, type TeamService } from './data/members.js';
+import { modelRunSettings } from '../workspace/data/models.js';
 import { encodeText, sha256 } from '../text.js';
-import { AppError, identity } from '../agent/types.js';
+import { AppError, identity } from '../agent/data/model.js';
 
 interface MemberChange {
   type: 'create' | 'update' | 'delete'; path: string; name: string; memberId?: string;

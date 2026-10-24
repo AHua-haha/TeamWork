@@ -6,6 +6,8 @@
     "backend/src/core/validation.ts",
     "backend/src/core/workspace-bootstrap.ts",
     "backend/src/core/workspace-reset.ts",
-    "backend/src/core/errors.ts"
+    "backend/src/core/errors.ts",
+    "backend/src/core/data.ts",
+    "backend/src/core/data-transaction.ts"
   ]
 }

@@ -1,8 +1,8 @@
 import type { MemberConfigService } from './member-config.js';
 import { Type, type JsonValue } from '@earendil-works/pi-ai';
 import type { RuntimeTool } from '../agent/contracts.js';
-import type { TeamService } from './team.js';
-import { AppError } from '../agent/types.js';
+import type { TeamService } from './data/members.js';
+import { AppError } from '../agent/data/model.js';
 
 /** Reusable services; harness assembly grants management capability to the lead. */
 export function teamTools(team: TeamService, configuration: MemberConfigService, permissionsEnabled = true): { management: RuntimeTool[] } {

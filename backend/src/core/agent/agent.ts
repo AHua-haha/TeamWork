@@ -1,11 +1,12 @@
-import { compactedContext, compactionInput, estimateRequestTokens, interruptedCompactionContext, validateCompactionSettings, type CompactionState, type CompactionTrigger } from './compaction.js';
+import { AgentState } from './data/state.js';
+import { compactedContext, compactionInput, estimateRequestTokens, interruptedCompactionContext, validateCompactionSettings, type CompactionState, type CompactionTrigger } from './data/compaction.js';
 import { finalAnswer, textPhase } from './final-answer.js';
-import { AgentMessageContext, type GroupContextReference } from './context.js';
+import { AgentMessageContext, type GroupContextReference } from './data/context.js';
 import { randomUUID } from 'node:crypto';
 import { AssistantMessageFrameEncoder, getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type Model, type Models, type SimpleStreamOptions, type ToolResultMessage, type JsonObject } from '@earendil-works/pi-ai';
-import { validateEntries, validateRun } from './message-validation.js';
-import { ProgressStore } from './progress.js';
-import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type RunState } from './types.js';
+import { validateEntries } from './data/validation.js';
+import { ProgressStore } from './data/progress.js';
+import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type RunState } from './data/model.js';
 import type { ModelStream, ModelRequest, AgentConfiguration, RuntimePolicy, RuntimeTool, StepScope } from './contracts.js';
 export type * from './contracts.js';
 
@@ -21,27 +22,25 @@ export interface AgentObserver {
   finished?(state: RunState): Promise<RunState | void>;
 }
 export class AgentExecution {
-  private context: ContextHistory;
-  private runState: RunState;
-  private historyPosition: number;
+  private readonly state:AgentState;
+  private get context(){return this.state.context;}
+  private set context(value:ContextHistory){this.state.acceptContext(value);}
+  private get runState(){return this.state.run;}
+  private set runState(value:RunState){this.state.acceptRun(value);}
+  private get historyPosition(){return this.state.historyPosition;}
+  private set historyPosition(value:number){this.state.acceptPosition(value);}
   private started = false;
   constructor(run: RunState, context: ContextHistory, historyPosition: number,
     private readonly config: AgentConfiguration, private readonly policy: RuntimePolicy,
     private readonly stream: ModelStream, private readonly observer: AgentObserver = {},
     readonly progress = new ProgressStore(), private readonly maxSteps = 64) {
-    validateRun(run); validateEntries(context.entries);
-    this.runState = structuredClone(run); this.context = structuredClone(context); this.historyPosition = historyPosition;
+    this.state=new AgentState(run,context,historyPosition);
     if (config.compaction) validateCompactionSettings(config.compaction);
     if (!Number.isSafeInteger(maxSteps) || maxSteps < 1) throw new AppError('invalid_config', 'Invalid model call limit');
   }
-  snapshot() { return structuredClone({ run: this.runState, context: this.context, historyPosition: this.historyPosition }); }
-  restoreContext(context: ContextHistory): void { validateEntries(context.entries); this.context = structuredClone(context); }
-  receive(record: CompletedMessage): void {
-    if (record.agentId !== this.runState.agentId || record.runId !== this.runState.runId) throw new AppError('invalid_input', 'Message belongs to another execution');
-    this.context.entries.push(structuredClone({ messageId: record.messageId, message: record.message, metadata: record.metadata }));
-    this.context.revision++; this.historyPosition = record.position;
-    if (record.messageId === this.runState.activeMessageId) this.runState = { ...this.runState, activeMessageId: null, phase: 'tools' };
-  }
+  snapshot(){return this.state.snapshot();}
+  restoreContext(context:ContextHistory):void{this.state.acceptContext(context);}
+  receive(record:CompletedMessage):void{this.state.receive(record);}
   private async record(entry: ContextEntry): Promise<CompletedMessage> {
     validateEntries([entry]);
     const proposed = { ...entry, agentId: this.runState.agentId, runId: this.runState.runId, position: this.historyPosition + 1 };

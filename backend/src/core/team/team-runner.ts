@@ -1,30 +1,30 @@
-import type { PreparedChatImage } from './chat-images.js';
+import { TeamExecutionData } from './data/execution.js';
+import type { PreparedChatImage } from './data/chat-images.js';
 import { OperationQueue } from '../workspace/workspace-git.js';
-import type { TeamRuntime } from './runtime.js';
-import type { TeamService, TeamStore } from './team.js';
+import type { AgentRuntime } from '../agent/runtime.js';
+import type { TeamService, TeamStore } from './data/members.js';
 import { Changes } from '../changes.js';
-import { chatText, userMentions, mentionLimit, type ChatStore, type ChatMessage, type ChatAcceptance } from './group-chat.js';
+import { chatText, userMentions, mentionLimit, type ChatStore, type ChatMessage, type ChatAcceptance } from './data/group-chat.js';
 import { parseMemberResponse } from './member-response.js';
-import { AppError, type RunState } from '../agent/types.js';
+import { AppError, type RunState } from '../agent/data/model.js';
 
-export type RunHost = Pick<TeamRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback' | 'clearProgress' | 'syncGroupContext'>;
+export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback' | 'clearProgress' | 'syncGroupContext'>;
 
 /** Shared publication and independent member activations. Private calls and call chains do not exist here. */
 export class TeamRunner {
   private readonly changes = new Changes();
-  private readonly active = new Map<string, { runId: string; exchangeId: string; workspaceId: string }>();
+  private readonly executionData=new TeamExecutionData();
   private closed = false;
   private readonly publications = new Set<Promise<unknown>>();
   private readonly gate = new OperationQueue();
   private readonly execution = new OperationQueue();
-  private readonly jobs = new Map<string, {agentId: string; workspaceId: string}>();
   constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost, private readonly resetShells: (ids?: string[]) => Promise<void> = async () => {}) {}
 
-  isRunning(memberId: string): boolean { return this.active.has(memberId); }
+  isRunning(memberId: string): boolean { return this.executionData.isRunning(memberId); }
 
   /** Admission remains atomic; only actual execution waits, including sender finalization. */
   async acquireExecution(memberId: string, signal: AbortSignal): Promise<() => void> {
-    const workspaceId = this.active.get(memberId)?.workspaceId ?? (await this.team.find(memberId))?.workspaceId;
+    const workspaceId = this.executionData.activeRun(memberId)?.workspaceId ?? (await this.team.find(memberId))?.workspaceId;
     if (!workspaceId) return () => {};
     signal.throwIfAborted();
     return new Promise((resolve, reject) => {
@@ -40,7 +40,7 @@ export class TeamRunner {
   }
 
 
-  async startUser(agentId: string, input: Parameters<TeamRuntime['start']>[1]): Promise<RunState> {
+  async startUser(agentId: string, input: Parameters<AgentRuntime['start']>[1]): Promise<RunState> {
     if (await this.team.find(agentId)) throw new AppError('member_conversation', 'Post workspace input to the shared team chat', 409);
     return this.runtime().start(agentId, input);
   }
@@ -52,7 +52,7 @@ export class TeamRunner {
 
   async publishFinal(memberId: string, runId: string, value: unknown, finalMessageId: string): Promise<ChatMessage> {
     const member = await this.team.find(memberId);
-    const active = this.active.get(memberId);
+    const active = this.executionData.activeRun(memberId);
     if (!member || member.value.retiredAt !== null || active?.runId !== runId) throw new AppError('member_unavailable', 'The sending member is no longer working', 409);
     const response = parseMemberResponse(chatText(value));
     const result = await this.publish(member.workspaceId, response.body, { memberId, name: member.value.name, runId, exchangeId: active.exchangeId, finalMessageId, names: response.names });
@@ -88,15 +88,13 @@ export class TeamRunner {
     }
     // The store rechecks busy state and budget with publication and all run records in one transaction.
     const result = await this.store.publishChat({ workspaceId, text, ...(images.length ? { images } : {}), memberRevisions: Object.fromEntries(recipients.map((member, index) => [member.id, configs[index]!.source?.agentRevision ?? member.revision])), recipients: recipients.map(member => member.id), author: sender ? { type: 'member', memberId: sender.memberId, name: sender.name, runId: sender.runId } : { type: 'user' }, ...(sender ? { exchangeId: sender.exchangeId, finalMessageId: sender.finalMessageId } : {}) });
-    if (sender) this.active.delete(sender.memberId);
+    if (sender) this.executionData.published(sender.memberId);
     for (const [index, run] of result.runs.entries()) {
-      this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });
+      this.executionData.admitted(run.agentId,run.runId,result.message.exchangeId,workspaceId);
       this.runtime().launch(run, configs[index]!);
-      this.jobs.set(run.runId, {agentId: run.agentId, workspaceId});
       const settled = () => {
         // A successor run may already have started after atomic final publication.
-        if (this.active.get(run.agentId)?.runId === run.runId) this.active.delete(run.agentId);
-        this.jobs.delete(run.runId);
+        this.executionData.settled(run.agentId,run.runId);
         this.changes.publish();
       };
       void this.runtime().finished(run.agentId, run.runId).then(settled, settled);
@@ -118,7 +116,7 @@ export class TeamRunner {
   }
   idleWorkspace<T>(workspaceId: string, action: () => Promise<T>, reason = 'All workspace members must finish before activating configuration'): Promise<T> {
     return this.workspaceOperation(workspaceId, async () => {
-      if ([...this.jobs.values()].some(job => job.workspaceId === workspaceId) || [...this.active.values()].some(run => run.workspaceId === workspaceId)) throw new AppError('workspace_busy', reason, 409);
+      if (this.executionData.workspaceBusy(workspaceId)) throw new AppError('workspace_busy', reason, 409);
       const result = await action(); this.changes.publish(); return result;
     });
   }
@@ -196,7 +194,7 @@ export class TeamRunner {
   async stop(workspaceId: string): Promise<void> {
     const runs = await this.store.stopChat(workspaceId);
     const work = new Map(runs.map(run => [run.runId, run.agentId]));
-    for (const [runId, job] of this.jobs) if (job.workspaceId === workspaceId) work.set(runId, job.agentId);
+    for (const job of this.executionData.workspaceJobs(workspaceId)) work.set(job.runId,job.agentId);
     await Promise.all([...work].map(([runId, agentId]) => this.runtime().cancel(agentId, runId)));
     this.changes.publish();
   }

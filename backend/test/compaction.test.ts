@@ -3,10 +3,10 @@ import { test } from 'node:test';
 import { fauxAssistantMessage, fauxProvider, normalizeContext, type AssistantMessage } from '@earendil-works/pi-ai';
 import { estimateContextTokens } from '@earendil-works/pi-ai/utils/estimate';
 import { AgentExecution, fixedPolicy, type AgentObserver } from '../src/core/agent/agent.js';
-import { compactedContext, estimateRequestTokens, validateCompactionSettings, type CompactionState } from '../src/core/agent/compaction.js';
+import { compactedContext, estimateRequestTokens, validateCompactionSettings, type CompactionState } from '../src/core/agent/data/compaction.js';
 import type { AgentConfiguration, ModelRequest, ModelStream, RuntimePolicy, RuntimeTool } from '../src/core/agent/contracts.js';
-import type { ContextEntry, RunState } from '../src/core/agent/types.js';
-import { groupEntry, groupSender } from '../src/core/team/group-chat.js';
+import type { ContextEntry, RunState } from '../src/core/agent/data/model.js';
+import { groupEntry, groupSender } from '../src/core/team/data/group-chat.js';
 import { harnessPrompt } from '../src/core/harness/harness-prompts.js';
 
 const model = fauxProvider().getModel(), prompt = harnessPrompt('context-compaction');

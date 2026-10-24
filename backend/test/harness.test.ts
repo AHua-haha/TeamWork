@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { test } from 'node:test';
 import { designMetadata } from '../src/core/workspace/design.js';
-import { commandArgv, emptyHarness, harnessConfig } from '../src/core/harness/harness-config.js';
+import { commandArgv, emptyHarness, harnessConfig } from '../src/core/harness/data/config.js';
 import { parseBashInput } from '../src/core/harness/harness-command.js';
 import { code, configureHarness, withTeam, worker } from './team-fixture.js';
 

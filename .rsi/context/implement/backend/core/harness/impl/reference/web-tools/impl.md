@@ -21,7 +21,7 @@ Use built-in Node fetch without an extra provider SDK. Inject fetch for determin
 ## Code map
 
 - [web-tools.ts](../../../../../../../../../backend/src/core/harness/web-tools.ts): reusable definitions, provider adapter, validation, Markdown/metadata formatting and limits.
-- [main.ts](../../../../../../../../../backend/src/runtime/main.ts), [team-system.ts](../../../../../../../../../backend/src/core/team/team-system.ts), [harness.ts](../../../../../../../../../backend/src/core/harness/harness.ts) and [harness-bases.ts](../../../../../../../../../backend/src/core/harness/harness-bases.ts): deployment injection and fixed capability assembly.
+- [main.ts](../../../../../../../../../backend/src/runtime/main.ts), [team-system.ts](../../../../../../../../../backend/src/core/team/team-system.ts), [harness.ts](../../../../../../../../../backend/src/core/harness/harness.ts) and [harness-bases.ts](../../../../../../../../../backend/src/core/harness/data/bases.ts): deployment injection and fixed capability assembly.
 - [execute.md](../../../../../../../../../backend/prompts/harness/execute.md): usage and external-content rules.
 - [Project configuration example](../../../../../../../../../rsi.config.example.json) and [README.md](../../../../../../../../../backend/README.md): deployment setup and examples.
 

@@ -4,7 +4,7 @@
 
 Run one agent with supplied model settings, Harness capabilities and a continuous in-memory message context. Own the model/tool loop, message-context state, group-message consumption tracking, run status and produced execution values. A member's context outlives an individual activation.
 
-Team owns group content and provides a read reference. Agent determines what shared messages it needs using its own tracking state. Agent does not own group publication, sender attribution, shared-message ordering, scheduling or SQL persistence. Team may persist Agent's exposed state; Agent must remain usable entirely in memory without a concrete Team or database dependency.
+Team owns group content and provides a read reference. Agent determines what shared messages it needs using its own tracking state. Agent does not own group publication, sender attribution, shared-message ordering or team scheduling. Agent owns and aggregates its core in-memory schema, durable context/execution/history/compaction model and related data operations. Its execution mechanism remains usable in memory; Agent’s durable runtime implements acknowledged persistence without a concrete Team dependency.
 
 ### Terms and public state meaning
 
@@ -15,7 +15,7 @@ Team owns group content and provides a read reference. Agent determines what sha
 | Agent message context | Agent's ordered model-facing context containing incorporated shared messages and private assistant/tool/feedback messages. |
 | Private working context | The private part of Agent context, including recorded execution information needed for continuity. |
 | Group consumption state | Agent-owned information identifying which shared messages it has incorporated and which remain incoming. It is not derived from run success. |
-| Stable history | Immutable completed execution/shared records served by Team, separate from mutable Agent model context. |
+| Stable history | Agent-owned immutable completed private execution records and Team-owned immutable shared records, separate from mutable Agent model context. |
 
 Exact field names and boundary encoding are implementation details. These semantic distinctions must remain observable through the public state contract used for persistence/restoration.
 
@@ -55,7 +55,7 @@ Agent must not duplicate an already incorporated shared message when it next run
 
 Run completion, failure or cancellation retains the Agent's assembled context and incorporated-group state. Do not erase successful private messages or reconstruct failed runs from a special retained range. Completed tool/assistant messages and recorded private feedback remain available on the next activation regardless of terminal status.
 
-Expose detached context/consumption state and acknowledged changes to the caller. Team persists those public values and restores them together after restart. Agent defines their meaning; Team does not calculate a success boundary or choose history ranges for the next model request. A persistence failure cannot be reported as acknowledged durable context advancement. An uncertain preparation lifecycle/message/cutover acknowledgement must remain observable even after an ordinary answer has already been published; do not apply a competing fallback replacement. The durable host recovers it on restart.
+Expose detached context/consumption state and acknowledged changes to the caller. Agent’s own data-model part persists those values and restores them together after restart. Agent defines their meaning; Team does not calculate a success boundary or choose history ranges for the next model request. A persistence failure cannot be reported as acknowledged durable context advancement. An uncertain preparation lifecycle/message/cutover acknowledgement must remain observable even after an ordinary answer has already been published; do not apply a competing fallback replacement. Agent’s durable runtime recovers it on restart.
 
 Restart never replays model/tool effects. If interruption left a recorded tool call without a result, protocol repair must identify that uncertainty explicitly, without claiming no effects occurred or modifying stable history. Uncommitted stream chunks may be lost under the existing streaming contract.
 
@@ -73,11 +73,15 @@ On success, replace the model context with the Team-owned original shared messag
 
 Expose preparation start, completed private messages and terminal/candidate values for an optional durable caller. Await acknowledged cutover before resuming. Keep old context available on failure; retain recorded preparation and explicit failure information so tool effects are not forgotten. Fail an ordinary pre-call trigger explicitly if preparation cannot finish; a finishing preparation failure preserves the ordinary run's result. Never replay tools automatically. Cancellation/shutdown stops preparation and an already-aborted signal starts no new model calls. Compaction calls have a finite independent call budget.
 
-A durable caller must recover interrupted preparation consistently with the old model context and recorded work, including after the ordinary response was already published. Agent defines recovery composition; persistence is not required for in-memory use. No group summarization, structured extraction, per-member group views or new context-maintenance tools are added.
+Agent’s durable runtime recovers interrupted preparation consistently with the old model context and recorded work, including after the ordinary response was already published. Agent owns both recovery composition and persistence; the in-memory execution mechanism can also be used independently. No group summarization, structured extraction, per-member group views or new context-maintenance tools are added.
+
+### Public data operations
+
+Expose acknowledged context/history/run/compaction reads and mutations, restoration/recovery and transaction-scoped admission/completion/reset operations. Team can obtain a narrow execution coordination view and immutable completed records for its shared references without loading private context or knowing Agent tables. Agent owns validation and mapping of those values. Runtime ownership, durable history, revisions and external-effect safety remain unchanged. Parent-supplied callbacks coordinate foreign configuration/presentation changes on the same transaction; Agent does not write those foreign models.
 
 ## Constraints, specifications and requirements
 
-- No SQL schema, query, durable codec, runtime lease or Team concrete dependency in Agent.
+- Aggregate Agent data definitions, validation, mutable context/progress, durable schemas/queries/migrations and operations under Agent. Keep SQL out of the reusable model/tool loop, not out of the Agent system. No concrete Team, Harness or Workspace dependency in Agent.
 - Stable history remains immutable when mutable model context changes.
 - Preserve private execution boundaries, recoverable tool failures, cancellation and acknowledged durable hosting.
 - The new path replaces per-run reconstruction/clear behavior; there must not be two competing retention mechanisms.

@@ -94,14 +94,14 @@ Content guidance is carried by management-design.md, implementation.md and the b
 
 ## Code map
 
-- [Context base](../../../../../../../../../../backend/src/core/workspace/context-base.ts): path rules, `ContextStore`, `Batch`, `DiskChange`, `ContextBase`, the reconcile scan, and the watcher.
+- [Context base](../../../../../../../../../../backend/src/core/workspace/data/context-base.ts): path rules, `ContextStore`, `Batch`, `DiskChange`, `ContextBase`, the reconcile scan, and the watcher.
 - [Change notification](../../../../../../../../../../backend/src/core/changes.ts): versioned notification for followers.
 - [Text rules](../../../../../../../../../../backend/src/core/text.ts): text decoding and encoding, the 1 MiB limit, and hashing.
 - [Workspace routes](../../../../../../../../../../backend/src/api/workspace-routes.ts) and [HTTP helpers](../../../../../../../../../../backend/src/api/http-helpers.ts): the context endpoints, request validation, error responses, and SSE.
-- [MySQL store](../../../../../../../../../../backend/src/core/team/data.ts) and [codec](../../../../../../../../../../backend/src/core/codec.ts): storage and record validation (see the [database implementation](../../../../../team/impl/reference/database/impl.md)).
+- [MySQL store](../../../../../../../../../../backend/src/core/data.ts) and [codec](../../../../../../../../../../backend/src/core/codec.ts): storage and record validation (see the [database implementation](../../../../../team/impl/reference/database/impl.md)).
 - [Context base tests](../../../../../../../../../../backend/test/context-base.test.ts) and [in-memory store](../../../../../../../../../../backend/test/memory-store.ts): behavior on real temporary folders.
 
-- [Path rules](../../../../../../../../../../backend/src/core/workspace/context-path.ts), [document format](../../../../../../../../../../backend/src/core/workspace/context-documents.ts), [Layout](../../../../../../../../../../backend/src/core/workspace/workspace-layout.ts), [bootstrap](../../../../../../../../../../backend/src/core/workspace-bootstrap.ts), [implementation-context scope definitions](../../../../../../../../../../backend/src/core/harness/harness-bases.ts) and [harness](../../../../../harness/impl/reference/workspace-agent/harness/impl.md): metadata/Markdown initialization, authority and shared history.
+- [Path rules](../../../../../../../../../../backend/src/core/workspace/data/paths.ts), [document format](../../../../../../../../../../backend/src/core/workspace/data/documents.ts), [Layout](../../../../../../../../../../backend/src/core/workspace/workspace-layout.ts), [bootstrap](../../../../../../../../../../backend/src/core/workspace-bootstrap.ts), [implementation-context scope definitions](../../../../../../../../../../backend/src/core/harness/data/bases.ts) and [harness](../../../../../harness/impl/reference/workspace-agent/harness/impl.md): metadata/Markdown initialization, authority and shared history.
 - [Design rules](../../../../../../../../../../backend/prompts/harness/management-design.md), [implementation rules](../../../../../../../../../../backend/prompts/harness/implementation.md), [design template](../../../../../../../../../../backend/prompts/harness/design-template.md) and [context template](../../../../../../../../../../backend/prompts/harness/implementation-context-template.md): file-maintained content rules.
 
 ## Verification

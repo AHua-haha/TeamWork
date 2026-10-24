@@ -28,7 +28,7 @@ One shared workspace and normal .git eliminate worktree synchronization and dupl
 
 ## Code map
 
-- [Composition](../../../../../../../../../../backend/src/core/harness/harness.ts), [bases](../../../../../../../../../../backend/src/core/harness/harness-bases.ts), [resources](../../../../../../../../../../backend/src/core/harness/harness-resources.ts).
+- [Composition](../../../../../../../../../../backend/src/core/harness/harness.ts), [bases](../../../../../../../../../../backend/src/core/harness/data/bases.ts), [resources](../../../../../../../../../../backend/src/core/harness/data/resources.ts).
 - [Commit approval](../../../../../../../../../../backend/src/core/harness/git-approval.ts), [ordinary Git/read/import utilities](../../../../../../../../../../backend/src/core/workspace/workspace-git.ts).
 - [Bash](../../../../../../../../../../backend/src/core/harness/harness-command.ts), [temporary resources](../../../../../../../../../../backend/src/core/harness/harness-execution.ts), [native adapters](../../../../../../../../../../backend/src/core/harness/harness-tools.ts).
 - [Design reads](../../../../../../../../../../backend/src/core/workspace/design.ts), [bootstrap](../../../../../../../../../../backend/src/core/workspace-bootstrap.ts), [member activation](../../../../../../../../../../backend/src/core/team/member-config.ts), [HTTP](../../../../../../../../../../backend/src/api/team-routes.ts).

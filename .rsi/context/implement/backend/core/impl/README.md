@@ -2,29 +2,32 @@
 
 ## Result summary
 
-Core now composes Agent, Harness, Workspace and Team. Persistence is an explicitly assigned responsibility: Agent can execute entirely in memory; Team is the durable application caller. Workspace maintains project information through a database-neutral persistence port.
+Core composes Agent, Harness, Workspace and Team. Each owns its in-memory schema, persistence model and related operations under data/. CoreData is a composition/lifecycle coordinator with no business SQL, table list or inherited monolithic repository.
 
 Design: [Core](../../../../design/backend/core/design.md).
 
-### Coordination and ownership
-
-Runtime constructs the shared technical MySqlStorage and TeamData durable adapter, then services and TeamRuntime. TeamRuntime creates AgentExecution instances and acknowledges their events. Team supplies only the original group-context reference; Agent owns consumption and continuous message state. The host restores context after admission, and normal terminal status never clears it. Workspace registration invokes parent Core bootstrap to prepare the root context and initial Team lead; TeamData commits registration atomically. The parent also coordinates administrative filesystem reset with Team-owned record deletion.
-
 ### Implemented contract
 
-**Input:** Application service inputs, the technical storage resource and operator settings.
+**Input:** CoreData(MySqlStorage). Public properties agents: AgentData, workspaces: WorkspaceData, team: TeamData and config: ConfigData (Team-owned settings).
 
-**Output:** The composed existing Core service interfaces, run/history/progress and explicit failures.
+**Output:** Owner data-model interfaces plus migrate(), resetRuntimeRecords(connection) and close(). There are no forwarded Agent/Workspace CRUD methods on CoreData.
 
-**Effect and failure:** SQL and durable codecs belong to Team, optional in-memory execution to Agent, tool authority/environment to Harness, project information management to Workspace. Core common helpers define no extra design system.
+**Effect and failure:** Owner inTransaction(connection) operations share one caller-controlled Storage transaction; nested owner work never starts or commits another transaction. Core wires Agent-created application-profile and run-finished presentation callbacks, Workspace-created lead/activation and default-model callbacks, and a narrow accepted-member-files read. Owners interpret their own rows and return domain values. Bootstrap, publication/admission, member activation and reset retain original atomicity and lock order. Stable SQL/JSON formats are unchanged. Migration initializes Agent, Workspace and Team schemas, imports old shared presentation through Team, then asks Agent to adopt its legacy contexts through Team read references. No migration rewrites ordinary stable history or resets user data.
 
-**Usage example:** Use Runtime composition in backend/src/runtime/main.ts. Start with MySqlStorage and TeamData, construct ConfigService, WorkspaceService, TeamSystem and TeamRuntime, attach the team, initialize and open.
+**Usage example:** const data = new CoreData(storage); await data.migrate(); inject data.agents into AgentRuntime, data.workspaces into WorkspaceService, data.team into TeamSystem and data.config into ConfigService. Shutdown the runtime/services before data.close(). Administrative reset quarantines files then calls resetRuntimeRecords on its existing transaction; Core calls owner deletion operations in dependency order, preserving provider/application settings.
 
-### Compaction coordination
+### Ownership map
 
-Runtime passes the Operations token threshold and Harness instruction into TeamRuntime. Agent owns Pi-based token measurement, both trigger checkpoints and private preparation/cutover composition. Team acknowledges lifecycle/messages/replacement through its SQL journal. Original shared history remains Team-owned and unchanged. No extra run, activation, group publication or frontend control is created. Mutable context and durable history remain separate.
+- Agent: execution state/context/progress, private completed history, compaction and runtime ownership/recovery.
+- Team: member/configuration/shared-chat/presentation models and transient admission/finalization references.
+- Workspace: registry/models, context/files/history and accepted baseline.
+- Harness: configuration/resource/scope/tool-input/approval models and session-bound approval operations; execution resources remain process-local.
+- data-transaction.ts and codec.ts provide schema-neutral shared mechanics. Domain validators live under their owner, rather than being re-exported from the common codec.
 
 ## File lookup
+
+- [backend/src/core/data.ts](../../../../../../backend/src/core/data.ts): owner composition, cross-owner hooks and lifecycle.
+- [backend/src/core/data-transaction.ts](../../../../../../backend/src/core/data-transaction.ts): schema-neutral SQL/transaction helpers.
 
 - [backend/src/core/errors.ts](../../../../../../backend/src/core/errors.ts): common application errors and identifier validation.
 

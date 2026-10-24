@@ -1,8 +1,8 @@
 import { MySqlStorage } from '../storage/mysql.js';
 import { createBackendModels } from '../core/agent/providers.js';
-import { TeamData } from '../core/team/data.js';
-import { ConfigService } from '../core/team/config.js';
-import { TeamRuntime, configuredPolicy, piModelStream } from '../core/team/runtime.js';
+import { CoreData } from '../core/data.js';
+import { ConfigService } from '../core/team/data/config.js';
+import { AgentRuntime, configuredPolicy, piModelStream } from '../core/agent/runtime.js';
 import { createAgentServer } from '../api/http.js';
 import { TeamSystem } from '../core/team/team-system.js';
 import { WorkspaceService } from '../core/workspace/workspace.js';
@@ -15,11 +15,11 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
 const models = createBackendModels();
 const storage = new MySqlStorage(databaseUrl);
-const store = new TeamData(storage);
-const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
-const workspaces = new WorkspaceService(store, config);
-const team = new TeamSystem(store, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY), harnessPermissionsEnabled(process.env.RSI_HARNESS_PERMISSIONS_ENABLED));
-const runtime = new TeamRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models), {compaction: {thresholdTokens: Number(process.env.RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000), prompt: harnessPrompt('context-compaction')}});
+const store = new CoreData(storage);
+const config = new ConfigService(store.config, models, [], process.env.CONFIG_ENCRYPTION_KEY);
+const workspaces = new WorkspaceService(store.workspaces, config);
+const team = new TeamSystem(store.team, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY), harnessPermissionsEnabled(process.env.RSI_HARNESS_PERMISSIONS_ENABLED));
+const runtime = new AgentRuntime(store.agents, team.runConfig, team.policy(configuredPolicy()), piModelStream(models), {compaction: {thresholdTokens: Number(process.env.RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000), prompt: harnessPrompt('context-compaction')}});
 team.attach(runtime);
 const server = createAgentServer(runtime, config, workspaces, team);
 try {

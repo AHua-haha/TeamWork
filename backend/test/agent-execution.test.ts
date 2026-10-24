@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai';
 import { AgentExecution, fixedPolicy, type AgentObserver } from '../src/core/agent/agent.js';
 import type { ModelStream, AgentConfiguration } from '../src/core/agent/contracts.js';
-import type { RunState } from '../src/core/agent/types.js';
+import type { RunState } from '../src/core/agent/data/model.js';
 
 const model = fauxProvider().getModel();
 const config: AgentConfiguration = { model, tools: [], systemPrompt: '', options: {} };
@@ -58,7 +58,7 @@ test('caller persistence failure becomes failed execution and terminal acknowled
 });
 
 test('Agent reads its shared reference only at work boundaries and carries private work into the next activation', async () => {
-  const { groupEntry, groupSender } = await import('../src/core/team/group-chat.js');
+  const { groupEntry, groupSender } = await import('../src/core/team/data/group-chat.js');
   const groups = [1].map(position => {
     const shared = {workspaceId:'workspace',messageId:`g${position}`,position,exchangeId:'exchange',author:{type:'user' as const},text:`request ${position}`,recipients:[],time:position};
     return {position,entry:groupEntry(shared),sender:groupSender(shared)};

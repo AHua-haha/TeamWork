@@ -1,9 +1,10 @@
+import { ApprovalRequests } from './data/approvals.js';
 import { copyFile, mkdtemp, open, rename, rm, stat, utimes } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { executionResources } from './harness-execution.js';
 import { gitText, repository, coversPath, type FileChange } from '../workspace/workspace-git.js';
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 
 /** Preserve Git's racy-stat detection when copying an index; a fresh mtime can hide same-size edits. */
 async function copyIndex(source:string,target:string){
@@ -12,32 +13,8 @@ async function copyIndex(source:string,target:string){
   await utimes(target,info.atime,Math.floor(info.mtimeMs/1000));
 }
 
-export interface CommitApproval {
-  id:string; workspaceId:string; memberId:string; runId:string|null; command:string; directory:string;
-  message:string; createdAt:number; changes:FileChange[];
-}
-export type ApprovalDecision='accept'|'deny'|'feedback';
-type Pending={view:CommitApproval; resolve:(decision:{action:ApprovalDecision;message:string})=>void};
-/** Session-bound pending tool decisions. Restart cancels execution, never replays it. */
-export class GitApprovals {
-  private pending=new Map<string,Pending>();
-  list(workspaceId:string){return [...this.pending.values()].filter(p=>p.view.workspaceId===workspaceId).map(({view:{changes:_,...view}})=>view);}
-  read(workspaceId:string,id:string){const entry=this.pending.get(id);if(!entry||entry.view.workspaceId!==workspaceId)throw new AppError('not_found','Commit approval is no longer pending',404);return entry.view;}
-  decide(workspaceId:string,id:string,action:unknown,message:unknown=''){
-    this.read(workspaceId,id);
-    if(!['accept','deny','feedback'].includes(action as string)||typeof message!=='string'||message.length>10000||(action==='feedback'&&!message.trim()))throw new AppError('invalid_input','Choose accept, deny or feedback; feedback requires a message');
-    const entry=this.pending.get(id)!;this.pending.delete(id);entry.resolve({action:action as ApprovalDecision,message});return {resolved:true};
-  }
-  private wait(view:CommitApproval,signal:AbortSignal,onWait:(waiting:boolean)=>void){
-    signal.throwIfAborted();onWait(true);
-    let abort=()=>{};
-    return new Promise<{action:ApprovalDecision;message:string}>((resolveDecision,reject)=>{
-      abort=()=>{this.pending.delete(view.id);reject(new AppError('approval_cancelled','Commit approval cancelled; no commit was executed',409));};
-      signal.addEventListener('abort',abort,{once:true});
-      this.pending.set(view.id,{view,resolve:resolveDecision});
-      if(signal.aborted)abort();
-    }).finally(()=>{signal.removeEventListener('abort',abort);this.pending.delete(view.id);onWait(false);});
-  }
+export class GitCommitControl {
+  constructor(private readonly approvals:ApprovalRequests){}
   async execute(input:{root:string;workspaceId:string;memberId:string;runId?:string;command:string;args:string[];cwd:string;env:NodeJS.ProcessEnv;implementation:string[];signal:AbortSignal;execute:(args:string[],env:NodeJS.ProcessEnv)=>Promise<{output:string;code:number}>;onWait:(waiting:boolean)=>void}) {
     const {root,signal,onWait}=input;
     await repository(root);
@@ -83,7 +60,7 @@ export class GitApprovals {
       const patches=(await text(['diff','--cached','--no-renames','--no-color','--no-ext-diff','--no-textconv'])).split(/(?=^diff --git )/m).filter(Boolean);
       const changes=paths.map((path,i):FileChange=>({path,action:fields[i*2]==='A'?'add':fields[i*2]==='D'?'delete':'modify',patch:(patches[i]??'').slice(0,256*1024),truncated:(patches[i]?.length??0)>256*1024}));
       if(protectedFiles){
-        const decision=await this.wait({id:randomUUID(),workspaceId:input.workspaceId,memberId:input.memberId,runId:input.runId??null,command:input.command,directory:root,message,createdAt:Date.now(),changes},signal,onWait);
+        const decision=await this.approvals.wait({id:randomUUID(),workspaceId:input.workspaceId,memberId:input.memberId,runId:input.runId??null,command:input.command,directory:root,message,createdAt:Date.now(),changes},signal,onWait);
         signal.throwIfAborted();
         if(decision.action!=='accept')return {output:decision.action==='deny'?`User denied the Git commit.${decision.message?' '+decision.message:''}`:`User feedback: ${decision.message}\nNo commit was executed. Revise the work or request another commit.`,code:1};
       }

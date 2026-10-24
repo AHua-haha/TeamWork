@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { StepScope } from '../src/core/team/runtime.js';
+import type { StepScope } from '../src/core/agent/runtime.js';
 import { hostShellEnvironment } from '../src/core/harness/harness-execution.js';
 import { harnessPermissionsEnabled } from '../src/core/harness/harness-policy.js';
 import { executeBash, resetMemberShell } from '../src/core/harness/harness-command.js';

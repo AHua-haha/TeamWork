@@ -1,7 +1,7 @@
 import { readImageSubmission } from './chat-images.js';
 import { body, fields, json, query, count, sse, type Route } from './http-helpers.js';
 import type { TeamSystem } from '../core/team/team-system.js';
-import { AppError, identity, position } from '../core/agent/types.js';
+import { AppError, identity, position } from '../core/agent/data/model.js';
 
 const maxBodyBytes = 1024 * 1024;
 

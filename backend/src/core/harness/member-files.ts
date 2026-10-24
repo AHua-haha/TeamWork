@@ -3,9 +3,9 @@ import type { Stats } from 'node:fs';
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { EditOperations, LsOperations, ReadOperations, WriteOperations } from '@earendil-works/pi-coding-agent';
-import { contextPath } from '../workspace/context-path.js';
+import { contextPath } from '../workspace/data/paths.js';
 import { decodeText, encodeText, maxFileBytes, missing } from '../text.js';
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 
 export type FileMode = 'see' | 'read' | 'write' | 'mkdir';
 /** The rule for one agent: why it may not do `mode` on a workspace-relative path, or null when it may. */

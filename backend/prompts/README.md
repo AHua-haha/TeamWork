@@ -27,4 +27,4 @@ Pi read/ls/grep/find use default operations for workspace reads. write/edit reta
 
 ## Private context preparation
 
-`harness/context-compaction.md` is the release-owned instruction passed by Runtime to Agent. Agent uses one configured token threshold before ordinary model calls and after work ends. Every new preparation message after the control prompt is retained, with Next steps when work remains. Team durably hosts preparation/cutover and preserves original shared history. No extra routing tool or group response is introduced.
+`harness/context-compaction.md` is the release-owned instruction passed by Runtime to Agent. Agent uses one configured token threshold before ordinary model calls and after work ends. Every new preparation message after the control prompt is retained, with Next steps when work remains. Agent durably hosts preparation/cutover; Team preserves original shared history. No extra routing tool or group response is introduced.

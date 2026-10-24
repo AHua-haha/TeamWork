@@ -1,13 +1,13 @@
-import { newLead } from './team/team.js';
+import { newLead } from './team/data/members.js';
 import { harnessPrompt } from './harness/harness-prompts.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { ContextCommit, WorkspaceRecord } from './workspace/context-base.js';
+import type { ContextCommit, WorkspaceRecord } from './workspace/data/context-base.js';
 import { filesRevision, type GitBaseline } from './workspace/workspace-git.js';
-import type { NewMember, MemberActivationState } from './team/team.js';
+import type { NewMember, MemberActivationState } from './team/data/members.js';
 import { sha256 } from './text.js';
-import { AppError } from './agent/types.js';
+import { AppError } from './agent/data/model.js';
 import { contextRoot, designRoot, managedRoot, rootDesignPath, metadataPath, contextPaths, memberContextPath } from './workspace/workspace-layout.js';
 
 export interface WorkspaceBootstrap { baseline: GitBaseline; activation: MemberActivationState; context: ContextCommit }
@@ -48,7 +48,7 @@ export async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMe
 }
 
 /** Core coordinates Team's initial member with Workspace's initial context and files. */
-export async function prepareWorkspace(workspace: WorkspaceRecord, settings: import('./team/config.js').RunSettings) {
+export async function prepareWorkspace(workspace: WorkspaceRecord, settings: import('./team/data/config.js').RunSettings) {
   const lead = newLead(workspace.workspaceId, settings, [rootDesignPath]);
   const bootstrap = await bootstrapWorkspace(workspace, lead);
   return { lead, bootstrap };

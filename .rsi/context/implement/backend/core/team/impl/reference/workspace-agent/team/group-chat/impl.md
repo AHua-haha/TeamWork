@@ -20,7 +20,7 @@ Unit tests cover mention parsing, routing, ordered admission and sequential exec
 
 ## Code map
 
-- [Chat records, mention parsing and context entry format](../../../../../../../../../../../backend/src/core/team/group-chat.ts)
+- [Chat records, mention parsing and context entry format](../../../../../../../../../../../backend/src/core/team/data/group-chat.ts)
 - [Agent response header parser](../../../../../../../../../../../backend/src/core/team/member-response.ts)
 - [File-backed response/routing rules](../../../../../../../../../../../backend/prompts/team/group-chat.md)
 - [Publication and activation coordinator](../../../../../../../../../../../backend/src/core/team/team-runner.ts)
@@ -66,7 +66,7 @@ Frontend projection hides a leading routing header, including incomplete prefixe
 
 TeamRunner.reset serializes with publication and configuration activation through the workspace operation gate, rejects any active/admitted/finalizing job and invokes one database reset transaction. SQL rechecks all workspace member active-run markers while holding workspace then agent locks. Clearing durable history follows dependency order; no filesystem operation is involved. Successful reset wakes timeline and legacy followers. Both follow loops emit a reset boundary before post-reset data and continue using monotonic positions. A reset cannot race with a new run inside the gate.
 
-TeamRuntime persists recoverable tool errors and completes the call batch before invoking team continuation policy. TeamSystem already continues any response with tool calls; the next step reads the full canonical context including error results. Final publication/mentions stay on the same natural-completion path. No team retry scheduler or provider-specific exception is added.
+AgentRuntime persists recoverable tool errors and completes the call batch before invoking team continuation policy. TeamSystem already continues any response with tool calls; the next step reads the full canonical context including error results. Final publication/mentions stay on the same natural-completion path. No team retry scheduler or provider-specific exception is added.
 
 ## Private execution progress
 
@@ -74,11 +74,11 @@ The version-1 durable group timeline and final references are unchanged. Private
 
 ## Shared workspace execution lock
 
-TeamRunner.acquireExecution uses a separate per-workspace OperationQueue from publication admission. RuntimePolicy.acquireRun obtains it before any request/tool and returns a release callback. TeamRuntime releases only after pending effects, afterRun and terminal persistence settle. Waiting abort rejects acquisition and skips policy finalization, while still recording cancellation durably. Publication continues to atomically reserve recipients; no lock is held while waiting for a recipient execution. parseMemberResponse and the SQL publication boundary enforce at most one agent recipient. Existing user multi-recipient admission remains unchanged.
+TeamRunner.acquireExecution uses a separate per-workspace OperationQueue from publication admission. RuntimePolicy.acquireRun obtains it before any request/tool and returns a release callback. AgentRuntime releases only after pending effects, afterRun and terminal persistence settle. Waiting abort rejects acquisition and skips policy finalization, while still recording cancellation durably. Publication continues to atomically reserve recipients; no lock is held while waiting for a recipient execution. parseMemberResponse and the SQL publication boundary enforce at most one agent recipient. Existing user multi-recipient admission remains unchanged.
 
 ## Image attachment integration
 
-The attachment adapter [chat-images.ts](../../../../../../../../../../../backend/src/core/team/chat-images.ts) owns bounded multipart decoding, actual PNG/JPEG/WebP byte signatures, preparation and metadata validation. It reuses public Pi 0.87.1 convertToPng for WebP normalization and resizeImage for decoding, aspect-preserving resizing and encoding. The encoded limit is 4.5 MiB with 2000-pixel edges (below the external 5 MiB stored-image cap). It adds no semantic caption and has no private Pi imports or custom image decoder. Invalid preparation refuses the full publication before SQL admission. HTTP rawBody bounds multipart source data to four 10 MiB images plus 128 KiB envelope/text overhead. JSON text submissions keep their existing route.
+The attachment adapter [chat-images.ts](../../../../../../../../../../../backend/src/core/team/data/chat-images.ts) owns bounded multipart decoding, actual PNG/JPEG/WebP byte signatures, preparation and metadata validation. It reuses public Pi 0.87.1 convertToPng for WebP normalization and resizeImage for decoding, aspect-preserving resizing and encoding. The encoded limit is 4.5 MiB with 2000-pixel edges (below the external 5 MiB stored-image cap). It adds no semantic caption and has no private Pi imports or custom image decoder. Invalid preparation refuses the full publication before SQL admission. HTTP rawBody bounds multipart source data to four 10 MiB images plus 128 KiB envelope/text overhead. JSON text submissions keep their existing route.
 
 TeamRunner resolves recipients and checks new-picture model input capability before publishChat. GET chat/attachments/:id uses the workspace-scoped store lookup and serves binary with its stored type, byte length, private no-cache and nosniff. Missing images return 404. The same transaction that records the user publication stores prepared binary data, metadata references, timeline reservation and run admissions. The group API/feed never carries image bytes/base64.
 

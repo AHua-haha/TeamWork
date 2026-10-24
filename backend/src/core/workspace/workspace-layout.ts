@@ -1,5 +1,5 @@
-import { AppError } from '../agent/types.js';
-import { contextPath } from './context-path.js';
+import { AppError } from '../agent/data/model.js';
+import { contextPath } from './data/paths.js';
 export const managedRoot = '.rsi';
 export const contextRoot = `${managedRoot}/context`;
 export const designRoot = `${contextRoot}/design`;

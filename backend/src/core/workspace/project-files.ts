@@ -3,7 +3,7 @@ import type { Dirent, Stats } from 'node:fs';
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decodeText, encodeText, maxFileBytes, missing, sha256 } from '../text.js';
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 
 export type ProjectEntry = { path: string; type: 'file'; size: number; updatedAt: number } | { path: string; type: 'folder' };
 export interface ProjectFile { path: string; revision: string; content: string; size: number; updatedAt: number }

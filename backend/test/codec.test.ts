@@ -1,8 +1,9 @@
+import { validateEntries } from '../src/core/agent/data/validation.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fauxAssistantMessage, Type } from '@earendil-works/pi-ai';
-import { decode, encode, validateEntries } from '../src/core/codec.js';
-import type { ContextEntry } from '../src/core/agent/types.js';
+import { decode, encode } from '../src/core/codec.js';
+import type { ContextEntry } from '../src/core/agent/data/model.js';
 
 test('versioned JSON preserves Pi content, opaque fields and runtime metadata', () => {
   const entries: ContextEntry[] = [

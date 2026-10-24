@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { AppError } from '../agent/types.js';
+import { AppError } from '../agent/data/model.js';
 
 const names = ['context-compaction', 'permissions-disabled', 'common', 'management', 'management-design', 'management-members', 'implementation', 'implementation-scope', 'implementation-context', 'design-template', 'implementation-context-template', 'execute'] as const;
 type PromptName = typeof names[number];

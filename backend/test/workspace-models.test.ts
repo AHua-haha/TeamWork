@@ -3,10 +3,10 @@ import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { WorkspaceService } from '../src/core/workspace/workspace.js';
-import { TeamService, newLead } from '../src/core/team/team.js';
+import { TeamService, newLead } from '../src/core/team/data/members.js';
 import { DesignService } from '../src/core/workspace/design.js';
-import { emptyRunSettings } from '../src/core/team/config.js';
-import { workspaceModels } from '../src/core/workspace/workspace-models.js';
+import { emptyRunSettings } from '../src/core/team/data/config.js';
+import { workspaceModels } from '../src/core/workspace/data/models.js';
 import { MemoryStore, testModels, testModelValidator, withFolder } from './memory-store.js';
 import { code, stubConfig } from './team-fixture.js';
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdir, writeFile, readFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { StepScope } from '../src/core/team/runtime.js';
+import type { StepScope } from '../src/core/agent/runtime.js';
 import { code, withTeam, worker } from './team-fixture.js';
 import { teamTools } from '../src/core/team/member-tools.js';
 

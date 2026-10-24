@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
-import { AgentMessageContext, adoptRecordedContext, repairInterruptedTools, type GroupContextMessage } from '../src/core/agent/context.js';
-import { groupEntry, groupSender, type ChatMessage } from '../src/core/team/group-chat.js';
-import type { ContextEntry } from '../src/core/agent/types.js';
+import { AgentMessageContext, adoptRecordedContext, repairInterruptedTools, type GroupContextMessage } from '../src/core/agent/data/context.js';
+import { groupEntry, groupSender, type ChatMessage } from '../src/core/team/data/group-chat.js';
+import type { ContextEntry } from '../src/core/agent/data/model.js';
 const contextInput = (text: string, metadata = {}): ContextEntry => ({ messageId: text.replace(/[^A-Za-z0-9_-]/g, '-'), message: { role: 'user', content: text, timestamp: 1 }, metadata });
 test('interrupted tool exchange gets context-only missing results without modifying original history', () => {
   const assistant: ContextEntry = { messageId: 'calls', message: fauxAssistantMessage([{ type: 'toolCall', id: 'a', name: 'bash', arguments: { command: 'work' } }, { type: 'toolCall', id: 'b', name: 'read', arguments: { path: 'file' } }], { stopReason: 'toolUse' }), metadata: {} };
