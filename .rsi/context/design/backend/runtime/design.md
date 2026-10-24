@@ -6,7 +6,7 @@ Runtime is backend process hosting and dependency wiring. It constructs Storage 
 
 ## Interface contract
 
-Operations supplies child-process launch settings from project rsi.config.json: database connection, encryption key, bind settings, optional web key and harness mode. Runtime constructs Storage and passes it to Core, asks Core to initialize its own data/schema/services, and starts API. It does not define application models or issue business SQL.
+Operations supplies child-process launch settings from project rsi.config.json: database connection, encryption key, bind settings, optional web key, harness mode and compaction token threshold. Supply the validated threshold (default 64,000 tokens) and Harness-owned instruction to Team’s Agent host; do not implement another token estimator or trigger policy. Runtime constructs Storage and passes it to Core, asks Core to initialize its own data/schema/services, and starts API. It does not define application models or issue business SQL.
 
 Startup failure reports an error and closes constructed resources. SIGINT/SIGTERM closes admission/runs, HTTP connections, shells, workspace resources and storage in dependency order. Runtime adds no hidden configuration source, business policy or automatic run replay.
 

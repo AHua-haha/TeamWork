@@ -12,13 +12,17 @@ Read child-process settings; construct MySqlStorage and TeamData; construct Core
 
 ### Implemented contract
 
-**Input:** `DATABASE_URL`, `CONFIG_ENCRYPTION_KEY`, `HOST`, `PORT`, optional `DEEPSEEK_WEB_API_KEY`, `RSI_HARNESS_PERMISSIONS_ENABLED`, provided by managed Operations launchers.
+**Input:** `DATABASE_URL`, `CONFIG_ENCRYPTION_KEY`, `HOST`, `PORT`, optional `DEEPSEEK_WEB_API_KEY`, `RSI_HARNESS_PERMISSIONS_ENABLED`, `RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS`, provided by managed Operations launchers.
 
 **Output:** A listening backend and startup log, or an explicit startup error. SIGINT/SIGTERM closes owned resources. Missing DATABASE_URL fails before any database access.
 
 **Effect and failure:** No business schema or SQL belongs here. Hosting constructs one dedicated resource graph; failed startup closes the initialized graph. Durable messages survive restart; transient progress does not.
 
 **Usage example:** Operations starts source with `node --import tsx backend/src/runtime/main.ts` or compiled `backend/dist/src/runtime/main.js` in a configured child environment. Normal users use the managed scripts, which load private project settings.
+
+### Compaction configuration
+
+main.ts resolves Number(RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000) and harnessPrompt('context-compaction'), then passes {compaction:{thresholdTokens,prompt}} to TeamRuntime. Invalid thresholds or missing prompt assets fail startup explicitly. The same threshold covers both checkpoints. Agent owns estimation/triggers and Team owns durable hosting; no token policy is implemented here.
 
 ## File lookup
 

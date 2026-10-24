@@ -34,3 +34,27 @@ test('project switch is independently selected, defaults to enforcement and reje
   config.deployment.environment.RSI_HARNESS_PERMISSIONS_ENABLED = 'false';
   assert.throws(() => validateConfiguration(config), /Reserved/);
 });
+
+test('one token threshold is resolved independently per environment with a validated default', () => {
+  const config = {
+    version: 1,
+    paths: { stateDirectory: '/tmp/state', developmentStateDirectory: '/tmp/dev', deploymentSourceRoot: '/tmp/source' },
+    mysql: { host: '127.0.0.1', port: 3306, project: 'backend', dockerContext: 'default', rootPassword: 'test' },
+    development: { backendPort: 3000, frontendPort: 5273, database: { name: 'rsi_agent_dev', username: 'rsi_dev', password: 'test' }, encryptionKey: Buffer.alloc(32, 1).toString('base64'), environment: {} },
+    deployment: { backendPort: 3001, frontendPort: 5274, database: { name: 'rsi_agent', username: 'rsi', password: 'test' }, encryptionKey: Buffer.alloc(32, 2).toString('base64'), environment: {} },
+  };
+  validateConfiguration(config);
+  assert.equal(backendSettings(config,'development').RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS,'64000');
+  config.development.contextCompactionThresholdTokens=12000;
+  config.deployment.contextCompactionThresholdTokens=48000;
+  validateConfiguration(config);
+  assert.equal(backendSettings(config,'development').RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS,'12000');
+  assert.equal(backendSettings(config,'deployment').RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS,'48000');
+  for(const value of [0,-1,1.5,'32000',null,Number.MAX_SAFE_INTEGER+1]) {
+    config.development.contextCompactionThresholdTokens=value;
+    assert.throws(()=>validateConfiguration(config),/positive safe integer/);
+  }
+  config.development.contextCompactionThresholdTokens=12000;
+  config.development.environment.RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS='1';
+  assert.throws(()=>validateConfiguration(config),/Reserved/);
+});

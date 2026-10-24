@@ -1,4 +1,5 @@
 import { imageContent, validateChatImages, type PreparedChatImage } from './chat-images.js';
+import { interruptedCompactionContext, validateCompactionState, type CompactionState } from '../agent/compaction.js';
 import { adoptRecordedContext, type GroupContextMessage } from '../agent/context.js';
 import { finalAnswer } from '../agent/final-answer.js';
 import { parseMemberResponse } from './member-response.js';
@@ -73,6 +74,14 @@ const schema = [
     run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     entry JSON NOT NULL, PRIMARY KEY(agent_id, position), UNIQUE KEY(agent_id, id),
     FOREIGN KEY (agent_id) REFERENCES agents(id), FOREIGN KEY (run_id) REFERENCES runs(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS context_compactions (
+    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    agent_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    active_agent_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL UNIQUE,
+    history_after BIGINT UNSIGNED NOT NULL, state JSON NOT NULL,
+    FOREIGN KEY(agent_id) REFERENCES agents(id), FOREIGN KEY(run_id) REFERENCES runs(id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS config_records (
     scope VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -213,7 +222,7 @@ const schema = [
 ];
 
 /** All writers lock the agent row first. Follow reads use a repeatable-read snapshot. */
-const tables = ['chat_changes', 'chat_entries', 'chat_clock', 'chat_runs', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_settings', 'messages', 'runs', 'members', 'workspace_git_baselines', 'member_activation', 'context_files', 'context_versions', 'context_blobs', 'context_records', 'workspace_models', 'workspaces', 'agents'];
+const tables = ['context_compactions', 'chat_changes', 'chat_entries', 'chat_clock', 'chat_runs', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_settings', 'messages', 'runs', 'members', 'workspace_git_baselines', 'member_activation', 'context_files', 'context_versions', 'context_blobs', 'context_records', 'workspace_models', 'workspaces', 'agents'];
 
 export class TeamData implements ContextStore, TeamStore, ChatStore {
   readonly pool: Pool;
@@ -503,6 +512,64 @@ export class TeamData implements ContextStore, TeamStore, ChatStore {
         await this.saveRun(db, { ...run, activeMessageId: null, phase: 'tools' });
       }
       return record;
+    });
+  }
+
+  async beginCompaction(state: CompactionState): Promise<void> {
+    validateCompactionState(state);
+    if (state.status !== 'preparing') throw new AppError('invalid_data', 'Compaction must start in preparation');
+    await this.transaction(async db => {
+      const agent = await this.agent(db, state.agentId, true);
+      await this.run(db, state.agentId, state.runId);
+      await db.execute('INSERT INTO context_compactions (id, agent_id, run_id, active_agent_id, history_after, state) VALUES (?, ?, ?, ?, ?, ?)',
+        [state.id, state.agentId, state.runId, state.agentId, agent.history_position, encode(state)]);
+    });
+  }
+
+  /** Tentative preparation is stable private history, not current model context or a new run. */
+  async commitCompactionMessage(record: CompletedMessage): Promise<CompletedMessage> {
+    validateEntries([record]);
+    identity(record.metadata.compactionId, 'compactionId');
+    if (record.metadata.source !== 'context-compaction') throw new AppError('invalid_data', 'Compaction message source is required');
+    return this.transaction(async db => {
+      const agent = await this.agent(db, record.agentId, true);
+      const [row] = await rows(db, 'SELECT state FROM context_compactions WHERE id = ? AND agent_id = ? AND run_id = ? AND active_agent_id = ?', [String(record.metadata.compactionId), record.agentId, record.runId, record.agentId]);
+      if (!row || decode<CompactionState>(row.state, validateCompactionState).status !== 'preparing') throw new AppError('context_conflict', 'Compaction is not preparing', 409);
+      const position = agent.history_position + 1;
+      const entry = {messageId: record.messageId, message: record.message, metadata: record.metadata};
+      await db.execute('INSERT INTO messages (agent_id, position, id, run_id, entry) VALUES (?, ?, ?, ?, ?)', [record.agentId, position, record.messageId, record.runId, encode(entry)]);
+      await db.execute('UPDATE agents SET history_position = ? WHERE id = ?', [position, record.agentId]);
+      return {...record, position};
+    });
+  }
+
+  async finishCompaction(state: CompactionState, revision: number, entries: ContextEntry[]): Promise<ContextHistory> {
+    validateCompactionState(state); position(revision); validateEntries(entries);
+    if (state.status === 'preparing') throw new AppError('invalid_data', 'A terminal compaction state is required');
+    await this.transaction(async db => {
+      const agent = await this.agent(db, state.agentId, true);
+      const [row] = await rows(db, 'SELECT state FROM context_compactions WHERE id = ? AND agent_id = ? AND run_id = ? AND active_agent_id = ?', [state.id, state.agentId, state.runId, state.agentId]);
+      if (!row || decode<CompactionState>(row.state, validateCompactionState).status !== 'preparing' || agent.context_revision !== revision) throw new AppError('context_conflict', 'Context or compaction state changed', 409);
+      await db.execute('UPDATE agents SET context = ?, context_revision = context_revision + 1 WHERE id = ?', [encode(entries), state.agentId]);
+      await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode(state), state.id]);
+    });
+    return {revision: revision + 1, entries: structuredClone(entries)};
+  }
+
+  async recoverCompactions(): Promise<void> {
+    this.assertRuntime();
+    const pending = await rows(this.pool, 'SELECT id, agent_id FROM context_compactions WHERE active_agent_id IS NOT NULL');
+    for (const item of pending) await this.transaction(async db => {
+      const agent = await this.agent(db, item.agent_id, true);
+      const [row] = await rows(db, 'SELECT * FROM context_compactions WHERE id = ? AND active_agent_id IS NOT NULL', [item.id]);
+      if (!row) return;
+      const state = decode<CompactionState>(row.state, validateCompactionState);
+      const records = await rows(db, 'SELECT entry FROM messages WHERE agent_id = ? AND position > ? AND run_id = ? ORDER BY position', [state.agentId, row.history_after, state.runId]);
+      const trace = records.map(row => decode<ContextEntry>(row.entry, value => validateEntries([value]))).filter(entry => entry.metadata.compactionId === state.id);
+      const error = {code: 'runtime_restarted', message: 'Runtime stopped during context preparation; recorded effects were not replayed'};
+      const entries = interruptedCompactionContext({revision: agent.context_revision, entries: decode<ContextEntry[]>(agent.context, validateEntries)}, trace, error);
+      await db.execute('UPDATE agents SET context = ?, context_revision = context_revision + 1 WHERE id = ?', [encode(entries), state.agentId]);
+      await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode({...state, status: 'failed', endedAt: Date.now(), error}), state.id]);
     });
   }
 
@@ -832,6 +899,7 @@ export class TeamData implements ContextStore, TeamStore, ChatStore {
       await db.execute('DELETE cr FROM chat_runs cr JOIN runs r ON r.id = cr.run_id JOIN members m ON m.id = r.agent_id WHERE m.workspace_id = ?', [workspaceId]);
       await db.execute('DELETE FROM chat_exchanges WHERE workspace_id = ?', [workspaceId]);
       for (const member of members) {
+        await db.execute('DELETE FROM context_compactions WHERE agent_id = ?', [member.id]);
         await db.execute('DELETE FROM messages WHERE agent_id = ?', [member.id]);
         await db.execute('DELETE FROM runs WHERE agent_id = ?', [member.id]);
         await db.execute('UPDATE agents SET context = ?, context_revision = context_revision + 1, history_position = 0, active_run_id = NULL, latest_run_id = NULL WHERE id = ?', [encode([]), member.id]);

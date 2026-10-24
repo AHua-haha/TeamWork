@@ -16,7 +16,7 @@ Team provides only GroupContextReference; Agent owns incorporation and continuou
 
 A backend context_format marker makes legacy adoption once-only. Agent's adoption helper combines recorded private work and original shared messages, keeping tool/result groups intact. SQL persists the resulting snapshot/marker transactionally, then retires legacy member_contexts/member_context_runs. It never edits stable history or project files. Old per-run document parsing, retrieval and success/failure retention rules are removed.
 
-Context persistence refusal prevents acknowledged consumption advancement. Idle synchronization failures remain observable via runtime.getState; later successful synchronization or activation can recover. External effects are never automatically replayed. Compaction is not implemented.
+Context persistence refusal prevents acknowledged consumption advancement. Idle synchronization failures remain observable via runtime.getState; later successful synchronization or activation can recover. External effects are never automatically replayed. Compaction lifecycle, immutable preparation records and CAS cutover are persisted by TeamData; see the owning Team and Agent implementation contexts. Preparation recovery runs before ordinary interruption recovery, including for already published responses.
 
 ## Code and verification
 

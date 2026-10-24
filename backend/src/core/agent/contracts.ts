@@ -1,13 +1,15 @@
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, JsonObject, Message, Model, Models, SimpleStreamOptions, Tool, ToolCall, ToolResultMessage } from '@earendil-works/pi-ai';
+import type { CompactionSettings } from './compaction.js';
 import type { GroupContextReference } from './context.js';
 import type { CompletedMessage, ContextEntry, ContextHistory, RunState } from './types.js';
 
 export interface AgentConfiguration {
   model: Model<Api>; models?: Models; tools: RuntimeTool[]; systemPrompt: string;
-  options: SimpleStreamOptions; contextBudget?: number;
+  options: SimpleStreamOptions; contextBudget?: number; compaction?: CompactionSettings;
 }
 
 export interface StepScope {
+  mode?: 'work' | 'compaction';
   agentId: string;
   runId: string;
   step: number;

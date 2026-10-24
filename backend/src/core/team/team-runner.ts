@@ -17,7 +17,7 @@ export class TeamRunner {
   private readonly publications = new Set<Promise<unknown>>();
   private readonly gate = new OperationQueue();
   private readonly execution = new OperationQueue();
-  private readonly jobs = new Map<string, string>();
+  private readonly jobs = new Map<string, {agentId: string; workspaceId: string}>();
   constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost, private readonly resetShells: (ids?: string[]) => Promise<void> = async () => {}) {}
 
   isRunning(memberId: string): boolean { return this.active.has(memberId); }
@@ -92,7 +92,7 @@ export class TeamRunner {
     for (const [index, run] of result.runs.entries()) {
       this.active.set(run.agentId, { runId: run.runId, exchangeId: result.message.exchangeId, workspaceId });
       this.runtime().launch(run, configs[index]!);
-      this.jobs.set(run.runId, workspaceId);
+      this.jobs.set(run.runId, {agentId: run.agentId, workspaceId});
       const settled = () => {
         // A successor run may already have started after atomic final publication.
         if (this.active.get(run.agentId)?.runId === run.runId) this.active.delete(run.agentId);
@@ -118,7 +118,7 @@ export class TeamRunner {
   }
   idleWorkspace<T>(workspaceId: string, action: () => Promise<T>, reason = 'All workspace members must finish before activating configuration'): Promise<T> {
     return this.workspaceOperation(workspaceId, async () => {
-      if ([...this.jobs.values()].includes(workspaceId) || [...this.active.values()].some(run => run.workspaceId === workspaceId)) throw new AppError('workspace_busy', reason, 409);
+      if ([...this.jobs.values()].some(job => job.workspaceId === workspaceId) || [...this.active.values()].some(run => run.workspaceId === workspaceId)) throw new AppError('workspace_busy', reason, 409);
       const result = await action(); this.changes.publish(); return result;
     });
   }
@@ -195,7 +195,9 @@ export class TeamRunner {
 
   async stop(workspaceId: string): Promise<void> {
     const runs = await this.store.stopChat(workspaceId);
-    await Promise.all(runs.map(run => this.runtime().cancel(run.agentId, run.runId)));
+    const work = new Map(runs.map(run => [run.runId, run.agentId]));
+    for (const [runId, job] of this.jobs) if (job.workspaceId === workspaceId) work.set(runId, job.agentId);
+    await Promise.all([...work].map(([runId, agentId]) => this.runtime().cancel(agentId, runId)));
     this.changes.publish();
   }
 

@@ -6,7 +6,7 @@ Define what an agent can do and rules it follows. Own reusable tool integration,
 
 ## Interface contract
 
-Resolve configured harnesses into tools and prompts; check permitted effects at invocation; expose approval requests/decisions and environment cleanup. Preserve native Pi tool formats, scoped write/edit, broad sandbox Bash, lifecycle/timeouts, user approval of explicit protected commits and operator permission bypass. Tools are reusable across agents. Harness does not schedule team members or own group/private message history.
+Resolve configured harnesses into tools and prompts; check permitted effects at invocation; expose approval requests/decisions and environment cleanup. Preserve native Pi tool formats, scoped write/edit, broad sandbox Bash, lifecycle/timeouts, user approval of explicit protected commits and operator permission bypass. Tools are reusable across agents. Harness does not schedule team members or own group/private message history. Maintain the compaction instruction as a release-owned prompt file, supplied to Agent through Runtime configuration. It explains the replacement boundary and preservation of all new messages, tool availability, original Team-owned group history, and Next steps when work remains. Agent owns estimation, trigger timing and cutover.
 
 ## Constraints, specifications and requirements
 

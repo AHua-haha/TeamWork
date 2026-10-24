@@ -8,6 +8,7 @@ import { TeamSystem } from '../core/team/team-system.js';
 import { WorkspaceService } from '../core/workspace/workspace.js';
 import { webTools } from '../core/harness/web-tools.js';
 import { harnessPermissionsEnabled } from '../core/harness/harness-policy.js';
+import { harnessPrompt } from '../core/harness/harness-prompts.js';
 import { closeBashRuntime } from '../core/harness/harness-command.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -18,7 +19,7 @@ const store = new TeamData(storage);
 const config = new ConfigService(store, models, [], process.env.CONFIG_ENCRYPTION_KEY);
 const workspaces = new WorkspaceService(store, config);
 const team = new TeamSystem(store, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY), harnessPermissionsEnabled(process.env.RSI_HARNESS_PERMISSIONS_ENABLED));
-const runtime = new TeamRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models));
+const runtime = new TeamRuntime(store, team.runConfig, team.policy(configuredPolicy()), piModelStream(models), {compaction: {thresholdTokens: Number(process.env.RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000), prompt: harnessPrompt('context-compaction')}});
 team.attach(runtime);
 const server = createAgentServer(runtime, config, workspaces, team);
 try {

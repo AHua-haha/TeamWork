@@ -28,7 +28,7 @@ This is the agreed group-chat behavior with the prototype conventions recorded d
 - Team admits recipients without choosing a shared-context boundary. Agent chooses incoming messages through its reference at execution start. Later messages are appended after current work finishes; synchronization itself triggers no model call.
 - At execution start, Agent uses its own incorporation state to append incoming shared messages to retained context. Private working messages continue across activations; no README loading or automatic retrieval reconstructs context.
 - Agent context and consumption markers persist after both successful and unsuccessful stops. There is no success-only history exclusion or terminal clearing. Immutable history remains independent and inspectable.
-- The [conversation context contract](../conversation-context/design.md) specifies continuous state, durable restart and interrupted-tool repair without replay. Compaction and trigger policy are deferred.
+- The [conversation context contract](../conversation-context/design.md) specifies continuous state, durable restart and interrupted-tool repair without replay. Agent compaction and its single token threshold follow the owning Agent contract; Team durably hosts its private preparation.
 - Reasoning, model/tool steps, tool results, and intermediate assistant messages belong to private execution context and are not copied into the group transcript.
 - A final response is a new group message. Its mentions can trigger subsequent member activations under the same rule.
 - The lead can assign work by addressing members in a shared message. A member can address a colleague or ask the lead for a design decision through a shared response.
@@ -55,7 +55,7 @@ Failed, cancelled, or interrupted runs are exposed as status, without a fabricat
 - Sharing a transcript does not expand a member's harness permissions or give it lead management/design-editing capabilities.
 - Shared chat publication and private execution are distinct. This distinction does not prevent members from reporting relevant results in their final responses.
 - Continuous Agent context retains recorded private work across success/failure/restart. Project documents remain design-organized artifacts maintained with ordinary tools, not implicit activation inputs or commands.
-- Compaction process/trigger policy and future Team-owned group summarization or member-specific views remain deferred.
+- Team-owned group summarization and member-specific views remain deferred; Agent compaction preserves original shared content.
 - The new design replaces the private blocking-call mechanism; implementation must derive cooperation from shared messages and triggering rules.
 
 ## Acceptance examples

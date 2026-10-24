@@ -118,7 +118,7 @@ Member publication parses the leading routing header from the immutable finalAns
 
 ## Workspace conversation reset
 
-chat_settings adds reset_cursor and reset_position with zero defaults; migrate inspects existing columns and adds absent columns before serving. resetChat takes workspace, sorted member-agent and clock locks in publication order, rejects active runs, deletes chat changes/entries/messages, chat-run links and exchanges, deletes member context admission rows and private messages/runs, resets member processed/success boundaries, then clears model contexts/current-run pointers and advances context revisions. It preserves member/settings rows, all filesystem/context-base state and monotonic chat clocks. The transaction returns durable reset boundaries; snapshots clamp pagination to these boundaries and expose them to TeamRunner followers.
+chat_settings adds reset_cursor and reset_position with zero defaults; migrate inspects existing columns and adds absent columns before serving. resetChat takes workspace, sorted member-agent and clock locks in publication order, rejects active runs, deletes chat changes/entries/messages, chat-run links and exchanges, deletes context_compactions journals and private messages/runs, then clears model contexts/incorporation markers/current-run pointers and advances context revisions. It preserves member/settings rows, all filesystem/context-base state and monotonic chat clocks. The transaction returns durable reset boundaries; snapshots clamp pagination to these boundaries and expose them to TeamRunner followers.
 
 ## Transient progress removal
 
@@ -137,3 +137,7 @@ TeamData creates chat_images(workspace_id,id,metadata,content MEDIUMBLOB). publi
 workspace_git_baselines stores one JSON copy of initial/legacy accepted design and member content per workspace. Workspace creation stores it atomically with lead/context/activation. INSERT IGNORE adopts a legacy baseline once without overwriting it; no run/edit/commit adds rows or history. Ordinary project Git supplies subsequent committed content. Active member sources, activation markers and durable private/shared contexts keep their existing tables. Approval waiting is session-bound memory and is cancelled on shutdown/restart; no Git index/ref/checkpoint tables are added.
 
 writeChatEntry acquires the existing workspace clock row with an exclusive upsert before its update. Concurrent terminal writes, including cancelled waiting members, cannot deadlock through shared-to-exclusive INSERT IGNORE lock upgrades previously masked by checkpoint delays.
+
+### Agent compaction journal
+
+context_compactions records id, agent_id, run_id, unique nullable active_agent_id, history_after and versioned lifecycle state. Tentative completed records append immutable messages under their owning run without changing current context. finishCompaction CAS-replaces agents.context and marks the lifecycle terminal atomically. recoverCompactions retains old context plus recorded preparation/uncertainty and marks runtime_restarted without replay; it runs before ordinary interrupted-run recovery. Public final references/end bounds stay pinned. Reset deletes journals before their message/run owners.

@@ -1,5 +1,7 @@
+import { harnessPrompt } from '../../src/core/harness/harness-prompts.js';
+import { compactionInput, validateCompactionState, type CompactionSettings, type CompactionState } from '../../src/core/agent/compaction.js';
 import { AgentMessageContext } from '../../src/core/agent/context.js';
-import { encode } from '../../src/core/codec.js';
+import { decode, encode } from '../../src/core/codec.js';
 import { MySqlStorage } from '../../src/storage/mysql.js';
 import { acceptFiles,initGit,waitApproval } from '../git-fixture.js';
 import { gitText } from '../../src/core/workspace/workspace-git.js';
@@ -1317,7 +1319,7 @@ test('workspace model SQL persistence initializes leads atomically and default e
   } finally { await team.runner.close(); await workspaceService.close(); await rm(folder, { recursive: true, force: true }); }
 });
 
-async function groupFixture(basePolicy: RuntimePolicy = configuredPolicy()) {
+async function groupFixture(basePolicy: RuntimePolicy = configuredPolicy(), options: {compaction?:CompactionSettings} = {}) {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'group-chat-')));
   const workspaceService = new WorkspaceService(store, { issuesFor: settings => service.issuesFor(settings) });
   const service = new ConfigService(store, builtinModels());
@@ -1325,7 +1327,7 @@ async function groupFixture(basePolicy: RuntimePolicy = configuredPolicy()) {
   const requests = new Queue<{ request: ModelRequest; events: Queue<AssistantMessageEvent> }>();
   const runtime = new TeamRuntime(store, team.runConfig, team.policy(basePolicy), request => {
     const events = new Queue<AssistantMessageEvent>(); requests.push({ request, events }); return events;
-  });
+  }, options);
   team.attach(runtime);
   const connectionId = `group-${randomUUID()}`;
   await service.createConnection(connectionId, { label: 'Group test', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
@@ -2435,4 +2437,151 @@ test('constructed image context fails explicitly when a later model request cann
     assert.equal(state.status, 'failed'); assert.equal(state.error?.code, 'image_not_supported');
     assert.match(state.error!.message, /model with image input/);
   } finally { await f.close(); }
+});
+
+const compactSettings:CompactionSettings={thresholdTokens:100000,prompt:harnessPrompt('context-compaction')};
+function largeUsage(text:string) {
+  const result=message(text);
+  result.usage={...result.usage,input:200000,output:0,cacheRead:0,cacheWrite:0,totalTokens:200000};
+  return result;
+}
+
+test('finishing compaction persists a private trace and atomically replaces context without changing the published response', {timeout:30000}, async()=>{
+  const f=await groupFixture(configuredPolicy(),{compaction:compactSettings});
+  try {
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend preserve the shared objective');
+    const run=accepted.runs[0]!;
+    answer((await f.requests.next()).events,largeUsage('Original accepted answer'));
+    const preparation=await f.requests.next();
+    assert.match(JSON.stringify(preparation.request.context.messages),/replacement boundary|Checkpoint: after-run/);
+    const old=await store.getContext(f.backend.memberId);
+    assert.match(JSON.stringify(old.entries),/Original accepted answer/);
+    assert.doesNotMatch(JSON.stringify(old.entries),/Checkpoint: after-run/,'tentative trace is not current context');
+    const published=await store.chatTimeline(f.workspaceId);
+    const entry=published.changes.at(-1)!.entry;
+    assert.ok(entry.kind==='member'&&entry.finalRef);
+    assert.equal(entry.kind==='member'&&entry.text,'Original accepted answer');
+    answer(preparation.events,largeUsage('Preserved private continuation. No work remains.'));
+    const terminal=await f.runtime.finished(f.backend.memberId,run.runId);
+    assert.equal(terminal.status,'completed');assert.equal(terminal.step,1);
+    assert.deepEqual(await store.chatTimeline(f.workspaceId),published,'no new publication or revision');
+    assert.equal(await f.runtime.finalText(f.backend.memberId,run.runId),'Original accepted answer');
+    const history=await store.runMessages(f.backend.memberId,run.runId);
+    assert.equal(history.filter(record=>record.metadata.source==='context-compaction').length,2);
+    assert.equal(history.at(-1)!.message.role==='assistant'&&history.at(-1)!.position>terminal.endPosition!,true,'public range remains pinned before maintenance');
+    const current=await store.getContext(f.backend.memberId);
+    assert.match(JSON.stringify(current.entries),/Preserved private continuation/);
+    assert.match(JSON.stringify(current.entries),/Sender: Backend|shared objective/,'original group messages remain');
+    assert.doesNotMatch(JSON.stringify(current.entries),/Checkpoint: after-run/);
+    const continuation=current.entries.find(record=>record.metadata.contextUsageInvalidated)!.message;
+    assert.equal(continuation.role==='assistant'&&continuation.usage.totalTokens,0);
+    const [journals]=await store.pool.query<any[]>('SELECT state, active_agent_id FROM context_compactions WHERE run_id = ?',[run.runId]);
+    assert.equal(journals.length,1);assert.equal(journals[0].active_agent_id,null);
+    assert.equal(decode<CompactionState>(journals[0].state,validateCompactionState).status,'completed');
+    const next=await f.team.runner.postUser(f.workspaceId,'@Backend next ordinary request');
+    const step=await f.requests.next();
+    assert.doesNotMatch(JSON.stringify(step.request.context.messages),/Checkpoint: before-model/,'invalidated usage does not immediately compact again');
+    answer(step.events,message('Second ordinary answer'));
+    await f.runtime.finished(f.backend.memberId,next.runs[0]!.runId);
+    await f.team.runner.reset(f.workspaceId);
+    const [cleared]=await store.pool.query<any[]>('SELECT id FROM context_compactions WHERE agent_id = ?',[f.backend.memberId]);
+    assert.deepEqual(cleared,[]);
+  }finally{await f.close();}
+});
+
+test('before-call compaction waits for acknowledged cutover then continues the same activation', {timeout:30000}, async()=>{
+  const f=await groupFixture(configuredPolicy(),{compaction:compactSettings});
+  try {
+    const before=await store.getContext(f.backend.memberId);
+    await store.replaceContext(f.backend.memberId,before.revision,[compactionInput('OLD PRIVATE '.repeat(50000))]);
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend continue existing work');
+    const preparation=await f.requests.next();
+    assert.match(JSON.stringify(preparation.request.context.messages),/Checkpoint: before-model/);
+    assert.match(JSON.stringify((await store.getContext(f.backend.memberId)).entries),/OLD PRIVATE/);
+    answer(preparation.events,largeUsage('Useful continuation.\n## Next steps\nFinish the existing objective.'));
+    const ordinary=await f.requests.next();
+    assert.doesNotMatch(JSON.stringify(ordinary.request.context.messages),/OLD PRIVATE|Checkpoint: before-model/);
+    assert.match(JSON.stringify(ordinary.request.context.messages),/Useful continuation|continue existing work/);
+    answer(ordinary.events,message('Completed after compaction'));
+    const finished=await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
+    assert.equal(finished.status,'completed');assert.equal(finished.step,1);
+    const chat=await store.chatSnapshot(f.workspaceId);
+    assert.deepEqual(chat.messages.map(m=>m.text),['@Backend continue existing work','Completed after compaction']);
+  }finally{await f.close();}
+});
+
+test('workspace stop aborts finishing preparation while retaining the already accepted answer and uncertainty', {timeout:30000}, async()=>{
+  const f=await groupFixture(configuredPolicy(),{compaction:compactSettings});
+  try {
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend answer then maintain context');
+    answer((await f.requests.next()).events,largeUsage('Keep this public answer'));
+    await f.requests.next();
+    await f.team.runner.stop(f.workspaceId);
+    const terminal=await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
+    assert.equal(terminal.status,'completed','accepted ordinary publication keeps its outcome');
+    assert.match(JSON.stringify((await store.getContext(f.backend.memberId)).entries),/No old context was discarded/);
+    assert.equal((await store.chatSnapshot(f.workspaceId)).messages.at(-1)!.text,'Keep this public answer');
+    const [journals]=await store.pool.query<any[]>('SELECT state FROM context_compactions WHERE run_id = ?',[terminal.runId]);
+    assert.equal(decode<CompactionState>(journals[0].state,validateCompactionState).status,'failed');
+    assert.equal(decode<CompactionState>(journals[0].state,validateCompactionState).error!.code,'cancelled');
+  }finally{await f.close();}
+});
+
+test('restart recovers interrupted preparation even after ordinary completion without replaying tools; cutover failure rolls back', {timeout:30000}, async()=>{
+  const f=await groupFixture();let recovery:TeamRuntime|undefined;
+  const trigger='compaction_failure_'+randomUUID().replaceAll('-','');let installed=false;
+  try {
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend retain accepted work');
+    answer((await f.requests.next()).events,message('Stable accepted result'));
+    const terminal=await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
+    const original=await store.getContext(f.backend.memberId);
+    const state:CompactionState={id:randomUUID(),agentId:f.backend.memberId,runId:terminal.runId,trigger:'after-run',status:'preparing',startedAt:Date.now(),endedAt:null,error:null};
+    await store.beginCompaction(state);
+    for(const entry of [compactionInput('Recovery boundary'),{messageId:randomUUID(),message:fauxAssistantMessage([{type:'toolCall',id:'uncertain-prep',name:'bash',arguments:{command:'may have effects'}}],{stopReason:'toolUse'}),metadata:{}}]) {
+      await store.commitCompactionMessage({...entry,agentId:state.agentId,runId:state.runId,position:0,metadata:{...entry.metadata,source:'context-compaction',compactionId:state.id}});
+    }
+    await store.pool.query(`CREATE TRIGGER ${trigger} BEFORE UPDATE ON context_compactions FOR EACH ROW BEGIN IF OLD.id = '${state.id}' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Injected compaction cutover failure'; END IF; END`);installed=true;
+    await assert.rejects(store.finishCompaction({...state,status:'completed',endedAt:Date.now()},original.revision,[]),/Injected compaction cutover failure/);
+    assert.deepEqual(await store.getContext(state.agentId),original,'context replacement rolls back with journal write');
+    await store.pool.query(`DROP TRIGGER ${trigger}`);installed=false;
+    const immutable=await store.runMessages(state.agentId,state.runId);
+    await f.runtime.close();
+    recovery=new TeamRuntime(store,f.team.runConfig,f.team.policy(configuredPolicy()),request=>{const events=new Queue<AssistantMessageEvent>();f.requests.push({request,events});return events;},{compaction:compactSettings});
+    f.team.attach(recovery);await recovery.open();
+    const context=JSON.stringify((await store.getContext(state.agentId)).entries);
+    assert.match(context,/Stable accepted result/);assert.match(context,/uncertain-prep/);assert.match(context,/not replayed/);
+    assert.equal((await recovery.getState(state.agentId)).run!.status,'completed');
+    assert.deepEqual(await store.runMessages(state.agentId,state.runId),immutable,'recovery never rewrites stable history');
+    const [journals]=await store.pool.query<any[]>('SELECT state,active_agent_id FROM context_compactions WHERE id = ?',[state.id]);
+    assert.equal(journals[0].active_agent_id,null);assert.equal(decode<CompactionState>(journals[0].state,validateCompactionState).error!.code,'runtime_restarted');
+    const next=await f.team.runner.postUser(f.workspaceId,'@Backend inspect after restart');
+    const request=await f.requests.next();
+    assert.match(JSON.stringify(request.request.context.messages),/uncertain-prep/);
+    answer(request.events,message('Resumed from recorded evidence'));
+    await recovery.finished(state.agentId,next.runs[0]!.runId);
+  }finally{if(installed)await store.pool.query(`DROP TRIGGER ${trigger}`);await recovery?.close();await f.close();}
+});
+
+test('published answers do not hide preparation persistence failure and restart recovers the journal', {timeout:30000}, async()=>{
+  const f=await groupFixture(configuredPolicy(),{compaction:compactSettings});let recovery:TeamRuntime|undefined;
+  const finish=store.finishCompaction.bind(store);
+  try{
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend preserve acknowledgement errors');
+    answer((await f.requests.next()).events,largeUsage('Keep this accepted response'));
+    const prep=await f.requests.next();
+    store.finishCompaction=async()=>{throw new Error('injected missing acknowledgement');};
+    answer(prep.events,message('Prepared continuation'));
+    await assert.rejects(f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId),code('persistence_failure'));
+    assert.equal((await store.chatSnapshot(f.workspaceId)).messages.at(-1)!.text,'Keep this accepted response');
+    assert.match(JSON.stringify((await store.getContext(f.backend.memberId)).entries),/Keep this accepted response/);
+    const [pending]=await store.pool.query<any[]>('SELECT id FROM context_compactions WHERE active_agent_id = ?',[f.backend.memberId]);
+    assert.equal(pending.length,1,'uncertain cutover remains recoverable');
+    store.finishCompaction=finish;
+    await f.runtime.close();
+    recovery=new TeamRuntime(store,f.team.runConfig,f.team.policy(configuredPolicy()),()=>{throw new Error('recovery must not call a model');});
+    f.team.attach(recovery);await recovery.open();
+    const restored=JSON.stringify((await store.getContext(f.backend.memberId)).entries);
+    assert.match(restored,/Keep this accepted response/);assert.match(restored,/Prepared continuation/);assert.match(restored,/No old context was discarded/);
+    assert.equal((await recovery.getState(f.backend.memberId)).run!.status,'completed');
+  }finally{store.finishCompaction=finish;await recovery?.close();await f.close();}
 });

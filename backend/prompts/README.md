@@ -24,3 +24,7 @@ Context templates now initialize design/metadata.json, design/design.md and impl
 Management/implementation prompts describe working and dependency permissions, each with design context, implementation context and project implementation. Only the lead edits designs; implementation context/code for every member follows accepted assignments.
 
 Pi read/ls/grep/find use default operations for workspace reads. write/edit retain input-based assignment checks. Pi content, details and native truncation are preserved. Bash has its own per-member persistent shell, native jobs and whole-workspace write sandbox; these broader permissions are distinct from file-tool input checks.
+
+## Private context preparation
+
+`harness/context-compaction.md` is the release-owned instruction passed by Runtime to Agent. Agent uses one configured token threshold before ordinary model calls and after work ends. Every new preparation message after the control prompt is retained, with Next steps when work remains. Team durably hosts preparation/cutover and preserves original shared history. No extra routing tool or group response is introduced.

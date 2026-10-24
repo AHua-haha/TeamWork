@@ -18,7 +18,7 @@ The runtime uses Pi AI (`@earendil-works/pi-ai`) for its unified `Message` and `
 - Input submission supplies the new user input and routing identifiers. The runtime obtains the model-context history from its own storage rather than requiring the frontend to submit that history.
 - Multiple frontends may follow an agent. Their connection state does not determine whether the agent run continues or when temporary chunks are removed.
 - Before accepting input, the runtime resolves that agent's run snapshot from its config source: the [config system](../../../../team/impl/reference/config/design.md) for an agent outside any team, or the member's settings for a [team](../../../../team/impl/reference/workspace-agent/team/design.md) member, which the team supplies by the same rules. The agent must explicitly select a resolvable provider connection and model; selected tools, prompt templates, instructions, and call options must be valid.
-- A team member retains durable private execution history for inspection; team context construction includes failed working ranges until a successful run. The team admits activations from its group chat and supplies already-persisted run records and resolved configuration snapshots for execution. The runtime enforces one active model/tool run per agent.
+- A team member retains durable private execution history for inspection; Agent owns continuous model context and compaction while Team persists its exposed values. The team admits activations from its group chat and supplies already-persisted run records and resolved configuration snapshots for execution. The runtime enforces one active model/tool run per agent.
 
 ## Outputs and observable effects
 
@@ -111,7 +111,7 @@ The default FIFO retains up to 1,024 compact progress events per member across r
 - Completed-message synchronization is gap-free across the transition to live following. Live chunks are best effort within the bounded buffer and are not guaranteed to replay after eviction.
 - Following uses a stream for one run, with no periodic polling requirement or connection spanning multiple runs.
 - The backend runs as one process per database. Multiple agents and multiple frontend followers are supported within that process. Context edits affect requests constructed after the edit; an already-constructed provider request is not retroactively changed.
-- Deployment access control, distributed workers, automatic compaction policy, metadata semantics, history pagination, resumable provider jobs and frontend implementation are outside this backend version.
+- Deployment access control, distributed workers, group-context summarization, metadata semantics, history pagination, resumable provider jobs and frontend implementation are outside this backend version.
 
 ## Acceptance examples
 

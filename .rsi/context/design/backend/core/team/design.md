@@ -48,7 +48,7 @@ Explicit idle chat reset clears shared history and Agent contexts/consumption st
 
 For now, expose original shared messages without summarization or structured extraction. A future Team-owned model may derive structured information and member-specific views. Agent must not independently summarize the shared transcript as its authoritative replacement.
 
-Future Agent compaction will obtain group context through the same read reference and combine it with Agent-prepared private working information. Team does not pass the retained range as an additional input. Compaction mechanics and trigger policy are deferred, and this design introduces no compaction endpoint or tool.
+Agent compaction obtains original group context through the same read reference and combines it with all new private preparation messages. Team does not pass the retained range as an additional input or define the trigger policy. Durably acknowledge preparation start and each completed private message under its owning run, retaining the old current context until an atomic context/journal cutover. Recovery preserves old context and recorded preparation with explicit uncertainty and never replays tools, including when the ordinary answer was already accepted. Public final references and presentation ranges remain pinned to ordinary work. Hold execution/idle authority through maintenance; stop/shutdown must cancel it. Reset removes preparation records with context/history. No new HTTP endpoint or agent tool is required.
 
 ## Constraints, specifications and requirements
 

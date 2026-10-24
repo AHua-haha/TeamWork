@@ -20,6 +20,10 @@ Runtime constructs the shared technical MySqlStorage and TeamData durable adapte
 
 **Usage example:** Use Runtime composition in backend/src/runtime/main.ts. Start with MySqlStorage and TeamData, construct ConfigService, WorkspaceService, TeamSystem and TeamRuntime, attach the team, initialize and open.
 
+### Compaction coordination
+
+Runtime passes the Operations token threshold and Harness instruction into TeamRuntime. Agent owns Pi-based token measurement, both trigger checkpoints and private preparation/cutover composition. Team acknowledges lifecycle/messages/replacement through its SQL journal. Original shared history remains Team-owned and unchanged. No extra run, activation, group publication or frontend control is created. Mutable context and durable history remain separate.
+
 ## File lookup
 
 - [backend/src/core/errors.ts](../../../../../../backend/src/core/errors.ts): common application errors and identifier validation.

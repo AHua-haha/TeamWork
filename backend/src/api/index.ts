@@ -37,3 +37,4 @@ export * from '../core/team/chat-images.js';
 export * from './chat-images.js';
 export * from '../storage/mysql.js';
 export { AgentExecution, type AgentObserver } from '../core/agent/agent.js';
+export * from '../core/agent/compaction.js';

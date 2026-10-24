@@ -10,4 +10,4 @@ Idle group synchronization starts no model call. Busy/queued members synchronize
 
 Implementation README files remain ordinary maintained project artifacts. Neither their summary/lookup text nor their Automatic retrieval entries are automatically loaded/executed. Agent may read files and run Bash using existing tools. There is no separate retained-failure range, success-only cleanup or terminal context clearing.
 
-Future compaction will combine Team-provided group context with Agent-prepared private continuation. Compaction preparation, cutover and trigger policy, Team summarization/structured extraction and member-specific group views are deferred. No automatic trimming or backend private-summary policy substitutes for them.
+Configured Agent compaction combines original Team group context with every message produced after the private preparation prompt. One Pi-estimated token threshold applies before model calls and after ordinary work. Team journals preparation and acknowledges atomic cutover, recovering interrupted preparation without replay. Team summarization/structured extraction and member-specific group views remain deferred.

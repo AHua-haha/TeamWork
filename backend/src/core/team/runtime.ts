@@ -9,6 +9,7 @@ import { AppError, type ContextEntry, type ContextHistory, type CurrentState, ty
 
 export { configuredPolicy, fixedPolicy, piModelStream } from '../agent/agent.js';
 export type * from '../agent/contracts.js';
+import { validateCompactionSettings, type CompactionSettings } from '../agent/compaction.js';
 import { AgentMessageContext } from '../agent/context.js';
 import { AgentExecution } from '../agent/agent.js';
 import type { RuntimePolicy, ModelStream } from '../agent/contracts.js';
@@ -26,7 +27,8 @@ export class TeamRuntime {
   private readonly maxSteps: number;
   private pendingStarts = new Set<Promise<RunState>>();
 
-  constructor(readonly store: TeamData, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, options: { progressCapacity?: number; maxSteps?: number } = {}) {
+  constructor(readonly store: TeamData, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, private readonly options: { progressCapacity?: number; maxSteps?: number; compaction?: CompactionSettings } = {}) {
+    if (options.compaction) validateCompactionSettings(options.compaction);
     this.progress = new ProgressStore(options.progressCapacity);
     this.maxSteps = options.maxSteps ?? 64;
     if (!Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1) throw new AppError('invalid_config', 'Invalid runtime limits');
@@ -39,6 +41,7 @@ export class TeamRuntime {
       this.progress.close();
     });
     try {
+      await this.store.recoverCompactions();
       await this.store.recoverInterruptedRuns(async run => this.policy.afterRun?.({ ...run, status: 'interrupted' }));
       this.finalizationFailures.clear();
       this.accepting = true;
@@ -109,11 +112,11 @@ export class TeamRuntime {
 
   async cancel(agentId: string, runId: string): Promise<void> {
     this.available();
+    const job = this.jobs.get(runId);
+    if (job) { if (job.agentId !== agentId) throw new AppError('not_found', 'Run not found for this agent', 404); job.controller.abort(); return; }
     const snapshot = await this.store.followSnapshot(agentId, runId, 0, false);
     if (snapshot.state.run?.status !== 'running') return;
-    const job = this.jobs.get(runId);
-    if (!job) throw new AppError('runtime_unavailable', 'Run has no live worker; restart runtime to recover', 503);
-    job.controller.abort();
+    throw new AppError('runtime_unavailable', 'Run has no live worker; restart runtime to recover', 503);
   }
 
   /** Resolves with the run's final state once its work has ended here. A run this runtime does not run reports its stored state at once. */
@@ -136,7 +139,7 @@ export class TeamRuntime {
     const messages = await this.store.runMessages(agentId, runId);
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!.message;
-      if (message.role !== 'assistant') continue;
+      if (messages[index]!.metadata.source === 'context-compaction' || message.role !== 'assistant') continue;
       const text = message.content.flatMap(part => (part.type === 'text' ? [part.text] : [])).join('\n').trim();
       if (text) return text;
     }
@@ -197,11 +200,14 @@ export class TeamRuntime {
           } catch (error) { release?.(); throw error; }
         },
       };
-      execution = new AgentExecution(run, { revision: 0, entries: [] }, 0, config, policy, this.stream, {
+      execution = new AgentExecution(run, { revision: 0, entries: [] }, 0, {...config, ...(this.options.compaction ? {compaction: this.options.compaction} : {})}, policy, this.stream, {
         assertActive: () => this.store.assertRuntime(),
         messageStart: state => this.store.beginMessage(state.agentId, state.runId, state.activeMessageId!, state.step),
         message: record => this.store.commitMessage(record.agentId, record.runId, { messageId: record.messageId, message: record.message, metadata: record.metadata }),
         contextChanged: (revision, entries) => this.replaceContext(run.agentId, revision, entries),
+        compactionStarted: state => this.store.beginCompaction(state),
+        compactionMessage: record => this.store.commitCompactionMessage(record),
+        compactionFinished: (state, revision, entries) => this.store.finishCompaction(state, revision, entries),
         finished: state => this.store.finishRun(state.agentId, state.runId, state.status as Exclude<RunState['status'], 'running'>, state.error),
       }, this.progress, this.maxSteps);
       const job = this.jobs.get(run.runId); if (job) job.execution = execution;
