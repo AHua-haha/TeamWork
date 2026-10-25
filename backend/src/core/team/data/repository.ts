@@ -10,9 +10,10 @@ import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation
 import { defaultRunSettings, type WorkspaceModels } from '../../workspace/data/models.js';
 import { generatedSource } from './member-config.js';
 import { AppError, identity, position, type RunState } from '../../agent/data/model.js';
-import { defaultMentionLimit, groupEntry, groupSender, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset } from './group-chat.js';
-import { clearTables, dataTransaction, rows, limitClause, duplicate, type DataConnection as Db } from '../../data-transaction.js';
+import { defaultMentionLimit, groupEntry, groupContextMessage, validateGroupContextEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset, type GroupContextEntry } from './group-chat.js';
+import { clearTables, dataTransaction, rows, insertRows, limitClause, duplicate, type DataConnection as Db } from '../../data-transaction.js';
 import { schema } from './schema.js';
+import { GroupContexts, type GroupContextHistory } from './group-context.js';
 import type { AgentData } from '../../agent/data/repository.js';
 import type { AgentExecutionState } from '../../agent/data/model.js';
 import type { WorkspaceData } from '../../workspace/data/repository.js';
@@ -32,8 +33,8 @@ function memberConflict(error: unknown): unknown {
 }
 export class TeamData implements TeamStore, ChatStore {
     readonly pool: Db;
-    constructor(readonly storage: MySqlStorage, readonly agents: AgentData, readonly workspaces: WorkspaceData, private readonly connection?: PoolConnection) { this.pool = connection ?? storage.pool; }
-    inTransaction(db: PoolConnection): TeamData { return new TeamData(this.storage, this.agents, this.workspaces, db); }
+    constructor(readonly storage: MySqlStorage, readonly agents: AgentData, readonly workspaces: WorkspaceData, private readonly connection?: PoolConnection, private readonly contexts = new GroupContexts()) { this.pool = connection ?? storage.pool; }
+    inTransaction(db: PoolConnection): TeamData { return new TeamData(this.storage, this.agents, this.workspaces, db, this.contexts); }
     private transaction<T>(fn: (db: PoolConnection) => Promise<T>): Promise<T> { return dataTransaction(this.storage, this.connection, fn); }
     async migrate(): Promise<void> {
         for (const statement of schema)
@@ -42,27 +43,65 @@ export class TeamData implements TeamStore, ChatStore {
         for (const column of ['reset_cursor', 'reset_position'])
             if (!columns.some(row => row.Field === column))
                 await this.pool.query(`ALTER TABLE chat_settings ADD COLUMN ${column} BIGINT UNSIGNED NOT NULL DEFAULT 0`);
+        if (!columns.some(row => row.Field === 'context_length'))
+            await this.pool.query('ALTER TABLE chat_settings ADD COLUMN context_length BIGINT UNSIGNED NOT NULL DEFAULT 0');
+        if (!columns.some(row => row.Field === 'context_format'))
+            await this.pool.query('ALTER TABLE chat_settings ADD COLUMN context_format TINYINT UNSIGNED NOT NULL DEFAULT 0');
+        if (String(columns.find(row => row.Field === 'context_format')?.Default) !== '1')
+            await this.pool.query('ALTER TABLE chat_settings ALTER COLUMN context_format SET DEFAULT 1');
         await this.pool.query('DROP TABLE IF EXISTS chat_delivery');
     }
     async readGroupContext(workspaceId: string, after: number): Promise<GroupContextMessage[]> {
-        identity(workspaceId, 'workspaceId');
-        position(after);
-        return this.transaction(db => this.groupContext(db, workspaceId, after));
+        identity(workspaceId, 'workspaceId'); position(after);
+        const model = this.connection ? undefined : await this.contexts.get(workspaceId, () => this.loadGroupContext(workspaceId));
+        if (model) return model.read(after).map(groupContextMessage);
+        const history = await this.loadGroupContext(workspaceId);
+        if (after > history.position) throw new AppError('invalid_cursor', 'Group consumption position is ahead of history', 409);
+        return history.entries.filter(entry => Number(entry.metadata.groupPosition) > Math.max(after, history.resetPosition)).map(groupContextMessage);
     }
-    private async groupContext(db: PoolConnection, workspaceId: string, after: number): Promise<GroupContextMessage[]> {
-        const [settings] = await rows(db, 'SELECT position, reset_position FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
-        const upper = settings?.position ?? 0;
-        if (after > upper)
-            throw new AppError('invalid_cursor', 'Group consumption position is ahead of history', 409);
-        const records = await rows(db, 'SELECT entry FROM chat_messages WHERE workspace_id = ? AND position > ? AND position <= ? ORDER BY position', [workspaceId, Math.max(after, settings?.reset_position ?? 0), upper]);
-        return Promise.all(records.map(async (row) => {
-            const stored = decode<StoredChatMessage>(row.entry, () => undefined);
-            const message = await this.resolveChatMessage(db, stored);
-            const images = await Promise.all((message.attachments ?? []).map(image => this.readChatImage(db, workspaceId, image.id)));
-            return { position: message.position, sender: groupSender(message), entry: groupEntry(message, images.map(imageContent)),
-                ...(stored.finalRef ? { origin: { agentId: stored.finalRef.agentId, messageId: stored.finalRef.messageId } } : {}) };
-        }));
+    private async loadGroupContext(workspaceId: string): Promise<GroupContextHistory> {
+        return this.transaction(async db => {
+            const [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+            if (settings && settings.context_format !== 1) throw new AppError('runtime_unavailable', 'Group context migration is incomplete', 503);
+            const upper = settings?.position ?? 0, resetPosition = settings?.reset_position ?? 0;
+            const records = await rows(db, 'SELECT position,id,entry FROM chat_context_entries WHERE workspace_id = ? AND position > ? AND position <= ? ORDER BY position', [workspaceId, resetPosition, upper]);
+            if (records.length !== (settings?.context_length ?? 0)) throw new AppError('corrupt_data', 'Group context row length differs from its bookkeeping', 500);
+            const entries = records.map(row => {
+                const entry = decode<GroupContextEntry>(row.entry, validateGroupContextEntry);
+                if (entry.messageId !== row.id || entry.metadata.groupPosition !== row.position || entry.metadata.workspaceId !== workspaceId)
+                    throw new AppError('corrupt_data', 'Group context row identity or order differs from its entry', 500);
+                return entry;
+            });
+            return {position: upper, resetPosition, entries};
+        });
     }
+    /** Startup-only conversion. Existing frontend history and origin references are unchanged. */
+    async migrateGroupContext(): Promise<void> {
+        const workspaces = await rows(this.pool, 'SELECT workspace_id FROM chat_settings WHERE context_format = 0 UNION SELECT workspace_id FROM chat_messages WHERE workspace_id NOT IN (SELECT workspace_id FROM chat_settings) ORDER BY workspace_id');
+        for (const {workspace_id: workspaceId} of workspaces) await this.transaction(async db => {
+            await this.workspaces.inTransaction(db).requireWorkspace(workspaceId, true);
+            const records = await rows(db, 'SELECT position,entry FROM chat_messages WHERE workspace_id = ? ORDER BY position', [workspaceId]);
+            await db.execute('INSERT IGNORE INTO chat_settings (workspace_id,position,context_format) VALUES (?, ?, 0)', [workspaceId, records.at(-1)?.position ?? 0]);
+            const [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+            if (settings!.context_format === 1) return;
+            const entries: GroupContextEntry[] = [];
+            for (const row of records) {
+                if (row.position <= settings!.reset_position) continue;
+                const stored = decode<StoredChatMessage>(row.entry, () => undefined);
+                const message = await this.resolveChatMessage(db, stored);
+                if (message.position !== row.position || message.workspaceId !== workspaceId || row.position > settings!.position)
+                    throw new AppError('corrupt_data', 'Shared history position differs from group context', 500);
+                const images = await Promise.all((message.attachments ?? []).map(image => this.readChatImage(db, workspaceId, image.id)));
+                const entry = groupEntry(message, images.map(imageContent), stored.finalRef);
+                validateGroupContextEntry(entry); entries.push(entry);
+            }
+            await db.execute('DELETE FROM chat_context_entries WHERE workspace_id = ?', [workspaceId]);
+            await insertRows(db, 'INSERT INTO chat_context_entries (workspace_id,position,id,entry) VALUES ?', entries.map(entry => [workspaceId, Number(entry.metadata.groupPosition), entry.messageId, encode(entry)]));
+            await db.execute('UPDATE chat_settings SET context_format = 1, context_length = ? WHERE workspace_id = ?', [entries.length, workspaceId]);
+            this.storage.afterCommit(db, () => this.contexts.invalidate(workspaceId), () => this.contexts.invalidate(workspaceId));
+        });
+    }
+    close(): void { this.contexts.clear(); }
     async configureChat(workspaceId: string, value: number): Promise<void> {
         mentionLimit(value);
         await this.transaction(async (db) => {
@@ -132,7 +171,11 @@ export class TeamData implements TeamStore, ChatStore {
             for (const image of input.images ?? [])
                 await db.execute('INSERT INTO chat_images (workspace_id, id, metadata, content) VALUES (?, ?, ?, ?)', [input.workspaceId, image.metadata.id, encode(image.metadata), image.bytes]);
             await db.execute('INSERT INTO chat_messages (workspace_id, position, entry) VALUES (?, ?, ?)', [input.workspaceId, message.position, encode(finalRef ? { ...message, text: undefined, finalRef } : message)]);
-            await db.execute('UPDATE chat_settings SET position = ? WHERE workspace_id = ?', [message.position, input.workspaceId]);
+            const contextEntry = groupEntry(message, (input.images ?? []).map(imageContent), finalRef);
+            validateGroupContextEntry(contextEntry);
+            await db.execute('INSERT INTO chat_context_entries (workspace_id,position,id,entry) VALUES (?, ?, ?, ?)', [input.workspaceId, message.position, message.messageId, encode(contextEntry)]);
+            this.storage.afterCommit(db, () => this.contexts.changed(input.workspaceId, {append: contextEntry, before: message.position - 1}), () => this.contexts.invalidate(input.workspaceId));
+            await db.execute('UPDATE chat_settings SET position = ?, context_length = context_length + 1 WHERE workspace_id = ?', [message.position, input.workspaceId]);
             await db.execute('UPDATE chat_exchanges SET used = used + ? WHERE id = ?', [input.recipients.length, exchangeId]);
             if (sender && input.author.type === 'member') {
                 const finished = await this.agents.inTransaction(db).completePublishedRun(sender.id, input.author.runId);
@@ -346,7 +389,7 @@ export class TeamData implements TeamStore, ChatStore {
             const [clock] = await rows(db, 'SELECT seq FROM chat_clock WHERE workspace_id = ? FOR UPDATE', [workspaceId]);
             const resetCursor = clock!.seq + 1;
             const resetPosition = settings!.position + 1;
-            for (const table of ['chat_changes', 'chat_entries', 'chat_messages', 'chat_images'])
+            for (const table of ['chat_changes', 'chat_entries', 'chat_context_entries', 'chat_messages', 'chat_images'])
                 await db.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [workspaceId]);
             // Include all member runs, even ones not linked to an exchange, but never solo agents.
             for (const run of await this.agents.inTransaction(db).listRuns(members.map(member => member.id)))
@@ -354,7 +397,8 @@ export class TeamData implements TeamStore, ChatStore {
             await db.execute('DELETE FROM chat_exchanges WHERE workspace_id = ?', [workspaceId]);
             await this.agents.inTransaction(db).resetConversations(members.map(member => member.id));
             await db.execute('UPDATE chat_clock SET seq = ? WHERE workspace_id = ?', [resetCursor, workspaceId]);
-            await db.execute('UPDATE chat_settings SET position = ?, reset_cursor = ?, reset_position = ? WHERE workspace_id = ?', [resetPosition, resetCursor, resetPosition, workspaceId]);
+            await db.execute('UPDATE chat_settings SET position = ?, reset_cursor = ?, reset_position = ?, context_length = 0, context_format = 1 WHERE workspace_id = ?', [resetPosition, resetCursor, resetPosition, workspaceId]);
+            this.storage.afterCommit(db, () => this.contexts.changed(workspaceId, {reset: resetPosition}), () => this.contexts.invalidate(workspaceId));
             return { workspaceId, resetCursor, resetPosition };
         });
     }
@@ -477,6 +521,10 @@ export class TeamData implements TeamStore, ChatStore {
             }
         return files;
     }
-    async clearConversations(): Promise<void> { await clearTables(this.pool, ['chat_changes', 'chat_entries', 'chat_clock', 'chat_runs', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_settings']); }
+    async clearConversations(): Promise<void> {
+        await clearTables(this.pool, ['chat_changes', 'chat_entries', 'chat_clock', 'chat_runs', 'chat_context_entries', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_settings']);
+        if (this.connection) this.storage.afterCommit(this.connection, () => this.contexts.clear(), () => this.contexts.clear());
+        else this.contexts.clear();
+    }
     async clearMembers(): Promise<void> { await clearTables(this.pool, ['member_activation', 'members']); }
 }

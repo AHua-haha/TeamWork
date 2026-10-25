@@ -34,6 +34,7 @@ export class CoreData {
         await this.workspaces.migrate();
         await this.team.migrate();
         await this.team.importChatHistory();
+        await this.team.migrateGroupContext();
         const legacy = new Set(await this.agents.legacyContextIds());
         for (const member of legacy.size ? (await this.team.contextMembers()).filter(member => legacy.has(member.id)) : [])
             await this.storage.transaction(async (db) => {
@@ -56,6 +57,7 @@ export class CoreData {
             await this.agents.releaseRuntime();
         }
         finally {
+            this.team.close();
             await this.storage.close();
         }
     }

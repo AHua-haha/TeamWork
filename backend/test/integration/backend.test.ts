@@ -2763,3 +2763,127 @@ test('uncertain SQL commit invalidates resident context before another run can r
   assert.notEqual(restored, stale);
   assert.deepEqual(restored.history, {revision: 1, entries: [entry]}, 'restore actual durable outcome without replaying the write');
 });
+
+test('Team reuses one Pi group-context load across publications, members and runs', {timeout: 30000}, async () => {
+  const f = await groupFixture();
+  const data = store.team as any, load = data.loadGroupContext;
+  let loads = 0;
+  const triggers = ['UPDATE', 'DELETE'].map(operation => ({operation, name: 'group_append_' + randomUUID().replaceAll('-', '')}));
+  data.loadGroupContext = async function (id: string) {if (id === f.workspaceId) loads++; return load.call(this, id);};
+  try {
+    assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), []);
+    for (const {operation,name} of triggers) await store.pool.query(`CREATE TRIGGER ${name} BEFORE ${operation} ON chat_context_entries FOR EACH ROW BEGIN IF OLD.workspace_id = '${f.workspaceId}' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Existing group rows must not be rewritten'; END IF; END`);
+    for (let index = 1; index <= 2; index++) {
+      const accepted = await f.team.runner.postUser(f.workspaceId, `@Lead shared ${index}`);
+      const request = await f.requests.next();
+      answer(request.events, fauxAssistantMessage([{type: 'thinking', thinking: '', thinkingSignature: 'private-encrypted-thinking'}, {type: 'text', text: `Public result ${index}`} ]));
+      await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    }
+    const shared = await store.team.readGroupContext(f.workspaceId, 0);
+    assert.equal(loads, 1); assert.equal(shared.length, 4);
+    assert.deepEqual(shared.map(item => item.entry.message.role), ['user', 'user', 'user', 'user']);
+    assert.match(JSON.stringify(shared), /Sender: Lead/); assert.match(JSON.stringify(shared), /Sender: User/);
+    assert.doesNotMatch(JSON.stringify(shared), /private-encrypted-thinking/);
+    assert.ok(shared[1]!.origin); assert.equal(shared[1]!.entry.metadata.finalRef !== undefined, true);
+    const copy = structuredClone(shared); shared[0]!.entry.message.content = 'forged';
+    assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), copy);
+    const [rows] = await store.pool.query<any[]>('SELECT position,entry FROM chat_context_entries WHERE workspace_id = ? ORDER BY position', [f.workspaceId]);
+    assert.equal(rows.length, 4);
+    for (const row of rows) assert.equal(decode<any>(row.entry, () => undefined).metadata.groupPosition, row.position);
+    const [history] = await store.pool.query<any[]>('SELECT entry FROM chat_messages WHERE workspace_id = ? ORDER BY position', [f.workspaceId]);
+    const published = decode<any>(history[1].entry, () => undefined);
+    assert.equal(published.text, undefined); assert.ok(published.finalRef, 'frontend history still uses exact final references');
+    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    try {await reopened.migrate(); assert.deepEqual(await reopened.team.readGroupContext(f.workspaceId, 0), copy);} finally {await reopened.close();}
+  } finally {for (const {name} of triggers) await store.pool.query(`DROP TRIGGER IF EXISTS ${name}`); data.loadGroupContext = load; await f.close();}
+});
+
+test('Team group context acknowledges only outer commit and resets without stale resident data', {timeout: 30000}, async () => {
+  const f = await groupFixture();
+  const input = {workspaceId: f.workspaceId, author: {type: 'user' as const}, text: 'Shared committed input', recipients: []};
+  try {
+    assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), []);
+    await assert.rejects(store.storage.transaction(async db => {
+      await store.team.inTransaction(db).publishChat(input);
+      assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), []);
+      throw new Error('rollback shared publication');
+    }), /rollback shared publication/);
+    assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), []);
+    await store.storage.transaction(async db => {
+      await store.team.inTransaction(db).publishChat(input);
+      assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), []);
+    });
+    const shared = await store.team.readGroupContext(f.workspaceId, 0); assert.equal(shared.length, 1);
+    await assert.rejects(store.storage.transaction(async db => {
+      await db.execute('DELETE FROM chat_context_entries WHERE workspace_id = ?', [f.workspaceId]);
+      await store.team.inTransaction(db).readGroupContext(f.workspaceId, 0);
+    }), /row length/, 'missing rows fail instead of silently shortening group context');
+    await assert.rejects(store.storage.transaction(async db => {
+      await store.team.inTransaction(db).resetChat(f.workspaceId);
+      assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), shared);
+      throw new Error('rollback shared reset');
+    }), /rollback shared reset/);
+    assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), shared);
+    await store.team.resetChat(f.workspaceId);
+    assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), []);
+    const fresh = await store.team.publishChat({...input, text: 'Fresh shared input'});
+    assert.deepEqual((await store.team.readGroupContext(f.workspaceId, 0)).map(item => item.entry.messageId), [fresh.message.messageId]);
+  } finally {await f.close();}
+});
+
+test('group-context migration backfills Pi messages, images and origin metadata atomically', {timeout: 30000}, async () => {
+  const f = await groupFixture();
+  const {png} = await import('../image-fixture.js');
+  const {prepareChatImage} = await import('../../src/core/team/data/chat-images.js');
+  const trigger = 'group_migration_' + randomUUID().replaceAll('-', '');
+  const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+  let installed = false;
+  try {
+    const accepted = await f.team.runner.postUser(f.workspaceId, '@Lead inspect picture', [await prepareChatImage(png(), 'picture.png')]);
+    answer((await f.requests.next()).events, message('Published picture result'));
+    await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    const expected = await store.team.readGroupContext(f.workspaceId, 0);
+    const timeline = await store.team.chatTimeline(f.workspaceId);
+    await f.runtime.close();
+    await store.pool.execute('DELETE FROM chat_context_entries WHERE workspace_id = ?', [f.workspaceId]);
+    await store.pool.execute('UPDATE chat_settings SET context_format = 0 WHERE workspace_id = ?', [f.workspaceId]);
+    await store.pool.query(`CREATE TRIGGER ${trigger} BEFORE INSERT ON chat_context_entries FOR EACH ROW BEGIN IF NEW.workspace_id = '${f.workspaceId}' AND NEW.position = 2 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Injected group migration failure'; END IF; END`);
+    installed = true;
+    await assert.rejects(reopened.migrate(), /Injected group migration failure/);
+    const [failed] = await store.pool.query<any[]>('SELECT context_format FROM chat_settings WHERE workspace_id = ?', [f.workspaceId]);
+    assert.equal(failed[0].context_format, 0);
+    const [rows] = await store.pool.query<any[]>('SELECT position FROM chat_context_entries WHERE workspace_id = ?', [f.workspaceId]);
+    assert.deepEqual(rows, []);
+    await store.pool.query(`DROP TRIGGER ${trigger}`); installed = false;
+    await reopened.migrate();
+    assert.deepEqual(await reopened.team.readGroupContext(f.workspaceId, 0), expected);
+    assert.deepEqual(await reopened.team.chatTimeline(f.workspaceId), timeline);
+    await reopened.migrate(); assert.deepEqual(await reopened.team.readGroupContext(f.workspaceId, 0), expected);
+  } finally {if (installed) await store.pool.query(`DROP TRIGGER ${trigger}`); await reopened.close(); await f.close();}
+});
+
+test('uncertain group publication commit restores durable Pi context without replay', {timeout: 30000}, async () => {
+  const f = await groupFixture();
+  const transaction = store.storage.transaction;
+  let connection: import('mysql2/promise').PoolConnection | undefined;
+  let commit: import('mysql2/promise').PoolConnection['commit'] | undefined;
+  try {
+    try {
+      assert.deepEqual(await store.team.readGroupContext(f.workspaceId, 0), []);
+      store.storage.transaction = function (operation) {
+        return transaction.call(this, async db => {
+          connection = db; commit = db.commit;
+          db.commit = async () => {await commit!.call(db); throw new Error('group commit acknowledgement lost');};
+          return operation(db);
+        }) as any;
+      };
+      await assert.rejects(store.team.publishChat({workspaceId: f.workspaceId, author: {type: 'user'}, text: 'Committed once', recipients: []}), /group commit acknowledgement lost/);
+    } finally {
+      if (connection && commit) connection.commit = commit;
+      store.storage.transaction = transaction;
+    }
+    const restored = await store.team.readGroupContext(f.workspaceId, 0);
+    assert.equal(restored.length, 1); assert.match(String(restored[0]!.entry.message.content), /Committed once/);
+    assert.equal((await store.team.chatSnapshot(f.workspaceId)).messages.length, 1);
+  } finally {await f.close();}
+});

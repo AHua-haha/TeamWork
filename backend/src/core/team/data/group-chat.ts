@@ -1,8 +1,8 @@
-import { validateRun } from '../../agent/data/validation.js';
+import { validateMessage, validateRun } from '../../agent/data/validation.js';
 import type { GroupContextMessage } from '../../agent/data/context.js';
-import type { ImageContent } from '@earendil-works/pi-ai';
+import type { ImageContent, Message, JsonObject } from '@earendil-works/pi-ai';
 import { validateChatImages, type ChatImage, type PreparedChatImage, type ChatImageStore } from './chat-images.js';
-import type { RunState, ContextEntry } from '../../agent/data/model.js';
+import type { RunState } from '../../agent/data/model.js';
 import { AppError, identity, position } from '../../agent/data/model.js';
 
 export const maxChatCharacters = 20_000;
@@ -12,6 +12,7 @@ export interface ChatMessage {
   workspaceId: string; messageId: string; position: number; exchangeId: string;
   author: ChatAuthor; text: string; attachments?: ChatImage[]; recipients: string[]; time: number;
 }
+export interface GroupContextEntry { messageId: string; message: Message; metadata: JsonObject }
 export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; /** UTF-16 offset in the joined selected text; backend-owned. */ bodyOffset?: number; /** Historical accepted response-tool records only. */ toolCallId?: string }
 export interface TimelineBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
 export type TimelineEntry = TimelineBase & (
@@ -72,12 +73,16 @@ export function validateChatMessage(value: unknown): asserts value is ChatMessag
   position(message.position);
   if (!message.position || !Number.isSafeInteger(message.time) || message.time < 0) throw new AppError('invalid_data', 'Invalid chat position or time');
   chatText(message.text, message.attachments);
-  if (!Array.isArray(message.recipients) || new Set(message.recipients).size !== message.recipients.length) throw new AppError('invalid_data', 'Invalid chat recipients');
-  for (const recipient of message.recipients) identity(recipient);
-  if (!message.author || !['user', 'member'].includes(message.author.type)) throw new AppError('invalid_data', 'Invalid chat author');
-  if (message.author.type === 'member') {
-    identity(message.author.memberId); identity(message.author.runId);
-    if (typeof message.author.name !== 'string' || !message.author.name) throw new AppError('invalid_data', 'Invalid chat author name');
+  validateRouting(message.author, message.recipients);
+}
+
+function validateRouting(author: ChatAuthor, recipients: string[]): void {
+  if (!Array.isArray(recipients) || new Set(recipients).size !== recipients.length) throw new AppError('invalid_data', 'Invalid chat recipients');
+  for (const recipient of recipients) identity(recipient);
+  if (!author || !['user', 'member'].includes(author.type)) throw new AppError('invalid_data', 'Invalid chat author');
+  if (author.type === 'member') {
+    identity(author.memberId); identity(author.runId);
+    if (typeof author.name !== 'string' || !author.name) throw new AppError('invalid_data', 'Invalid chat author name');
   }
 }
 
@@ -105,20 +110,57 @@ export function userMentions(text: string): string[] {
   return [...result.values()];
 }
 
-export function groupSender(message: ChatMessage): string {
+export function groupSender(message: Pick<ChatMessage, 'author'>): string {
   return message.author.type === 'user' ? 'Sender: User [user]' : `Sender: ${message.author.name} [member: ${message.author.memberId}]`;
 }
 
-export function groupEntry(message: ChatMessage, images: ImageContent[] = []): ContextEntry {
+export function groupEntry(message: ChatMessage, images: ImageContent[] = [], finalRef?: FinalReference): GroupContextEntry {
   const text = `[Group message ${message.position}]\n${groupSender(message)}\n${message.recipients.length ? `[Mentioned members: ${message.recipients.join(', ')}]\n` : ''}${message.text}`;
   return {
     messageId: message.messageId,
-    message: { role: 'user', content: images.length ? [{ type: 'text', text }, ...images] : text, timestamp: message.time },
-    metadata: { source: 'group-chat', workspaceId: message.workspaceId, groupPosition: message.position, author: message.author, recipients: message.recipients },
+    message: { role: 'user', content: images.length ? [{ type: 'text', text }, ...images.map(image => ({...image}))] : text, timestamp: message.time },
+    metadata: { source: 'group-chat', workspaceId: message.workspaceId, groupPosition: message.position, exchangeId: message.exchangeId, author: {...message.author}, recipients: [...message.recipients],
+      ...(message.attachments ? {attachments: message.attachments.map(image => ({...image}))} : {}), ...(finalRef ? {finalRef: {...structuredClone(finalRef)}} : {}) },
   };
 }
 
 export function mentionLimit(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 1000) throw new AppError('invalid_input', 'mentionLimit is an integer from 1 to 1,000');
   return value as number;
+}
+
+/** Validate Team's envelope independently of Agent's mutable context model. */
+export function validateGroupContextEntry(value: unknown): asserts value is GroupContextEntry {
+  if (!value || typeof value !== 'object') throw new AppError('corrupt_data', 'Invalid group context entry', 500);
+  const entry = value as GroupContextEntry;
+  identity(entry.messageId, 'messageId'); validateMessage(entry.message);
+  if (entry.message.role !== 'user' || !entry.metadata || entry.metadata.source !== 'group-chat') throw new AppError('corrupt_data', 'Group context requires public user-role content', 500);
+  const metadata = entry.metadata;
+  const text = typeof entry.message.content === 'string' ? entry.message.content : entry.message.content[0]?.type === 'text' ? entry.message.content[0].text : '';
+  const record = {workspaceId: metadata.workspaceId, messageId: entry.messageId, position: metadata.groupPosition,
+    exchangeId: metadata.exchangeId, author: metadata.author, recipients: metadata.recipients, time: entry.message.timestamp,
+    text, ...(metadata.attachments ? {attachments: metadata.attachments} : {})} as unknown as ChatMessage;
+  identity(record.workspaceId); identity(record.exchangeId); position(record.position);
+  if (!record.position || !Number.isSafeInteger(record.time) || record.time < 0) throw new AppError('corrupt_data', 'Invalid group position or time', 500);
+  validateRouting(record.author, record.recipients);
+  const prefix = `[Group message ${record.position}]\n${groupSender(record)}\n${record.recipients.length ? `[Mentioned members: ${record.recipients.join(', ')}]\n` : ''}`;
+  if (!text.startsWith(prefix)) throw new AppError('corrupt_data', 'Group sender content differs from authoritative metadata', 500);
+  chatText(text.slice(prefix.length), record.attachments);
+  const images = typeof entry.message.content === 'string' ? [] : entry.message.content.filter(block => block.type === 'image');
+  if (images.length !== (record.attachments?.length ?? 0)) throw new AppError('corrupt_data', 'Group picture blocks differ from metadata', 500);
+  if (images.some((image, index) => image.mimeType !== record.attachments![index]!.mimeType)) throw new AppError('corrupt_data', 'Group picture MIME differs from metadata', 500);
+  if (metadata.finalRef !== undefined) {
+    const ref = metadata.finalRef as unknown as FinalReference;
+    if (!ref || record.author.type !== 'member' || ref.agentId !== record.author.memberId || ref.runId !== record.author.runId) throw new AppError('corrupt_data', 'Invalid group final origin', 500);
+    identity(ref.messageId); position(ref.position);
+    if (!ref.position) throw new AppError('corrupt_data', 'Invalid group final origin position', 500);
+  }
+}
+
+/** The Agent port is a detached projection of Team-owned Pi messages, not reconstructed text. */
+export function groupContextMessage(entry: GroupContextEntry): GroupContextMessage {
+  const author = entry.metadata.author as unknown as ChatAuthor;
+  const ref = entry.metadata.finalRef as unknown as FinalReference | undefined;
+  return {position: Number(entry.metadata.groupPosition), sender: groupSender({author}), entry,
+    ...(ref ? {origin: {agentId: ref.agentId, messageId: ref.messageId}} : {})};
 }

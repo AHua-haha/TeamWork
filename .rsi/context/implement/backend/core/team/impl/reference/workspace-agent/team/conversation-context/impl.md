@@ -6,7 +6,7 @@ Team provides only GroupContextReference; Agent owns incorporation and continuou
 
 ## Data flow and implemented interfaces
 
-1. TeamSystem.policy.groupContext(agentId) returns {id: workspaceId, read: after => store.readGroupContext(workspaceId, after)}. No admission-through/retention position is supplied.
+1. TeamSystem.policy.groupContext(agentId) returns {id: workspaceId, read: after => store.readGroupContext(workspaceId, after)}. No admission-through/retention position is supplied. Team persists Pi Message-plus-metadata entries and loads its resident shared context once; each root read returns a detached suffix without resolving private history or images again.
 2. AgentRuntime acquires execution authority and restores agents.context once. AgentExecution uses AgentMessageContext.incoming to choose after from existing entry metadata and propose new entries. Optional observer.contextChanged acknowledges CAS replacement before dependent work.
 3. Group entries include groupContextId, groupPosition and groupMessageId. These markers and message content are one persisted context snapshot, without a separate processed-prefix table. Native pictures remain content blocks. Own finals retain their original assistant blocks and add sender/provenance without duplicating the answer.
 4. No shared input is inserted between model/tool steps. After pending work/afterRun settles, Agent catches up through its reference before the host finishes. Unmentioned idle members use the same Agent context owner through runtime.syncGroupContext, without model calls.

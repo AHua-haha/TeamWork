@@ -24,6 +24,14 @@ Please implement the agreed backend interface.
 
 The precise delimiter is an implementation detail; sender visibility and consistent attribution are required. Preserve structured sender/mention metadata for programmatic use. Render attribution from authoritative message authorship, not text written by another member. Native image blocks remain images. No semantic image description is generated.
 
+### Incremental message data model
+
+Represent shared context with complete Pi Message values plus Team-owned metadata and stable message IDs. Each message content includes the sender, while metadata carries authoritative sender identity/kind/name, recipients, workspace/order/exchange and optional private final origin. Shared messages contain public text and native images only; never expose private thinking or tool traces.
+
+Persist one ordered context row per accepted group publication, and insert only the new row during normal work. Keep stable frontend history and response references independently intact. Load a resident Team group-context model once per workspace on first use; reuse it across member activations and reads. Return detached ranges from that model, never its mutable storage. Incorporation positions remain Agent-owned.
+
+Publish resident changes only after the outer SQL transaction commits. Rollback changes no visible state; uncertain commit acknowledgement invalidates resident data until durable restoration without replay. Explicit idle reset clears durable and resident group context with the existing history/member reset. Shutdown releases resident state. Migrate old records without changing their IDs/order/authorship/images/final references or resetting user data. Group compaction remains deferred.
+
 ### Read reference supplied to Agent
 
 Provide a read capability for the shared context. Agent can use stable identities/order and its own state to extract incoming messages and obtain a consistent view. The capability must not expose mutable Team collections or permit Agent to edit shared history.
@@ -40,7 +48,7 @@ Own durable mappings/schema/queries for shared history, member/configuration and
 
 On terminal success/failure/cancellation, let Agent persist its continuous state and acknowledge the Team presentation update through the coordinated transaction. Do not clear model context, rebuild from implementation README files or maintain separate success-only private-history cleanup. Agent marks abandoned activations interrupted and restores recorded context through its own recovery; Team records the resulting presentation without replaying external effects. Immutable private history, final references and presentation working ranges remain available independently of mutable model context.
 
-An accepted final remains shared through its stable private origin reference. Make that provenance available so the sender's Agent can reconcile its existing private answer with the shared publication without duplicate model-visible content. A publication refusal remains private feedback and allows revision under existing rules.
+An accepted final retains its stable private origin reference alongside its materialized public context entry. Make that provenance available so the sender's Agent can reconcile its existing private answer with the shared publication without duplicate model-visible content. A publication refusal remains private feedback and allows revision under existing rules.
 
 Explicit idle chat reset clears shared history and Agent contexts/consumption state consistently, while preserving project files and context documents. Reset is the explicit destructive operation; a normal stop is not a reset.
 
