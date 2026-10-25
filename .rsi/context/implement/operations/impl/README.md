@@ -28,6 +28,13 @@ The development/deployment sections each accept optional contextCompactionThresh
 
 A committed Operations team member has been created and validated for this design. Its bundle is `.rsi/members/0ad4ed85-9e16-4b3c-b335-4473d7270f8e/`. The configuration is committed but remains inactive pending separate user-controlled activation.
 
+## Design update awaiting implementation
+
+The user-approved project direction is one private `rsi.config.json` as the source for all project-level configuration, including development/deployment, environment/toolchain/dependency and database-service settings. Operations owns development environment setup, pinned dependency/toolchain readiness, launch configuration, and this project's isolated development database service lifecycle (initialize/configure/start/stop/status). The development service must use project-specific Compose resources and credentials, and must never reuse or modify another project's service or data. Its host port must be configured in the project file and checked for conflicts. Development and deployment remain separately configurable.
+
+This design update is recorded, but the current implementation has not yet been changed to create/manage a dedicated development service or centralize/extend environment setup. The prior implementation uses the shared Compose MySQL service; do not claim isolation until Operations implements and verifies the new lifecycle. Existing service/data have not been altered.
+
+## File lookup
 
 - [scripts](../../../../../scripts): owned implementation.
 - [backend/scripts](../../../../../backend/scripts): owned implementation.
