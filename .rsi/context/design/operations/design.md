@@ -6,7 +6,7 @@ Operations owns development/deployment build and process management, launch conf
 
 ## Interface contract
 
-Project commands manage development and committed host deployment using one private rsi.config.json. The existing MySQL service is shared by independent development/deployment databases/accounts/keys. Commands keep settings in child processes, preserve caller/global environment and refuse unrelated occupied ports/processes. Each environment accepts one optional positive safe-integer contextCompactionThresholdTokens, default 64,000. The same value controls both Agent checkpoints; do not couple it to per-model stored contextBudget or add separate trigger thresholds.
+Project commands manage development and committed host deployment using one private rsi.config.json. The existing MySQL service is shared by independent development/deployment databases/accounts/keys. Commands keep settings in child processes, preserve caller/global environment and refuse unrelated occupied ports/processes. Each environment accepts one optional positive safe-integer contextCompactionThresholdTokens, default 128,000. The same value controls both Agent checkpoints; do not couple it to per-model stored contextBudget or add separate trigger thresholds.
 
 Deployment builds an exported local commit before switching app processes, preserves the current version on build failure and attempts recovery on launch failure. Stopping an app preserves the database service/data. Existing old compiled release entries remain startable for recovery after source migration. No data reset/copy, infrastructure rewrite or live deployment update is part of source reorganization.
 

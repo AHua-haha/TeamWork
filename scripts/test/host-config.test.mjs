@@ -44,7 +44,8 @@ test('one token threshold is resolved independently per environment with a valid
     deployment: { backendPort: 3001, frontendPort: 5274, database: { name: 'rsi_agent', username: 'rsi', password: 'test' }, encryptionKey: Buffer.alloc(32, 2).toString('base64'), environment: {} },
   };
   validateConfiguration(config);
-  assert.equal(backendSettings(config,'development').RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS,'64000');
+  assert.equal(backendSettings(config,'development').RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS,'128000');
+  assert.equal(backendSettings(config,'deployment').RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS,'128000');
   config.development.contextCompactionThresholdTokens=12000;
   config.deployment.contextCompactionThresholdTokens=48000;
   validateConfiguration(config);
