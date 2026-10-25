@@ -24,7 +24,10 @@ host-config reads the project private config and constructs isolated child setti
 
 The development/deployment sections each accept optional contextCompactionThresholdTokens: positive safe integer, default 64000. Example: {"contextCompactionThresholdTokens": 32000} in the selected environment. host-config.validateConfiguration validates it, backendSettings emits RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS only into the managed child environment. Reserved RSI_* keys cannot override it through environment. It is independent of per-model contextBudget and applies to both compaction checkpoints. Restart the affected backend after editing the private project file. Existing config files need no migration; no private config or live service was changed by this implementation.
 
-## File lookup
+## Current team configuration
+
+A committed Operations team member has been created and validated for this design. Its bundle is `.rsi/members/0ad4ed85-9e16-4b3c-b335-4473d7270f8e/`. The configuration is committed but remains inactive pending separate user-controlled activation.
+
 
 - [scripts](../../../../../scripts): owned implementation.
 - [backend/scripts](../../../../../backend/scripts): owned implementation.
