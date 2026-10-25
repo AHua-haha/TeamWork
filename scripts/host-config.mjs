@@ -30,7 +30,8 @@ export function validateConfiguration(value) {
   object(value.paths, ['stateDirectory', 'developmentStateDirectory', 'deploymentSourceRoot'], 'paths');
   for (const [name, path] of Object.entries(value.paths)) { text(path, name); if (!isAbsolute(path)) throw new Error(`paths.${name} must be absolute`); }
   object(value.mysql, ['host', 'port', 'project', 'dockerContext', 'rootPassword'], 'mysql');
-  if (value.mysql.host !== '127.0.0.1' || value.mysql.project !== 'backend') throw new Error('Shared MySQL must retain loopback host and the existing backend project identity');
+  if (value.mysql.host !== '127.0.0.1') throw new Error('MySQL host must be loopback');
+  if (!/^[a-z][a-z0-9_-]{2,40}$/.test(value.mysql.project)) throw new Error('MySQL project must be a unique lowercase Compose identity');
   port(value.mysql.port); text(value.mysql.rootPassword, 'MySQL root password'); text(value.mysql.dockerContext, 'Docker context');
   if (!/^[A-Za-z0-9_.-]+$/.test(value.mysql.dockerContext)) throw new Error('Invalid Docker context name');
   for (const name of ['development', 'deployment']) {
@@ -100,7 +101,8 @@ export async function initializeConfiguration() {
   if (legacyDatabase(development).url.host !== prod.url.host) throw new Error('Legacy development/deployment MySQL addresses differ; resolve them before import');
   let dockerContext = 'default';
   try { dockerContext = execFileSync('docker', ['context', 'show'], { encoding: 'utf8', env: hostEnvironment(), stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* init can precede Docker installation */ }
-  const config = validateConfiguration({ version: 1, paths, mysql: { host: prod.url.hostname, port: Number(prod.url.port || 3306), project: 'backend', dockerContext, rootPassword: 'local-root' }, development: legacySection(development, 3000, 5273), deployment: legacySection(production, 3001, 5274) });
+  const mysql = { host: '127.0.0.1', port: 13306, project: 'team-work', dockerContext, rootPassword: randomBytes(32).toString('hex') };
+  const config = validateConfiguration({ version: 1, paths, mysql, development: legacySection(development, 3000, 5273), deployment: legacySection(production, 3001, 5274) });
   const temporary = `${configPath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   try {
     await writeFile(temporary, JSON.stringify(config, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
@@ -115,7 +117,7 @@ export function backendSettings(config, name) {
   return { ...section.environment, RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS: String(section.contextCompactionThresholdTokens ?? 64000), RSI_HARNESS_PERMISSIONS_ENABLED: String(section.harnessPermissionsEnabled ?? true), DATABASE_URL: url.href, CONFIG_ENCRYPTION_KEY: section.encryptionKey, HOST: '127.0.0.1', PORT: String(section.backendPort), NODE_ENV: name === 'deployment' ? 'production' : 'development' };
 }
 export function composeSettings(config) {
-  return { ...hostEnvironment(), RSI_MYSQL_HOST: config.mysql.host, RSI_MYSQL_PORT: String(config.mysql.port), RSI_MYSQL_ROOT_PASSWORD: config.mysql.rootPassword, RSI_MYSQL_DATABASE: config.deployment.database.name, RSI_MYSQL_USER: config.deployment.database.username, RSI_MYSQL_PASSWORD: config.deployment.database.password };
+  return { ...hostEnvironment(), RSI_MYSQL_HOST: config.mysql.host, RSI_MYSQL_PORT: String(config.mysql.port), RSI_MYSQL_ROOT_PASSWORD: config.mysql.rootPassword, RSI_MYSQL_DATABASE: config.development.database.name, RSI_MYSQL_USER: config.development.database.username, RSI_MYSQL_PASSWORD: config.development.database.password };
 }
 export function composeArguments(config) {
   return ['--context', config.mysql.dockerContext, 'compose', '--env-file', '/dev/null', '--project-directory', join(root, 'backend'), '-p', config.mysql.project, '-f', join(root, 'backend/compose.yaml')];

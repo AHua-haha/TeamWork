@@ -33,7 +33,7 @@ async function start() {
 try {
   const command = process.argv[2];
   if (command === 'status') {
-    console.log(`MySQL: ${databaseStatus(config) ? 'running (shared)' : 'stopped/unavailable'}`);
+    console.log(`MySQL: ${databaseStatus(config) ? 'running (project-isolated)' : 'stopped/unavailable'}`);
     for (const [name, file, marker] of [['Backend', backPid, backend], ['Frontend', frontPid, frontend]]) {
       const record = await processRecord(file, marker); console.log(`Development ${name}: ${record ? `running (PID ${record.pid})` : 'stopped'}`);
     }

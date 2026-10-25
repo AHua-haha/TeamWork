@@ -13,7 +13,9 @@ export async function startDatabase(config) {
 }
 export async function provisionDevelopment(config) {
   const password = config.development.database.password;
-  const sql = `CREATE DATABASE IF NOT EXISTS rsi_agent_dev CHARACTER SET utf8mb4;\nCREATE USER IF NOT EXISTS 'rsi_dev'@'%' IDENTIFIED BY '${password}';\nALTER USER 'rsi_dev'@'%' IDENTIFIED BY '${password}';\nGRANT ALL PRIVILEGES ON rsi_agent_dev.* TO 'rsi_dev'@'%';\n`;
+  const database = config.development.database.name;
+  const username = config.development.database.username;
+  const sql = `CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4;\nCREATE USER IF NOT EXISTS '${username}'@'%' IDENTIFIED BY '${password}';\nALTER USER '${username}'@'%' IDENTIFIED BY '${password}';\nGRANT ALL PRIVILEGES ON \`${database}\`.* TO '${username}'@'%';\n`;
   await new Promise((resolve, reject) => {
     const child = spawn('docker', [...composeArguments(config), 'exec', '-T', 'mysql', 'sh', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -uroot'], { env: composeSettings(config), stdio: ['pipe', 'ignore', 'inherit'] });
     child.once('error', reject); child.stdin.on('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('Development database provisioning failed'))); child.stdin.end(sql);

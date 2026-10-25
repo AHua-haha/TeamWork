@@ -2,51 +2,72 @@
 
 ## Result summary
 
-Project scripts retain the existing shared database service and separate dev/deployment settings. Source/compiled backend entries now follow Runtime. Previously selected flat-entry compiled releases can still restart during rollback.
+Operations owns setup/readiness, dependency installation from lockfiles, development and deployment processes, and the isolated development MySQL service lifecycle. Project settings are centralized in private `rsi.config.json`; it is generated on `dev.sh init` (mode 0600), not committed. The development MySQL Compose project is `team-work`, with container `team-work-dev-mysql`, network `team-work-dev-network`, volume `team-work-dev-mysql-data`, loopback host port 13306, and dedicated development credentials. It is distinct from the pre-existing `backend-mysql-1` service on 3306. Development and deployment application settings remain separate; only the dedicated dev service is managed by `database.sh`.
+
+**Current local setup:** private root `rsi.config.json` has been initialized and dependencies installed with `npm ci` under backend and frontend. Dedicated MySQL was created, health-checked, provisioned, and exercised by successful dev backend/frontend startup. Both applications and the dedicated service were then stopped cleanly. The pre-existing service remains running and untouched. Private config contains secrets and is not tracked.
 
 Design: [Operations](../../../design/operations/design.md).
 
-### Coordination and ownership
+## Implemented interfaces
 
-host-config reads the project private config and constructs isolated child settings. develop launches source/Vite; deployment exports committed Git source, installs/builds, then switches application processes. database manages the supporting service/accounts, never interprets application models.
+### Environment and development
 
-### Implemented contract
+**Input:** `scripts/dev.sh init|start|stop|restart|status|logs [backend|frontend]`, project private config; locked `backend/package-lock.json` and `frontend/package-lock.json`.
 
-**Input:** Project commands (`dev.sh`, `deploy.sh`, `database.sh`), a private mode-0600 rsi.config.json, optional explicit Git ref.
+**Output:** Validated config, dependency readiness errors, process status/logs, and local backend/frontend on configured loopback ports.
 
-**Output:** Build/release selection, process status/logs and application/service lifecycle. update defaults to local committed HEAD; no fetch, checkout switch or uncommitted source deployment.
+**Effect:** Child processes receive only managed per-environment settings. `dev.sh start` starts/ensures the dedicated DB, provisions the configured development schema/user (no application schema interpretation), and starts backend/frontend; stop stops only those application processes and preserves the database service/data. Dependency setup is `npm ci --prefix backend && npm ci --prefix frontend`.
 
-**Effect and failure:** Settings remain child-process-only. Build failure preserves the running release; launch failure attempts recovery. Stop app leaves MySQL/data intact. No live config, database or deployment is modified by this source migration.
+**Usage:** `./scripts/dev.sh init`; `npm ci --prefix backend && npm ci --prefix frontend`; `./scripts/dev.sh start`; `./scripts/dev.sh status`; `./scripts/dev.sh stop`.
 
-**Usage example:** `./scripts/dev.sh start`; `./scripts/deploy.sh update [git-ref]`; `./scripts/deploy.sh status`. Install backend/frontend dependencies before development. Review root README for required local tools and isolated lifecycle tests.
+### Dedicated supporting database
 
-### Token-threshold launch setting
+**Input:** `scripts/database.sh start|stop|status`; `mysql` configuration and development database credentials from `rsi.config.json`.
 
-The development/deployment sections each accept optional contextCompactionThresholdTokens: positive safe integer, default 64000. Example: {"contextCompactionThresholdTokens": 32000} in the selected environment. host-config.validateConfiguration validates it, backendSettings emits RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS only into the managed child environment. Reserved RSI_* keys cannot override it through environment. It is independent of per-model contextBudget and applies to both compaction checkpoints. Restart the affected backend after editing the private project file. Existing config files need no migration; no private config or live service was changed by this implementation.
+**Output:** Explicit service lifecycle/status; Compose health waits on start.
 
-## Current team configuration
+**Effect:** Docker Compose arguments select the configured context/project and repository Compose file; unique project identity and explicit named volume/network/container isolate service resources. Start uses no-recreate; stop only targets this Compose project's MySQL. Configured host port is checked by Compose bind, so another listener causes start refusal without stopping it. No deployment DB settings are used for provisioning.
 
-A committed Operations team member has been created and validated for this design. Its bundle is `.rsi/members/0ad4ed85-9e16-4b3c-b335-4473d7270f8e/`. The configuration is committed but remains inactive pending separate user-controlled activation.
+**Usage:** `./scripts/database.sh start`, `./scripts/database.sh status`, `./scripts/database.sh stop`.
 
-## Design update awaiting implementation
+### Deployment
 
-The user-approved project direction is one private `rsi.config.json` as the source for all project-level configuration, including development/deployment, environment/toolchain/dependency and database-service settings. Operations owns development environment setup, pinned dependency/toolchain readiness, launch configuration, and this project's isolated development database service lifecycle (initialize/configure/start/stop/status). The development service must use project-specific Compose resources and credentials, and must never reuse or modify another project's service or data. Its host port must be configured in the project file and checked for conflicts. Development and deployment remain separately configurable.
+**Input:** `scripts/deploy.sh` lifecycle/update commands and optional local Git ref.
 
-This design update is recorded, but the current implementation has not yet been changed to create/manage a dedicated development service or centralize/extend environment setup. The prior implementation uses the shared Compose MySQL service; do not claim isolation until Operations implements and verifies the new lifecycle. Existing service/data have not been altered.
+**Output/effect:** Exported committed local source is built before switching; failures preserve active release or attempt recovery after launch failure. Deployment application database settings stay separately configured and database is never stopped by app stop.
+
+**Usage:** `./scripts/deploy.sh update [git-ref]`; `./scripts/deploy.sh status`.
+
+### Configuration contract
+
+`rsi.config.json` is the sole private project config. `mysql.host` must be loopback, project identity is validated, and host port is explicit (initialized to 13306). Initialization generates a root credential and separate development encryption key while retaining imported deployment credentials; it does not modify legacy env files. `backendSettings(config, environment)` creates child-only backend settings. Context compaction threshold defaults to 64,000 and validates positive safe integers independently for development/deployment. Example template: [rsi.config.example.json](../../../../../rsi.config.example.json).
+
+## Verification
+
+- `docker ps` initially showed existing `backend-mysql-1` on 127.0.0.1:3306.
+- `./scripts/dev.sh init` generated private config with port 13306 and project `team-work`.
+- `./scripts/database.sh start` created and health-checked the dedicated container; `./scripts/dev.sh start` successfully started both app processes.
+- Confirmed separate containers/ports and distinct `backend_mysql-data` vs `team-work-dev-mysql-data` volumes.
+- `./scripts/dev.sh stop`, `./scripts/database.sh stop` left `backend-mysql-1` running on 3306.
+- `node --test scripts/test/*.test.mjs`: 15 passed.
+- `npm --prefix backend test`: 228 passed; `npm --prefix frontend test`: 88 passed.
+- Backend/frontend `npm run check`: passed.
+- npm reported dependency audit issues (backend: 6 total, including 5 high; frontend: 3 high); no audit fix was applied.
 
 ## File lookup
 
-- [scripts](../../../../../scripts): owned implementation.
-- [backend/scripts](../../../../../backend/scripts): owned implementation.
-- [backend/compose.yaml](../../../../../backend/compose.yaml): owned implementation.
-- [rsi.config.example.json](../../../../../rsi.config.example.json): owned implementation.
-- [reference/host-deployment/design.md](reference/host-deployment/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/host-deployment/impl.md](reference/host-deployment/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/local-dev/design.md](reference/local-dev/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/local-dev/impl.md](reference/local-dev/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/shared-database/design.md](reference/shared-database/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/shared-database/impl.md](reference/shared-database/impl.md): migrated existing behavior/code reference, not a child design.
-- [Host tests](../../../../../scripts/test): isolated Git/state/process fixtures; no live service mutation.
+- [scripts](../../../../../scripts): lifecycle/configuration implementation and isolated host tests.
+- [backend/compose.yaml](../../../../../backend/compose.yaml): MySQL service definition.
+- [rsi.config.example.json](../../../../../rsi.config.example.json): private-config template.
+- [backend/package.json](../../../../../backend/package.json), [frontend/package.json](../../../../../frontend/package.json): dependency manifests and lifecycle scripts.
+- [frontend](../../../../../frontend): front-end source.
+
+## Remaining work and risks
+
+- Local private config is machine-specific and must be retained securely; template values are placeholders. Do not commit the private config.
+- Deployment database service provisioning/lifecycle is intentionally not coupled to this dev-only service.
+- npm audit findings require separate dependency/security triage; automatic upgrades were not attempted.
+- Source/service setup is not a deployed release; deployment remains an explicit operator action.
 
 ## Automatic retrieval
 

@@ -40,7 +40,7 @@ async function fixture(run) {
   const config = {
     version: 1,
     paths: { stateDirectory: state, developmentStateDirectory: join(root, '.run'), deploymentSourceRoot: join(directory, 'sources') },
-    mysql: { host: '127.0.0.1', port: 3306, project: 'backend', dockerContext: 'fixture-context', rootPassword: 'fixture-root' },
+    mysql: { host: '127.0.0.1', port: 13306, project: 'fixture-project', dockerContext: 'fixture-context', rootPassword: 'fixture-root' },
     development: { backendPort: await port(), frontendPort: await port(), database: { name: 'rsi_agent_dev', username: 'rsi_dev', password: 'rsi_dev' }, encryptionKey: randomBytes(32).toString('base64'), environment: {} },
     deployment: { backendPort: await port(), frontendPort: await port(), database: { name: 'rsi_agent', username: 'rsi', password: 'rsi' }, encryptionKey: key, environment: { DEEPSEEK_WEB_API_KEY: 'retained-test-key' } },
   };
@@ -58,7 +58,7 @@ test('initialization imports legacy credentials once into a private project file
   const config = JSON.parse(await readFile(f.configPath, 'utf8'));
   assert.equal(config.deployment.encryptionKey, f.key);
   assert.equal(config.deployment.environment.DEEPSEEK_WEB_API_KEY, 'retained-test-key');
-  assert.equal(config.mysql.port, 3306); assert.equal(config.mysql.dockerContext, 'fixture-context');
+  assert.equal(config.mysql.port, 13306); assert.equal(config.mysql.project, 'team-work'); assert.equal(config.mysql.dockerContext, 'fixture-context');
   assert.equal(config.deployment.database.name, 'rsi_agent'); assert.equal(config.development.database.name, 'rsi_agent_dev');
   assert.notEqual(config.development.encryptionKey, f.key);
   assert.equal((await stat(f.configPath)).mode & 0o777, 0o600);

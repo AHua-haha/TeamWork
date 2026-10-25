@@ -7,38 +7,26 @@
   },
   "mysql": {
     "host": "127.0.0.1",
-    "port": 3306,
-    "project": "backend",
+    "port": 13306,
+    "project": "team-work",
     "dockerContext": "default",
-    "rootPassword": "LOCAL_MYSQL_ROOT_PASSWORD"
+    "rootPassword": "GENERATED_BY_INIT"
   },
   "development": {
     "backendPort": 3000,
     "frontendPort": 5273,
-    "database": {
-      "name": "rsi_agent_dev",
-      "username": "rsi_dev",
-      "password": "rsi_dev"
-    },
+    "database": { "name": "rsi_agent_dev", "username": "rsi_dev", "password": "GENERATED_BY_INIT" },
     "encryptionKey": "GENERATED_BY_INIT_PRESERVE_EXISTING_KEY",
-    "environment": {
-      "DEEPSEEK_WEB_API_KEY": ""
-    },
+    "environment": { "DEEPSEEK_WEB_API_KEY": "" },
     "harnessPermissionsEnabled": true,
     "contextCompactionThresholdTokens": 64000
   },
   "deployment": {
     "backendPort": 3001,
     "frontendPort": 5274,
-    "database": {
-      "name": "rsi_agent",
-      "username": "rsi",
-      "password": "LOCAL_MYSQL_PASSWORD"
-    },
+    "database": { "name": "rsi_agent", "username": "rsi", "password": "LOCAL_MYSQL_PASSWORD" },
     "encryptionKey": "IMPORTED_BY_INIT_PRESERVE_EXISTING_KEY",
-    "environment": {
-      "DEEPSEEK_WEB_API_KEY": ""
-    },
+    "environment": { "DEEPSEEK_WEB_API_KEY": "" },
     "harnessPermissionsEnabled": true,
     "contextCompactionThresholdTokens": 64000
   }
