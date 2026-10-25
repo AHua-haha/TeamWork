@@ -1,0 +1,31 @@
+{
+  "name": "Backend",
+  "role": "Backend",
+  "responsibility": "Owns backend collaboration and execution capabilities focused on Team, Agent, and Harness: maintains shared team cooperation, admission and publication behavior; Agent run, context, persistence, recovery and compaction mechanisms; and Harness tools, permissions, approvals and execution capabilities. Preserves accepted ownership boundaries and coordinates only through public interfaces.",
+  "settings": {
+    "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+    "modelId": "gpt-6.1-sol",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+        "modelId": "gpt-6.1-sol"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "backend/core/team/metadata.json",
+      "backend/core/agent/metadata.json",
+      "backend/core/harness/metadata.json"
+    ],
+    "dependencies": []
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}

@@ -52,3 +52,7 @@ Core prepareWorkspace creates a fresh Team root-design lead and asks Workspace's
 ```json
 {"commands": []}
 ```
+
+## Backend Team member assignment
+
+A pending Backend member was created for the accepted Team, Agent and Harness subdesigns and validated. Bundle: `.rsi/members/6ce74fb9-cbce-4784-9a64-c8ff96c7d203/`. The member owns Team shared cooperation/publication and scheduling, Agent run/context/persistence/recovery/compaction, and Harness capabilities/permissions, within those three design scopes. Configuration remains pending and inactive until separately reviewed/committed and user-activated.
