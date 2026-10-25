@@ -50,13 +50,17 @@ On terminal success/failure/cancellation, let Agent persist its continuous state
 
 An accepted final retains its stable private origin reference alongside its materialized public context entry. Make that provenance available so the sender's Agent can reconcile its existing private answer with the shared publication without duplicate model-visible content. A publication refusal remains private feedback and allows revision under existing rules.
 
-Explicit idle chat reset clears shared history and Agent contexts/consumption state consistently, while preserving project files and context documents. Reset is the explicit destructive operation; a normal stop is not a reset.
+Explicit idle chat reset clears shared history and Agent contexts/consumption state consistently, while preserving project files and context documents. Reset and workspace deletion are explicit destructive lifecycle operations; a normal stop is neither.
 
 ### Future group-context management
 
 For now, expose original shared messages without summarization or structured extraction. A future Team-owned model may derive structured information and member-specific views. Agent must not independently summarize the shared transcript as its authoritative replacement.
 
 Agent compaction obtains original group context through the same read reference and combines it with all new private preparation messages. Team does not pass the retained range as an additional input or define the trigger policy. Agent durably acknowledges preparation start/messages and atomic context/journal cutover, and recovers interrupted preparation without replay. Team neither implements that persistence nor changes an already accepted ordinary response. Public final references and presentation ranges remain pinned to ordinary work. Hold execution/idle authority through maintenance; stop/shutdown must cancel it. Reset removes preparation records with context/history. No new HTTP endpoint or agent tool is required.
+
+### Workspace deletion lifecycle
+
+The explicit user deletion flow requires the entire team to be idle, including pending/finalizing work. Serialize it with admission/configuration lifecycle operations. Remove only the selected workspace group context/history/images/timeline/exchanges, activation and all members including retired members. Use Agent public idle checks and Core-coordinated Agent removal. Stop persistent shells/jobs and clear runtime progress; invalidate shared residents after commit/uncertainty. Wake history followers so deleted workspaces report unavailability. Keep all filesystem content and global configuration.
 
 ## Constraints, specifications and requirements
 

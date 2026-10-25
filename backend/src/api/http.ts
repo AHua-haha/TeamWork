@@ -9,7 +9,7 @@ import { workspaceRoutes } from './workspace-routes.js';
 import type { WorkspaceService } from '../core/workspace/workspace.js';
 
 export function createAgentServer(runtime: AgentRuntime, config: ConfigService, workspaces: WorkspaceService, team: TeamSystem) {
-  const workspaceRoute = workspaceRoutes(workspaces);
+  const workspaceRoute = workspaceRoutes(workspaces, id => team.deleteWorkspace(id));
   const teamRoute = teamRoutes(team);
   return createServer(respond(async route => {
     const { request, response, url, path, signal } = route;

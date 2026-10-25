@@ -476,6 +476,25 @@ export class AgentData {
             }
         });
     }
+    async assertIdle(ids: string[], reason = 'Wait for every member to finish before deleting the workspace'): Promise<void> {
+        for (const id of [...new Set(ids)].sort()) {
+            const agent = await this.agent(this.pool, id, true);
+            const preparing = await rows(this.pool, 'SELECT id FROM context_compactions WHERE agent_id = ? AND active_agent_id IS NOT NULL FOR UPDATE', [id]);
+            if (agent.activeRunId || preparing.length) throw new AppError('workspace_busy', reason, 409);
+        }
+    }
+    async deleteAgents(ids: string[]): Promise<void> {
+        await this.transaction(async db => {
+            const agents = this.inTransaction(db);
+            await agents.assertIdle(ids);
+            for (const id of [...new Set(ids)].sort()) {
+                for (const table of ['context_compactions', 'agent_context_entries', 'messages', 'runs'])
+                    await db.execute(`DELETE FROM ${table} WHERE agent_id = ?`, [id]);
+                await db.execute('DELETE FROM agents WHERE id = ?', [id]);
+                this.storage.afterCommit(db, () => this.contexts.invalidate(id), () => this.contexts.invalidate(id));
+            }
+        });
+    }
     async clearHistory(): Promise<void> { await clearTables(this.pool, ['context_compactions', 'agent_context_entries', 'messages', 'runs']); }
     async deleteRecords(): Promise<void> {
         await clearTables(this.pool, ['agents']);

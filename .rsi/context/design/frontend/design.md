@@ -14,6 +14,10 @@ The UI returns visible records, forms, progress and explicit error/retry states.
 
 Before creating a workspace, inspect the selected directory. When nonempty `.rsi` state outside context exists, show its paths and an explicit Clean up and initialize action. State that project context and source are preserved and other member/runtime metadata is discarded. Cancel performs no cleanup or registration. Submit the reviewed cleanup revision with the captured creation request; if state changes, show the conflict and require a new review. No cleanup confirmation is needed for context-only or empty managed state.
 
+### Workspace deletion confirmation
+
+Each workspace row offers Delete workspace. Require a confirmation naming the workspace and explaining that application chats/member contexts/settings are permanently removed while all project files and .rsi are kept. Cancel sends no deletion request; busy/backend failures remain visible without removing the row. After success remove the row; if currently viewing it, close its local files/chat and return home. Clear saved last-chat references to the deleted workspace, invalidate stale workspace-list requests, and preserve navigation to unrelated workspaces. Explain loss of unsaved local edits when applicable.
+
 ## Constraints, specifications and requirements
 
 - Preserve existing accepted observable behavior, record formats, revisions/cursors, API payloads and lifecycle guarantees during this migration.

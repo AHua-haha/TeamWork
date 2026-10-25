@@ -30,6 +30,16 @@ createAgentServer receives AgentRuntime and configuration/workspace/team service
 
 **Usage example:** inspect an existing directory, display cleanupPaths, then POST /workspaces with its cleanupRevision only after explicit user confirmation. If state changes, inspect/review again before retrying.
 
+### Workspace deletion endpoint
+
+**Input:** DELETE /workspaces/:workspaceId, with a validated identity and no query parameters or filesystem option. workspaceRoutes receives a business deletion callback supplied by createAgentServer.
+
+**Output:** 200 {workspaceId}; workspace_busy/409 for active work/maintenance, not_found/404 for missing IDs, and existing error envelopes for technical failures.
+
+**Effect and failure:** Delegate to TeamSystem.deleteWorkspace for idle authority, owner transaction and resource cleanup. No direct persistence or file deletion is implemented in API. All other workspace methods retain existing contracts.
+
+**Usage example:** await fetch('/workspaces/my-project',{method:'DELETE'}). Frontend confirms the destructive application-data action before sending this request; it sends no directory or deletion flags. Repeating deletion after success returns 404.
+
 ## File lookup
 
 - [backend/src/api](../../../../../../backend/src/api): owned implementation.

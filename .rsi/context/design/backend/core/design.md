@@ -22,6 +22,10 @@ Core composes owner data-model operations on one technical transaction. Workspac
 
 Workspace inspects and prepares filesystem state while preserving existing context. Core creates a fresh root-design Team lead and registers its initial configuration, activation, context history and accepted baseline atomically through owner operations. Nonempty metadata cleanup requires explicit revision-bound user confirmation. Registration failure rolls back prepared filesystem additions and restores staged metadata; original context and project source are preserved.
 
+### Atomic workspace deletion
+
+Coordinate Workspace, Team, Agent and member-profile removal through their public owner operations in one Storage transaction. Preserve other workspaces, standalone agents and global provider/application configuration. Team holds idle/admission authority through deletion; reject running/admitted/finalizing work or active compaction. Stop member shells/jobs and context watchers, remove durable data atomically, invalidate resident models only after commit or uncertain acknowledgement, and notify existing readers. Do not remove project files or .rsi metadata.
+
 ## Constraints, specifications and requirements
 
 Preserve public HTTP/SSE presentation, shared-workspace single-member execution, mention/publication refusal behavior, image semantics, idle reset and member configuration rules. Context ownership and compaction introduce no public context-edit endpoint; workspace creation uses its initialization review.

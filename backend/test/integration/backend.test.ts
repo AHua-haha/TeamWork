@@ -2930,3 +2930,88 @@ test('adoption imports preserved context and fresh lead atomically after reviewe
     assert.equal(await readFile(join(directory,'src/api/index.ts'),'utf8'),'implementation');
   }finally{await rm(directory,{recursive:true,force:true});}
 });
+
+test('workspace deletion is scoped, atomic and invalidates resident contexts while preserving files', {timeout:30000}, async()=>{
+  const f=await groupFixture();
+  const otherFolder=await realpath(await mkdtemp(join(tmpdir(),'deletion-other-')));
+  try{
+    const {png}=await import('../image-fixture.js');
+    const {prepareChatImage}=await import('../../src/core/team/data/chat-images.js');
+    const directory=(await store.workspaces.getWorkspace(f.workspaceId))!.directory;
+    await writeFile(join(directory,'keep.txt'),'source stays');
+    const accepted=await f.team.runner.postUser(f.workspaceId,'Inspect picture',[await prepareChatImage(png(),'saved.png')]);
+    answer((await f.requests.next()).events,message('Published result'));
+    await f.runtime.finished(f.lead.memberId,accepted.runs[0]!.runId);
+    await new Promise(resolve=>setImmediate(resolve));
+    await f.team.runner.retire(f.workspaceId,f.backend.memberId,f.backend.revision);
+    const memberIds=(await store.team.listMembers(f.workspaceId)).map(m=>m.id);
+    const resident=await store.agents.residentContext(f.lead.memberId);
+    const shared=await store.team.readGroupContext(f.workspaceId,0);
+    assert.equal(shared.length,2);
+    const originalDesign=await readFile(join(directory,'.rsi/context/design/design.md'));
+    const originalMember=await readFile(join(directory,'.rsi/members',f.lead.memberId,'member.json'));
+    await mkdir(join(directory,'.git'));await writeFile(join(directory,'.git/HEAD'),'preserved git bytes');
+    const other=await workspaces.create({name:'Other deletion isolation',directory:join(otherFolder,'project'),models:testModels(),adopt:false});
+    const otherLead=(await store.team.listMembers(other.workspaceId))[0]!;
+    const soloId=randomUUID();await store.agents.createAgent(soloId);
+    const soloRun=await store.agents.startRun(soloId,{role:'user',content:'Solo stays',timestamp:1});
+    await store.agents.finishRun(soloId,soloRun.runId,'cancelled');
+    const connection=await store.config.getConfig('connection',f.lead.settings.connectionId!);
+    const app=await store.config.getConfig('app','settings');
+    // Owner removal composed inside an outer rollback must leave SQL and resident state intact.
+    await assert.rejects(store.storage.transaction(async db=>{
+      await store.workspaces.inTransaction(db).deleteWorkspace(f.workspaceId);
+      assert.ok(resident.history.entries.length);
+      throw new Error('rollback workspace deletion');
+    }),/rollback workspace deletion/);
+    assert.ok(await store.workspaces.getWorkspace(f.workspaceId));
+    assert.equal(await store.agents.residentContext(f.lead.memberId),resident);
+    assert.deepEqual(await store.team.readGroupContext(f.workspaceId,0),shared);
+    await f.team.deleteWorkspace(f.workspaceId);
+    assert.equal(await store.workspaces.getWorkspace(f.workspaceId),null);
+    for(const table of ['workspace_git_baselines','workspace_models','context_blobs','context_versions','context_files','context_records','members','member_activation','chat_images','chat_settings','chat_exchanges','chat_messages','chat_context_entries','chat_clock','chat_entries','chat_changes']){
+      const [rows]=await store.pool.query<any[]>(`SELECT COUNT(*) count FROM ${table} WHERE workspace_id = ?`,[f.workspaceId]);
+      assert.equal(rows[0].count,0,table);
+    }
+    for(const id of memberIds){
+      await assert.rejects(store.agents.getState(id),e=>(e as {code?:string}).code==='not_found');
+      await assert.rejects(store.config.getConfig('agent',id),e=>(e as {code?:string}).code==='not_found');
+      for(const table of ['agent_context_entries','messages','runs','context_compactions']){
+        const [rows]=await store.pool.query<any[]>(`SELECT COUNT(*) count FROM ${table} WHERE agent_id = ?`,[id]);assert.equal(rows[0].count,0,table);
+      }
+    }
+    assert.throws(()=>resident.history,e=>(e as {code?:string}).code==='context_conflict');
+    await assert.rejects(store.agents.residentContext(f.lead.memberId),e=>(e as {code?:string}).code==='not_found');
+    await assert.rejects(store.team.readGroupContext(f.workspaceId,0),e=>(e as {code?:string}).code==='not_found');
+    assert.deepEqual(await store.config.getConfig('connection',f.lead.settings.connectionId!),connection);
+    assert.deepEqual(await store.config.getConfig('app','settings'),app);
+    assert.ok(await store.workspaces.getWorkspace(other.workspaceId));assert.ok(await store.agents.getState(otherLead.id));
+    assert.equal((await store.agents.getContext(soloId)).entries[0]!.message.role,'user');
+    assert.equal(await readFile(join(directory,'keep.txt'),'utf8'),'source stays');
+    assert.equal(await readFile(join(directory,'.git/HEAD'),'utf8'),'preserved git bytes');
+    assert.deepEqual(await readFile(join(directory,'.rsi/context/design/design.md')),originalDesign);
+    assert.deepEqual(await readFile(join(directory,'.rsi/members',f.lead.memberId,'member.json')),originalMember);
+  }finally{await f.close();await rm(otherFolder,{recursive:true,force:true});}
+});
+
+test('workspace deletion refuses active runs and unfinished compaction at the durable boundary', {timeout:30000}, async()=>{
+  const f=await groupFixture();
+  try{
+    const accepted=await f.team.runner.postUser(f.workspaceId,'Work');
+    const request=await f.requests.next();
+    await assert.rejects(f.team.deleteWorkspace(f.workspaceId),e=>(e as {code?:string}).code==='workspace_busy');
+    await assert.rejects(store.workspaces.deleteWorkspace(f.workspaceId),e=>(e as {code?:string}).code==='workspace_busy');
+    assert.equal((await store.team.chatSnapshot(f.workspaceId)).messages.length,1);
+    answer(request.events,message('Done'));await f.runtime.finished(f.lead.memberId,accepted.runs[0]!.runId);
+    await new Promise(resolve=>setImmediate(resolve));
+    const history=await store.agents.getContext(f.lead.memberId);
+    const compaction:CompactionState={id:randomUUID(),agentId:f.lead.memberId,runId:accepted.runs[0]!.runId,trigger:'after-run',status:'preparing',startedAt:Date.now(),endedAt:null,error:null};
+    await store.agents.beginCompaction(compaction);
+    await assert.rejects(f.team.deleteWorkspace(f.workspaceId),e=>(e as {code?:string}).code==='workspace_busy');
+    assert.ok(await store.workspaces.getWorkspace(f.workspaceId));
+    assert.equal((await store.team.chatSnapshot(f.workspaceId)).messages.length,2);
+    await store.agents.finishCompaction({...compaction,status:'completed',endedAt:Date.now()},history.revision,history.entries);
+    await f.team.deleteWorkspace(f.workspaceId);
+    assert.equal(await store.workspaces.getWorkspace(f.workspaceId),null);
+  }finally{await f.close();}
+});

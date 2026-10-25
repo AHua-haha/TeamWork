@@ -14,6 +14,10 @@ Creating/adopting a workspace preserves existing `.rsi/context/` content byte fo
 
 Expose read-only inspection returning the canonical directory, nonempty non-context `.rsi` paths and a cleanup revision. Empty non-context directories are allowed. Nonempty metadata requires the user to review/confirm cleanup; creating without that revision or with a changed revision fails before modifying files. Confirmation authorizes removal only outside `.rsi/context/`. Refuse symbolic managed/context roots and case collisions. On preparation/registration failure, preserve existing context and restore staged metadata, removing only this attempt's additions. Successful cleanup creates fresh filesystem/SQL runtime/member state; it does not recover prior conversations or member configuration. Filesystem staging is not a crash recovery journal.
 
+### Workspace deletion
+
+Delete a registered workspace and its application-owned data while preserving every file on disk, including the complete .rsi directory, source and ordinary Git history. Deletion is independent of folder availability. Stop context watchers before removal, invalidate registry/context caches, and release the directory for later adoption. Missing IDs fail explicitly; registered identity cannot silently return from stale caches. Core composes foreign-owner removal through lifecycle callbacks on one transaction. Failure rolls back durable removal and permits reopening existing context. Deletion does not recover data on later adoption; re-adoption uses normal initialization review.
+
 ## Constraints, specifications and requirements
 
 Preserve existing public HTTP/SSE payloads, stable SQL/JSON formats, ordering, authority and lifecycle behavior. Workspace owns both its core in-memory model and durable representation, schema, mapping, validation, queries and related operations. Technical Storage supplies engine resources only. Share explicit interface values and lifecycle notifications; keep private runtime state and SQL schemas inside their respective owners. Filesystem/tool effects can precede failures and are never automatically replayed.

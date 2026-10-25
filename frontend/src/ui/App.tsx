@@ -50,6 +50,8 @@ export function App() {
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
   const [workspacesError, setWorkspacesError] = useState<string | null>(null);
   const [addingWorkspace, setAddingWorkspace] = useState(false);
+  const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceRecord | null>(null);
+  const workspaceLoad = useRef(0);
   const [connections, setConnections] = useState<ConfigRecord<ConnectionView>[]>([]);
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
@@ -70,9 +72,13 @@ export function App() {
     finally { setAgentsLoading(false); }
   }, [api]);
   const loadWorkspaces = useCallback(async () => {
-    try { setWorkspaces(await workspaceClient.listWorkspaces()); setWorkspacesError(null); }
-    catch (cause) { setWorkspacesError(errorText(cause)); }
-    finally { setWorkspacesLoading(false); }
+    const request = ++workspaceLoad.current;
+    try {
+      const items = await workspaceClient.listWorkspaces();
+      if (request === workspaceLoad.current) { setWorkspaces(items); setWorkspacesError(null); }
+    }
+    catch (cause) { if (request === workspaceLoad.current) setWorkspacesError(errorText(cause)); }
+    finally { if (request === workspaceLoad.current) setWorkspacesLoading(false); }
   }, [workspaceClient]);
   const loadConnections = useCallback(async () => {
     try { setConnections(await api.listConnections()); setConnectionsError(null); }
@@ -127,6 +133,23 @@ export function App() {
   function showFiles(open: boolean) {
     if (open && window.innerWidth <= 760) setPanelOpen(false);
     setFilesOpen(open);
+  }
+  async function deleteWorkspace(workspace: WorkspaceRecord) {
+    await workspaceClient.deleteWorkspace(workspace.workspaceId);
+    workspaceLoad.current++;
+    setWorkspaces(list => list.filter(item => item.workspaceId !== workspace.workspaceId));
+    setWorkspacesLoading(false); setWorkspacesError(null); setDeletingWorkspace(null);
+    if (lastChat?.page === 'workspace' && lastChat.id === workspace.workspaceId) {
+      setLastChat(null);
+      try { window.sessionStorage.removeItem('lastChat'); } catch { /* Navigation works without storage. */ }
+    }
+    const current = routeRef.current;
+    if (current.page === 'workspace' && current.id === workspace.workspaceId) {
+      filesDirty.current = false;
+      setFilesOpen(false); setFilesExpanded(false); setLeaving(null);
+      window.history.replaceState(null, '', routeUrl({page: 'home'}));
+      setRoute({page: 'home'}); setError(null);
+    }
   }
   function showConversation() {
     setFilesExpanded(false);
@@ -188,6 +211,9 @@ export function App() {
           {!workspacesLoading && !workspaces.length && !workspacesError && <p className="sidebar-muted">No workspaces yet. A workspace is a project folder with its own team.</p>}
           {filteredWorkspaces.map(workspace => <div className={`conversation-nav-row ${route.page === 'workspace' && route.id === workspace.workspaceId ? 'selected' : ''}`} key={workspace.workspaceId}>
             <button type="button" className="conversation-nav-link" title={workspace.directory} onClick={() => navigate({ page: 'workspace', id: workspace.workspaceId })}><span className="conversation-nav-mark">▣</span><span>{workspace.name}</span></button>
+            <button type="button" className="rename-trigger workspace-delete" title="Delete workspace" aria-label={`Delete workspace ${workspace.name}`} onClick={() => setDeletingWorkspace(workspace)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg>
+            </button>
           </div>)}
         </div>
         <div className="context-section-label with-action"><span>CONVERSATIONS</span>
@@ -237,5 +263,9 @@ export function App() {
       setWorkspaces(list => [...list.filter(item => item.workspaceId !== created.workspaceId), created].sort((a, b) => a.name.localeCompare(b.name)));
       navigate({ page: 'workspace', id: created.workspaceId });
     }} />}
+    {deletingWorkspace && <ConfirmDialog eyebrow="DELETE WORKSPACE" title={`Delete “${deletingWorkspace.name}”?`} action="Delete workspace"
+      message={<>This permanently removes this workspace’s saved chats, member contexts and settings from the application.<br /><br />All files in <code>{deletingWorkspace.directory}</code>, including the entire <code>.rsi</code> directory, will be kept.
+        {filesDirty.current && route.page === 'workspace' && route.id === deletingWorkspace.workspaceId && <><br /><br />Unsaved edits in open files will be discarded.</>}</>}
+      onClose={() => setDeletingWorkspace(null)} onConfirm={() => deleteWorkspace(deletingWorkspace)} />}
   </div>;
 }

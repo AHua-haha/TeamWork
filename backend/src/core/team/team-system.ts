@@ -33,7 +33,7 @@ export class TeamSystem {
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
 
-  constructor(private readonly store: TeamStore & ChatStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
+  constructor(private readonly store: TeamStore & ChatStore, private readonly workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
     this.designs = new DesignService(workspaces);
     this.service = new TeamService(store, workspaces, config, this.designs);
     this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id), web, permissionsEnabled);
@@ -60,6 +60,15 @@ export class TeamSystem {
   async team(workspaceId: string): Promise<TeamStatus> {
     const team = await this.service.team(workspaceId);
     return { ...team, members: team.members.map(member => this.status(member)) };
+  }
+
+  deleteWorkspace(workspaceId: string): Promise<void> {
+    return this.runner.idleWorkspace(workspaceId, async () => {
+      const members = await this.store.listMembers(workspaceId);
+      await this.workspaces.delete(workspaceId);
+      try { await this.harness.closeShells(members.map(member => member.id)); }
+      finally { for (const member of members) this.runtime?.clearProgress(member.id); }
+    }, 'Stop team work and wait for every member to finish before deleting the workspace');
   }
 
   modelSettings(workspaceId: string, memberId: string) { return this.service.modelSettings(workspaceId, memberId); }

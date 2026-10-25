@@ -19,6 +19,7 @@ export interface WorkspaceDataHooks {
     created(db: PoolConnection, lead: NewMember, bootstrap?: WorkspaceBootstrap): Promise<void>;
     modelsChanged?(db: PoolConnection, workspaceId: string, value: WorkspaceModels): Promise<void>;
     memberFiles?(workspaceId: string): Promise<Record<string, string>>;
+    deleting?(db: PoolConnection, workspaceId: string): Promise<void>;
 }
 export class WorkspaceData implements ContextStore {
     readonly pool: Db;
@@ -67,6 +68,15 @@ export class WorkspaceData implements ContextStore {
                 await db.execute('INSERT INTO workspace_git_baselines (workspace_id, data) VALUES (?, ?)', [workspace.workspaceId, encode(bootstrap.baseline)]);
                 await this.writeContext(db, workspace.workspaceId, 0, bootstrap.context);
             }
+        });
+    }
+    async deleteWorkspace(workspaceId: string): Promise<void> {
+        await this.transaction(async db => {
+            await this.inTransaction(db).requireWorkspace(workspaceId, true);
+            await this.hooks.deleting?.(db, workspaceId);
+            for (const table of ['workspace_git_baselines', 'context_files', 'context_versions', 'context_blobs', 'context_records', 'workspace_models'])
+                await db.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [workspaceId]);
+            await db.execute('DELETE FROM workspaces WHERE id = ?', [workspaceId]);
         });
     }
     async getWorkspaceModels(workspaceId: string): Promise<StoredWorkspaceModels | null> {

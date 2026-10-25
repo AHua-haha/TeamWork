@@ -23,6 +23,8 @@ const within = (folder: string, path: string) => path === folder || path.startsW
 export class WorkspaceService {
   private readonly bases = new Map<string, Promise<ContextBase>>();
   private readonly records = new Map<string, WorkspaceRecord>();
+  private readonly deleting = new Set<string>();
+  private readonly lifecycle = new Map<string, number>();
   private creating: Promise<unknown> = Promise.resolve();
   private closed = false;
 
@@ -171,6 +173,29 @@ export class WorkspaceService {
     return created.then(() => this.get(workspaceId));
   }
 
+  /** Removes application state only. No path on disk is removed or rewritten. */
+  delete(workspaceId: string): Promise<void> {
+    identity(workspaceId, 'workspaceId');
+    const operation = this.creating.then(async () => {
+      this.assertOpen();
+      await this.record(workspaceId);
+      this.deleting.add(workspaceId);
+      this.lifecycle.set(workspaceId, (this.lifecycle.get(workspaceId) ?? 0) + 1);
+      const opening = this.bases.get(workspaceId);
+      this.bases.delete(workspaceId);
+      try {
+        if (opening) await (await opening.catch(() => undefined))?.close();
+        await this.store.deleteWorkspace(workspaceId);
+      } finally {
+        // Reload on failure too: a failed COMMIT acknowledgement may mean deletion committed.
+        this.records.delete(workspaceId);
+        this.deleting.delete(workspaceId);
+      }
+    });
+    this.creating = operation.catch(() => undefined);
+    return operation;
+  }
+
   async close(): Promise<void> {
     this.closed = true;
     await this.creating;
@@ -186,9 +211,13 @@ export class WorkspaceService {
   async record(workspaceId: string): Promise<WorkspaceRecord> {
     this.assertOpen();
     identity(workspaceId, 'workspaceId');
+    if (this.deleting.has(workspaceId)) throw new AppError('workspace_busy', 'Workspace is being deleted', 409);
     const cached = this.records.get(workspaceId);
     if (cached) return cached;
+    const version = this.lifecycle.get(workspaceId) ?? 0;
     const record = await this.store.getWorkspace(workspaceId);
+    if (this.deleting.has(workspaceId) || version !== (this.lifecycle.get(workspaceId) ?? 0))
+      throw new AppError('workspace_busy', 'Workspace lifecycle changed; retry the request', 409);
     if (!record) throw new AppError('not_found', `Workspace ${workspaceId} not found`, 404);
     this.records.set(workspaceId, record);
     return record;

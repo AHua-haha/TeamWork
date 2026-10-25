@@ -83,6 +83,7 @@ export class WorkspaceClient {
   listWorkspaces(): Promise<WorkspaceRecord[]> { return this.get<{ workspaces: WorkspaceRecord[] }>('/workspaces').then(result => result.workspaces); }
   inspectInitialization(input: Pick<WorkspaceInput, 'directory' | 'adopt'>): Promise<WorkspaceInitialization> { return this.write('/workspaces/initialization', 'POST', input); }
   createWorkspace(input: WorkspaceInput): Promise<Workspace> { return this.write('/workspaces', 'POST', input); }
+  deleteWorkspace(workspaceId: string): Promise<{workspaceId: string}> { return this.fetcher(this.base(workspaceId), {method: 'DELETE'}).then(json<{workspaceId: string}>); }
   getWorkspace(workspaceId: string): Promise<Workspace> { return this.get(this.base(workspaceId)); }
 
   team(workspaceId: string): Promise<Team> { return this.get(`${this.base(workspaceId)}/team`); }

@@ -87,6 +87,10 @@ Compaction may atomically replace all active context rows and update the residen
 
 Expose acknowledged context/history/run/compaction reads and mutations, restoration/recovery and transaction-scoped admission/completion/reset operations. Team can obtain a narrow execution coordination view and immutable completed records for its shared references without loading private context or knowing Agent tables. Agent owns validation and mapping of those values. Runtime ownership, durable history, revisions and external-effect safety remain unchanged. Parent-supplied callbacks coordinate foreign configuration/presentation changes on the same transaction; Agent does not write those foreign models.
 
+### Explicit member deletion
+
+Provide transaction-scoped idle checks and scoped deletion of selected Agents with private context/history/runs/compaction records. Refuse active runs or preparing compaction; do not turn an executing member into a standalone agent. Resident private context becomes invalid only after committed deletion or uncertain acknowledgement. Ordinary context updates still preserve immutable history; explicit user reset/deletion are lifecycle exceptions. No concrete Team/Workspace tables or scheduling logic belongs here.
+
 ## Constraints, specifications and requirements
 
 - Aggregate Agent data definitions, validation, mutable context/progress, durable schemas/queries/migrations and operations under Agent. Keep SQL out of the reusable model/tool loop, not out of the Agent system. No concrete Team, Harness or Workspace dependency in Agent.

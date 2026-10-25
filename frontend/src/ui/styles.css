@@ -47,6 +47,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .conversation-nav-mark { color: #71977c; font-size: 18px; line-height: 12px; }
 .rename-trigger { border: 0; background: none; color: #779181; padding: 7px 8px; opacity: 0; }
 .conversation-nav-row:hover .rename-trigger, .rename-trigger:focus-visible { opacity: 1; }
+.workspace-delete { display: flex; align-items: center; }
+.workspace-delete:hover { color: #b55243; }
+@media (hover: none) { .workspace-delete { opacity: 1; } }
 .rename-form { display: flex; width: 100%; gap: 3px; padding: 4px; }
 .rename-form input { min-width: 0; flex: 1; border: 1px solid #a6c9ad; border-radius: 6px; padding: 5px; font-size: 12px; }
 .rename-form button { border: 0; background: transparent; color: #3b6b49; }

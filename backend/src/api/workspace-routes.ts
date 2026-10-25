@@ -33,7 +33,7 @@ function path(value: unknown, name: string): string {
 }
 
 /** Handles `/workspaces` and everything under it. */
-export function workspaceRoutes(workspaces: WorkspaceService): (route: Route) => Promise<void> {
+export function workspaceRoutes(workspaces: WorkspaceService, deleteWorkspace: (workspaceId: string) => Promise<void>): (route: Route) => Promise<void> {
   const designs = new DesignService(workspaces);
   return async ({ request, response, url, path: segments, signal }) => {
     const method = request.method;
@@ -65,6 +65,12 @@ export function workspaceRoutes(workspaces: WorkspaceService): (route: Route) =>
     const [, , area, operation, ...extra] = segments;
     if (extra.length) throw notFound();
     if (area === undefined) {
+      if (method === 'DELETE') {
+        query(url, []);
+        await deleteWorkspace(workspaceId);
+        json(response, 200, {workspaceId});
+        return;
+      }
       if (method !== 'GET') throw notFound();
       query(url, []);
       json(response, 200, await workspaces.get(workspaceId));

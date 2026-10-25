@@ -24,6 +24,11 @@ export class CoreData {
             },
             modelsChanged: (db, id, value) => this.team.inTransaction(db).initializeLeadModels(id, value),
             memberFiles: id => this.team.initialMemberFiles(id),
+            deleting: async (db, id) => {
+                const ids = await this.team.inTransaction(db).deleteWorkspace(id);
+                await this.config.inTransaction(db).deleteAgentProfiles(ids);
+                await this.agents.inTransaction(db).deleteAgents(ids);
+            },
         });
         this.team = new TeamData(storage, this.agents, this.workspaces);
         this.config = new ConfigData(storage, this.agents, { contains: async (id, db) => !!await (db ? this.team.inTransaction(db) : this.team).getMember(id), ids: async () => (await this.team.contextMembers()).map(member => member.id) });

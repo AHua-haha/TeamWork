@@ -30,6 +30,16 @@ Client modules fetch history/inspection and merge live deltas; adapters derive d
 
 **Usage example:** choose Use an existing folder, configure a default model, click Create workspace, review the cleanup paths and explicitly confirm. Backend handles durable/file effects; the browser stores only form/review state.
 
+### Workspace deletion confirmation
+
+**Input:** WorkspaceClient.deleteWorkspace(workspaceId) sends DELETE without a body; the sidebar supplies a selected WorkspaceRecord to the existing ConfirmDialog.
+
+**Output:** A trash action next to each workspace row, a confirmation naming the project and kept directory/.rsi files, explicit busy/backend errors, and updated navigation after acknowledged success.
+
+**Effect and failure:** Cancellation sends no request. Failures retain the row and confirmation. Successful deletion filters the selected row, invalidates older list-request generations, clears saved lastChat when it names that workspace, and returns home only if viewing the deleted workspace. Its open file/chat components unmount; confirmed unsaved edits are discarded. Deleting an inactive workspace keeps unrelated navigation/lastChat. Mobile non-hover controls stay visible. No filesystem path is sent to the deletion endpoint.
+
+**Usage example:** hover a workspace row (or use its visible mobile action), click its trash icon, review the kept-files explanation and click Delete workspace. Busy refusal asks the user to stop work and retry. Mock-browser checks cover cancel, refusal, stale list responses, active deletion and inactive deletion.
+
 ## File lookup
 
 - [frontend](../../../../../frontend): owned implementation.

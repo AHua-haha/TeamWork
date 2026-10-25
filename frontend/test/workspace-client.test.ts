@@ -143,3 +143,15 @@ test('workspace client reviews initialization and sends cleanup consent only whe
     {path:'/workspaces',body:{name:'Existing',directory:'/srv/existing',adopt:true,models,cleanupRevision:review.cleanupRevision}},
   ]);
 });
+
+
+test('workspace deletion uses only the selected identity and preserves busy errors for confirmation',async()=>{
+  const calls:{path:string;method:string|undefined;body:unknown}[]=[];
+  const client=new WorkspaceClient((async(input,init)=>{
+    calls.push({path:String(input),method:init?.method,body:init?.body});
+    return calls.length===1?new Response(JSON.stringify({error:{code:'workspace_busy',message:'Stop team work first'}}),{status:409}):new Response(JSON.stringify({workspaceId:'w 1'}));
+  }) as typeof fetch);
+  await assert.rejects(client.deleteWorkspace('w 1'),e=>e instanceof BackendError&&e.code==='workspace_busy');
+  assert.deepEqual(await client.deleteWorkspace('w 1'),{workspaceId:'w 1'});
+  assert.deepEqual(calls,[{path:'/workspaces/w%201',method:'DELETE',body:undefined},{path:'/workspaces/w%201',method:'DELETE',body:undefined}]);
+});

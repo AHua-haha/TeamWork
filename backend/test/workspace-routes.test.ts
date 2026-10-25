@@ -30,7 +30,7 @@ function send(server: Server, path: string, method = 'GET', data?: unknown): Pro
 function withServer(run: (call: Call, server: Server, folder: string) => Promise<void>): Promise<void> {
   return withFolder(async folder => {
     const service = new WorkspaceService(new MemoryStore(), testModelValidator);
-    const server = createAgentServer({} as AgentRuntime, {} as ConfigService, service, {} as TeamSystem);
+    const server = createAgentServer({} as AgentRuntime, {} as ConfigService, service, {deleteWorkspace: id => service.delete(id)} as TeamSystem);
     const call: Call = async (path, { method = 'GET', data, status = 200 } = {}) => {
       const response = await send(server, path, method, data);
       const body = JSON.parse(await text(response)) as Body;
@@ -176,4 +176,20 @@ test('workspace initialization HTTP contract reviews metadata before explicitly 
   assert.equal(await readFile(join(root,'context/design/design.md'),'utf8'),'# Retained');
   await assert.rejects(stat(join(root,'members/old.json')));
   assert.equal((await call('/workspaces/initialization',{method:'POST',data:{directory,adopt:true},status:409})).error.code,'workspace_exists');
+}));
+
+
+test('DELETE workspace removes registration while keeping context and project files',()=>withServer(async(call,_server,folder)=>{
+  const directory=join(folder,'deleted');
+  const created=await call('/workspaces',{method:'POST',status:201,data:{workspaceId:'deleted',name:'Deleted',directory,adopt:false,models:testModels()}});
+  await writeFile(join(directory,'keep.txt'),'keep');
+  const context=await readFile(join(directory,'.rsi/context/design/design.md'),'utf8');
+  await call('/workspaces/deleted?force=true',{method:'DELETE',status:400});
+  assert.equal((await call('/workspaces/deleted')).workspaceId,created.workspaceId);
+  assert.deepEqual(await call('/workspaces/deleted',{method:'DELETE'}),{workspaceId:'deleted'});
+  assert.deepEqual((await call('/workspaces')).workspaces,[]);
+  await call('/workspaces/deleted',{status:404});
+  await call('/workspaces/deleted',{method:'DELETE',status:404});
+  assert.equal(await readFile(join(directory,'keep.txt'),'utf8'),'keep');
+  assert.equal(await readFile(join(directory,'.rsi/context/design/design.md'),'utf8'),context);
 }));

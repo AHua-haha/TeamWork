@@ -61,6 +61,7 @@ export class TeamData implements TeamStore, ChatStore {
     }
     private async loadGroupContext(workspaceId: string): Promise<GroupContextHistory> {
         return this.transaction(async db => {
+            await this.workspaces.inTransaction(db).requireWorkspace(workspaceId);
             const [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
             if (settings && settings.context_format !== 1) throw new AppError('runtime_unavailable', 'Group context migration is incomplete', 503);
             const upper = settings?.position ?? 0, resetPosition = settings?.reset_position ?? 0;
@@ -520,6 +521,22 @@ export class TeamData implements TeamStore, ChatStore {
                     files[`${source.path.slice(0, source.path.lastIndexOf('/'))}/${path}`] = text;
             }
         return files;
+    }
+    async deleteWorkspace(workspaceId: string): Promise<string[]> {
+        identity(workspaceId, 'workspaceId');
+        return this.transaction(async db => {
+            await this.workspaces.inTransaction(db).requireWorkspace(workspaceId, true);
+            const members = await rows(db, 'SELECT id FROM members WHERE workspace_id = ? ORDER BY id FOR UPDATE', [workspaceId]);
+            const ids = members.map(member => member.id as string);
+            await this.agents.inTransaction(db).assertIdle(ids);
+            for (const table of ['chat_changes', 'chat_entries', 'chat_context_entries', 'chat_messages', 'chat_images'])
+                await db.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [workspaceId]);
+            await db.execute('DELETE FROM chat_runs WHERE exchange_id IN (SELECT id FROM chat_exchanges WHERE workspace_id = ?)', [workspaceId]);
+            for (const table of ['chat_exchanges', 'chat_clock', 'chat_settings', 'member_activation', 'members'])
+                await db.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [workspaceId]);
+            this.storage.afterCommit(db, () => this.contexts.invalidate(workspaceId), () => this.contexts.invalidate(workspaceId));
+            return ids;
+        });
     }
     async clearConversations(): Promise<void> {
         await clearTables(this.pool, ['chat_changes', 'chat_entries', 'chat_clock', 'chat_runs', 'chat_context_entries', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_settings']);

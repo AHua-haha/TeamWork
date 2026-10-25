@@ -106,4 +106,7 @@ export class ConfigData {
     }
     async seedAgent(agentId: string): Promise<void> { await this.pool.execute('INSERT INTO config_records (scope,id,data) VALUES (?,?,?)', ['agent', agentId, encode({})]); }
     async clearAgentProfiles(): Promise<void> { await this.pool.execute("DELETE FROM config_records WHERE scope = 'agent'"); }
+    async deleteAgentProfiles(ids: string[]): Promise<void> {
+        for (const id of ids) await this.pool.execute("DELETE FROM config_records WHERE scope = 'agent' AND id = ?", [id]);
+    }
 }

@@ -67,6 +67,7 @@ export interface ContextStore {
   getWorkspace(workspaceId: string): Promise<WorkspaceRecord | null>;
   /** Stores the workspace and its team's lead together, or neither. Fails with 409 `workspace_exists` for a duplicate ID or directory key. */
   createWorkspace(workspace: WorkspaceRecord, directoryKey: string, lead: NewMember, models?: WorkspaceModels, bootstrap?: WorkspaceBootstrap): Promise<void>;
+  deleteWorkspace(workspaceId: string): Promise<void>;
   getWorkspaceModels(workspaceId: string): Promise<StoredWorkspaceModels | null>;
   saveWorkspaceModels(workspaceId: string, revision: number | null, value: WorkspaceModels, initializeLead: boolean): Promise<StoredWorkspaceModels>;
   loadContext(workspaceId: string): Promise<{ seq: number; files: IndexedFile[] }>;

@@ -32,6 +32,16 @@ harnessPrompt('context-compaction') loads required backend/prompts/harness/conte
 
 **Usage example:** use harness.approvals.list(workspaceId), read(workspaceId,id) and decide(workspaceId,id,action,message). Git execution uses the same injected ApprovalRequests.wait mechanism, without changing the HTTP review contract.
 
+### Workspace deletion resources
+
+**Input:** Existing HarnessService.closeShells(memberIds), called by the confirmed idle workspace-deletion flow after durable removal.
+
+**Output:** Completion after the selected member shells and background jobs stop.
+
+**Effect and failure:** Reuse resetMemberShell to terminate process groups and Git broker sessions; preserve all project/.rsi files. No tool schema/permission policy or filesystem cleanup capability is added. Application-data refusal occurs before resource cleanup.
+
+**Usage example:** TeamSystem captures all member IDs, deletes application data, then closes their shell sessions. The deletion regression test launches a native sleep job, deletes the workspace, verifies that PID is gone and compares every project file byte-for-byte.
+
 ## File lookup
 
 - [backend/src/core/harness/data](../../../../../../../backend/src/core/harness/data): scope, tool input and approval model operations.

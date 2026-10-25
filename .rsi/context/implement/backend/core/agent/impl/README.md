@@ -44,6 +44,16 @@ AgentData beginCompaction/commitCompactionMessage/finishCompaction journals tent
 
 adoptLegacyContext and finishLegacyMigration keep the existing once-only context_format transition; Core supplies original Team references. Agent owns the adoption algorithm and its SQL, and retires old retention/transient tables without deleting stable history. legacyContextIds avoids loading/locking already migrated contexts.
 
+### Explicit member deletion
+
+**Input:** AgentData.assertIdle(ids,reason?) and deleteAgents(ids), used through a transaction-bound owner view during Core lifecycle coordination.
+
+**Output:** Promise<void>; refuse workspace_busy when an Agent has an active run or active compaction journal. Missing Agent IDs fail explicitly.
+
+**Effect and failure:** Lock Agents and preparing compactions in sorted identity order; delete only selected context_compactions, agent_context_entries, immutable messages, runs and agents rows. Team references must already be removed through Core coordination. Register resident invalidation on committed or uncertain deletion; rollback leaves existing models valid. Normal append/compaction semantics remain unchanged; user deletion is an explicit lifetime boundary for stable history. Hosting clears the deleted members' progress through the existing runtime API.
+
+**Usage example:** Core invokes await agents.inTransaction(db).deleteAgents(memberIds) after Team-owned references are removed. SQL tests hold a resident model through rollback/deletion and verify it remains valid after rollback and becomes invalid after committed deletion.
+
 ## File lookup
 
 - [backend/src/core/agent/data/resident-context.ts](../../../../../../../backend/src/core/agent/data/resident-context.ts): lazy resident models and committed revision reconciliation.

@@ -28,7 +28,19 @@ DesignService keeps accepted recursive working roots, dependencies, pending-desi
 
 **Usage example:** review = await workspaces.inspectInitialization({directory,adopt:true}); after the user confirms its cleanupPaths, call workspaces.create({...input,cleanupRevision:review.cleanupRevision ?? undefined}). Context-only projects need no consent. ContextBase and bootstrap use the same data/context-scan.ts to discover indexable files. No SQL schema migration is needed.
 
+### Workspace deletion
+
+**Input:** WorkspaceService.delete(workspaceId), coordinated by TeamSystem.deleteWorkspace; ContextStore.deleteWorkspace is the durable owner port. WorkspaceDataHooks.deleting(db,id) lets Core compose Team/Agent/profile removal on the same transaction.
+
+**Output:** Promise<void>; not_found/404 for missing identity. Host-facing deletion does not require the project directory to exist or be readable.
+
+**Effect and failure:** WorkspaceData locks the registry row, invokes Core's owner lifecycle callback, removes only this workspace's baseline/models/context files/versions/blobs/records and registry, then commits atomically. WorkspaceService serializes deletion with create, marks the workspace unavailable during removal, closes any open ContextBase and drains its queue before SQL removal. Registry/cache entries are invalidated on both success and failure; on failure the next access reloads the durable outcome. A per-ID lifecycle generation prevents an earlier delayed read from repopulating a deleted registry cache. SQL rollback preserves all durable rows; a closed context handle can reopen from the surviving registry. No filesystem remove/write operation is used. Existing .rsi remains for normal reviewed initialization if later re-adopted.
+
+**Usage example:** await team.deleteWorkspace(id) through the hosted service; DELETE /workspaces/:id returns {workspaceId:id}. Unit/disposable SQL tests verify preserved files, missing directories, rollback, stale cache reads, re-adoption and exclusion of unrelated data.
+
 ## File lookup
+
+- [backend/test/workspace-deletion.test.ts](../../../../../../../backend/test/workspace-deletion.test.ts): file preservation, busy refusal, shell/job cleanup, failure reopening and delayed-cache-read prevention.
 
 - [backend/src/core/workspace/workspace-initialization.ts](../../../../../../../backend/src/core/workspace/workspace-initialization.ts): read-only metadata inspection, cleanup revision, reversible staging and exclusive missing-file creation.
 - [backend/src/core/workspace/data/context-scan.ts](../../../../../../../backend/src/core/workspace/data/context-scan.ts): shared discovery/limits for bootstrap imports and live context indexing.

@@ -179,6 +179,22 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     }
   }
 
+  async deleteWorkspace(workspaceId: string): Promise<void> {
+    this.stored(workspaceId);
+    const members = await this.listMembers(workspaceId), ids = new Set(members.map(m => m.id));
+    if ([...this.chatRuns.values()].some(item => ids.has(item.run.agentId) && item.run.status === 'running'))
+      throw new AppError('workspace_busy', 'Wait for every member before deleting the workspace', 409);
+    for (const [runId, value] of this.chatRuns) if (ids.has(value.run.agentId)) {
+      this.exchanges.delete(value.exchangeId); this.chatRuns.delete(runId);
+    }
+    for (const id of ids) { this.members.delete(id); this.agentContexts.delete(id); }
+    for (const [id, entry] of this.timelineEntries) if (entry.workspaceId === workspaceId) this.timelineEntries.delete(id);
+    for (const id of this.chatImages.keys()) if (id.startsWith(workspaceId + ':')) this.chatImages.delete(id);
+    this.chatMessages.delete(workspaceId); this.timelineChanges.delete(workspaceId); this.timelinePositions.delete(workspaceId);
+    this.limits.delete(workspaceId); this.resets.delete(workspaceId); this.memberActivations.delete(workspaceId);
+    this.workspaceModels.delete(workspaceId); this.gitBaselines.delete(workspaceId); this.workspaces.delete(workspaceId);
+  }
+
   async getWorkspaceModels(id: string): Promise<StoredWorkspaceModels | null> { return structuredClone(this.workspaceModels.get(id) ?? null); }
   async saveWorkspaceModels(id: string, expected: number | null, value: WorkspaceModels, initializeLead: boolean): Promise<StoredWorkspaceModels> {
     this.stored(id);

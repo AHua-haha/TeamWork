@@ -28,6 +28,16 @@ Design: [Core](../../../../design/backend/core/design.md).
 
 Core prepareWorkspace creates a fresh Team root-design lead and asks Workspace's PreparedWorkspaceFiles to preserve/import context, add missing templates and stage reviewed non-context metadata. WorkspaceService commits lead/configuration/activation, context history/design baseline and registration through the existing atomic owner transaction, then discards staging. Preparation/registration failures remove only additions and restore old metadata. Existing context and source bytes remain intact; normal opening does not reinitialize registered workspaces.
 
+### Atomic workspace deletion
+
+**Input:** WorkspaceData's deleting(db,workspaceId) lifecycle callback in CoreData; TeamSystem.deleteWorkspace supplies idle/admission authority through TeamRunner.idleWorkspace.
+
+**Output:** One committed deletion of selected Workspace/Team/Agent/profile data, or an explicit refusal/failure.
+
+**Effect and failure:** Core calls TeamData.deleteWorkspace on the transaction, receives all member identities including retired members, then calls ConfigData.deleteAgentProfiles and AgentData.deleteAgents on that same connection. WorkspaceData removes its own records last. No foreign SQL is introduced into callers or Storage. Team locks the workspace/member rows and obtains Agent idle/maintenance checks in stable ID order. Agent and Team context invalidation follows outer commit; rollback publishes none; unknown commit acknowledgement invalidates resident models for restoration. Host lifecycle subsequently stops shells and clears runtime progress, notifying followers. All source, context, member manifests, ordinary Git data and global provider/application configuration are preserved on disk.
+
+**Usage example:** HTTP delegates to TeamSystem.deleteWorkspace(id); WorkspaceService closes context hosting and invokes the composed owner removal. Disposable SQL verifies rollback leaves resident/durable history intact, and successful deletion excludes other workspaces and solo agents.
+
 ## File lookup
 
 - [backend/src/core/data.ts](../../../../../../backend/src/core/data.ts): owner composition, cross-owner hooks and lifecycle.

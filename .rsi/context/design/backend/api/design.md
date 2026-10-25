@@ -14,6 +14,10 @@ Multipart parsing belongs to API; image preparation/validation semantics belong 
 
 `POST /workspaces/initialization` accepts directory and adopt and returns a read-only initialization inspection: canonical directory, cleanupPaths and cleanupRevision (null when no nonempty metadata). `POST /workspaces` additionally accepts optional cleanupRevision. Without matching reviewed cleanup consent, nonempty metadata returns a conflict. Existing content under `.rsi/context/` is preserved; source files and Git state are unchanged. Other registered workspaces cannot be cleaned or reinitialized through this operation.
 
+### Workspace deletion endpoint
+
+DELETE /workspaces/:workspaceId removes only application data and returns the deleted workspace identity. Busy teams/maintenance fail with workspace_busy/409 and missing identities with not_found/404. No filesystem deletion option is exposed. Existing error envelopes apply. Delegate Team idle authority and Workspace/Core lifecycle work to business services.
+
 ## Constraints, specifications and requirements
 
 - Preserve existing accepted observable behavior, record formats, revisions/cursors, API payloads and lifecycle guarantees during this migration.

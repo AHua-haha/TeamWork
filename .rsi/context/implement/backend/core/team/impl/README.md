@@ -38,6 +38,16 @@ TeamData.inTransaction(connection) and ConfigData.inTransaction(connection) join
 
 TeamData owns the resident shared Pi context. TeamRunner supplies original shared references and idle synchronization notifications to AgentRuntime; it neither restores nor persists Agent context. Busy members buffer shared updates until Agent work boundaries. Restart recovery of private context/compaction belongs to Agent. Team’s importChatHistory migration reads old linked runs/history through Agent operations and owns the resulting shared presentation changes. Group summarization/structured extraction/member-specific views remain deferred.
 
+### Workspace deletion lifecycle
+
+**Input:** TeamSystem.deleteWorkspace(workspaceId); TeamData.deleteWorkspace(workspaceId) is a transaction-scoped owner operation returning the deleted member IDs.
+
+**Output:** Hosted Promise<void>; workspace_busy/409 for admitted/running/finalizing member work or unfinished durable compaction, not_found/404 for missing workspace.
+
+**Effect and failure:** TeamRunner.idleWorkspace holds the existing admission/configuration gate. TeamData locks workspace/member identities, calls AgentData.assertIdle, deletes only Team-owned group/timeline/context/image/exchange/settings/activation/member rows, and invalidates shared residents on commit/uncertainty. Core owns deletion of foreign Agent/profile rows. A group-context durable load validates registry existence, so invalidated references cannot silently read a deleted workspace as an empty group. After successful database removal, stop member shells/jobs and clear progress; refusals do not stop shells. idleWorkspace publishes a change to wake history followers; missing records become explicit unavailable/not_found errors. No project file is removed.
+
+**Usage example:** await team.deleteWorkspace(id); busy callers stop team work and retry after it finishes. Retired members are included; global app/provider/model-cache records remain intact.
+
 ## File lookup
 
 - [backend/src/core/team/data/group-context.ts](../../../../../../../backend/src/core/team/data/group-context.ts): resident ordered group context and commit reconciliation.
