@@ -48,6 +48,16 @@ TeamData owns the resident shared Pi context. TeamRunner supplies original share
 
 **Usage example:** await team.deleteWorkspace(id); busy callers stop team work and retry after it finishes. Retired members are included; global app/provider/model-cache records remain intact.
 
+### Member design-maintenance responsibility
+
+**Input:** MemberInstructions.build(memberId,ownPrompt) with active member role and Harness-provided working/dependency context; TeamSystem.policy composes it with HarnessService.prepare.
+
+**Output:** Worker role instructions allow maintenance of assigned working designs/accepted descendants and require reporting design changes to the user. Only outside-scope changes and unsettled user decisions require handoff to the lead/responsible member using the existing mention header. Lead instructions retain whole-project design coordination, member management and user clarification responsibilities.
+
+**Effect and failure:** Update role guidance without rewriting active member bundles or private message history. Harness supplies the shared required Markdown in both permission modes. Existing routing, scheduling, mention limits, tool authorization and commit/activation behavior remain unchanged.
+
+**Usage example:** an in-scope design correction is described in the worker's shared final response; an interface change in a read-only dependency is brought to its owner/lead. team-context.test.ts assembles actual model requests with explicit dependencies and recursive accepted child designs for both roles/modes and checks that obsolete lead-only design instructions are absent.
+
 ## File lookup
 
 - [backend/src/core/team/data/group-context.ts](../../../../../../../backend/src/core/team/data/group-context.ts): resident ordered group context and commit reconciliation.

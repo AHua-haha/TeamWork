@@ -62,6 +62,10 @@ Agent compaction obtains original group context through the same read reference 
 
 The explicit user deletion flow requires the entire team to be idle, including pending/finalizing work. Serialize it with admission/configuration lifecycle operations. Remove only the selected workspace group context/history/images/timeline/exchanges, activation and all members including retired members. Use Agent public idle checks and Core-coordinated Agent removal. Stop persistent shells/jobs and clear runtime progress; invalidate shared residents after commit/uncertainty. Wake history followers so deleted workspaces report unavailability. Keep all filesystem content and global configuration.
 
+### Member design-maintenance responsibility
+
+Members may maintain and edit their assigned working-design context, including accepted descendants, and must describe design changes in their shared response so the user is aware. Dependency designs remain read-only. The lead maintains the whole project design and coordinates cross-scope changes; member configuration remains lead-managed. Route outside-scope edits and unsettled user choices to the lead/responsible member, rather than routing every in-scope design edit to the lead. This is prompt guidance in both operator modes; existing Harness tool enforcement and commit/acceptance policy remain unchanged.
+
 ## Constraints, specifications and requirements
 
 - Preserve existing HTTP/SSE message presentation, durable final references, reservation ordering and delta-stream recovery.

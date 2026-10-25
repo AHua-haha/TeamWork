@@ -42,7 +42,20 @@ harnessPrompt('context-compaction') loads required backend/prompts/harness/conte
 
 **Usage example:** TeamSystem captures all member IDs, deletes application data, then closes their shell sessions. The deletion regression test launches a native sleep job, deletes the workspace, verifies that PID is gone and compares every project file byte-for-byte.
 
+### Design-edit responsibility prompts
+
+**Input:** Required release-owned design-responsibility.md plus existing member/design assignments and the operator permission switch.
+
+**Output:** HarnessService.prepare injects one shared Design-edit responsibility section into every assembled member request, independently of whether controlled harness definitions are included. It covers working designs/accepted descendants, read-only dependencies, user-visible change reporting, separate user acceptance and escalation for outside-scope or unsettled decisions. Lead design resources retain their extra whole-project document-maintenance instructions.
+
+**Effect and failure:** harness-prompts.ts eagerly loads the required Markdown; the existing backend build copies it with the other prompt assets. Missing/empty assets fail explicitly. management.md and implementation.md no longer instruct workers to route every design edit to the lead. permissions-disabled.md points to the same shared conduct policy instead of dropping it. No file/Bash authorization, tool schema, assigned resource, private context/history, Git approval or operator configuration changes. The controlled write/edit gate still blocks worker design edits; prompts instruct reporting a tool refusal rather than bypassing it. Current disabled mode permits actual tool writes but dependency/scope guidance remains.
+
+**Usage example:** a Backend worker assigned systems/backend/metadata.json may maintain that design and accepted child designs, keeps Storage dependency design unchanged, and describes its edits in the shared response. Both source and compiled backends load the shared rules at startup, so rebuild/restart is required for existing services. Actual request assembly is verified for workers/leads in both modes; existing tool authorization tests remain intact.
+
 ## File lookup
+
+- [backend/prompts/harness/design-responsibility.md](../../../../../../../backend/prompts/harness/design-responsibility.md): shared working-design conduct and reporting rules injected in both permission modes.
+- [backend/test/team-context.test.ts](../../../../../../../backend/test/team-context.test.ts): actual lead/worker request assembly across enforcement modes, descendants and dependencies.
 
 - [backend/src/core/harness/data](../../../../../../../backend/src/core/harness/data): scope, tool input and approval model operations.
 

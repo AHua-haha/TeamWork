@@ -62,3 +62,34 @@ test('source files are loaded on demand and unrelated catalog tools are not inje
   const plain = await policy.buildRequest(scope('plain-agent'), { revision: 0, entries: [] });
   assert.deepEqual(names(plain), ['unscoped']);
 }));
+
+for (const enforced of [true, false]) {
+  test(`design-edit responsibility reaches actual lead and worker requests with enforcement ${enforced ? 'enabled' : 'disabled'}`, () => withTeam(async f => {
+    const member = await worker(f, 'Backend', ['src']);
+    const dependency = await worker(f, 'Storage', ['storage']);
+    await seedDesign(f.workspaces, f.workspaceId, 'systems/backend/api/metadata.json', { content: 'Owned child API design', implementation: ['api'] });
+    await configureHarness(f, 'Backend', {
+      designScope: {working: member.harness.designScope.working, dependencies: dependency.harness.designScope.working}, allowedCommands: [],
+    });
+    for (const id of [member.memberId, f.lead.memberId]) {
+      const request = await f.team.policy(base).buildRequest(scope(id), {revision: 0, entries: []});
+      const prompt = request.context.systemPrompt!;
+      assert.equal(prompt.split('## Design-edit responsibility').length - 1, 1);
+      assert.match(prompt, /Every member may maintain and edit the design context of its assigned working designs/);
+      assert.match(prompt, /accepted descendant designs/);
+      assert.match(prompt, /Dependency designs remain read-only/);
+      assert.match(prompt, /Report design changes in your shared response so the user is aware/);
+      assert.match(prompt, /Editing a design is not evidence of user acceptance/);
+      assert.match(prompt, /member configuration remains lead-managed/);
+      assert.doesNotMatch(prompt, /Only the lead may edit the design tree|Other members can only read\/follow working and dependency designs|The lead alone can edit all design context/);
+      assert.match(prompt, enforced ? /Resolved permissions/ : /operator has disabled harness permission enforcement/i);
+      if (id === member.memberId) {
+        assert.match(prompt, /Owned child API design/);
+        assert.match(prompt, /Design for Storage/);
+        assert.match(prompt, /For changes outside your working scope or an unsettled user decision/);
+      } else {
+        assert.match(prompt, /maintain the whole project design and its subdesigns/);
+      }
+    }
+  }, enforced));
+}

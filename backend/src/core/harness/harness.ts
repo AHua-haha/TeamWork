@@ -164,6 +164,7 @@ export class HarnessService {
     const parts = [
       '## Your harness',
       harnessPrompt(this.permissionsEnabled ? 'common' : 'permissions-disabled', { workspace: env.root }),
+      '## Design-edit responsibility', harnessPrompt('design-responsibility'),
       `## ${this.permissionsEnabled ? 'Resolved permissions' : 'Design assignments (guidance only)'}\n${JSON.stringify(harnessPermissions(member,resolved),null,2)}`,
       ...(this.permissionsEnabled ? env.definitions : []).map(d => `## ${d.id} harness\n${d.prompt}\n${d.resources.map(p => `Resource ${p.id}: ${p.paths.join(', ')}; excludes ${p.exclude.join(', ') || '(none)'}; commit policy: ${p.commit}. ${p.prompt}`).join('\n')}`),
       '## Accepted working designs', await this.designView(resolved.working),

@@ -5,6 +5,7 @@ Fixed team response/routing rules live in `team/group-chat.md`. MemberContext lo
 Maintain harness rule text in the Markdown files under `harness/`:
 
 - `common.md`: shared workspace, ordinary project Git and approval instructions.
+- `design-responsibility.md`: working-design editing responsibility, dependency read-only guidance, user-visible reporting and acceptance rules; injected for every member in both enforcement modes.
 - `management.md`: design and member maintenance rules.
 - `management-design.md` and `management-members.md`: design/member resource maintenance instructions.
 - `implementation.md`, `implementation-scope.md` and `implementation-context.md`: implementation-code/context maintenance and ordinary Git history rules.
@@ -21,7 +22,7 @@ Design uses purpose/responsibilities/boundaries, Interface contract and constrai
 
 Context templates now initialize design/metadata.json, design/design.md and implement/impl/README.md under the context container. Rule Markdown describes complete system designs represented by one file or multiple documents, independently of real child-system decomposition. No Markdown content is embedded in JSON metadata.
 
-Management/implementation prompts describe working and dependency permissions, each with design context, implementation context and project implementation. Only the lead edits designs; implementation context/code for every member follows accepted assignments.
+Management/implementation prompts describe working and dependency permissions, each with design context, implementation context and project implementation. Each member may maintain its working designs and accepted descendants; dependency designs remain read-only by responsibility. The lead retains project-wide design responsibility and member management. This prompt change does not alter the existing controlled write/edit gate, which still blocks worker design writes; tool refusals are reported rather than bypassed. Implementation context/code for every member follows accepted assignments.
 
 Pi read/ls/grep/find use default operations for workspace reads. write/edit retain input-based assignment checks. Pi content, details and native truncation are preserved. Bash has its own per-member persistent shell, native jobs and whole-workspace write sandbox; these broader permissions are distinct from file-tool input checks.
 

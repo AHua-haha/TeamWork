@@ -12,6 +12,10 @@ Resolve configured harnesses into tools and prompts; check permitted effects at 
 
 Confirmed deletion of an idle workspace stops member persistent shells and their background jobs. This resource cleanup preserves all project and .rsi files. Existing commit/tool permission behavior remains unchanged.
 
+### Design-edit responsibility prompts
+
+All members receive the same design-edit responsibility rules independently of the permission switch: maintain assigned working designs and their accepted descendants, keep dependency designs read-only, report changes to the user and preserve user acceptance as a separate decision. The lead retains project-wide design responsibility and member configuration management. Changes outside assignment and unresolved design decisions require coordination. These instructions define responsibility, not new tool authorization: this change leaves the existing controlled write/edit gate (lead-only design writes), broad Bash and commit approval unchanged; tool refusals must be reported rather than bypassed.
+
 ## Constraints, specifications and requirements
 
 Preserve existing public HTTP/SSE payloads, stable SQL/JSON formats, ordering, authority and lifecycle behavior. Each business owns its core in-memory model and any durable representation, mapping, validation, queries and related operations together. Harness uses other owners’ public interfaces, not their private persistence. Technical Storage supplies engine resources only. Share explicit interface values and lifecycle notifications; keep private runtime state and SQL schemas inside their respective owners. Filesystem/tool effects can precede failures and are never automatically replayed.

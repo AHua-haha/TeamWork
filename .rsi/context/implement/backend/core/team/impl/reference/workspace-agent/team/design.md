@@ -168,7 +168,7 @@ A newly created/adopted workspace already has a valid active lead assigned to me
 
 Working/dependency references identify exact system nodes by metadata.json. Each node contains Markdown design and implementation context in single-file or directory form; document count does not introduce additional assignments. Raw safe references are syntactically parsed before semantic node resolution so unavailable active assignments remain inspectable/unready. Submitted member configuration and run admission must resolve valid node metadata/design before granting code/context scope. No automatic old-layout assignment conversion occurs.
 
-Only the lead edits designs. Other members follow their accepted working/dependency designs. Implementation context for both roles follows assigned nodes under implement/, while source code follows accepted mappings. Working/dependency permission views each contain design context, implementation context and implementation; global lead design management does not grant global implementation rights.
+Design-maintenance prompt responsibility follows each member's accepted working designs and descendants; dependency designs remain read-only and changes must be reported to the user. The lead retains project-wide design and member management. The current controlled write/edit authorization still limits design writes to the lead; this prompt change does not alter that gate. Implementation context for both roles follows assigned nodes under implement/, while source code follows accepted mappings. Working/dependency permission views each contain design context, implementation context and implementation; global lead design management does not grant global implementation rights.
 
 ## User member model settings
 
