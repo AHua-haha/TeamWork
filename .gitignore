@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.DS_Store
+.claude/
 .playwright-cli/
 output/playwright/
 .env
@@ -7,7 +9,8 @@ output/playwright/
 !.env.example
 .test-mysql.env
 .run/
-.rsi/
+/.rsi/*
+!/.rsi/context/
 
 /rsi.config.json
 /rsi.config.json.*.tmp
