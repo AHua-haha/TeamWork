@@ -14,6 +14,11 @@ export interface ContextHistory {
   entries: ContextEntry[];
 }
 
+export interface ContextPatch {
+  append: ContextEntry[];
+  update: ContextEntry[];
+}
+
 export interface CompletedMessage extends ContextEntry {
   agentId: string;
   runId: string;
@@ -57,7 +62,7 @@ export type FollowEvent = { version: 2; agentId: string; runId: string | null } 
 );
 
 export interface AgentRecord {
-  id:string; context:ContextEntry[]; contextRevision:number; historyPosition:number;
+  id:string; contextLength:number; contextRevision:number; historyPosition:number;
   activeRunId:string|null; latestRunId:string|null; contextFormat:number;
 }
 

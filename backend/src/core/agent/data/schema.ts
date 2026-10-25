@@ -2,10 +2,17 @@ export const schema = [
   `CREATE TABLE IF NOT EXISTS agents (
     id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     context_format TINYINT UNSIGNED NOT NULL DEFAULT 1,
-    context JSON NOT NULL, context_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    context_length BIGINT UNSIGNED NOT NULL DEFAULT 0, context_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
     history_position BIGINT UNSIGNED NOT NULL DEFAULT 0,
     active_run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
     latest_run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS agent_context_entries (
+    agent_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    position BIGINT UNSIGNED NOT NULL,
+    id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    entry JSON NOT NULL, PRIMARY KEY(agent_id, position), UNIQUE KEY(agent_id, id),
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS runs (
     id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
@@ -30,4 +37,4 @@ export const schema = [
   ) ENGINE=InnoDB`,
 ];
 
-export const tables = ["agents", "runs", "messages", "context_compactions"] as const;
+export const tables = ["agents", "agent_context_entries", "runs", "messages", "context_compactions"] as const;

@@ -1,4 +1,4 @@
-import { AgentState } from './data/state.js';
+import { AgentState, AgentContextState } from './data/state.js';
 import { compactedContext, compactionInput, estimateRequestTokens, interruptedCompactionContext, validateCompactionSettings, type CompactionState, type CompactionTrigger } from './data/compaction.js';
 import { finalAnswer, textPhase } from './final-answer.js';
 import { AgentMessageContext, type GroupContextReference } from './data/context.js';
@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { AssistantMessageFrameEncoder, getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type Model, type Models, type SimpleStreamOptions, type ToolResultMessage, type JsonObject } from '@earendil-works/pi-ai';
 import { validateEntries } from './data/validation.js';
 import { ProgressStore } from './data/progress.js';
-import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type RunState } from './data/model.js';
+import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type ContextPatch, type RunState } from './data/model.js';
 import type { ModelStream, ModelRequest, AgentConfiguration, RuntimePolicy, RuntimeTool, StepScope } from './contracts.js';
 export type * from './contracts.js';
 
@@ -16,6 +16,7 @@ export interface AgentObserver {
   messageStart?(state: RunState, historyPosition: number): Promise<number | void>;
   message?(record: CompletedMessage): Promise<CompletedMessage | void>;
   contextChanged?(revision: number, entries: ContextEntry[]): Promise<ContextHistory | void>;
+  contextPatched?(revision: number, patch: ContextPatch): Promise<void>;
   compactionStarted?(state: CompactionState): Promise<void>;
   compactionMessage?(record: CompletedMessage): Promise<CompletedMessage | void>;
   compactionFinished?(state: CompactionState, revision: number, entries: ContextEntry[]): Promise<ContextHistory | void>;
@@ -30,7 +31,7 @@ export class AgentExecution {
   private get historyPosition(){return this.state.historyPosition;}
   private set historyPosition(value:number){this.state.acceptPosition(value);}
   private started = false;
-  constructor(run: RunState, context: ContextHistory, historyPosition: number,
+  constructor(run: RunState, context: ContextHistory | AgentContextState, historyPosition: number,
     private readonly config: AgentConfiguration, private readonly policy: RuntimePolicy,
     private readonly stream: ModelStream, private readonly observer: AgentObserver = {},
     readonly progress = new ProgressStore(), private readonly maxSteps = 64) {
@@ -40,6 +41,7 @@ export class AgentExecution {
   }
   snapshot(){return this.state.snapshot();}
   restoreContext(context:ContextHistory):void{this.state.acceptContext(context);}
+  attachContext(context:AgentContextState):void{this.state.attachContext(context);}
   receive(record:CompletedMessage):void{this.state.receive(record);}
   private async record(entry: ContextEntry): Promise<CompletedMessage> {
     validateEntries([entry]);
@@ -66,8 +68,20 @@ export class AgentExecution {
     let preparationFailed = false;
     let acknowledgementFailure: unknown;
     const synchronize = async () => {
-      const entries = await new AgentMessageContext(run.agentId, this.context).incoming(group);
-      if (entries) await this.replaceContext(this.context.revision, entries);
+      const change = await new AgentMessageContext(run.agentId, this.context).changes(group);
+      if (!change) return;
+      if ('replace' in change) await this.replaceContext(this.context.revision, change.replace);
+      else {
+        const revision = this.context.revision;
+        if (this.observer.contextPatched) {
+          await this.observer.contextPatched(revision, change.patch);
+          this.state.patchContext(revision + 1, change.patch);
+        } else if (this.observer.contextChanged) {
+          const next = new AgentContextState(this.context);
+          next.patch(revision + 1, change.patch);
+          await this.replaceContext(revision, next.history.entries);
+        } else this.state.patchContext(revision + 1, change.patch);
+      }
     };
     const pendingEffects = new Set<Promise<unknown>>();
     const track = <T>(operation: Promise<T>): Promise<T> => {

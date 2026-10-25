@@ -5,6 +5,7 @@ export class MySqlStorage {
   readonly pool: Pool;
   readonly database: string;
   private closing?: Promise<void>;
+  private readonly commits = new WeakMap<PoolConnection, {acknowledge: () => void; uncertain?: () => void}[]>();
 
   constructor(url: string) {
     const parsed = new URL(url);
@@ -16,16 +17,31 @@ export class MySqlStorage {
   /** Repeatable-read transaction on one borrowed connection; callback errors are not reinterpreted. */
   async transaction<T>(action: (connection: PoolConnection) => Promise<T>): Promise<T> {
     const connection = await this.pool.getConnection();
+    let committed = false;
     try {
       await connection.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
       await connection.beginTransaction();
+      this.commits.set(connection, []);
       const result = await action(connection);
-      await connection.commit();
+      try { await connection.commit(); }
+      catch (error) {
+        for (const callback of this.commits.get(connection) ?? []) callback.uncertain?.();
+        throw error;
+      }
+      committed = true;
+      for (const callback of this.commits.get(connection) ?? []) callback.acknowledge();
       return result;
     } catch (error) {
-      await connection.rollback().catch(() => undefined);
+      if (!committed) await connection.rollback().catch(() => undefined);
       throw error;
-    } finally { connection.release(); }
+    } finally { this.commits.delete(connection); connection.release(); }
+  }
+
+  /** Register a synchronous, non-throwing memory acknowledgement on the outer transaction. */
+  afterCommit(connection: PoolConnection, acknowledge: () => void, uncertain?: () => void): void {
+    const callbacks = this.commits.get(connection);
+    if (!callbacks) throw new Error('Commit acknowledgement requires a managed transaction');
+    callbacks.push({acknowledge, uncertain});
   }
 
   close(): Promise<void> { return this.closing ??= this.pool.end(); }

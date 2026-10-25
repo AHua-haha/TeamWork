@@ -6,11 +6,11 @@
 
 ## Contract
 
-[Agent runtime design](design.md). One Agent-owned in-memory loop with caller-controlled tools/context. Team hosting adds persist-before-completion and run sync/follow streams.
+[Agent runtime design](design.md). One Agent-owned in-memory loop with caller-controlled tools/context. Agent durable hosting adds persist-before-completion and run sync/follow streams.
 
 ## Responsibilities and decomposition
 
-The Team runtime host uses [Team durable persistence](../../../../team/impl/reference/database/design.md) with Pi AI model streaming. Runtime policy hooks choose model, request, tools, context mutations, tool execution, and continuation. HTTP transport belongs to API; the Core follow generator is also usable in-process. Runtime owns process hosting separately.
+AgentRuntime uses AgentData; [cross-owner persistence](../../../../team/impl/reference/database/design.md) with Pi AI model streaming. Runtime policy hooks choose model, request, tools, context mutations, tool execution, and continuation. HTTP transport belongs to API; the Core follow generator is also usable in-process. Runtime owns process hosting separately.
 
 The [config system](../../../../team/impl/reference/config/design.md) supplies one run snapshot of editable selections. The runtime chooses the resolution point before accepting input and applies that copy through all loop steps. Policy hooks remain the extension point for request construction and context changes.
 
@@ -20,7 +20,7 @@ The team supplies member config resolution and wraps the runtime policy for curr
 
 ## Coordination and data flow
 
-Accept input transactionally, run the shared loop independently of frontend connections, reread canonical context before each call, publish compact frames to the in-memory FIFO, commit completed messages, execute tools, and decide continuation. Scoped versioned notifications distinguish memory progress from durable changes. Initial synchronization and durable changes read consistent SQL snapshots; progress-only wakeups read the FIFO. Version checks prevent lost wakeups during SQL reads and slow delivery. Slow readers hold no event queue. A terminal run's history bound prevents delivery from a later run.
+Accept input transactionally, run the shared loop independently of frontend connections, reuse the resident context across calls and runs, publish compact frames to the in-memory FIFO, commit completed messages, execute tools, and decide continuation. Scoped versioned notifications distinguish memory progress from durable changes. Initial synchronization and durable changes read consistent SQL snapshots; progress-only wakeups read the FIFO. Version checks prevent lost wakeups during SQL reads and slow delivery. Slow readers hold no event queue. A terminal run's history bound prevents delivery from a later run.
 
 `start` asks the config source to resolve and validate a snapshot before the database accepts input. The snapshot is stored in the run's in-memory step scope. `configuredPolicy` builds Pi requests from that snapshot and the current canonical context. The API layer delegates config CRUD to `ConfigService`, including optimistic revision conflicts. App config governs agent creation and per-request input size.
 
@@ -53,7 +53,7 @@ Config integration tests in [backend.test.ts](../../../../../../../../../backend
 
 Failed terminal persistence is remembered locally and exposed as unavailable, not a fabricated durable state. The next runtime owner recovers unfinished durable runs as interrupted. Tools, custom hooks and custom streams must honor the run abort signal; their external effects are not transactional with MySQL. The default executable registers no solo-agent catalog tools and supplies the shared token threshold plus Harness instruction to Agent’s compaction mechanism. Workspace member tools are supplied by the harness, with lead design/team tools eligible by role. HTTP exposes new input and observation, while context replacement is an in-process backend operation.
 
-AgentRuntime restores Agent context once after execution admission. Agent maintains subsequent steps in memory and synchronizes its shared reference at work boundaries. Idle Agent synchronization starts no run. StepScope.recordInput retains private inputs through the normal acknowledged history path. Shared/private stable history remains independent of mutable context. Shutdown settles publication and context updates before releasing runtime ownership.
+AgentRuntime loads a resident AgentContextState once on first use, attaches it after execution admission and reuses it across later activations. Normal message persistence inserts context rows and small bookkeeping only; it does not reread the whole context. Agent maintains subsequent steps in memory and synchronizes its shared reference at work boundaries. Idle Agent synchronization starts no run. StepScope.recordInput retains private inputs through the normal acknowledged history path. Shared/private stable history remains independent of mutable context. Shutdown settles publication and context updates before releasing runtime ownership.
 
 Continuation policies receive the committed assistant record as their fourth argument. Team policy passes its messageId to final publication; it does not infer identity from response text or the member’s latest history. Database terminal writes finalize any associated group entry and its working range. Private follow can start at the group entry’s history start boundary; shared messages are read from authoritative group storage through the Agent-owned reference at work boundaries.
 

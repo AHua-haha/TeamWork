@@ -6,7 +6,7 @@ Storage supplies technical storage-engine access and resource management. It doe
 
 ## Interface contract
 
-A caller supplies an engine connection configuration and receives connection/query/command capabilities, transaction execution and resource shutdown. Transaction callbacks execute caller-owned statements on one connection and return a result. Success commits; failure attempts rollback, preserves the original failure and releases the connection. Shutdown closes owned resources.
+A caller supplies an engine connection configuration and receives connection/query/command capabilities, transaction execution and resource shutdown. Transaction callbacks execute caller-owned statements on one connection and return a result. Success commits; failure before confirmed commit attempts rollback, preserves the original failure and releases the connection. Callers may register synchronous non-throwing acknowledgement callbacks on a managed transaction; these run only after its outer commit and never on rollback, allowing owners to publish their committed in-memory changes. An optional uncertainty callback invalidates owner caches when commit acknowledgement fails; the original database error remains observable. Shutdown closes owned resources.
 
 The prototype implements MySQL access only. SQLite/Redis are examples of future engine-specific capabilities, not promised adapters or an interchangeable universal transaction model. Engine errors remain technical errors; callers interpret application conflicts. The infrastructure creates no application schema, names no business records and constructs no prompts.
 

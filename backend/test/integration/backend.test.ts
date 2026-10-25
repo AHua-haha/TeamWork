@@ -182,7 +182,7 @@ test('real Pi provider collection drives shared loop, validates and executes too
     if (final.type === 'end') assert.equal(final.run?.status, 'completed');
     const history = events.filter(event => event.type === 'message');
     assert.deepEqual(history.map(event => event.record.message.role), ['user', 'assistant', 'toolResult', 'assistant']);
-    assert.equal(contextReads, 1, 'Team restores once; the Agent maintains later model context in memory');
+    assert.equal(contextReads, 1, 'Agent loads resident context once and maintains later model context in memory');
     assert.deepEqual((await store.agents.getContext(agentId)).entries.map(entry => entry.message.role), ['user', 'assistant']);
   } finally { store.agents.getContext = readContext; await runtime.close(); }
 });
@@ -1097,7 +1097,7 @@ test('persisted context survives reopening the pool; corrupt stored schema fails
   const reopened = new CoreData(new MySqlStorage(databaseUrl!));
   try {
     assert.deepEqual(await reopened.agents.getContext(agentId), await store.agents.getContext(agentId));
-    await reopened.pool.execute('UPDATE agents SET context = ? WHERE id = ?', ['{"version":999,"data":[]}', agentId]);
+    await reopened.pool.execute('UPDATE agent_context_entries SET entry = ? WHERE agent_id = ?', ['{"version":999,"data":[]}', agentId]);
     await assert.rejects(reopened.agents.getContext(agentId), /schema version/);
   } finally { await reopened.close(); }
 });
@@ -2265,23 +2265,23 @@ test('continuous member context survives failure, success and runtime restart wi
 });
 
 test('idle synchronization failure is observable and recoverable without rejecting an accepted publication', {timeout:30_000}, async()=>{
-  const f=await groupFixture();const replace=store.agents.replaceContext.bind(store.agents);
-  store.agents.replaceContext=async(agentId,revision,entries)=>{
+  const f=await groupFixture();const patch=store.agents.patchContext.bind(store.agents);
+  store.agents.patchContext=async(agentId,revision,entries)=>{
     if(agentId===f.frontend.memberId)throw new Error('injected idle context write failure');
-    return replace(agentId,revision,entries);
+    return patch(agentId,revision,entries);
   };
   try{
     const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend continue');
     assert.equal((await store.team.chatSnapshot(f.workspaceId)).position,1);
     await assert.rejects(f.runtime.getState(f.frontend.memberId),code('persistence_failure'));
     assert.deepEqual((await store.agents.getContext(f.frontend.memberId)).entries,[],'refused acknowledgement advances no consumption state');
-    store.agents.replaceContext=replace;
+    store.agents.patchContext=patch;
     await f.runtime.syncGroupContext(f.frontend.memberId);
     assert.equal((await f.runtime.getState(f.frontend.memberId)).run,null,'idle catch-up triggers no model');
     assert.equal((await store.agents.getContext(f.frontend.memberId)).entries.length,1);
     answer((await f.requests.next()).events,message('Recovered publication'));
     await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
-  }finally{store.agents.replaceContext=replace;await f.close();}
+  }finally{store.agents.patchContext=patch;await f.close();}
 });
 
 test('shared input arriving after the terminal read is caught up when the member becomes idle', {timeout:30_000}, async()=>{
@@ -2367,7 +2367,8 @@ test('legacy adoption restores recorded work once without rewriting stable histo
     await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
     const history=await store.agents.runMessages(f.backend.memberId,accepted.runs[0]!.runId);
     await f.runtime.close();
-    await store.pool.execute('UPDATE agents SET context = ? WHERE id = ?',[encode([]),f.backend.memberId]);
+    await store.pool.execute('DELETE FROM agent_context_entries WHERE agent_id = ?',[f.backend.memberId]);
+    await store.pool.execute('UPDATE agents SET context_length = 0 WHERE id = ?',[f.backend.memberId]);
     await store.pool.query('ALTER TABLE agents DROP COLUMN context_format');
     const reopened=new CoreData(new MySqlStorage(databaseUrl!));
     try {
@@ -2603,7 +2604,7 @@ test('Agent owns durable execution/context independently of Team or Workspace sc
     const history=await data.runMessages(agentId,run.runId),context=await data.getContext(agentId);
     assert.deepEqual(Object.keys(await data.executionState(agentId)).sort(),['activeRunId','historyPosition','id']);
     const [tables]=await storage.pool.query<any[]>('SHOW TABLES');
-    assert.deepEqual(tables.map(row=>Object.values(row)[0]).sort(),['agents','context_compactions','messages','runs']);
+    assert.deepEqual(tables.map(row=>Object.values(row)[0]).sort(),['agent_context_entries','agents','context_compactions','messages','runs']);
     const rolledBack=randomUUID();
     await assert.rejects(storage.transaction(async db=>{
       const session=data.inTransaction(db);await session.createRecord(rolledBack);await session.admitRun(rolledBack);throw new Error('rollback owner operations');
@@ -2613,4 +2614,152 @@ test('Agent owns durable execution/context independently of Team or Workspace sc
     reopened=new MySqlStorage(url.toString());const restored=new AgentData(reopened);await restored.migrate();
     assert.deepEqual(await restored.getContext(agentId),context);assert.deepEqual(await restored.runMessages(agentId,run.runId),history);
   }finally{await runtime.close();await storage.close();await reopened?.close();await store.pool.query(`DROP DATABASE ${database}`);}
+});
+
+test('resident Agent context survives runs with one SQL load and append-only context writes', {timeout: 30000}, async () => {
+  const f = await fixture();
+  const originalTransaction = store.storage.transaction;
+  const statements: string[] = [];
+  store.storage.transaction = function (operation) {
+    return originalTransaction.call(this, async db => {
+      const execute = db.execute, query = db.query;
+      db.execute = function (this: typeof db, sql: any, ...args: any[]) { statements.push(typeof sql === 'string' ? sql : sql.sql); return (execute as any).call(this, sql, ...args); } as typeof execute;
+      db.query = function (this: typeof db, sql: any, ...args: any[]) { statements.push(typeof sql === 'string' ? sql : sql.sql); return (query as any).call(this, sql, ...args); } as typeof query;
+      try { return await operation(db); }
+      finally { db.execute = execute; db.query = query; }
+    }) as any;
+  };
+  try {
+    const first = await f.runtime.start(f.agentId, 'First input');
+    const signed = fauxAssistantMessage([{type: 'thinking', thinking: '', thinkingSignature: 'opaque-encrypted-content'}, {type: 'text', text: 'First answer'}]);
+    answer((await f.requests.next()).events, signed);
+    await f.runtime.finished(f.agentId, first.runId);
+    const resident = await store.agents.residentContext(f.agentId);
+    const second = await f.runtime.start(f.agentId, 'Second input');
+    const request = await f.requests.next();
+    assert.ok(request.request.context.messages.some(item => item.role === 'assistant' && item.content.some(block => block.type === 'thinking' && block.thinkingSignature === 'opaque-encrypted-content')));
+    answer(request.events, message('Second answer'));
+    await f.runtime.finished(f.agentId, second.runId);
+    assert.equal(await store.agents.residentContext(f.agentId), resident, 'same owned context model across runs');
+    assert.equal(resident.history.entries.length, 4, 'durable acknowledgement does not duplicate in-memory messages');
+    assert.equal(statements.filter(sql => /SELECT position,id,entry FROM agent_context_entries/.test(sql)).length, 1);
+    assert.equal(statements.filter(sql => /INSERT INTO agent_context_entries/.test(sql)).length, 4);
+    assert.ok(!statements.some(sql => /(?:DELETE FROM|UPDATE) agent_context_entries/.test(sql)), 'normal appends do not rewrite existing rows');
+    assert.ok(!statements.some(sql => /SELECT \* FROM agents|SET context\s*=/.test(sql)), 'coordination reads only bookkeeping');
+    assert.deepEqual(await store.agents.getContext(f.agentId), resident.history);
+  } finally {store.storage.transaction = originalTransaction; await f.runtime.close();}
+});
+
+test('resident context acknowledges outer commit, ignores rollback, and resets the same model', {timeout: 15000}, async () => {
+  const {agentId} = await store.agents.createAgent();
+  const resident = await store.agents.residentContext(agentId);
+  const entry = {messageId: 'transactional', message: user, metadata: {}};
+  await assert.rejects(store.storage.transaction(async db => {
+    await store.agents.inTransaction(db).patchContext(agentId, 0, {append: [entry], update: []});
+    assert.deepEqual(resident.history.entries, [], 'no speculative memory publication');
+    throw new Error('rollback context rows');
+  }), /rollback context rows/);
+  assert.deepEqual(resident.history, {revision: 0, entries: []});
+  assert.deepEqual(await store.agents.getContext(agentId), resident.history);
+  await store.storage.transaction(async db => {
+    await store.agents.inTransaction(db).patchContext(agentId, 0, {append: [entry], update: []});
+    assert.equal(resident.history.revision, 0);
+  });
+  assert.deepEqual(resident.history, {revision: 1, entries: [entry]});
+  await assert.rejects(store.storage.transaction(async db => {
+    await store.agents.inTransaction(db).resetConversations([agentId]);
+    assert.equal(resident.history.entries.length, 1);
+    throw new Error('rollback reset');
+  }), /rollback reset/);
+  assert.equal(resident.history.entries.length, 1);
+  await store.storage.transaction(async db => {await store.agents.inTransaction(db).resetConversations([agentId]);});
+  assert.equal(await store.agents.residentContext(agentId), resident);
+  assert.deepEqual(resident.history, {revision: 2, entries: []});
+  await assert.rejects(store.agents.patchContext(agentId, 1, {append: [entry], update: []}), code('context_conflict'));
+});
+
+test('whole-JSON context migration preserves order, opaque fields, revisions and resumes after interruption', {timeout: 30000}, async () => {
+  const database = 'context_migration_' + randomUUID().replaceAll('-', '');
+  await store.pool.query(`CREATE DATABASE ${database}`);
+  const url = new URL(databaseUrl!); url.pathname = '/' + database;
+  const storage = new MySqlStorage(url.toString());
+  const {AgentData} = await import('../../src/core/agent/data/repository.js');
+  const data = new AgentData(storage);
+  const entries = [{messageId: 'signed', message: fauxAssistantMessage([
+    {type: 'thinking' as const, thinking: '', thinkingSignature: 'opaque-signature'},
+    {type: 'thinking' as const, thinking: '[Reasoning redacted]', thinkingSignature: 'opaque-redacted', redacted: true},
+    {type: 'text' as const, text: 'Preserved answer'},
+  ]), metadata: {groupContextId: 'group', groupPosition: 7}}, {messageId: 'user', message: user, metadata: {}}];
+  try {
+    await storage.pool.query(`CREATE TABLE agents (
+      id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY, context JSON NOT NULL,
+      context_format TINYINT UNSIGNED NOT NULL DEFAULT 1, context_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      history_position BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      active_run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL, latest_run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL
+    ) ENGINE=InnoDB`);
+    await storage.pool.execute('INSERT INTO agents (id,context,context_revision) VALUES (?, ?, ?), (?, ?, ?)', ['a', encode(entries), 9, 'b', '{"version":999,"data":[]}', 0]);
+    await assert.rejects(data.migrate(), /schema version/);
+    const [columns] = await storage.pool.query<any[]>("SHOW COLUMNS FROM agents LIKE 'context'");
+    assert.equal(columns.length, 1, 'old data remains until every agent is migrated');
+    await storage.pool.execute('UPDATE agents SET context = ? WHERE id = ?', [encode([]), 'b']);
+    await data.migrate();
+    const expected = {revision: 9, entries};
+    assert.deepEqual(await data.getContext('a'), expected);
+    await data.migrate(); assert.deepEqual(await data.getContext('a'), expected);
+    const [retired] = await storage.pool.query<any[]>("SHOW COLUMNS FROM agents LIKE 'context'");
+    assert.deepEqual(retired, []);
+    const [rows] = await storage.pool.query<any[]>('SELECT position,id FROM agent_context_entries WHERE agent_id = ? ORDER BY position', ['a']);
+    assert.deepEqual(rows.map(row => [row.position, row.id]), [[1, 'signed'], [2, 'user']]);
+    assert.equal((await data.residentContext('a')).history.entries.length, 2);
+  } finally {await storage.close(); await store.pool.query(`DROP DATABASE ${database}`);}
+});
+
+test('targeted context edits leave other rows and immutable history unchanged', {timeout: 15000}, async () => {
+  const {agentId} = await store.agents.createAgent();
+  const run = await store.agents.startRun(agentId, user);
+  await store.agents.finishRun(agentId, run.runId, 'completed');
+  const before = await store.agents.getContext(agentId);
+  const resident = await store.agents.residentContext(agentId);
+  const history = await store.agents.runMessages(agentId, run.runId);
+  const edited = {...before.entries[0]!, metadata: {groupPosition: 1, groupContextId: 'workspace'}};
+  const appended = {messageId: 'incoming', message: user, metadata: {groupPosition: 2, groupContextId: 'workspace'}};
+  await store.agents.patchContext(agentId, before.revision, {update: [edited], append: [appended]});
+  assert.deepEqual(resident.history.entries, [edited, appended]);
+  const [originalRows] = await store.pool.query<any[]>('SELECT position,id,entry FROM agent_context_entries WHERE agent_id = ? ORDER BY position', [agentId]);
+  await store.agents.patchContext(agentId, resident.history.revision, {update: [{...appended, metadata: {changed: true}}], append: []});
+  const [rows] = await store.pool.query<any[]>('SELECT position,id,entry FROM agent_context_entries WHERE agent_id = ? ORDER BY position', [agentId]);
+  assert.deepEqual(rows[0], originalRows[0], 'unaffected row is unchanged');
+  assert.equal(rows[1].id, originalRows[1].id); assert.equal(rows[1].position, originalRows[1].position);
+  assert.deepEqual(await store.agents.runMessages(agentId, run.runId), history);
+  assert.deepEqual(await store.agents.getContext(agentId), resident.history);
+  const current = structuredClone(resident.history);
+  await assert.rejects(store.agents.patchContext(agentId, current.revision, {update: [{...appended, messageId: 'missing'}], append: []}), code('context_conflict'));
+  assert.deepEqual(resident.history, current);
+  assert.deepEqual(await store.agents.getContext(agentId), current);
+});
+
+test('uncertain SQL commit invalidates resident context before another run can reuse it', {timeout: 15000}, async () => {
+  const {agentId} = await store.agents.createAgent();
+  const stale = await store.agents.residentContext(agentId);
+  const transaction = store.storage.transaction;
+  let connection: import('mysql2/promise').PoolConnection | undefined;
+  let commit: import('mysql2/promise').PoolConnection['commit'] | undefined;
+  store.storage.transaction = function (operation) {
+    return transaction.call(this, async db => {
+      connection = db; commit = db.commit;
+      db.commit = async () => {await commit!.call(db); throw new Error('commit acknowledgement lost');};
+      return operation(db);
+    }) as any;
+  };
+  const entry = {messageId: 'committed-without-ack', message: user, metadata: {}};
+  try {
+    await assert.rejects(store.agents.patchContext(agentId, 0, {append: [entry], update: []}), /acknowledgement lost/);
+  } finally {
+    if (connection && commit) connection.commit = commit;
+    store.storage.transaction = transaction;
+  }
+  assert.throws(() => stale.history, /out of sequence/);
+  const restored = await store.agents.residentContext(agentId);
+  assert.notEqual(restored, stale);
+  assert.deepEqual(restored.history, {revision: 1, entries: [entry]}, 'restore actual durable outcome without replaying the write');
 });

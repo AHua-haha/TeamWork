@@ -75,6 +75,14 @@ Expose preparation start, completed private messages and terminal/candidate valu
 
 Agent’s durable runtime recovers interrupted preparation consistently with the old model context and recorded work, including after the ordinary response was already published. Agent owns both recovery composition and persistence; the in-memory execution mechanism can also be used independently. No group summarization, structured extraction, per-member group views or new context-maintenance tools are added.
 
+### Incremental persistence and resident context
+
+Active context is stored as ordered message rows, each preserving the complete Pi message, identity and incorporation metadata. The Agent record stores only context bookkeeping, not a whole-context JSON value. Stable history remains an independent immutable record. Normal additions insert only new context/history rows and advance small revision/position fields; changes to an existing context entry update only that row. Neither normal append nor model-call coordination reads all existing context messages.
+
+Load a resident context model once on first use. Reuse the same owned model across activations and idle group delivery; individual runs hold separate execution state. SQL acknowledgement precedes in-memory advancement, including operations composed into another owner's transaction. Rollback must not publish speculative state. An uncertain SQL commit acknowledgement invalidates resident state before another execution can reuse it; restore the durable outcome without replaying the write. Reset clears the resident and durable state consistently; shutdown/restart releases resident state and restores it lazily from durable rows.
+
+Compaction may atomically replace all active context rows and update the resident model after acknowledgement; original history remains unchanged. Explicit context replacement has the same revision-checked semantics. Migrate existing whole-context storage losslessly before retiring it, preserving order, IDs, signatures, metadata and revisions.
+
 ### Public data operations
 
 Expose acknowledged context/history/run/compaction reads and mutations, restoration/recovery and transaction-scoped admission/completion/reset operations. Team can obtain a narrow execution coordination view and immutable completed records for its shared references without loading private context or knowing Agent tables. Agent owns validation and mapping of those values. Runtime ownership, durable history, revisions and external-effect safety remain unchanged. Parent-supplied callbacks coordinate foreign configuration/presentation changes on the same transaction; Agent does not write those foreign models.

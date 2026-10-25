@@ -10,7 +10,7 @@
 
 ## Responsibilities and decomposition
 
-A MySQL repository owns schema setup, transactions, versioned JSON serialization, and logical persistence operations. It is internal to aggregate Core; Storage supplies only the injected MySQL resources.
+Each business owner has its own repository, schema, validation and SQL. AgentData owns private execution/context/history; TeamData and ConfigData own team/config/shared data; WorkspaceData owns workspace/context-base persistence. CoreData composes their transaction-scoped public operations; Storage supplies engine resources and commit acknowledgements.
 
 The config service also calls it for scoped versioned config records. The database checks identities and revisions while leaving config field validation to that service.
 
@@ -71,15 +71,19 @@ The config integration tests in [backend.test.ts](../../../../../../../../../bac
 
 The complete lead/harness integration verifies persisted lead author and version content after reopening the pool; codec checks reject invalid author IDs.
 
+## Agent context representation
+
+agents keeps only context_length/context_revision and execution/history bookkeeping. agent_context_entries stores ordered complete ContextEntry envelopes with primary key (agent_id,position) and unique key (agent_id,id). Ordinary appends insert one active-context row and one immutable messages row; metadata-only coordination reads no context payload. Group synchronization updates affected entries and inserts new ones. Compaction/explicit replacement/reset may replace active rows atomically. AgentData migrates the old whole JSON value before retiring its column; stable history is unchanged. Resident contexts live across runs, and outer commit callbacks keep memory consistent without SQL context reloads. See the [Agent contract](../../../../agent/impl/README.md).
+
 ## Group chat storage and transaction order
 
-Shared storage uses chat_settings, chat_messages, chat_exchanges and chat_runs. Agent incorporation state lives with entries in agents.context; no separate member processed/success boundary or admission-range tables remain. agents.context_format marks the once-only adoption of legacy recorded work/shared messages through Agent's public helper. Migration preserves stable records/project files, commits each snapshot/marker together and drops obsolete retention tables only after adoption.
+Shared storage uses chat_settings, chat_messages, chat_exchanges and chat_runs. Agent incorporation state lives with entries in agent_context_entries; no separate member processed/success boundary or admission-range tables remain. agents.context_format marks the once-only adoption of legacy recorded work/shared messages through Agent's public helper. Migration preserves stable records/project files, commits each snapshot/marker together and drops obsolete retention tables only after adoption.
 
 Publication locks the workspace and active agents in ID order, validates recipients/budget and stores the shared record/recipient runs atomically. Successful publication completes the sender's run/timeline but leaves current context intact. TeamRunner then schedules Agent-owned synchronization for idle members. Busy execution receives no mid-loop insertion.
 
-readGroupContext reads the original messages after the Agent-requested position, resolves final references and hydrates images in one repeatable-read snapshot. AgentRuntime restores context once after acquiring execution authority. AgentMessageContext determines incoming messages, reconciles own finals and proposes an acknowledged context replacement. SQL is the persistence mapping, not the retention policy owner.
+readGroupContext reads the original messages after the Agent-requested position, resolves final references and hydrates images in one repeatable-read snapshot. AgentRuntime loads the resident context once on first use and reuses it across activations. AgentMessageContext determines incoming messages, reconciles own finals and proposes append/targeted-update patches acknowledged only after the outer commit. SQL is the persistence mapping, not the retention policy owner.
 
-finishRun and accepted final publication no longer clear agents.context or maintain success-only private retention. Recorded working messages and incorporation metadata survive success/failure/restart. Context-only missing-result repair belongs to Agent and never changes immutable messages. Explicit reset clears model context and history together.
+finishRun and accepted final publication no longer clear active context rows or maintain success-only private retention. Recorded working messages and incorporation metadata survive success/failure/restart. Context-only missing-result repair belongs to Agent and never changes immutable messages. Explicit reset clears model context and history together.
 
 Repeatable-read snapshots provide stable history pages and status. Live observation remains a TeamRunner notification over durable reads; private chunks stay in memory. Integration tests cover publication rollback, continuous context, buffered inputs, sender reconciliation, acknowledgement, restart, legacy adoption, images and reset.
 
@@ -122,7 +126,7 @@ chat_settings adds reset_cursor and reset_position with zero defaults; migrate i
 
 ## Transient progress removal
 
-Database storage has no appendChunk or live-range reads. beginMessage returns the stable history position before the response, establishing the memory start boundary. followSnapshot selects agent identity/run pointers/positions without fetching its canonical context JSON. Migration drops only obsolete transient chunks/live_messages tables. Completed-message and terminal transactions retain their existing atomic history/context and group coordination guarantees. Runtime ProgressStore owns temporary events and eviction.
+Database storage has no appendChunk or live-range reads. beginMessage returns the stable history position before the response, establishing the memory start boundary. followSnapshot selects agent identity/run pointers/positions without fetching context entry rows. Migration drops only obsolete transient chunks/live_messages tables. Completed-message and terminal transactions retain their existing atomic history/context and group coordination guarantees. Runtime ProgressStore owns temporary events and eviction.
 
 ## Conversation-context durability verification
 
@@ -140,4 +144,4 @@ writeChatEntry acquires the existing workspace clock row with an exclusive upser
 
 ### Agent compaction journal
 
-AgentData owns context_compactions, which records id, agent_id, run_id, unique nullable active_agent_id, history_after and versioned lifecycle state. Tentative completed records append immutable messages under their owning run without changing current context. finishCompaction CAS-replaces agents.context and marks the lifecycle terminal atomically. recoverCompactions retains old context plus recorded preparation/uncertainty and marks runtime_restarted without replay; it runs before ordinary interrupted-run recovery. Public final references/end bounds stay pinned. Reset deletes journals before their message/run owners.
+AgentData owns context_compactions, which records id, agent_id, run_id, unique nullable active_agent_id, history_after and versioned lifecycle state. Tentative completed records append immutable messages under their owning run without changing current context. finishCompaction CAS-replaces active agent_context_entries rows and marks the lifecycle terminal atomically. recoverCompactions retains old context plus recorded preparation/uncertainty and marks runtime_restarted without replay; it runs before ordinary interrupted-run recovery. Public final references/end bounds stay pinned. Reset deletes journals before their message/run owners.

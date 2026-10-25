@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { ToolResultMessage } from '@earendil-works/pi-ai';
 import { validateEntries } from './validation.js';
-import { AppError, type ContextEntry, type ContextHistory } from './model.js';
+import { AppError, type ContextEntry, type ContextHistory, type ContextPatch } from './model.js';
+
+export type IncomingContextChange = {patch: ContextPatch} | {replace: ContextEntry[]};
 
 /** Team supplies content, never an activation/retention boundary. */
 export interface GroupContextMessage {
@@ -19,25 +21,42 @@ export interface GroupContextReference {
 export class AgentMessageContext {
   constructor(private readonly agentId: string, private readonly history: ContextHistory) {}
 
-  async incoming(reference?: GroupContextReference): Promise<ContextEntry[] | undefined> {
-    const entries = repairInterruptedTools(structuredClone(this.history.entries));
+  /** Ordinary delivery copies only changed entries, and never rebuilds durable context. */
+  async changes(reference?: GroupContextReference): Promise<IncomingContextChange | undefined> {
+    const original = this.history.entries;
+    const entries = repairInterruptedTools([...original]);
+    // An explicitly restored malformed exchange can need repair inside the old prefix.
+    const replacement = !original.every((entry, index) => entries[index] === entry);
+    const updates = new Map<string, ContextEntry>();
     if (reference) {
       let after = 0;
-      for (const entry of entries) {
-        if (entry.metadata.groupContextId !== reference.id) continue;
+      for (const entry of entries) if (entry.metadata.groupContextId === reference.id) {
         const value = entry.metadata.groupPosition;
         if (!Number.isSafeInteger(value) || Number(value) < 1) throw new AppError('invalid_context', 'Invalid incorporated group position');
         after = Math.max(after, Number(value));
       }
-      const messages = await reference.read(after);
-      for (const message of messages) {
-        if (!Number.isSafeInteger(message.position) || message.position <= after) throw new AppError('invalid_context', 'Group messages must be strictly ordered after the requested position');
-        incorporate(entries, this.agentId, reference.id, message);
-        after = message.position;
+      for (const item of await reference.read(after)) {
+        if (!Number.isSafeInteger(item.position) || item.position <= after) throw new AppError('invalid_context', 'Group messages must be strictly ordered after the requested position');
+        const ownIndex = item.origin?.agentId === this.agentId ? entries.findIndex(entry => entry.messageId === item.origin!.messageId && entry.message.role === 'assistant') : -1;
+        if (ownIndex >= 0) entries[ownIndex] = structuredClone(entries[ownIndex]!);
+        incorporate(entries, this.agentId, reference.id, item);
+        if (ownIndex >= 0 && ownIndex < original.length) updates.set(entries[ownIndex]!.messageId, entries[ownIndex]!);
+        after = item.position;
       }
     }
+    if (replacement) return {replace: entries};
+    const patch = {append: entries.slice(original.length), update: [...updates.values()]};
+    return patch.append.length || patch.update.length ? {patch} : undefined;
+  }
+
+  async incoming(reference?: GroupContextReference): Promise<ContextEntry[] | undefined> {
+    const change = await this.changes(reference);
+    if (!change) { validateEntries(this.history.entries); return undefined; }
+    const updates = 'patch' in change ? new Map(change.patch.update.map(entry => [entry.messageId, entry])) : undefined;
+    const entries = 'replace' in change ? change.replace
+      : [...this.history.entries.map(entry => updates!.get(entry.messageId) ?? entry), ...change.patch.append];
     validateEntries(entries);
-    return JSON.stringify(entries) === JSON.stringify(this.history.entries) ? undefined : entries;
+    return structuredClone(entries);
   }
 }
 

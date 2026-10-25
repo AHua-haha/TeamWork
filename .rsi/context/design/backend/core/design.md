@@ -10,13 +10,13 @@ For member conversations, Team owns authoritative shared group context; Agent ow
 
 Team admits/schedules a member and provides a group-context read reference. Agent uses its own state to obtain and incorporate incoming shared messages, then runs the model/tool loop. No activation or compaction boundary is selected by Team and passed as an additional input. Agent context survives terminal success, failure, cancellation and restart restoration. Terminal status does not implicitly clear context or select history ranges for reconstruction.
 
-Shared group inputs and private execution messages extend the Agent context chronologically. Every incorporated group message retains sender-visible content and source identity. Incoming shared messages are incorporated at safe boundaries after current work finishes, not between an in-flight tool call and its result. Agent persists its consumption state and context together through its own acknowledged data-model operations.
+Shared group inputs and private execution messages extend the Agent context chronologically. Every incorporated group message retains sender-visible content and source identity. Incoming shared messages are incorporated at safe boundaries after current work finishes, not between an in-flight tool call and its result. Agent persists its consumption state and context together through its own acknowledged data-model operations. It reuses a resident context model across runs, appends new durable message rows during normal work and replaces active rows for compaction or explicit replacement/reset.
 
 Team continues to own mention routing, scheduling, publication, response reservations and shared stable history/presentation. Agent context changes do not rewrite shared or private stable message history. Workspace documents remain independently maintained project information. Harness authority and external tool effects retain their existing responsibilities.
 
 ### Cross-system atomicity
 
-Core composes owner data-model operations on one technical transaction. Workspace plus lead/bootstrap, accepted final publication plus sender completion/recipient admission, member activation and explicit reset remain atomic. Owners expose narrow operations and domain values, never foreign SQL rows or queries. Keep existing lock order and acknowledged failure/recovery behavior. Source ownership changes preserve existing durable formats and require no user-data reset.
+Core composes owner data-model operations on one technical transaction. Workspace plus lead/bootstrap, accepted final publication plus sender completion/recipient admission, member activation and explicit reset remain atomic. Owners expose narrow operations and domain values, never foreign SQL rows or queries. Keep existing lock order and acknowledged failure/recovery behavior. Immutable message envelopes and public contracts are preserved. Agent migrates active context from a JSON snapshot into ordered rows without a user-data reset; committed memory acknowledgements follow the outer transaction.
 
 ## Constraints, specifications and requirements
 

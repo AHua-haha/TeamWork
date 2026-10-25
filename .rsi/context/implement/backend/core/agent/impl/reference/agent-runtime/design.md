@@ -139,4 +139,4 @@ A response requests three fetches. The second returns a timeout error result. Pe
 
 ## Member conversation context integration
 
-Team supplies only the group-context reference. Agent synchronizes incoming shared inputs before model work and after work settles, selecting its own consumption boundary from its context. AgentData persists Agent snapshots and completed private records. Success/failure never clears context; there is no per-run document reconstruction or automatic retrieval. StepScope.recordInput remains available for private policy feedback. Solo execution remains supported.
+Team supplies only the group-context reference. Agent synchronizes incoming shared inputs before model work and after work settles, selecting its own consumption boundary from its context. AgentData persists ordered active context rows and independent completed private records; Agent reuses its resident context model across activations. Success/failure never clears context; there is no per-run document reconstruction or automatic retrieval. StepScope.recordInput remains available for private policy feedback. Solo execution remains supported.

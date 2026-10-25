@@ -172,9 +172,13 @@ export class AgentRuntime {
       if (!this.accepting || [...this.jobs.values()].some(job => job.agentId === agentId)) return;
       const reference = await this.policy.groupContext?.(agentId);
       if (!reference) return;
-      const history = await this.store.getContext(agentId);
-      const entries = await new AgentMessageContext(agentId, history).incoming(reference);
-      if (entries) await this.store.replaceContext(agentId, history.revision, entries);
+      const resident = await this.store.residentContext(agentId);
+      const history = resident.history;
+      const change = await new AgentMessageContext(agentId, history).changes(reference);
+      if (change) {
+        if ('replace' in change) await this.store.replaceContext(agentId, history.revision, change.replace);
+        else await this.store.patchContext(agentId, history.revision, change.patch);
+      }
       this.contextFailures.delete(agentId);
     }).catch(error => { this.contextFailures.set(agentId, error); });
     this.contextUpdates.set(agentId, update);
@@ -195,7 +199,7 @@ export class AgentRuntime {
           const release = await this.policy.acquireRun?.(state, activeSignal);
           try {
             await this.contextUpdates.get(run.agentId);
-            execution.restoreContext(await this.store.getContext(run.agentId));
+            execution.attachContext(await this.store.residentContext(run.agentId));
             this.contextFailures.delete(run.agentId);
             return release ?? (() => {});
           } catch (error) { release?.(); throw error; }
@@ -206,6 +210,7 @@ export class AgentRuntime {
         messageStart: state => this.store.beginMessage(state.agentId, state.runId, state.activeMessageId!, state.step),
         message: record => this.store.commitMessage(record.agentId, record.runId, { messageId: record.messageId, message: record.message, metadata: record.metadata }),
         contextChanged: (revision, entries) => this.replaceContext(run.agentId, revision, entries),
+        contextPatched: (revision, patch) => this.store.patchContext(run.agentId, revision, patch),
         compactionStarted: state => this.store.beginCompaction(state),
         compactionMessage: record => this.store.commitCompactionMessage(record),
         compactionFinished: (state, revision, entries) => this.store.finishCompaction(state, revision, entries),
