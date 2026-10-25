@@ -18,8 +18,12 @@ Team owns its resident shared context as Pi messages plus metadata, persists one
 
 Core composes owner data-model operations on one technical transaction. Workspace plus lead/bootstrap, accepted final publication plus sender completion/recipient admission, member activation and explicit reset remain atomic. Owners expose narrow operations and domain values, never foreign SQL rows or queries. Keep existing lock order and acknowledged failure/recovery behavior. Immutable message envelopes and public contracts are preserved. Agent migrates active context from a JSON snapshot into ordered rows without a user-data reset; committed memory acknowledgements follow the outer transaction.
 
+### Workspace initialization coordination
+
+Workspace inspects and prepares filesystem state while preserving existing context. Core creates a fresh root-design Team lead and registers its initial configuration, activation, context history and accepted baseline atomically through owner operations. Nonempty metadata cleanup requires explicit revision-bound user confirmation. Registration failure rolls back prepared filesystem additions and restores staged metadata; original context and project source are preserved.
+
 ## Constraints, specifications and requirements
 
-Preserve public HTTP/SSE presentation, shared-workspace single-member execution, mention/publication refusal behavior, image semantics, idle reset and member configuration rules. No new public context-edit endpoint or frontend UI is required by this design.
+Preserve public HTTP/SSE presentation, shared-workspace single-member execution, mention/publication refusal behavior, image semantics, idle reset and member configuration rules. Context ownership and compaction introduce no public context-edit endpoint; workspace creation uses its initialization review.
 
 Agent-owned compaction uses a single configured token threshold before ordinary model calls and after ordinary work ends. Preparation uses normal tools, retains every new message after its control instruction, and replaces the old private prefix only on acknowledged completion. Rebuild original Team group context plus the new private trace. Agent durably journals preparation and atomically stores cutover; failed/interrupted preparation retains old state plus recorded effects without replay. Finishing preparation creates no extra ordinary run or publication. Shared group summarization, structured extraction and member-specific views remain deferred; original shared history alone may still exceed model limits.

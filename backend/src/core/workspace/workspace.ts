@@ -4,15 +4,16 @@ import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { ContextBase, type ContextOverview, type ContextStore, type WorkspaceRecord } from './data/context-base.js';
 import { ProjectFiles } from './project-files.js';
+import { inspectManagedState, type WorkspaceInitialization } from './workspace-initialization.js';
 import { prepareWorkspace } from '../workspace-bootstrap.js';
-import { managedRoot, rootDesignPath } from './workspace-layout.js';
+import { rootDesignPath } from './workspace-layout.js';
 import { missing, sha256 } from '../text.js';
 import { AppError, identity } from '../agent/data/model.js';
 import type { RunSettings } from '../team/data/config.js';
 import { defaultRunSettings, emptyWorkspaceModels, modelRunSettings, workspaceModels, type WorkspaceModelsView } from './data/models.js';
 
 export interface Workspace extends WorkspaceRecord { context: ContextOverview }
-export interface WorkspaceInput { workspaceId?: unknown; name: unknown; directory: unknown; adopt: unknown; models: unknown }
+export interface WorkspaceInput { workspaceId?: unknown; name: unknown; directory: unknown; adopt: unknown; models: unknown; cleanupRevision?: unknown }
 
 const controlCharacter = /[\u0000-\u001f\u007f-\u009f]/;
 const folderKey = (directory: string) => directory.toLowerCase();
@@ -113,36 +114,58 @@ export class WorkspaceService {
     return new ProjectFiles((await this.record(workspaceId)).directory);
   }
 
+  /** Read-only review; existing registrations cannot be cleaned through initialization. */
+  async inspectInitialization(input: {directory: unknown; adopt: unknown}): Promise<WorkspaceInitialization> {
+    this.validateDirectory(input);
+    await this.creating;
+    this.assertOpen();
+    const directory = await this.planDirectory(input.directory, input.adopt);
+    if (!input.adopt) return {directory, cleanupPaths: [], cleanupRevision: null};
+    return inspectManagedState(directory);
+  }
+
+  private validateDirectory(input: {directory: unknown; adopt: unknown}): asserts input is {directory: string; adopt: boolean} {
+    if (typeof input.directory !== 'string' || !isAbsolute(input.directory) || input.directory.length > 1024) throw new AppError('invalid_input', 'directory is an absolute path of at most 1024 characters');
+    if (typeof input.adopt !== 'boolean') throw new AppError('invalid_input', 'adopt is true or false');
+  }
+
+  private async planDirectory(directory: string, adopt: boolean): Promise<string> {
+    const planned = adopt ? await existingFolder(directory) : await newFolder(directory);
+    const key = folderKey(planned);
+    for (const other of await this.store.listWorkspaces()) {
+      const otherKey = folderKey(other.directory);
+      if (within(otherKey, key) || within(key, otherKey)) throw new AppError('workspace_exists', `${directory} overlaps workspace ${other.name}`, 409);
+    }
+    return planned;
+  }
+
   async create(input: WorkspaceInput): Promise<Workspace> {
     const workspaceId = input.workspaceId === undefined ? randomUUID() : input.workspaceId;
     identity(workspaceId, 'workspaceId');
     if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 200 || controlCharacter.test(input.name)) throw new AppError('invalid_input', 'name has 1–200 characters without control characters');
-    if (typeof input.directory !== 'string' || !isAbsolute(input.directory) || input.directory.length > 1024) throw new AppError('invalid_input', 'directory is an absolute path of at most 1024 characters');
-    if (typeof input.adopt !== 'boolean') throw new AppError('invalid_input', 'adopt is true or false');
+    this.validateDirectory(input);
+    if (input.cleanupRevision !== undefined && (typeof input.cleanupRevision !== 'string' || !/^[a-f0-9]{64}$/.test(input.cleanupRevision))) throw new AppError('invalid_input', 'cleanupRevision must be the reviewed initialization revision');
     const models = await this.validateModels(input.models);
     const { name, directory, adopt } = input;
     // One create at a time, so the overlap check sees every earlier workspace.
     const created = this.creating.then(async () => {
       this.assertOpen();
       if (await this.store.getWorkspace(workspaceId)) throw new AppError('workspace_exists', `Workspace ${workspaceId} already exists`, 409);
-      const planned = adopt ? await existingFolder(directory) : await newFolder(directory);
-      const key = folderKey(planned);
-      for (const other of await this.store.listWorkspaces()) {
-        const otherKey = folderKey(other.directory);
-        if (within(otherKey, key) || within(key, otherKey)) throw new AppError('workspace_exists', `${directory} overlaps workspace ${other.name}`, 409);
-      }
+      await this.planDirectory(directory, adopt);
       const made = adopt ? undefined : await mkdir(directory, { recursive: true });
-      let initialized = false;
+      let prepared: Awaited<ReturnType<typeof prepareWorkspace>> | undefined;
       try {
         const record: WorkspaceRecord = { workspaceId, name, directory: await realpath(directory), createdAt: Date.now() };
-        const { lead, bootstrap } = await prepareWorkspace(record, defaultRunSettings(models)); initialized = true;
+        prepared = await prepareWorkspace(record, defaultRunSettings(models), input.cleanupRevision as string | undefined);
+        const {lead, bootstrap} = prepared;
         await this.store.createWorkspace(record, sha256(folderKey(record.directory)), lead, models, bootstrap);
         this.records.set(workspaceId, record);
       } catch (error) {
-        if (initialized) await rm(join(directory, managedRoot), { recursive: true, force: true });
+        await prepared?.files.rollback();
         if (made) await rm(made, { recursive: true, force: true }).catch(() => undefined);
         throw error;
       }
+      await prepared.files.finish();
     });
     this.creating = created.catch(() => undefined);
     return created.then(() => this.get(workspaceId));

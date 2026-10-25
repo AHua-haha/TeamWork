@@ -263,3 +263,6 @@ Only one Changes read is in flight per workspace view. Focus/polling coalesce; d
 ## Shared user pictures
 
 Workspace group input accepts PNG/JPEG/WebP pictures through the composer file picker, clipboard and drop. Users can remove local previews and send pictures alone or with text. Refused sends preserve their draft. Sent pictures remain viewable after reload through durable backend attachment references. Picture input does not change solo-conversation input.
+
+
+Workspace creation preserves existing .rsi/context documents and adds only missing root documents. Review POST /workspaces/initialization is read-only. Cancellation sends no create/cleanup request. Cleanup POST /workspaces includes the reviewed cleanupRevision; context/source are explicitly excluded from removal.

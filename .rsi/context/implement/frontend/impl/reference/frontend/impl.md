@@ -152,7 +152,7 @@ ChangesClient coalesces lightweight ordinary file review and separately loads co
 
 ## Workspace bootstrap path coordination
 
-Discussion reference formatting, physical-node-reference normalization and member configuration diff labels use .rsi/context and .rsi/members. Logical context requests use category-free paths; design hierarchy grouping uses metadata node identities. No additional creation request fields or frontend initialization step is needed: workspace create/adopt succeeds only after the backend baseline is ready.
+Discussion reference formatting, physical-node-reference normalization and member configuration diff labels use .rsi/context and .rsi/members. Logical context requests use category-free paths; design hierarchy grouping uses metadata node identities. CreateWorkspaceDialog inspects initialization before creation. Nonempty non-context metadata opens an explicit cleanup review listing paths, with Cancel, Back and Clean up and initialize actions. The confirmed request carries the captured directory/models and cleanupRevision. A stale cleanup_required response returns to the form for a fresh review. Context-only initialization proceeds without a cleanup prompt; success waits for the backend baseline to be ready.
 
 MemberInspector labels each backend-derived impl-context-<hash> part as Implementation context and displays its concrete paths/agent commit policy alongside the existing parts. Unknown future scope IDs retain their ID label instead of being misrepresented as member configuration. No context editor or new API is introduced.
 
@@ -195,3 +195,6 @@ WorkspacePanel refreshes accepted design discovery when team activity transition
 ## Managed service configuration
 
 The host lifecycle supplies development proxy/port inputs from project-root rsi.config.json through explicit child settings. Vite disables envDir loading so separate frontend .env files cannot become another service configuration source. Static deployment serving receives its own configured backend origin and port; application message/state contracts are unchanged.
+
+
+Workspace creation preserves existing .rsi/context documents and adds only missing root documents. Review POST /workspaces/initialization is read-only. Cancellation sends no create/cleanup request. Cleanup POST /workspaces includes the reviewed cleanupRevision; context/source are explicitly excluded from removal.

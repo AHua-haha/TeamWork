@@ -20,6 +20,16 @@ createAgentServer receives AgentRuntime and configuration/workspace/team service
 
 **Usage example:** `const server = createAgentServer(runtime, config, workspaces, team); server.listen(port, host);` For browser use, `GET /agents` lists solo agents. `GET /workspaces/:id/team/chat/timeline?after=0&limit=100` returns ordered timeline changes; follow using its change cursor.
 
+### Context-preserving workspace initialization
+
+**Input:** POST /workspaces/initialization JSON {directory,adopt}; POST /workspaces JSON {workspaceId?,name,directory,adopt,models,cleanupRevision?}. Both reject unknown fields/query parameters.
+
+**Output:** Inspection 200 {directory,cleanupPaths,cleanupRevision:string|null}; creation 201 Workspace. Nonempty state without matching cleanupRevision returns cleanup_required/409. Invalid revision format returns invalid_input/400; unsafe managed/context paths return file_exists/409; existing registry overlaps return workspace_exists/409.
+
+**Effect and failure:** Inspection is read-only; creation delegates revision-bound cleanup/context preservation to Workspace. Existing context and source files are excluded from cleanup. Error envelopes retain the existing {error:{code,message}} shape.
+
+**Usage example:** inspect an existing directory, display cleanupPaths, then POST /workspaces with its cleanupRevision only after explicit user confirmation. If state changes, inspect/review again before retrying.
+
 ## File lookup
 
 - [backend/src/api](../../../../../../backend/src/api): owned implementation.

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { Workspace, WorkspaceClient, WorkspaceModels } from '../client/workspace-client.js';
+import type { Workspace, WorkspaceClient, WorkspaceModels, WorkspaceInput, WorkspaceInitialization } from '../client/workspace-client.js';
+import { BackendError } from '../client/agent-client.js';
 import { errorText } from './FileTree.js';
 import { WorkspaceModelsEditor } from './WorkspaceModelsEditor.js';
 import { workspaceModelsError } from './workspace-model-state.js';
@@ -55,14 +56,37 @@ export function CreateWorkspaceDialog({ client, onCreated, onClose }: { client: 
   const [directory, setDirectory] = useState('');
   const [adopt, setAdopt] = useState(false);
   const [models, setModels] = useState<WorkspaceModels>({ models: [], defaultModel: null });
+  const [cleanup, setCleanup] = useState<{input: WorkspaceInput; review: WorkspaceInitialization} | null>(null);
   const modelError = workspaceModelsError(models);
   const { busy, error, submit } = useSubmit(async () => {
+    if (cleanup) {
+      try { onCreated(await client.createWorkspace({...cleanup.input, cleanupRevision: cleanup.review.cleanupRevision!})); }
+      catch (cause) {
+        if (cause instanceof BackendError && cause.code === 'cleanup_required') setCleanup(null);
+        throw cause;
+      }
+      return;
+    }
     if (modelError) throw new Error(modelError);
-    onCreated(await client.createWorkspace({ name: name.trim(), directory: directory.trim(), adopt, models }));
+    const input = {name: name.trim(), directory: directory.trim(), adopt, models};
+    const review = await client.inspectInitialization({directory: input.directory, adopt});
+    if (review.cleanupRevision) { setCleanup({input: {...input, directory: review.directory}, review}); return; }
+    onCreated(await client.createWorkspace(input));
   });
   return <Dialog eyebrow="WORKSPACE" title="New workspace" busy={busy} onClose={onClose}>
     <form onSubmit={event => void submit(event)}>
       {error && <div className="form-error" role="alert">{error}</div>}
+      {cleanup ? <>
+        <p className="dialog-message">This folder contains existing member or runtime metadata. Clean up these paths and initialize a fresh lead?</p>
+        <p><code>{cleanup.review.directory}</code></p>
+        <ul>{cleanup.review.cleanupPaths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
+        <p className="workspace-model-hint">Existing files under .rsi/context/ and project source files will be preserved. Missing root context files will be added. The listed metadata will be discarded.</p>
+        <div className="dialog-actions">
+          <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="button" className="text-button" disabled={busy} onClick={() => setCleanup(null)}>Back</button>
+          <button type="submit" className="primary-button danger-button" disabled={busy}>{busy ? 'Initializing…' : 'Clean up and initialize'}</button>
+        </div>
+      </> : <>
       <label>Name<input autoFocus required maxLength={200} value={name} disabled={busy} onChange={event => setName(event.target.value)} placeholder="Billing service" /></label>
       <label>Folder<input required maxLength={1024} value={directory} disabled={busy} onChange={event => setDirectory(event.target.value)} placeholder="Absolute folder path" spellCheck={false} />
         <small>An absolute path on the machine running the backend. Workspaces cannot overlap.</small></label>
@@ -72,6 +96,7 @@ export function CreateWorkspaceDialog({ client, onCreated, onClose }: { client: 
       {modelError && <p className="workspace-model-hint">{modelError}</p>}
       <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="submit" className="primary-button" disabled={busy || !!modelError}>{busy ? 'Creating…' : 'Create workspace'}</button></div>
+      </>}
     </form>
   </Dialog>;
 }

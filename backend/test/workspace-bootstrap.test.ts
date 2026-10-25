@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { TeamSystem } from '../src/core/team/team-system.js';
+import { testModels } from './memory-store.js';
 import { code, stubConfig, withTeam } from './team-fixture.js';
 
 test('new workspace has a ready root-design lead, exact active files and clean bootstrap history before any agent runs', () => withTeam(async f => {
@@ -30,4 +31,26 @@ test('new workspace has a ready root-design lead, exact active files and clean b
     assert.equal((await reopened.currentConfiguration(f.workspaceId)).active.revision,view.active.revision);
     assert.equal((await reopened.configuration.accepted(f.workspaceId,lead.memberId)).files['prompts/member.md'],source.files['prompts/member.md']);
   } finally { await reopened.runner.close(); }
+}));
+
+
+test('adopted context gives the fresh lead its existing recursive design mappings and a clean configuration baseline', () => withTeam(async f => {
+  const directory=join(f.directory,'..','adopted');
+  for(const path of ['.rsi/context/design/api','src/root','src/api'])await mkdir(join(directory,path),{recursive:true});
+  await writeFile(join(directory,'.rsi/context/design/metadata.json'),JSON.stringify({implementation:['src/root']}));
+  await writeFile(join(directory,'.rsi/context/design/design.md'),'# Preserved project');
+  await writeFile(join(directory,'.rsi/context/design/api/metadata.json'),JSON.stringify({implementation:['src/api']}));
+  await writeFile(join(directory,'.rsi/context/design/api/design.md'),'# Preserved API');
+  const workspace=await f.workspaces.create({name:'Adopted',directory,adopt:true,models:testModels()});
+  const roster=await f.team.team(workspace.workspaceId);
+  assert.equal(roster.members.length,1);
+  const lead=roster.members[0]!;
+  assert.equal(lead.lead,true); assert.equal(lead.ready,true);
+  assert.deepEqual(lead.harness.designScope,{working:['metadata.json'],dependencies:[]});
+  assert.deepEqual([...lead.harness.implementationScope.paths].sort(),['src/api','src/root']);
+  const view=await f.team.currentConfiguration(workspace.workspaceId);
+  assert.equal(view.status.valid,true);assert.equal(view.status.hasPending,false);
+  assert.equal(view.activation.valid,true);assert.equal(view.activation.hasChanges,false);
+  assert.deepEqual(view.changes,[]);
+  assert.deepEqual((await f.team.designs.list(workspace.workspaceId)).designs.map(d=>d.path).sort(),['api/metadata.json','metadata.json']);
 }));

@@ -126,3 +126,20 @@ test('context feed stops on a gap, a wrong sync position, or a client error', as
     feed.dispose();
   }
 });
+
+
+test('workspace client reviews initialization and sends cleanup consent only when explicitly supplied', async () => {
+  const calls:{path:string; body:unknown}[]=[];
+  const review={directory:'/srv/existing',cleanupPaths:['.rsi/members'],cleanupRevision:'a'.repeat(64)};
+  const client=new WorkspaceClient((async(input,init)=>{
+    calls.push({path:String(input),body:JSON.parse(String(init?.body))});
+    return new Response(JSON.stringify(String(input).endsWith('/initialization')?review:{}));
+  }) as typeof fetch);
+  assert.deepEqual(await client.inspectInitialization({directory:'/srv/existing',adopt:true}),review);
+  assert.equal(calls.length,1); // A review alone never creates or cleans a workspace.
+  await client.createWorkspace({name:'Existing',directory:review.directory,adopt:true,models,cleanupRevision:review.cleanupRevision});
+  assert.deepEqual(calls,[
+    {path:'/workspaces/initialization',body:{directory:'/srv/existing',adopt:true}},
+    {path:'/workspaces',body:{name:'Existing',directory:'/srv/existing',adopt:true,models,cleanupRevision:review.cleanupRevision}},
+  ]);
+});

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { join } from 'node:path';
 import { duplexPair } from 'node:stream';
@@ -155,4 +155,25 @@ test('read-only design endpoints discover current designs and explain invalid me
   await call('/workspaces/designs/designs/file?path=systems/backend/metadata.json&revision=older', { status: 400 });
   await call('/workspaces/designs/designs', { method: 'POST', data: record, status: 404 });
   await call('/workspaces/missing/designs', { status: 404 });
+}));
+
+
+test('workspace initialization HTTP contract reviews metadata before explicitly confirmed cleanup', () => withServer(async (call, _server, folder) => {
+  const directory=join(folder,'existing'), root=join(directory,'.rsi');
+  await mkdir(join(root,'members'),{recursive:true});
+  await writeFile(join(root,'members/old.json'),'old');
+  await mkdir(join(root,'context/design'),{recursive:true});
+  await writeFile(join(root,'context/design/design.md'),'# Retained');
+  const review=await call('/workspaces/initialization',{method:'POST',data:{directory,adopt:true}});
+  assert.deepEqual(review.cleanupPaths,['.rsi/members']); assert.ok(review.cleanupRevision);
+  const input={name:'Existing',directory,adopt:true,models:testModels()};
+  assert.equal((await call('/workspaces',{method:'POST',data:input,status:409})).error.code,'cleanup_required');
+  assert.equal(await readFile(join(root,'members/old.json'),'utf8'),'old');
+  await call('/workspaces',{method:'POST',data:{...input,cleanupRevision:true},status:400});
+  await call('/workspaces/initialization',{method:'POST',data:{directory,adopt:true,cleanup:true},status:400});
+  const created=await call('/workspaces',{method:'POST',data:{...input,cleanupRevision:review.cleanupRevision},status:201});
+  assert.equal(created.context.seq,1);
+  assert.equal(await readFile(join(root,'context/design/design.md'),'utf8'),'# Retained');
+  await assert.rejects(stat(join(root,'members/old.json')));
+  assert.equal((await call('/workspaces/initialization',{method:'POST',data:{directory,adopt:true},status:409})).error.code,'workspace_exists');
 }));

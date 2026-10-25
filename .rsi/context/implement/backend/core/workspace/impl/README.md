@@ -18,7 +18,21 @@ Design: [Workspace](../../../../../design/backend/core/workspace/design.md).
 
 DesignService keeps accepted recursive working roots, dependencies, pending-design authority and native file access unchanged. Source ownership changes preserve all existing rows/versions and require no metadata reset.
 
+### Context-preserving workspace initialization
+
+**Input:** WorkspaceService.inspectInitialization({directory,adopt}); create({name,directory,adopt,models,workspaceId?,cleanupRevision?}). Inspection returns canonical directory, cleanupPaths and cleanupRevision|null. A valid reviewed SHA-256 revision is required to remove nonempty non-context state; missing/stale consent raises cleanup_required/409 before mutation. Existing registered/overlapping paths remain workspace_exists/409.
+
+**Output:** The initialized Workspace and context overview. Existing valid UTF-8 context files and missing root templates are imported at context sequence 1, with preserved design bytes as the accepted bootstrap baseline. The fresh lead's working root is metadata.json.
+
+**Effect and failure:** workspace-initialization.ts owns reserved-path inspection, recursive non-context stat fingerprint, exclusive file additions and reversible staging under .rsi/.initialization-*. Existing context files are never rewritten/deleted; hidden/binary/unsupported context entries remain physically intact and normal inspection reports supported problems. Honor root design.md versus design/README.md and impl.md versus impl/README.md. Missing files are added only. Non-context metadata symlinks are removed as links without accessing targets. Protected root/required-document symlinks and case collisions fail. Failed preparation/SQL registration removes additions and restores staged metadata; source and Git are untouched. Staging is not a crash journal and assumes no concurrent external filesystem writer. Registration success precedes removal of staged state.
+
+**Usage example:** review = await workspaces.inspectInitialization({directory,adopt:true}); after the user confirms its cleanupPaths, call workspaces.create({...input,cleanupRevision:review.cleanupRevision ?? undefined}). Context-only projects need no consent. ContextBase and bootstrap use the same data/context-scan.ts to discover indexable files. No SQL schema migration is needed.
+
 ## File lookup
+
+- [backend/src/core/workspace/workspace-initialization.ts](../../../../../../../backend/src/core/workspace/workspace-initialization.ts): read-only metadata inspection, cleanup revision, reversible staging and exclusive missing-file creation.
+- [backend/src/core/workspace/data/context-scan.ts](../../../../../../../backend/src/core/workspace/data/context-scan.ts): shared discovery/limits for bootstrap imports and live context indexing.
+- [backend/src/core/workspace-bootstrap.ts](../../../../../../../backend/src/core/workspace-bootstrap.ts): Core coordination of preserved context and fresh lead/baseline.
 
 - [backend/src/core/workspace/data](../../../../../../../backend/src/core/workspace/data): registry/context models and owned SQL.
 

@@ -10,6 +10,10 @@ The server factory accepts Core services and returns an HTTP server without bind
 
 Multipart parsing belongs to API; image preparation/validation semantics belong to Core. Follow streams present Core records/deltas and honor backpressure and cancellation without driving agent execution. Unknown paths/input formats fail explicitly; errors after headers follow the stream-error contract. API does not query application tables, run business migrations or implement cooperation/permission policy.
 
+### Workspace initialization
+
+`POST /workspaces/initialization` accepts directory and adopt and returns a read-only initialization inspection: canonical directory, cleanupPaths and cleanupRevision (null when no nonempty metadata). `POST /workspaces` additionally accepts optional cleanupRevision. Without matching reviewed cleanup consent, nonempty metadata returns a conflict. Existing content under `.rsi/context/` is preserved; source files and Git state are unchanged. Other registered workspaces cannot be cleaned or reinitialized through this operation.
+
 ## Constraints, specifications and requirements
 
 - Preserve existing accepted observable behavior, record formats, revisions/cursors, API payloads and lifecycle guarantees during this migration.

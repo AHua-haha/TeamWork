@@ -13,7 +13,7 @@ import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -2886,4 +2886,47 @@ test('uncertain group publication commit restores durable Pi context without rep
     assert.equal(restored.length, 1); assert.match(String(restored[0]!.entry.message.content), /Committed once/);
     assert.equal((await store.team.chatSnapshot(f.workspaceId)).messages.length, 1);
   } finally {await f.close();}
+});
+
+
+test('adoption imports preserved context and fresh lead atomically after reviewed metadata cleanup', async () => {
+  const directory=await realpath(await mkdtemp(join(tmpdir(),'rsi-adopt-test-')));
+  const root=join(directory,'.rsi');
+  const original={
+    'design/metadata.json': '{"implementation":["src"]}\n',
+    'design/design.md': '# Preserved root\r\n',
+    'design/api/metadata.json': '{"implementation":["src/api"]}\n',
+    'design/api/design.md': '# API contract\n',
+    'implement/impl/README.md': '# Existing result context\n',
+  };
+  try {
+    for(const [path,content]of Object.entries(original)){
+      await mkdir(join(root,'context',path,'..'),{recursive:true});await writeFile(join(root,'context',path),content);
+    }
+    await mkdir(join(root,'members/old'),{recursive:true});await writeFile(join(root,'members/old/member.json'),'stale member');
+    await mkdir(join(directory,'src/api'),{recursive:true});await writeFile(join(directory,'src/api/index.ts'),'implementation');
+    const review=await workspaces.inspectInitialization({directory,adopt:true});
+    const input={name:'Adopted',directory,models:testModels(),adopt:true};
+    await assert.rejects(workspaces.create(input),error=>(error as {code?:string}).code==='cleanup_required');
+    const created=await workspaces.create({...input,cleanupRevision:review.cleanupRevision!});
+    assert.equal(created.context.seq,1);assert.equal(created.context.files,Object.keys(original).length);
+    const indexed=await store.workspaces.loadContext(created.workspaceId);
+    assert.equal(indexed.seq,1);assert.equal(indexed.files.length,Object.keys(original).length);
+    for(const [path,content]of Object.entries(original)){
+      assert.equal(await readFile(join(root,'context',path),'utf8'),content);
+      const file=indexed.files.find(f=>f.path===path)!;
+      assert.equal(await store.workspaces.blob(created.workspaceId,file.hash),content);
+    }
+    const members=await store.team.listMembers(created.workspaceId);
+    assert.equal(members.length,1);
+    assert.equal(members[0]!.value.name,'Lead');
+    assert.deepEqual(members[0]!.value.harness.designScope,{working:['metadata.json'],dependencies:[]});
+    assert.equal((await store.agents.getState(members[0]!.id)).historyPosition,0);
+    assert.deepEqual(await readdir(join(root,'members')),[members[0]!.id]);
+    const activation=await store.team.getMemberActivation(created.workspaceId);
+    assert.equal(activation?.revision,members[0]!.value.configuration?.acceptedRevision);
+    const baseline=await store.workspaces.getGitBaseline(created.workspaceId);
+    assert.deepEqual(baseline!.design,Object.fromEntries(Object.entries(original).filter(([p])=>p.startsWith('design/')).map(([p,c])=>[`.rsi/context/${p}`,c])));
+    assert.equal(await readFile(join(directory,'src/api/index.ts'),'utf8'),'implementation');
+  }finally{await rm(directory,{recursive:true,force:true});}
 });

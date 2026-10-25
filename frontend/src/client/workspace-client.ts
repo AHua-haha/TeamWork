@@ -6,7 +6,8 @@ export interface WorkspaceRecord { workspaceId: string; name: string; directory:
 export interface ModelReference { connectionId: string; modelId: string }
 export interface WorkspaceModels { models: ModelOptions[]; defaultModel: ModelReference | null }
 export interface WorkspaceModelsRecord { revision: number; value: WorkspaceModels; issues: string[] }
-export interface WorkspaceInput { name: string; directory: string; adopt: boolean; models: WorkspaceModels }
+export interface WorkspaceInput { name: string; directory: string; adopt: boolean; models: WorkspaceModels; cleanupRevision?: string }
+export interface WorkspaceInitialization { directory: string; cleanupPaths: string[]; cleanupRevision: string | null }
 export interface Problem { path: string; code: string; message: string }
 export interface ContextOverview { workspaceId: string; seq: number; files: number; bytes: number; problems: Problem[] }
 export interface Workspace extends WorkspaceRecord { context: ContextOverview }
@@ -80,6 +81,7 @@ export class WorkspaceClient {
   private base(workspaceId: string): string { return `/workspaces/${encodeURIComponent(workspaceId)}`; }
 
   listWorkspaces(): Promise<WorkspaceRecord[]> { return this.get<{ workspaces: WorkspaceRecord[] }>('/workspaces').then(result => result.workspaces); }
+  inspectInitialization(input: Pick<WorkspaceInput, 'directory' | 'adopt'>): Promise<WorkspaceInitialization> { return this.write('/workspaces/initialization', 'POST', input); }
   createWorkspace(input: WorkspaceInput): Promise<Workspace> { return this.write('/workspaces', 'POST', input); }
   getWorkspace(workspaceId: string): Promise<Workspace> { return this.get(this.base(workspaceId)); }
 

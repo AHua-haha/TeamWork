@@ -1,3 +1,4 @@
+import { scanContextFiles, type DiskFile } from './context-scan.js';
 import { randomUUID } from 'node:crypto';
 import { watch, type Dirent, type FSWatcher } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
@@ -94,7 +95,6 @@ export const maxTreeEntries = 2000;
 export const maxFindResults = 200;
 export const maxSearchMatches = 100;
 export const maxReasonLength = 1000;
-const maxPathLength = 512;
 const userAuthor: Author = { type: 'user' };
 
 const keyOf = (path: string) => path.toLowerCase();
@@ -211,7 +211,6 @@ class DiskChange {
   }
 }
 
-interface DiskFile { path: string; key: string; size: number; mtimeMs: number }
 
 /**
  * One workspace's context base. Current files are the files under `.rsi/context/` on disk, and the store
@@ -605,7 +604,7 @@ export class ContextBase {
     }
     this.watch(ino);
 
-    const scan = await this.scan();
+    const scan = await scanContextFiles(this.contextDir);
     const problems = scan.problems;
     const notText = new Map<string, { size: number; mtimeMs: number }>();
     const served = new Set<string>();
@@ -661,51 +660,6 @@ export class ContextBase {
       }
     }
     if (!batch.empty) await this.commit(batch);
-  }
-
-  /** Valid text-file candidates and problems. Dot entries are reserved and ignored; invalid folders are not walked. */
-  private async scan(): Promise<{ files: DiskFile[]; problems: Problem[] }> {
-    const files: DiskFile[] = [];
-    const problems: Problem[] = [];
-    const visit = async (folder: string, prefix: string, segments: number): Promise<void> => {
-      let entries: Dirent[];
-      try { entries = await readdir(folder, { withFileTypes: true }); }
-      catch (error) {
-        if (missing(error)) return;
-        throw error;
-      }
-      const visible = entries.filter(entry => !entry.name.startsWith('.'));
-      const counts = new Map<string, number>();
-      for (const entry of visible) counts.set(entry.name.toLowerCase(), (counts.get(entry.name.toLowerCase()) ?? 0) + 1);
-      for (const entry of visible) {
-        const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-        if (counts.get(entry.name.toLowerCase())! > 1) {
-          problems.push({ path, code: 'duplicate_path', message: 'Another name differs only in letter case' });
-          continue;
-        }
-        if (!validSegment(entry.name) || segments + 1 > maxSegments || path.length > maxPathLength) {
-          problems.push({ path, code: 'invalid_path', message: 'The name or path breaks the context path rules' });
-          continue;
-        }
-        if (entry.isDirectory()) {
-          await visit(join(folder, entry.name), path, segments + 1);
-          continue;
-        }
-        if (!entry.isFile()) {
-          problems.push({ path, code: 'not_file', message: 'Not a regular file' });
-          continue;
-        }
-        try {
-          const info = await lstat(join(folder, entry.name));
-          if (info.size > maxFileBytes) problems.push({ path, code: 'too_large', message: `Larger than ${maxFileBytes} bytes` });
-          else files.push({ path, key: keyOf(path), size: info.size, mtimeMs: info.mtimeMs });
-        } catch (error) {
-          if (!missing(error)) throw error;
-        }
-      }
-    };
-    await visit(this.contextDir, '', 0);
-    return { files, problems };
   }
 
   private watch(ino: number): void {

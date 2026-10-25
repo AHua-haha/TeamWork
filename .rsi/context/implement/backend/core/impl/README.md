@@ -24,6 +24,10 @@ Design: [Core](../../../../design/backend/core/design.md).
 - Harness: configuration/resource/scope/tool-input/approval models and session-bound approval operations; execution resources remain process-local.
 - data-transaction.ts and codec.ts provide schema-neutral shared mechanics. Domain validators live under their owner, rather than being re-exported from the common codec.
 
+### Context-preserving workspace initialization
+
+Core prepareWorkspace creates a fresh Team root-design lead and asks Workspace's PreparedWorkspaceFiles to preserve/import context, add missing templates and stage reviewed non-context metadata. WorkspaceService commits lead/configuration/activation, context history/design baseline and registration through the existing atomic owner transaction, then discards staging. Preparation/registration failures remove only additions and restore old metadata. Existing context and source bytes remain intact; normal opening does not reinitialize registered workspaces.
+
 ## File lookup
 
 - [backend/src/core/data.ts](../../../../../../backend/src/core/data.ts): owner composition, cross-owner hooks and lifecycle.

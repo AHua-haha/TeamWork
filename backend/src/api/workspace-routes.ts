@@ -47,11 +47,18 @@ export function workspaceRoutes(workspaces: WorkspaceService): (route: Route) =>
       if (method === 'POST') {
         query(url, []);
         const input = await body(request, maxBodyBytes);
-        fields(input, ['workspaceId', 'name', 'directory', 'adopt', 'models']);
-        json(response, 201, await workspaces.create({ workspaceId: input.workspaceId, name: input.name, directory: input.directory, adopt: input.adopt, models: input.models }));
+        fields(input, ['workspaceId', 'name', 'directory', 'adopt', 'models', 'cleanupRevision']);
+        json(response, 201, await workspaces.create({ workspaceId: input.workspaceId, name: input.name, directory: input.directory, adopt: input.adopt, models: input.models, cleanupRevision: input.cleanupRevision }));
         return;
       }
       throw notFound();
+    }
+    if (segments.length === 2 && segments[1] === 'initialization' && method === 'POST') {
+      query(url, []);
+      const input = await body(request, maxBodyBytes);
+      fields(input, ['directory', 'adopt']);
+      json(response, 200, await workspaces.inspectInitialization({directory: input.directory, adopt: input.adopt}));
+      return;
     }
     const workspaceId = segments[1]!;
     identity(workspaceId, 'workspaceId');
