@@ -24,6 +24,8 @@ HarnessService obtains public member configuration and Workspace design/file inf
 
 harnessPrompt('context-compaction') loads required backend/prompts/harness/context-compaction.md. The build copies the complete harness prompt directory beside compiled code. The instruction describes the private replacement boundary, retention of every new assistant/tool message, separately preserved original group context and Next steps for unfinished work. Runtime supplies this string in Agent compaction settings; Harness does not select a token threshold or persist compaction state.
 
+The semantic-analysis Harness capability is implemented as `semanticSubmissionTool` and exposed only through `HarnessService.semanticTool` to the Team-created maintenance run. It validates the native tool input shape and forwards the typed submission to Team; Team, not Harness, validates source digests, tree structure, member IDs and authoritative involvement. The capability does not enter ordinary member tools, alter shared messages or publish responses. The existing context-compaction prompt remains release-owned and unchanged.
+
 ### Harness data model
 
 **Input:** data/config.ts validates configured design scope; data/bases.ts and resources.ts define purpose/resource grants; data/model.ts defines resolved scopes/permissions/environment; data/bash.ts defines Bash input/output and parsing. data/approvals.ts owns pending CommitApproval values and ApprovalRequests list/read/decide/wait operations.
@@ -31,6 +33,10 @@ harnessPrompt('context-compaction') loads required backend/prompts/harness/conte
 **Output/effect:** HarnessService.approvals is the same public inspection/decision surface backed by ApprovalRequests. GitCommitControl consumes that data interface for staged-tree validation and approved execution; it no longer stores approval state itself. Approvals and shell/job resources remain session-local and are cancelled/reset under existing lifecycle rules. No new durable Harness table or tool/input/output/permission policy is added.
 
 **Usage example:** use harness.approvals.list(workspaceId), read(workspaceId,id) and decide(workspaceId,id,action,message). Git execution uses the same injected ApprovalRequests.wait mechanism, without changing the HTTP review contract.
+
+### Semantic tool verification
+
+`npm run check` and the full backend suite pass (231/231). The maintenance-only `submit_group_semantic_information` tool is exposed by Harness and is not added to ordinary member tool sets. Team remains responsible for source, revision and involvement validation.
 
 ## File lookup
 

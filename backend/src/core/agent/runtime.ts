@@ -120,6 +120,17 @@ export class AgentRuntime {
     throw new AppError('runtime_unavailable', 'Run has no live worker; restart runtime to recover', 503);
   }
 
+  async runMaintenance(configuration: import('./contracts.js').AgentConfiguration, entries: ContextEntry[], signal = new AbortController().signal): Promise<RunState> {
+    this.available();
+    const run: RunState = { agentId: `maintenance:${randomUUID()}`, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
+    const config = { ...configuration, compaction: undefined };
+    const policy: RuntimePolicy = {
+      buildRequest: (_scope, history) => ({ model: config.model, models: config.models, tools: config.tools, options: config.options,
+        context: { messages: history.entries.map(entry => entry.message), tools: config.tools.map(tool => tool.definition), ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}) } }),
+    };
+    const execution = new AgentExecution(run, { revision: 0, entries: structuredClone(entries) }, 0, config, policy, this.stream, {}, new ProgressStore(), this.maxSteps);
+    return execution.run(signal);
+  }
   /** Resolves with the run's final state once its work has ended here. A run this runtime does not run reports its stored state at once. */
   finished(agentId: string, runId: string): Promise<RunState> {
     const key=agentId+'\0'+runId;

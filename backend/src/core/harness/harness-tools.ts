@@ -1,7 +1,21 @@
-import { Type } from '@earendil-works/pi-ai';
 import { createEditTool, createFindTool, createGrepTool, createLsTool, createReadTool, createWriteTool } from '@earendil-works/pi-coding-agent';
+import { Type, type JsonObject } from '@earendil-works/pi-ai';
+import type { GroupSemanticSubmission } from '../team/data/semantic.js';
 import type { HarnessService } from './harness.js';
 import type { RuntimeTool } from '../agent/contracts.js';
+export function semanticSubmissionTool(submit: (value: GroupSemanticSubmission) => Promise<unknown>): RuntimeTool {
+  return {
+    definition: { name: 'submit_group_semantic_information', description: 'Submit the complete hierarchical semantic information for the pinned full group context. Team validates and stores the result; do not submit a partial suffix.', parameters: Type.Object({
+      baseRevision: Type.Integer({ minimum: 0 }), through: Type.Integer({ minimum: 1 }), sourceDigest: Type.String({ minLength: 64, maxLength: 64 }), tree: Type.Array(Type.Any(), { minItems: 1 }),
+    }, { additionalProperties: false }) },
+    execute: async (args: JsonObject) => {
+      const result = await submit(args as unknown as GroupSemanticSubmission);
+      return { content: [{ type: 'text', text: `Semantic information accepted for group positions ${(result as {from?: number; through?: number}).from ?? '?'}-${(result as {through?: number}).through ?? '?'}.` }], details: result as any, isError: false };
+    },
+  };
+}
+
+
 
 /** Pi owns schemas, operations and results. Harness checks invocation inputs only. */
 export function harnessFileTools(harness: HarnessService, writable: boolean): RuntimeTool[] {

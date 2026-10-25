@@ -8,7 +8,10 @@ import { chatText, userMentions, mentionLimit, type ChatStore, type ChatMessage,
 import { parseMemberResponse } from './member-response.js';
 import { AppError, type RunState } from '../agent/data/model.js';
 
-export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback' | 'clearProgress' | 'syncGroupContext'>;
+export type RunHost = Pick<AgentRuntime, 'start' | 'cancel' | 'finished' | 'getState' | 'prepareRun' | 'launch' | 'feedback' | 'clearProgress' | 'syncGroupContext'> & {
+  runMaintenance?: AgentRuntime['runMaintenance'];
+};
+
 
 /** Shared publication and independent member activations. Private calls and call chains do not exist here. */
 export class TeamRunner {
@@ -18,7 +21,7 @@ export class TeamRunner {
   private readonly publications = new Set<Promise<unknown>>();
   private readonly gate = new OperationQueue();
   private readonly execution = new OperationQueue();
-  constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost, private readonly resetShells: (ids?: string[]) => Promise<void> = async () => {}) {}
+  constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost, private readonly resetShells: (ids?: string[]) => Promise<void> = async () => {}, private readonly publicationHook: (workspaceId: string) => void = () => {}) {}
 
   isRunning(memberId: string): boolean { return this.executionData.isRunning(memberId); }
 
@@ -100,6 +103,7 @@ export class TeamRunner {
       void this.runtime().finished(run.agentId, run.runId).then(settled, settled);
     }
     this.changes.publish();
+    this.publicationHook(workspaceId);
     await Promise.all(roster.map(member => this.runtime().syncGroupContext(member.id)));
     return result;
   }

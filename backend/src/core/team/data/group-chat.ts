@@ -1,5 +1,5 @@
 import { validateMessage, validateRun } from '../../agent/data/validation.js';
-import type { GroupContextMessage } from '../../agent/data/context.js';
+import type { GroupContextMessage, GroupSemanticIndex } from '../../agent/data/context.js';
 import type { ImageContent, Message, JsonObject } from '@earendil-works/pi-ai';
 import { validateChatImages, type ChatImage, type PreparedChatImage, type ChatImageStore } from './chat-images.js';
 import type { RunState } from '../../agent/data/model.js';
@@ -58,6 +58,10 @@ export interface ChatPublication {
 }
 export interface ChatStore extends ChatImageStore {
   readGroupContext(workspaceId: string, after: number): Promise<GroupContextMessage[]>;
+  readGroupSemantic?(workspaceId: string): Promise<GroupSemanticIndex | undefined>;
+  semanticInput?(workspaceId: string, through?: number): Promise<{ messages: GroupContextMessage[]; previous?: GroupSemanticIndex; through: number; baseRevision: number }>;
+  submitGroupSemantic?(workspaceId: string, submission: import('./semantic.js').GroupSemanticSubmission): Promise<GroupSemanticIndex>;
+  semanticReady?(workspaceId: string): Promise<boolean>;
   publishChat(input: ChatPublication): Promise<ChatAcceptance>;
   chatSnapshot(workspaceId: string, after?: number, limit?: number): Promise<ChatSnapshot>;
   chatTimeline(workspaceId: string, after?: number, limit?: number): Promise<TimelineSnapshot>;

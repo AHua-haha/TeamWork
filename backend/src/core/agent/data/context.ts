@@ -12,9 +12,27 @@ export interface GroupContextMessage {
   sender: string;
   origin?: { agentId: string; messageId: string };
 }
+export interface GroupSemanticNode {
+  id: string;
+  firstPosition: number;
+  lastPosition: number;
+  topic: string;
+  summary: string;
+  involvedMemberIds: string[];
+  children: GroupSemanticNode[];
+}
+export interface GroupSemanticIndex {
+  revision: number;
+  from: number;
+  through: number;
+  sourceDigest: string;
+  tree: GroupSemanticNode[];
+}
 export interface GroupContextReference {
   id: string;
   read(after: number): Promise<GroupContextMessage[]>;
+  /** Latest complete Team-owned semantic index, detached and source-bound. */
+  semantic?(): Promise<GroupSemanticIndex | undefined>;
 }
 
 /** Incorporation state lives with the entries, so content and consumption acknowledge atomically. */

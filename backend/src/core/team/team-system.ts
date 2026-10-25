@@ -13,7 +13,10 @@ import { inspectHarnesses } from '../harness/data/bases.js';
 import { MemberInstructions } from './member-instructions.js';
 import { teamTools } from './member-tools.js';
 import type { RuntimePolicy, RuntimeTool } from '../agent/contracts.js';
+import { semanticSourceDigest, semanticTokenCount, semanticTokenThreshold } from './data/semantic.js';
 import { webTools } from '../harness/web-tools.js';
+import { randomUUID } from 'node:crypto';
+import type { ContextEntry } from '../agent/data/model.js';
 import { TeamRunner, type RunHost } from './team-runner.js';
 import { TeamService, teamRunConfig, type MemberView, type TeamStore, type TeamView } from './data/members.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
@@ -32,6 +35,7 @@ export class TeamSystem {
   readonly harness: HarnessService;
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
+  private readonly semanticJobs = new Map<string, Promise<void>>();
 
   constructor(private readonly store: TeamStore & ChatStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
     this.designs = new DesignService(workspaces);
@@ -41,15 +45,42 @@ export class TeamSystem {
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
-    }, ids => this.harness.closeShells(ids));
+    }, ids => this.harness.closeShells(ids), workspaceId => { void this.scheduleSemantic(workspaceId); });
     this.configuration = new MemberConfigService(this.service, this.harness);
     this.runConfig = teamRunConfig(this.service, config);
   }
 
-  /** The runtime that runs the members. */
+  private async scheduleSemantic(workspaceId: string): Promise<void> {
+    const runtime = this.runtime;
+    const semanticInput = this.store.semanticInput;
+    const submitGroupSemantic = this.store.submitGroupSemantic;
+    if (this.semanticJobs.has(workspaceId) || !runtime || !semanticInput || !submitGroupSemantic) return;
+    const job = this.generateSemantic(workspaceId, runtime, semanticInput, submitGroupSemantic).finally(() => { if (this.semanticJobs.get(workspaceId) === job) this.semanticJobs.delete(workspaceId); });
+    this.semanticJobs.set(workspaceId, job);
+    await job.catch(() => undefined);
+  }
+
+  private async generateSemantic(workspaceId: string, runtime: RunHost, semanticInput: NonNullable<ChatStore['semanticInput']>, submitGroupSemantic: NonNullable<ChatStore['submitGroupSemantic']>): Promise<void> {
+    const input = await semanticInput.call(this.store, workspaceId);
+    const previousThrough = input.previous?.through ?? 0;
+    const uncovered = input.messages.filter(message => message.position > previousThrough);
+    if (semanticTokenCount(uncovered) < semanticTokenThreshold || !input.messages.length) return;
+    const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);
+    if (!lead) return;
+    const resolved = await this.runConfig.resolveForRun(lead.id);
+    const sourceDigest = semanticSourceDigest(input.messages);
+    const previous: ContextEntry = { messageId: randomUUID(), message: { role: 'user', content: `Previous semantic information result (it may be null):\n${JSON.stringify(input.previous ?? null)}`, timestamp: Date.now() }, metadata: { source: 'semantic-analysis-input' } };
+    const prompt = `You are the Team semantic-analysis maintenance agent. Review the complete group chat context supplied as user messages and the previous semantic information result. Submit one complete semantic tree with submit_group_semantic_information. The tree roots must cover every group position from the first supplied message through position ${input.through}; child ranges must be contained, ordered, and non-overlapping. Each node needs id, firstPosition, lastPosition, topic, summary, involvedMemberIds, and children. Set involvedMemberIds only from authoritative Sender/member IDs and Mentioned members shown in the source messages. Do not invent members, omit source ranges, or submit a partial suffix. After a successful tool submission, briefly confirm completion.`;
+    const tool = this.harness.semanticTool(submission => submitGroupSemantic.call(this.store, workspaceId, submission));
+    const runMaintenance = runtime.runMaintenance;
+    if (!runMaintenance) return;
+    await runMaintenance({ ...resolved, tools: [tool], systemPrompt: prompt, compaction: undefined }, [...input.messages.map(message => structuredClone(message.entry)), previous]);
+  }
+  /** The runtime that runs the members and maintenance jobs. */
   attach(runtime: RunHost): void {
     this.runtime = runtime;
   }
+
 
   /** Gives workspaces that have no lead one; the backend calls this once at startup. */
   async initialize(): Promise<void> {
@@ -130,7 +161,7 @@ export class TeamSystem {
       groupContext: async agentId => {
         const member = await this.service.find(agentId);
         if (!member) return base.groupContext?.(agentId);
-        return { id: member.workspaceId, read: after => this.store.readGroupContext(member.workspaceId, after) };
+        return { id: member.workspaceId, read: after => this.store.readGroupContext(member.workspaceId, after), ...(this.store.readGroupSemantic ? { semantic: () => this.store.readGroupSemantic!(member.workspaceId) } : {}) };
       },
       acquireRun: async (run, signal) => {
         const release = await this.runner.acquireExecution(run.agentId, signal);

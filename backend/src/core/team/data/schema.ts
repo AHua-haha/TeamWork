@@ -37,6 +37,15 @@ export const schema = [
     position BIGINT UNSIGNED NOT NULL DEFAULT 0, mention_limit INT UNSIGNED NOT NULL DEFAULT 32,
     reset_cursor BIGINT UNSIGNED NOT NULL DEFAULT 0, reset_position BIGINT UNSIGNED NOT NULL DEFAULT 0,
     context_format TINYINT UNSIGNED NOT NULL DEFAULT 1, context_length BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    semantic_position BIGINT UNSIGNED NOT NULL DEFAULT 0, semantic_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS chat_semantic_indexes (
+    workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    revision BIGINT UNSIGNED NOT NULL,
+    through_position BIGINT UNSIGNED NOT NULL,
+    source_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    data JSON NOT NULL,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS chat_exchanges (
@@ -83,4 +92,4 @@ export const schema = [
   ) ENGINE=InnoDB`,
 ];
 
-export const tables = ["config_records", "members", "member_activation", "chat_images", "chat_settings", "chat_exchanges", "chat_messages", "chat_context_entries", "chat_runs", "chat_clock", "chat_entries", "chat_changes"] as const;
+export const tables = ["config_records", "members", "member_activation", "chat_images", "chat_settings", "chat_semantic_indexes", "chat_exchanges", "chat_messages", "chat_context_entries", "chat_runs", "chat_clock", "chat_entries", "chat_changes"] as const;

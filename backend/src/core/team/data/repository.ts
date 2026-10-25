@@ -1,5 +1,5 @@
 import { imageContent, validateChatImages, type PreparedChatImage } from './chat-images.js';
-import { type GroupContextMessage } from '../../agent/data/context.js';
+import { type GroupContextMessage, type GroupSemanticIndex } from '../../agent/data/context.js';
 import { finalAnswer } from '../../agent/final-answer.js';
 import { parseMemberResponse } from '../member-response.js';
 import { randomUUID } from 'node:crypto';
@@ -14,6 +14,7 @@ import { defaultMentionLimit, groupEntry, groupContextMessage, validateGroupCont
 import { clearTables, dataTransaction, rows, insertRows, limitClause, duplicate, type DataConnection as Db } from '../../data-transaction.js';
 import { schema } from './schema.js';
 import { GroupContexts, type GroupContextHistory } from './group-context.js';
+import { semanticSourceDigest, semanticTokenCount, semanticTokenThreshold, validateSemanticIndex, validateSemanticInvolvement, validateSemanticSubmission, type GroupSemanticSubmission } from './semantic.js';
 import type { AgentData } from '../../agent/data/repository.js';
 import type { AgentExecutionState } from '../../agent/data/model.js';
 import type { WorkspaceData } from '../../workspace/data/repository.js';
@@ -45,6 +46,10 @@ export class TeamData implements TeamStore, ChatStore {
                 await this.pool.query(`ALTER TABLE chat_settings ADD COLUMN ${column} BIGINT UNSIGNED NOT NULL DEFAULT 0`);
         if (!columns.some(row => row.Field === 'context_length'))
             await this.pool.query('ALTER TABLE chat_settings ADD COLUMN context_length BIGINT UNSIGNED NOT NULL DEFAULT 0');
+        if (!columns.some(row => row.Field === 'semantic_position'))
+            await this.pool.query('ALTER TABLE chat_settings ADD COLUMN semantic_position BIGINT UNSIGNED NOT NULL DEFAULT 0');
+        if (!columns.some(row => row.Field === 'semantic_revision'))
+            await this.pool.query('ALTER TABLE chat_settings ADD COLUMN semantic_revision BIGINT UNSIGNED NOT NULL DEFAULT 0');
         if (!columns.some(row => row.Field === 'context_format'))
             await this.pool.query('ALTER TABLE chat_settings ADD COLUMN context_format TINYINT UNSIGNED NOT NULL DEFAULT 0');
         if (String(columns.find(row => row.Field === 'context_format')?.Default) !== '1')
@@ -58,6 +63,51 @@ export class TeamData implements TeamStore, ChatStore {
         const history = await this.loadGroupContext(workspaceId);
         if (after > history.position) throw new AppError('invalid_cursor', 'Group consumption position is ahead of history', 409);
         return history.entries.filter(entry => Number(entry.metadata.groupPosition) > Math.max(after, history.resetPosition)).map(groupContextMessage);
+    }
+    async readGroupSemantic(workspaceId: string): Promise<GroupSemanticIndex | undefined> {
+        identity(workspaceId, 'workspaceId');
+        const [row] = await rows(this.pool, 'SELECT revision,through_position,source_digest,data FROM chat_semantic_indexes WHERE workspace_id = ?', [workspaceId]);
+        if (!row) return undefined;
+        const value = decode<Omit<GroupSemanticIndex, 'revision' | 'through' | 'sourceDigest'>>(row.data, () => undefined);
+        const index = { ...value, revision: Number(row.revision), from: (value as unknown as { from?: number }).from ?? 1, through: Number(row.through_position), sourceDigest: String(row.source_digest) } as GroupSemanticIndex;
+        validateSemanticIndex(index);
+        return structuredClone(index);
+    }
+    async semanticInput(workspaceId: string, through?: number): Promise<{ messages: GroupContextMessage[]; previous?: GroupSemanticIndex; through: number; baseRevision: number }> {
+        const messages = await this.readGroupContext(workspaceId, 0);
+        const boundary = through ?? (messages.at(-1)?.position ?? 0);
+        if (!Number.isSafeInteger(boundary) || boundary < 0 || boundary > (messages.at(-1)?.position ?? 0)) throw new AppError('invalid_cursor', 'Invalid semantic analysis boundary', 409);
+        const previous = await this.readGroupSemantic(workspaceId);
+        return { messages: messages.filter(message => message.position <= boundary), ...(previous ? { previous } : {}), through: boundary, baseRevision: previous?.revision ?? 0 };
+    }
+    async semanticReady(workspaceId: string): Promise<boolean> {
+        const input = await this.semanticInput(workspaceId);
+        const previous = input.previous?.through ?? 0;
+        const source = input.messages.filter(message => message.position > previous);
+        return semanticTokenCount(source) >= semanticTokenThreshold;
+    }
+    async submitGroupSemantic(workspaceId: string, submission: GroupSemanticSubmission): Promise<GroupSemanticIndex> {
+        return this.transaction(async db => {
+            await this.workspaces.inTransaction(db).requireWorkspace(workspaceId, true);
+            const context = await this.loadGroupContext(workspaceId);
+            const from = context.resetPosition + 1;
+            const messages = context.entries.map(entry => groupContextMessage(entry));
+            const [settings] = await rows(db, 'SELECT position,semantic_revision,semantic_position FROM chat_settings WHERE workspace_id = ? FOR UPDATE', [workspaceId]);
+            const currentRevision = Number(settings?.semantic_revision ?? 0);
+            const currentThrough = Number(settings?.semantic_position ?? 0);
+            if (submission.baseRevision !== currentRevision) throw new AppError('context_conflict', 'Semantic analysis revision changed', 409);
+            if (submission.through !== (messages.at(-1)?.position ?? 0)) throw new AppError('context_conflict', 'Semantic source boundary is no longer current', 409);
+            validateSemanticSubmission(submission, from);
+            const memberRows = await rows(db, 'SELECT id FROM members WHERE workspace_id = ?', [workspaceId]);
+            validateSemanticInvolvement(submission.tree, messages.filter(message => message.position >= from && message.position <= submission.through), new Set(memberRows.map(row => String(row.id))));
+            const source = messages.filter(message => message.position >= from && message.position <= submission.through);
+            if (semanticSourceDigest(source) !== submission.sourceDigest) throw new AppError('context_conflict', 'Semantic source changed during analysis', 409);
+            const index: GroupSemanticIndex = { revision: currentRevision + 1, from, through: submission.through, sourceDigest: submission.sourceDigest, tree: structuredClone(submission.tree) };
+            validateSemanticIndex(index);
+            await db.execute('INSERT INTO chat_semantic_indexes (workspace_id,revision,through_position,source_digest,data) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE revision=VALUES(revision),through_position=VALUES(through_position),source_digest=VALUES(source_digest),data=VALUES(data)', [workspaceId, index.revision, index.through, index.sourceDigest, encode({ from: index.from, tree: index.tree })]);
+            await db.execute('UPDATE chat_settings SET semantic_position = ?, semantic_revision = ? WHERE workspace_id = ?', [index.through, index.revision, workspaceId]);
+            return index;
+        });
     }
     private async loadGroupContext(workspaceId: string): Promise<GroupContextHistory> {
         return this.transaction(async db => {
@@ -391,13 +441,14 @@ export class TeamData implements TeamStore, ChatStore {
             const resetPosition = settings!.position + 1;
             for (const table of ['chat_changes', 'chat_entries', 'chat_context_entries', 'chat_messages', 'chat_images'])
                 await db.execute(`DELETE FROM ${table} WHERE workspace_id = ?`, [workspaceId]);
+            await db.execute('DELETE FROM chat_semantic_indexes WHERE workspace_id = ?', [workspaceId]);
             // Include all member runs, even ones not linked to an exchange, but never solo agents.
             for (const run of await this.agents.inTransaction(db).listRuns(members.map(member => member.id)))
                 await db.execute('DELETE FROM chat_runs WHERE run_id = ?', [run.runId]);
             await db.execute('DELETE FROM chat_exchanges WHERE workspace_id = ?', [workspaceId]);
             await this.agents.inTransaction(db).resetConversations(members.map(member => member.id));
             await db.execute('UPDATE chat_clock SET seq = ? WHERE workspace_id = ?', [resetCursor, workspaceId]);
-            await db.execute('UPDATE chat_settings SET position = ?, reset_cursor = ?, reset_position = ?, context_length = 0, context_format = 1 WHERE workspace_id = ?', [resetPosition, resetCursor, resetPosition, workspaceId]);
+            await db.execute('UPDATE chat_settings SET position = ?, reset_cursor = ?, reset_position = ?, context_length = 0, context_format = 1, semantic_position = ?, semantic_revision = 0 WHERE workspace_id = ?', [resetPosition, resetCursor, resetPosition, resetPosition - 1, workspaceId]);
             this.storage.afterCommit(db, () => this.contexts.changed(workspaceId, {reset: resetPosition}), () => this.contexts.invalidate(workspaceId));
             return { workspaceId, resetCursor, resetPosition };
         });
@@ -522,7 +573,7 @@ export class TeamData implements TeamStore, ChatStore {
         return files;
     }
     async clearConversations(): Promise<void> {
-        await clearTables(this.pool, ['chat_changes', 'chat_entries', 'chat_clock', 'chat_runs', 'chat_context_entries', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_settings']);
+        await clearTables(this.pool, ['chat_changes', 'chat_entries', 'chat_clock', 'chat_runs', 'chat_context_entries', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_semantic_indexes', 'chat_settings']);
         if (this.connection) this.storage.afterCommit(this.connection, () => this.contexts.clear(), () => this.contexts.clear());
         else this.contexts.clear();
     }
