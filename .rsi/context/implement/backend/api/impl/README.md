@@ -55,3 +55,13 @@ Both accept only optional `offset`, `limit`, `revision` query parameters as nonn
 ```json
 {"commands": []}
 ```
+
+## Roster endpoint
+
+**Input:** `GET /workspaces/:workspaceId/team/roster` without query parameters or body.
+
+**Output:** 200 `{workspaceId,members:[{memberId,workspaceId,revision,name,role,responsibility,lead,running}]}` for accepted active members, lead first. No readiness/effective harness/model fields.
+
+**Effect/failure:** delegates to TeamSystem.roster with no design/harness inspection or writes. Unknown workspaces return not_found/404; unknown/repeated query parameters return invalid_input/400; extra segments and write methods are not endpoints.
+
+**Usage:** ordinary chat calls roster; deliberate detailed inspection can still call the existing GET team API. Committed configuration review and activate endpoints retain existing validation and revision/digest semantics.

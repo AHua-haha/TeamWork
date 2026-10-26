@@ -23,3 +23,7 @@ Application startup creates one configured client instance and makes it availabl
 - Preserve existing HTTP/JSON, binary and SSE payloads, cursors, revisions and lifecycle semantics.
 - Unknown paths, malformed responses and transport failures remain explicit.
 - Do not move feature interpretation or durable business policy into this layer.
+
+## Chat roster transport
+
+Expose the backend's narrow roster separately from full team inspection. The frontend feature owns refresh coalescing and temporary-mode policy; transport does not synthesize missing readiness/harness fields. Member activation continues to use the committed-review and revision/digest activation endpoints.

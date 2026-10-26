@@ -92,3 +92,7 @@ Member context is owned and read by Agent. Team validates that the requested act
 3. A member stops successfully or fails; Agent persists its continuous state without erasing the private trace from future context.
 4. A member is unmentioned and stays idle while its group context can synchronize. A busy member defers incorporation until its current work finishes.
 5. SQL restoration preserves Agent-owned incorporation state alongside its context. Already incorporated group inputs do not reappear after backend restart.
+
+## Chat roster read
+
+Provide a narrow read of active member identities, names, roles, responsibilities and current running flags for ordinary chat presentation. This read checks workspace existence and projects accepted member records; it does not inspect design files, resolve harnesses, validate model availability or declare readiness. Detailed inspection remains a separate capability. Run admission and configuration activation continue to perform required validation regardless of frontend mode.

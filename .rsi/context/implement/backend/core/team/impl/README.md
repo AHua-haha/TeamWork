@@ -78,3 +78,13 @@ TeamData owns the resident shared Pi context. TeamRunner supplies original share
 ```json
 {"commands": []}
 ```
+
+## Lightweight roster
+
+**Input:** `TeamService.roster(workspaceId)`; `TeamSystem.roster(workspaceId)` adds TeamRunner.isRunning flags.
+
+**Output:** `{workspaceId,members:[{memberId,workspaceId,revision,name,role,responsibility,lead,running}]}`. Members are active only, lead first. No settings, harness, ready or issues fields are synthesized.
+
+**Effect/failure:** workspace record lookup plus one member-list read; no design/context filesystem reads, Git processes, model availability checks or harness resolution. Missing workspace returns not_found/404. Stored-member decoding and ordinary owner validation still apply. Detailed team reads and required run/activation checks are unchanged.
+
+**Usage:** chat uses this operation for avatars, mentions and identity refresh. Tests force design and readiness resolution to fail and verify the roster still succeeds.

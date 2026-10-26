@@ -26,6 +26,12 @@ export function teamRoutes(team: TeamSystem, runtime: AgentRuntime): (route: Rou
       json(response, 200, await team.inspectGroupContext(workspaceId, contextQuery(url)));
       return;
     }
+    if (area === 'roster') {
+      if (method !== 'GET' || memberId !== undefined || extra.length) throw notFound();
+      query(url, []);
+      json(response, 200, await team.roster(workspaceId));
+      return;
+    }
     if (area === 'changes') {
       if (method !== 'GET' || memberId !== undefined || extra.length) throw notFound();
       query(url, []);

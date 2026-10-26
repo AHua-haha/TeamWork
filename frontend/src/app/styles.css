@@ -787,3 +787,5 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .context-part-tool { background: #f2f8f5; border-color: #b9dcc8; }
 .context-part-tool strong { color: #2f7650; }
 .context-part pre { margin: 0; white-space: pre-wrap; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.member-activation-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-block: 16px; }

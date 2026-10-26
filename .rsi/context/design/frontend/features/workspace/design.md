@@ -32,3 +32,9 @@ Workspace uses the shared backend client and composes shared UI with workspace-s
 ### Workspace initialization review
 
 Workspace creation/adoption must use the existing review flow: inspect the target directory first; when non-context `.rsi` metadata is nonempty, show the canonical directory and cleanup paths, explain that context and source are preserved, and require explicit revision-bound confirmation before cleanup. Cancel makes no create request; a changed cleanup revision requires a fresh review. See the Frontend overview and accepted Workspace design for the full contract.
+
+## Temporary lightweight mode
+
+`workspaceDetailsEnabled` is temporarily false. Workspace composes group chat with a narrow member roster and a manually opened activation/commit-review panel. Existing Design, Team, Changes and Files implementations remain available in source but are not mounted, including after closing/reopening the panel. Their context feeds, design/harness inspection, full team polling and file diffs must not start while this mode is off. Re-enable the switch to restore the existing detailed composition.
+
+Activation checks run only when the user selects Check committed members, and activation sends the exact reviewed revision/digest through the existing idle-team validation. Opening the panel, focus and elapsed time do not request activation review. Explicit commit approval/review remains available. Backend run and activation permission/configuration validation remains mandatory.

@@ -94,6 +94,11 @@ export class TeamSystem {
     return { ...team, members: team.members.map(member => this.status(member)) };
   }
 
+  async roster(workspaceId: string) {
+    const roster = await this.service.roster(workspaceId);
+    return { ...roster, members: roster.members.map(member => ({ ...member, running: this.runner.isRunning(member.memberId) })) };
+  }
+
   modelSettings(workspaceId: string, memberId: string) { return this.service.modelSettings(workspaceId, memberId); }
   updateModelSettings(workspaceId: string, memberId: string, revision: number, value: unknown) {
     return this.runner.workspaceOperation(workspaceId, () => this.service.updateModelSettings(workspaceId, memberId, revision, value));
