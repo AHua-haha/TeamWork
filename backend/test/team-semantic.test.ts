@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai';
 import type { AgentConfiguration, ResolvedRunConfig, StepScope } from '../src/core/agent/contracts.js';
+import { AgentRuntime, fixedPolicy } from '../src/core/agent/runtime.js';
+import type { AgentData } from '../src/core/agent/data/repository.js';
 import type { GroupSemanticIndex } from '../src/core/agent/data/context.js';
 import type { RunState } from '../src/core/agent/data/model.js';
 import { groupEntry, groupSender, type ChatMessage } from '../src/core/team/data/group-chat.js';
@@ -61,6 +64,45 @@ test('startup checks eligible existing group context with a bound runtime and su
   assert.equal(f.runtime.runs.length, 0, 'maintenance creates no member activation');
   await f.team.startMaintenance();
   assert.equal(calls, 1, 'startup scan is idempotent');
+}));
+
+test('startup semantic generation executes through the real AgentRuntime model/tool loop', () => withTeam(async f => {
+  const data = semanticFixture(f);
+  const model = fauxProvider().getModel();
+  const configuration: ResolvedRunConfig = { model, options: {}, tools: [], systemPrompt: '', source: { appRevision: 0, agentRevision: 0, catalogRevisions: {} } };
+  const config = { resolveForRun: async () => configuration };
+  Object.assign(f.team.runConfig, config);
+  // Maintenance needs runtime ownership, but owns no durable member context/history.
+  const ownership = {
+    acquireRuntime: async () => {}, assertRuntime: () => {}, releaseRuntime: async () => {},
+    recoverCompactions: async () => {}, recoverInterruptedRuns: async () => {},
+  } as unknown as AgentData;
+  let modelCalls = 0;
+  const runtime = new AgentRuntime(ownership, config, fixedPolicy(model), async function* (request) {
+    modelCalls++;
+    assert.equal(request.context.messages[0]?.role, 'user');
+    const metadata = { baseRevision: 0, through: 1, sourceDigest: semanticSourceDigest(data.messages) };
+    assert.ok(request.context.systemPrompt?.includes(JSON.stringify(metadata)));
+    const args = { ...metadata, tree: [{ id: 'root', firstPosition: 1, lastPosition: 1, topic: 'Project', summary: 'Agreed project context', involvedMemberIds: [], children: [] }] };
+    const message = modelCalls === 1 ? fauxAssistantMessage([{ type: 'toolCall', id: 'submit', name: 'submit_group_semantic_information', arguments: args }], { stopReason: 'toolUse' }) : fauxAssistantMessage('Semantic information saved.');
+    if (modelCalls === 2) {
+      const result = request.context.messages.find(message => message.role === 'toolResult');
+      assert.ok(result && result.role === 'toolResult' && !result.isError, 'real tool execution accepted the semantic index');
+    }
+    yield { type: 'start', partial: { ...message, content: [], stopReason: 'pending' } };
+    yield { type: 'done', reason: modelCalls === 1 ? 'toolUse' : 'stop', message };
+  });
+  await runtime.open();
+  f.team.attach(runtime);
+  try {
+    await f.team.startMaintenance();
+    assert.equal(modelCalls, 2, 'maintenance reaches the model and resumes after its submission tool');
+    assert.equal(data.saved?.revision, 1);
+    assert.equal(data.saved?.through, 1);
+  } finally {
+    await f.team.closeMaintenance();
+    await runtime.close();
+  }
 }));
 
 test('startup skips context below the semantic threshold', () => withTeam(async f => {

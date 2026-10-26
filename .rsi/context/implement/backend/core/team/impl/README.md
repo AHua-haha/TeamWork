@@ -44,6 +44,8 @@ TeamData owns the resident shared Pi context. TeamRunner supplies original share
 
 `backend/test/team-semantic.test.ts` covers retained-context startup generation, receiver binding, submission metadata, below-threshold skips, publication/startup deduplication, covered-message skips, visible errors with retry, missing submissions and shutdown cancellation/draining. These deterministic tests use a fake maintenance model and make no paid provider requests.
 
+The suite also executes startup scheduling through the real `AgentRuntime.runMaintenance` and `AgentExecution` loop with a synthetic model stream: the first response calls the submission tool, its validated result is incorporated, and a second response completes maintenance. Maintenance identities use `maintenance_<uuid>`, respecting Agent's 1–64 ASCII letter/digit/underscore/hyphen identity contract; the old colon prefix was rejected before the first model call. This regression exercises the real runtime/state validators rather than only a stub maintenance method.
+
 `npm run check` passes. The full backend suite passes: 231 tests, 231 passed. `backend/test/semantic-context.test.ts` covers summary replacement, recursive opening of involved ranges, involved-leaf preservation and uncovered-message fallback. `git diff --check` passes. Direct live-provider semantic generation remains dependent on the configured model provider; rejected or failed maintenance submissions intentionally leave the previous index unchanged.
 
 ### Context inspection

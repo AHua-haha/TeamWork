@@ -123,7 +123,7 @@ export class AgentRuntime {
 
   async runMaintenance(configuration: import('./contracts.js').AgentConfiguration, entries: ContextEntry[], signal = new AbortController().signal): Promise<RunState> {
     this.available();
-    const run: RunState = { agentId: `maintenance:${randomUUID()}`, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
+    const run: RunState = { agentId: `maintenance_${randomUUID()}`, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
     const config = { ...configuration, compaction: undefined };
     const policy: RuntimePolicy = {
       buildRequest: (_scope, history) => ({ model: config.model, models: config.models, tools: config.tools, options: config.options,
