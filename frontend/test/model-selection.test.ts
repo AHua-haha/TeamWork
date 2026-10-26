@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { AgentSettings, ConfigRecord, ConnectionView, ModelChoice } from '../src/client/config-client.js';
-import { clampedTo, customizedCount, effectiveReasoning, misfits, modelKey, modelSettings, selectModel, selectedModel, withModelSettings, type ModelEntry } from '../src/ui/model-selection.js';
+import type { AgentSettings, ConfigRecord, ConnectionView, ModelChoice } from '../src/shared/backend-client/config-client.js';
+import { clampedTo, customizedCount, effectiveReasoning, misfits, modelKey, modelSettings, selectModel, selectedModel, withModelSettings, type ModelEntry } from '../src/features/chat/model-selection.js';
 
 const settings: AgentSettings = {
   name: 'Conversation', connectionId: 'first', modelId: 'shared', prompt: 'Keep this',

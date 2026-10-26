@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { WorkspaceClient, type Member, type DesignSummary } from '../src/client/workspace-client.js';
-import { memberTree } from '../src/ui/member-tree.js';
-import { TeamTab } from '../src/ui/TeamTab.js';
-import { MemberTree } from '../src/ui/MemberTree.js';
-import { FileDiff } from '../src/ui/FileDiff.js';
-import { diffLines } from '../src/ui/file-diff.js';
+import { WorkspaceClient, type Member, type DesignSummary } from '../src/shared/backend-client/workspace-client.js';
+import { memberTree } from '../src/features/workspace/member-tree.js';
+import { TeamTab } from '../src/features/workspace/TeamTab.js';
+import { MemberTree } from '../src/features/workspace/MemberTree.js';
+import { FileDiff } from '../src/features/workspace/FileDiff.js';
+import { diffLines } from '../src/features/workspace/file-diff.js';
 
 const member = (id: string, working: string[], dependencies: string[] = []): Member => ({ memberId: id, workspaceId: 'w', revision: 1, name: id, role: 'developer', responsibility: 'Own assigned design', lead: id === 'Lead', ready: true, running: false, issues: [], settings: { connectionId: 'c', modelId: 'm', toolOptionIds: [], promptOptionIds: [], prompt: '', modelOptions: [] }, harness: { designScope: { working, dependencies }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] } });
 const design = (path: string): DesignSummary => ({ path, revision: 'r', implementation: [] });

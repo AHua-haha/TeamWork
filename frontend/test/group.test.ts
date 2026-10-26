@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GroupClient, validateEntry, type GroupEntry } from '../src/client/group-client.js';
-import { isRunThinking, runActivity, mentionAt, mentionToken, toolSetSummary, workToolSummary, type ActivityItem } from '../src/ui/group-work.js';
-import type { ProgressEvent } from '../src/client/progress.js';
+import { GroupClient, validateEntry, type GroupEntry } from '../src/shared/backend-client/group-client.js';
+import { isRunThinking, runActivity, mentionAt, mentionToken, toolSetSummary, workToolSummary, type ActivityItem } from '../src/features/chat/group-work.js';
+import type { ProgressEvent } from '../src/shared/backend-client/progress.js';
 import { assistant, record, run, streamResponse, until, agentId, runId } from './fixtures.js';
 const workspaceId = 'w1';
 const user: GroupEntry = { workspaceId, entryId: 'u1', position: 1, revision: 1, exchangeId: 'e1', time: 1, kind: 'user', messageId: 'u1', text: 'work' };
@@ -65,7 +65,7 @@ test('refusal leaves no optimistic entry; malformed/gapped updates stop without 
   assert.equal(client.getSnapshot().cursor, 0); client.dispose();
 });
 
-const snapshot = (completed: ReturnType<typeof record>[] = [], live: import('../src/client/protocol.js').LiveMessage[] = []): import('../src/client/protocol.js').ClientSnapshot => ({ agentId, completed, live, historyPosition: completed.at(-1)?.position ?? 0, synchronized: true, connection: 'following', run: run(), sending: false, error: null });
+const snapshot = (completed: ReturnType<typeof record>[] = [], live: import('../src/shared/backend-client/protocol.js').LiveMessage[] = []): import('../src/shared/backend-client/protocol.js').ClientSnapshot => ({ agentId, completed, live, historyPosition: completed.at(-1)?.position ?? 0, synchronized: true, connection: 'following', run: run(), sending: false, error: null });
 const call = (position: number, name = 'read', id = `call-${position}`) => ({ ...record(position, `m-${position}`, ''), message: { ...assistant(''), content: [{ type: 'toolCall' as const, id, name, arguments: { path: String(position) } }] } });
 const result = (position: number, id: string, text: string) => ({ ...record(position, `r-${position}`, ''), message: { role: 'toolResult' as const, toolCallId: id, toolName: 'read', content: [{ type: 'text' as const, text }], isError: false, timestamp: 1 } });
 const tools = (items: ActivityItem[]) => items.flatMap(item => item.kind === 'tools' ? item.tools : []);

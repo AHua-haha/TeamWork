@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addWorkspaceModel, removeWorkspaceModel, workspaceModelKey, workspaceModelsError } from '../src/ui/workspace-model-state.js';
+import { addWorkspaceModel, removeWorkspaceModel, workspaceModelKey, workspaceModelsError } from '../src/features/workspace/workspace-model-state.js';
 
 test('workspace model choices keep provider identity, require a selected default and retain per-model options', () => {
   const first = { connectionId: 'a', modelId: 'same', reasoning: 'high' as const };

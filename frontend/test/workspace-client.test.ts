@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BackendError } from '../src/client/agent-client.js';
-import { ContextFeed, WorkspaceClient, type ChangeRecord } from '../src/client/workspace-client.js';
+import { BackendError } from '../src/shared/backend-client/agent-client.js';
+import { ContextFeed, WorkspaceClient, type ChangeRecord } from '../src/shared/backend-client/workspace-client.js';
 import { streamResponse, until } from './fixtures.js';
 
 const workspaceId = 'w 1';

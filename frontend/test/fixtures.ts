@@ -1,5 +1,5 @@
 import type { AssistantMessage } from '@earendil-works/pi-ai';
-import type { CompletedRecord, FollowEvent, RunState } from '../src/client/protocol.js';
+import type { CompletedRecord, FollowEvent, RunState } from '../src/shared/backend-client/protocol.js';
 
 export const agentId = 'agent_1';
 export const runId = 'run_1';

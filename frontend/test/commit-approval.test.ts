@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { CommitApprovalPrompt } from '../src/ui/CommitApproval.js';
-import { pendingCommits,reviewCommit,decideCommit } from '../src/client/commit-approval.js';
+import { CommitApprovalPrompt } from '../src/features/chat/CommitApproval.js';
+import { pendingCommits,reviewCommit,decideCommit } from '../src/shared/backend-client/commit-approval.js';
 test('approval input has decisions, optional feedback and Review without diff content',()=>{
  const html=renderToStaticMarkup(createElement(CommitApprovalPrompt,{busy:false,error:null,message:'',onMessage(){},onReview(){},onDecide(){}}));
  assert.match(html,/Git commit approval required/);assert.match(html,/Commit approval feedback/);for(const label of ['Accept','Deny','Send feedback','Review'])assert.match(html,new RegExp(label));

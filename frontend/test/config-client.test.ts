@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ConfigClient, type AgentSettings, type PromptOption } from '../src/client/config-client.js';
-import { BackendError } from '../src/client/agent-client.js';
+import { ConfigClient, type AgentSettings, type PromptOption } from '../src/shared/backend-client/config-client.js';
+import { BackendError } from '../src/shared/backend-client/agent-client.js';
 
 test('config client preserves backend records, revisions and complete agent values', async () => {
   const calls: { path: string; method: string; body?: unknown }[] = [];

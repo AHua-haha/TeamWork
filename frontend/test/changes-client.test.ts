@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ChangesClient } from '../src/client/changes-client.js';
-import type { WorkspaceChanges, ConfigurationCommit, MemberConfigurationReview } from '../src/client/workspace-client.js';
+import { ChangesClient } from '../src/shared/backend-client/changes-client.js';
+import type { WorkspaceChanges, ConfigurationCommit, MemberConfigurationReview } from '../src/shared/backend-client/workspace-client.js';
 const deferred=<T>()=>{let resolve!:(value:T)=>void;let reject!:(error:Error)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 const view=(hasChanges=false):WorkspaceChanges=>({workspaceId:'w',leadId:'lead',design:{revision:'d-review',base:'d-base',changes:[]},members:{revision:'m-review',base:'m-base',changes:[]},activation:{revision:'m-base',activeRevision:hasChanges?'m-old':'m-base',hasChanges}});
 const validation:MemberConfigurationReview={revision:'m-base',digest:'digest',valid:true,issues:[]};

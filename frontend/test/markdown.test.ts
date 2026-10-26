@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { externalHref, parseInline, parseMarkdown, resolveLink } from '../src/ui/markdown-parser.js';
+import { externalHref, parseInline, parseMarkdown, resolveLink } from '../src/features/chat/markdown-parser.js';
 
 const text = (value: string) => ({ type: 'text', text: value });
 

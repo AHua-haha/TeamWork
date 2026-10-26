@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AgentClient } from '../src/client/agent-client.js';
-import { ProtocolError, readSse } from '../src/client/sse.js';
+import { AgentClient } from '../src/shared/backend-client/agent-client.js';
+import { ProtocolError, readSse } from '../src/shared/backend-client/sse.js';
 import { agentId, assistant, event, record, run, runId, streamResponse, until } from './fixtures.js';
-import type { FollowEvent } from '../src/client/protocol.js';
+import type { FollowEvent } from '../src/shared/backend-client/protocol.js';
 
 const base = { version: 2 as const, agentId, runId };
 

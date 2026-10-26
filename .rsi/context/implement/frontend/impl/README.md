@@ -2,11 +2,23 @@
 
 ## Result summary
 
-The React client consumes stable API history and compact progress; retained detailed references document presentation and synchronization.
+Frontend design is now decomposed into the agreed tree: App, Shared (UI and Backend Client), and Features (Home, Providers, Chat and Workspace). The implementation remains in its existing source layout; this tree records ownership and target boundaries without claiming a source migration is complete.
 
 Design: [Frontend](../../../design/frontend/design.md).
 
 ### Coordination and ownership
+
+The source migration now follows the design tree:
+
+- `frontend/src/app/` owns startup, route parsing, the shell and global navigation.
+- `frontend/src/shared/backend-client/` owns the decomposed backend transport modules and the `BackendClient` facade/singleton.
+- `frontend/src/shared/ui/` is intentionally empty for now; reusable UI extraction is deferred.
+- `frontend/src/features/providers/` owns Providers.
+- `frontend/src/features/chat/` owns solo/team conversation UI, adapters and chat state.
+- `frontend/src/features/workspace/` owns the workspace page and its Files, Design, Team, Changes and related sections.
+- `frontend/src/features/home/` owns the Home landing page, workspace overview/list and quick actions.
+
+The migration moves source ownership without changing routes, API payloads, SSE behavior or user-facing workflows. Features use the shared `backendClient` facade while resource implementations remain internally decomposed.
 
 Client modules fetch history/inspection and merge live deltas; adapters derive display state; UI components render conversations, review and configuration. API responses are the frontend contract, not backend object internals.
 
@@ -32,12 +44,13 @@ Client modules fetch history/inspection and merge live deltas; adapters derive d
 
 ## File lookup
 
-- [frontend](../../../../../frontend): owned implementation.
-- [reference/frontend/design.md](reference/frontend/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/frontend/group-chat/design.md](reference/frontend/group-chat/design.md): migrated existing behavior/code reference, not a child design.
-- [reference/frontend/group-chat/impl.md](reference/frontend/group-chat/impl.md): migrated existing behavior/code reference, not a child design.
-- [reference/frontend/impl.md](reference/frontend/impl.md): migrated existing behavior/code reference, not a child design.
+- [Frontend source](../../../../../frontend/src): migrated implementation organized under `app/`, `shared/backend-client/`, `shared/ui/` (intentionally empty), and `features/`.
+- [App](../../../../../frontend/src/app): startup, shell and routes.
+- [Backend Client](../../../../../frontend/src/shared/backend-client): transport modules and public facade.
+- [Home](../../../../../frontend/src/features/home), [Providers](../../../../../frontend/src/features/providers), [Chat](../../../../../frontend/src/features/chat), [Workspace](../../../../../frontend/src/features/workspace): feature implementations.
 - [Frontend tests](../../../../../frontend/test): client, adapter and UI regression checks.
+
+Legacy reference documents remain available under the existing `reference/` paths; they are migrated behavior/code references, not child designs.
 
 ## Automatic retrieval
 

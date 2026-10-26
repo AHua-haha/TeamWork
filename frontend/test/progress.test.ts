@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { reduceAssistantMessageFrames, type AssistantMessage, type AssistantMessageFrame } from '@earendil-works/pi-ai';
-import { ProgressReducer, type ProgressEvent } from '../src/client/progress.js';
+import { ProgressReducer, type ProgressEvent } from '../src/shared/backend-client/progress.js';
 import { assistant } from './fixtures.js';
 
 test('incremental compact projection matches Pi replay across interleaved text, thinking, tool checkpoints and signatures', () => {

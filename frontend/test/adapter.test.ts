@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
-import type { ClientSnapshot, CompletedRecord } from '../src/client/protocol.js';
-import { projectSnapshot } from '../src/adapter/project.js';
+import type { ClientSnapshot, CompletedRecord } from '../src/shared/backend-client/protocol.js';
+import { projectSnapshot } from '../src/features/chat/project.js';
 import { agentId, assistant, record, runId } from './fixtures.js';
 
 function snapshot(completed: CompletedRecord[], live: ClientSnapshot['live'] = []): ClientSnapshot {

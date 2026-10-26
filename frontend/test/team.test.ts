@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BackendError } from '../src/client/agent-client.js';
-import type { Member, Team } from '../src/client/workspace-client.js';
-import { WorkspaceClient } from '../src/client/workspace-client.js';
-import { readRoute, routeUrl, sameRoute } from '../src/ui/routes.js';
-import { findLead, memberStatus, modelText, pollIntervalMs, shouldPoll } from '../src/ui/team-state.js';
-import { callRecipient, toolHeading, toolLabels } from '../src/ui/tool-label.js';
+import { BackendError } from '../src/shared/backend-client/agent-client.js';
+import type { Member, Team } from '../src/shared/backend-client/workspace-client.js';
+import { WorkspaceClient } from '../src/shared/backend-client/workspace-client.js';
+import { readRoute, routeUrl, sameRoute } from '../src/app/routes.js';
+import { findLead, memberStatus, modelText, pollIntervalMs, shouldPoll } from '../src/features/workspace/team-state.js';
+import { callRecipient, toolHeading, toolLabels } from '../src/features/chat/tool-label.js';
 
 const settings = { connectionId: 'main', modelId: 'm1', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'm1', reasoning: 'high' as const }] };
 const member = (patch: Partial<Member> = {}): Member => ({

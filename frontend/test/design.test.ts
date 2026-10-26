@@ -1,9 +1,9 @@
-import { writableContextPath } from '../src/ui/context-path.js';
+import { writableContextPath } from '../src/features/workspace/context-path.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { WorkspaceClient, type Member, type DesignSummary } from '../src/client/workspace-client.js';
-import { discussionInput, referenceLabel } from '../src/client/discussion-reference.js';
-import { designMembers, designTitle, implementationAccess, memberDesigns } from '../src/ui/design-state.js';
+import { WorkspaceClient, type Member, type DesignSummary } from '../src/shared/backend-client/workspace-client.js';
+import { discussionInput, referenceLabel } from '../src/shared/backend-client/discussion-reference.js';
+import { designMembers, designTitle, implementationAccess, memberDesigns } from '../src/features/workspace/design-state.js';
 
 const member = (name: string, working: string[], dependencies: string[]): Member => ({ memberId: name, name, workspaceId: 'w', revision: 0, role: 'developer', responsibility: '', lead: false, settings: { connectionId: 'c', modelId: 'm', toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, ready: true, running: false, issues: [], harness: { designScope: { working, dependencies }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] } });
 const design: DesignSummary = { path: 'systems/api/metadata.json', revision: 'r', implementation: ['backend/api', 'shared/api.ts'] };

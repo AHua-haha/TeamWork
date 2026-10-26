@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { GroupClient, imageUrl, validateEntry } from '../src/client/group-client.js';
-import { imageInputError } from '../src/ui/useImageDraft.js';
+import { GroupClient, imageUrl, validateEntry } from '../src/shared/backend-client/group-client.js';
+import { imageInputError } from '../src/features/chat/useImageDraft.js';
 
 const image = { id: 'picture1', name: 'screen.png', mimeType: 'image/png', width: 8, height: 6, size: 100 };
 const entry = { kind: 'user', workspaceId: 'w', entryId: 'm', messageId: 'm', position: 1, revision: 1, exchangeId: 'e', time: 1, text: '', attachments: [image] };
