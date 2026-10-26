@@ -42,6 +42,16 @@ TeamData owns the resident shared Pi context. TeamRunner supplies original share
 
 `npm run check` passes. The full backend suite passes: 231 tests, 231 passed. `backend/test/semantic-context.test.ts` covers summary replacement, recursive opening of involved ranges, involved-leaf preservation and uncovered-message fallback. `git diff --check` passes. Direct live-provider semantic generation remains dependent on the configured model provider; rejected or failed maintenance submissions intentionally leave the previous index unchanged.
 
+### Context inspection
+
+**Input:** `TeamSystem.inspectGroupContext(workspaceId, {offset?,limit?,revision?})` delegates to TeamData's same operation through ChatStore. `TeamSystem.requireContextMember(workspaceId,memberId)` checks workspace existence, member ownership and non-retirement before the API calls Agent's inspection port. It does not resolve harnesses/model configuration or run synchronization.
+
+**Output:** Group inspection returns `{revision,offset,total,nextOffset,entries}` using original `GroupContextEntry` records. The revision is `chat_settings.position`; reset advances that position, while semantic-index updates alone do not change original shared context. Group entry Pi role can be user even for a member sender; metadata.author and explicit sender text carry authorship. Private thinking/tools are not copied into shared context.
+
+**Effect/failure:** A repeatable-read transaction reads workspace presence, chat settings and the bounded ordered rows after reset_position. No full resident load, private-history joins, repair, maintenance or mutation occurs. Defaults and errors match Agent pagination: offset 0, limit 50/max100, later-page revision required, changed revision context_changed/409. Unknown workspaces and out-of-workspace/retired/missing members return not_found/404. Existing tables and lifecycle bookkeeping suffice; no migration is added.
+
+**Usage example:** `await team.inspectGroupContext(id,{limit:50})` returns original shared entries for debugging; use its revision and nextOffset to continue. To inspect private context, first validate the member scope, then call AgentRuntime.inspectContext rather than querying Agent SQL from Team.
+
 ## File lookup
 
 - [backend/src/core/team/data/group-context.ts](../../../../../../../backend/src/core/team/data/group-context.ts): resident ordered group context and commit reconciliation.

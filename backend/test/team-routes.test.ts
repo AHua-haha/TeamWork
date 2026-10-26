@@ -1,3 +1,4 @@
+import { contextPageInput } from '../src/core/context-page.js';
 import { acceptFiles,initGit,waitApproval } from './git-fixture.js';
 import assert from 'node:assert/strict';
 import { request as httpRequest, type IncomingMessage, type Server } from 'node:http';
@@ -225,4 +226,38 @@ test('commit approval endpoints expose pending command and right-panel diff; dec
  await call(`${base}/${request.id}`,{method:'POST',data:{action:'feedback',message:'Revise the prompt'}});assert.match((await running).output,/Revise the prompt/);
  await call(`${base}/${request.id}`,{status:404});await call(`/workspaces/${f.workspaceId}/team/members/${f.lead.memberId}/harness`,{status:404});
  await call(`/workspaces/${f.workspaceId}/team/configuration/commit`,{method:'POST',data:{},status:404});
+}));
+
+
+test('context inspection routes are read-only, scoped, paged and independent of execution state', () => withServer(async (call, fixture) => {
+  const base = `/workspaces/${fixture.workspaceId}/team`;
+  const created = await worker(fixture, 'Inspector');
+  const entry = { messageId: 'retained', message: { role: 'user', content: 'Retained context', timestamp: 1 }, metadata: { source: 'group-chat', marker: 'exact' } };
+  const reads: { agentId: string; input: unknown }[] = [];
+  Object.assign(fixture.runtime, { inspectContext: async (agentId: string, options: Parameters<typeof contextPageInput>[0]) => {
+    const input = contextPageInput(options); reads.push({ agentId, input });
+    return { revision: 7, offset: input.offset, total: 1, nextOffset: null, entries: [entry] };
+  } });
+  const member = await call(`${base}/members/${created.memberId}/context?limit=1`);
+  assert.deepEqual(member, { revision: 7, offset: 0, total: 1, nextOffset: null, entries: [entry] });
+  assert.equal(reads[0]!.agentId, created.memberId);
+  await call(`${base}/members/${created.memberId}/context?offset=1&revision=7`);
+  assert.deepEqual(reads[1]!.input, { offset: 1, limit: 50, revision: 7 });
+  assert.deepEqual(await call(`${base}/chat/context`), { revision: 0, offset: 0, total: 0, nextOffset: null, entries: [] });
+  for (const suffix of ['limit=0', 'limit=101', 'offset=1', 'offset=-1', 'revision=abc', 'limit=1&limit=2', 'unknown=1']) {
+    await call(`${base}/members/${created.memberId}/context?${suffix}`, { status: 400 });
+    await call(`${base}/chat/context?${suffix}`, { status: 400 });
+  }
+  for (const suffix of [`members/${created.memberId}/context`, 'chat/context']) {
+    for (const method of ['POST', 'PUT', 'DELETE']) await call(`${base}/${suffix}`, { method, status: 404 });
+    await call(`${base}/${suffix}/extra`, { status: 404 });
+  }
+  const before = reads.length;
+  await call(`/workspaces/other/team/members/${created.memberId}/context`, { status: 404 });
+  await call('/workspaces/other/team/chat/context', { status: 404 });
+  await call(`${base}/members/missing/context`, { status: 404 });
+  await fixture.team.service.retire(fixture.workspaceId, created.memberId, created.revision);
+  await call(`${base}/members/${created.memberId}/context`, { status: 404 });
+  assert.equal(reads.length, before, 'scope failures never read another member context');
+  assert.equal(fixture.runtime.runs.length, 0, 'inspection never starts work');
 }));

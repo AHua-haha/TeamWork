@@ -31,7 +31,7 @@ import { newLead } from '../../src/core/team/data/members.js';
 import { WorkspaceService } from '../../src/core/workspace/workspace.js';
 import type { ContextCommit } from '../../src/core/workspace/data/context-base.js';
 import { sha256 } from '../../src/core/text.js';
-import type { FollowEvent } from '../../src/core/agent/data/model.js';
+import type { ContextEntry, FollowEvent } from '../../src/core/agent/data/model.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a disposable MySQL 8.4 database (see README)');
@@ -2929,4 +2929,69 @@ test('adoption imports preserved context and fresh lead atomically after reviewe
     assert.deepEqual(baseline!.design,Object.fromEntries(Object.entries(original).filter(([p])=>p.startsWith('design/')).map(([p,c])=>[`.rsi/context/${p}`,c])));
     assert.equal(await readFile(join(directory,'src/api/index.ts'),'utf8'),'implementation');
   }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+
+test('Agent context inspection pages exact Pi entries, rejects changed revisions and survives restart without a runtime lease', {timeout: 30000}, async () => {
+  const entries: ContextEntry[] = [
+    {messageId: 'question', message: {...user, content: [{type: 'text' as const, text: 'Image input'}, {type: 'image' as const, mimeType: 'image/png', data: 'aW1hZ2U='}]}, metadata: {source: 'group-chat', groupPosition: 1}},
+    {messageId: 'answer', message: fauxAssistantMessage([{type: 'thinking', thinking: '', thinkingSignature: 'opaque-signed-thinking'}, {type: 'text', text: 'Private result'}]), metadata: {source: 'model', extra: {kept: true}}},
+  ];
+  const {agentId} = await store.agents.createAgent(undefined, entries);
+  const first = await store.agents.inspectContext(agentId, {limit: 1});
+  assert.deepEqual(first, {revision: 0, offset: 0, total: 2, nextOffset: 1, entries: [entries[0]]});
+  assert.deepEqual(await store.agents.inspectContext(agentId, {offset: 1, limit: 1, revision: first.revision}), {revision: 0, offset: 1, total: 2, nextOffset: null, entries: [entries[1]]});
+  assert.deepEqual((await store.agents.inspectContext(agentId, {offset: 2, revision: 0})).entries, []);
+  assert.deepEqual(await store.agents.getContext(agentId), {revision: 0, entries}, 'inspection neither mutates nor synchronizes context');
+  const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+  try { assert.deepEqual(await reopened.agents.inspectContext(agentId), {...first, nextOffset: null, entries}); }
+  finally { await reopened.close(); }
+  await store.agents.patchContext(agentId, 0, {update: [], append: [{messageId: 'next', message: user, metadata: {}}]});
+  await assert.rejects(store.agents.inspectContext(agentId, {offset: 1, revision: 0}), code('context_changed'));
+  const current = await store.agents.inspectContext(agentId, {limit: 1});
+  await store.agents.replaceContext(agentId, current.revision, [{messageId: 'compacted', message: user, metadata: {source: 'compaction'}}]);
+  await assert.rejects(store.agents.inspectContext(agentId, {offset: 1, revision: current.revision}), code('context_changed'));
+  assert.equal((await store.agents.inspectContext(agentId)).entries[0]!.messageId, 'compacted');
+  await assert.rejects(store.agents.inspectContext(agentId, {offset: 2, revision: current.revision + 1}), code('invalid_input'));
+  await assert.rejects(store.agents.inspectContext('missing'), code('not_found'));
+  await store.storage.transaction(async db => {
+    const scoped = store.agents.inTransaction(db);
+    const pinned = await scoped.inspectContext(agentId);
+    await store.agents.patchContext(agentId, pinned.revision, {update: [], append: [{messageId: 'concurrent', message: user, metadata: {}}]});
+    assert.deepEqual(await scoped.inspectContext(agentId, {revision: pinned.revision}), pinned, 'one owner transaction keeps header and rows on the same repeatable-read snapshot');
+  });
+  assert.equal((await store.agents.inspectContext(agentId)).total, 2, 'a new inspection observes the concurrent commit');
+});
+
+test('Group context inspection reads original public entries, handles publication/reset revisions and never reads Agent private context', {timeout: 30000}, async () => {
+  const f = await groupFixture();
+  try {
+    assert.deepEqual(await f.team.inspectGroupContext(f.workspaceId), {revision: 0, offset: 0, total: 0, nextOffset: null, entries: []});
+    const accepted = await f.team.runner.postUser(f.workspaceId, '@Lead inspect this');
+    const active = await f.team.inspectGroupContext(f.workspaceId, {limit: 1});
+    assert.equal(active.total, 1, 'inspection works during an active model call');
+    assert.equal(active.entries[0]!.messageId, accepted.message.messageId);
+    assert.equal(active.entries[0]!.metadata.source, 'group-chat');
+    answer((await f.requests.next()).events, fauxAssistantMessage([{type: 'thinking', thinking: '', thinkingSignature: 'private-signature'}, {type: 'text', text: 'Shared answer'}]));
+    await f.runtime.finished(f.lead.memberId, accepted.runs[0]!.runId);
+    await assert.rejects(f.team.inspectGroupContext(f.workspaceId, {revision: active.revision}), code('context_changed'));
+    const first = await f.team.inspectGroupContext(f.workspaceId, {limit: 1});
+    const second = await f.team.inspectGroupContext(f.workspaceId, {offset: first.nextOffset!, limit: 1, revision: first.revision});
+    assert.equal(second.nextOffset, null);
+    const original = (await store.team.readGroupContext(f.workspaceId, 0)).map(item => item.entry);
+    assert.deepEqual([...first.entries, ...second.entries], original);
+    assert.doesNotMatch(JSON.stringify(original), /private-signature/);
+    assert.match(JSON.stringify(second.entries), /Sender: Lead/);
+    assert.ok(second.entries[0]!.metadata.finalRef);
+    const memberContext = await f.runtime.inspectContext(f.lead.memberId);
+    assert.match(JSON.stringify(memberContext), /private-signature/);
+    await f.runtime.close();
+    assert.deepEqual(await f.runtime.inspectContext(f.lead.memberId), memberContext, 'read does not require runtime ownership');
+    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    try { assert.deepEqual((await reopened.team.inspectGroupContext(f.workspaceId)).entries, original); }
+    finally { await reopened.close(); }
+    await store.team.resetChat(f.workspaceId);
+    await assert.rejects(f.team.inspectGroupContext(f.workspaceId, {offset: 1, revision: first.revision}), code('context_changed'));
+    assert.equal((await f.team.inspectGroupContext(f.workspaceId)).total, 0);
+  } finally { await f.close(); }
 });

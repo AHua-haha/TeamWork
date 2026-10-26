@@ -10,7 +10,7 @@ import type { WorkspaceService } from '../core/workspace/workspace.js';
 
 export function createAgentServer(runtime: AgentRuntime, config: ConfigService, workspaces: WorkspaceService, team: TeamSystem) {
   const workspaceRoute = workspaceRoutes(workspaces);
-  const teamRoute = teamRoutes(team);
+  const teamRoute = teamRoutes(team, runtime);
   return createServer(respond(async route => {
     const { request, response, url, path, signal } = route;
     if (path[0] === 'workspaces') return path[2] === 'team' ? teamRoute(route) : workspaceRoute(route);

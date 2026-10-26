@@ -28,7 +28,13 @@ Design: [Core](../../../../design/backend/core/design.md).
 
 Core prepareWorkspace creates a fresh Team root-design lead and asks Workspace's PreparedWorkspaceFiles to preserve/import context, add missing templates and stage reviewed non-context metadata. WorkspaceService commits lead/configuration/activation, context history/design baseline and registration through the existing atomic owner transaction, then discards staging. Preparation/registration failures remove only additions and restore old metadata. Existing context and source bytes remain intact; normal opening does not reinitialize registered workspaces.
 
+### Context inspection coordination
+
+`context-page.ts` supplies schema-neutral `ContextPageInput`, generic `ContextPage<T>`, page validation (offset 0, limit 50/max100, revision required after offset 0), and context_changed/409 checks. AgentData and TeamData own their SQL snapshot reads and message types. API validates member scope through Team, then reads through AgentRuntime.inspectContext; group inspection goes through TeamSystem.inspectGroupContext. These operations use existing storage transactions without runtime ownership or writes. See the child Agent/Team and API implementation contracts for complete payloads and examples.
+
 ## File lookup
+
+- [backend/src/core/context-page.ts](../../../../../../backend/src/core/context-page.ts): schema-neutral revision-checked page mechanics.
 
 - [backend/src/core/data.ts](../../../../../../backend/src/core/data.ts): owner composition, cross-owner hooks and lifecycle.
 - [backend/src/core/data-transaction.ts](../../../../../../backend/src/core/data-transaction.ts): schema-neutral SQL/transaction helpers.

@@ -1,3 +1,4 @@
+import type { ContextPageInput } from '../context-page.js';
 import { validateMessage } from './data/validation.js';
 import type { ResolvedRunConfig, RunConfigSource } from './contracts.js';
 export type { ResolvedRunConfig, RunConfigSource } from './contracts.js';
@@ -159,6 +160,9 @@ export class AgentRuntime {
   }
 
   clearProgress(agentId: string): void { this.progress.clear(agentId); this.contextFailures.delete(agentId); }
+
+  /** Inspection reads durable context even when the execution runtime is unavailable. */
+  inspectContext(agentId: string, input: ContextPageInput = {}) { return this.store.inspectContext(agentId, input); }
 
   async getState(agentId: string): Promise<CurrentState> {
     this.available();

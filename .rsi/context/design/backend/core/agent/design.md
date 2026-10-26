@@ -89,6 +89,12 @@ Compaction may atomically replace all active context rows and update the residen
 
 Expose acknowledged context/history/run/compaction reads and mutations, restoration/recovery and transaction-scoped admission/completion/reset operations. Team can obtain a narrow execution coordination view and immutable completed records for its shared references without loading private context or knowing Agent tables. Agent owns validation and mapping of those values. Runtime ownership, durable history, revisions and external-effect safety remain unchanged. Parent-supplied callbacks coordinate foreign configuration/presentation changes on the same transaction; Agent does not write those foreign models.
 
+### Read-only retained context inspection
+
+Expose the Agent's current durable message context as an ordered sequence of native Pi messages with their stable entry identities and metadata. This is the context retained for future model calls, including incorporated group messages, private work, and compacted or semantic-derived entries when present. Stable execution history, system instructions/tool schemas assembled separately, and unfinished stream chunks are different information and are not synthesized into this view.
+
+Inspection is detached and read-only. It works while idle or running and does not require runtime execution ownership, synchronize incoming group messages, repair protocol state, start models/tools, or compact. Bound each read and pair it with a revision of the retained context; if a later page's revision differs because of append, update, replacement or reset, refuse it so the caller can refresh rather than mix snapshots. Preserve content, image blocks, opaque signatures and metadata without truncation or rewriting.
+
 ## Constraints, specifications and requirements
 
 - Aggregate Agent data definitions, validation, mutable context/progress, durable schemas/queries/migrations and operations under Agent. Keep SQL out of the reusable model/tool loop, not out of the Agent system. No concrete Team, Harness or Workspace dependency in Agent.

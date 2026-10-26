@@ -1,3 +1,4 @@
+import { contextPageInput, checkContextPage, type ContextPageInput, type ContextPage } from '../../context-page.js';
 import type { AgentRecord, AgentExecutionState } from './model.js';
 import { validateEntries, validateRun } from './validation.js';
 import { interruptedCompactionContext, validateCompactionState, type CompactionState } from './compaction.js';
@@ -150,6 +151,26 @@ export class AgentData {
     }
     async getContext(agentId: string): Promise<ContextHistory> {
         return this.transaction(async db => this.contextRows(db, await this.agent(db, agentId)));
+    }
+    /** Detached, bounded SQL read; no runtime lease, resident context, repair or synchronization. */
+    async inspectContext(agentId: string, options: ContextPageInput = {}): Promise<ContextPage<ContextEntry>> {
+        const input = contextPageInput(options);
+        return this.transaction(async db => {
+            const agent = await this.agent(db, agentId);
+            if (agent.contextFormat !== 1) throw new AppError('runtime_unavailable', 'Agent context migration is incomplete', 503);
+            checkContextPage(agent.contextRevision, agent.contextLength, input);
+            const records = await rows(db, 'SELECT position,id,entry FROM agent_context_entries WHERE agent_id = ? AND position > ? ORDER BY position LIMIT ' + input.limit, [agentId, input.offset]);
+            const expected = Math.min(input.limit, agent.contextLength - input.offset);
+            if (records.length !== expected || records.some((row, index) => row.position !== input.offset + index + 1))
+                throw new AppError('corrupt_data', 'Context page order or length is invalid', 500);
+            const entries = records.map(row => {
+                const entry = decode<ContextEntry>(row.entry, value => validateEntries([value]));
+                if (entry.messageId !== row.id) throw new AppError('corrupt_data', 'Context row identity is invalid', 500);
+                return entry;
+            });
+            const next = input.offset + entries.length;
+            return { revision: agent.contextRevision, offset: input.offset, total: agent.contextLength, nextOffset: next < agent.contextLength ? next : null, entries };
+        });
     }
     residentContext(agentId: string) {
         if (this.connection) throw new AppError('context_conflict', 'Resident context cannot be loaded from an uncommitted transaction', 409);

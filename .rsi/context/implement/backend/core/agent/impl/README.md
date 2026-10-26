@@ -50,6 +50,16 @@ adoptLegacyContext and finishLegacyMigration keep the existing once-only context
 
 `npm run check` passes. The full backend suite passes: 231 tests, 231 passed. `backend/test/semantic-context.test.ts` verifies Agent-owned deterministic projection and uncovered fallback without changing normal group incorporation. `git diff --check` passes. Durable compaction recovery continues to use the existing acknowledged cutover path; no separate semantic persistence is owned by Agent.
 
+### Retained context inspection
+
+**Input:** `AgentRuntime.inspectContext(agentId, {offset?, limit?, revision?})` delegates to `AgentData.inspectContext`. Offset is zero-based, defaults to 0; limit defaults to 50 and must be 1–100. Subsequent pages require revision. Shared pagination validation lives in `backend/src/core/context-page.ts` and has no message/schema ownership.
+
+**Output:** `{revision, offset, total, nextOffset, entries}`; each entry is the exact `{messageId, message: Pi.Message, metadata}` retained in `agent_context_entries`. Next offset is null at the end. Empty contexts return total 0 and no entries. Ordering follows context position, not stable-history position.
+
+**Effect/failure:** One repeatable-read transaction reads Agent bookkeeping and only the selected context rows. It validates row count/order/identity and stored entry format. No runtime lease/resident-context initialization, write, repair or group synchronization occurs. Unknown agents return not_found/404; invalid page input returns invalid_input/400; stale revision returns context_changed/409; incomplete migration returns runtime_unavailable/503; malformed stored data fails explicitly. Append, update, compaction and reset increment the existing context revision. Signed thinking and native images survive serialization unchanged. This is the durable context at read time, not necessarily an in-flight model request.
+
+**Usage example:** read `inspectContext(id, {limit:50})`; if nextOffset is non-null, read with `{offset:page.nextOffset, revision:page.revision, limit:50}`. On context_changed discard the partial assembled snapshot and start at offset 0 without revision.
+
 ## File lookup
 
 - [backend/src/core/agent/data/resident-context.ts](../../../../../../../backend/src/core/agent/data/resident-context.ts): lazy resident models and committed revision reconciliation.

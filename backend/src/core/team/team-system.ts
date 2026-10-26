@@ -1,3 +1,4 @@
+import type { ContextPageInput } from '../context-page.js';
 import type { RunConfigSource } from './data/config.js';
 import { mkdir,writeFile } from 'node:fs/promises';
 import { dirname,join } from 'node:path';
@@ -101,6 +102,14 @@ export class TeamSystem {
   async member(workspaceId: string, memberId: string): Promise<MemberStatus> {
     return this.status(await this.service.get(workspaceId, memberId));
   }
+  async requireContextMember(workspaceId: string, memberId: string): Promise<void> {
+    await this.service.requireWorkspace(workspaceId);
+    const member = await this.service.find(memberId);
+    if (!member || member.workspaceId !== workspaceId || member.value.retiredAt !== null)
+      throw new AppError('not_found', 'Member not found in this workspace', 404);
+  }
+  inspectGroupContext(workspaceId: string, input: ContextPageInput = {}) { return this.store.inspectGroupContext(workspaceId, input); }
+
   async inspect(workspaceId: string, memberId: string) {
     const { stored, member } = await this.service.inspect(workspaceId, memberId);
     let working: string[] = [];

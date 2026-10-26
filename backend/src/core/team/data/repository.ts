@@ -1,3 +1,4 @@
+import { contextPageInput, checkContextPage, type ContextPageInput, type ContextPage } from '../../context-page.js';
 import { imageContent, validateChatImages, type PreparedChatImage } from './chat-images.js';
 import { type GroupContextMessage, type GroupSemanticIndex } from '../../agent/data/context.js';
 import { finalAnswer } from '../../agent/final-answer.js';
@@ -55,6 +56,28 @@ export class TeamData implements TeamStore, ChatStore {
         if (String(columns.find(row => row.Field === 'context_format')?.Default) !== '1')
             await this.pool.query('ALTER TABLE chat_settings ALTER COLUMN context_format SET DEFAULT 1');
         await this.pool.query('DROP TABLE IF EXISTS chat_delivery');
+    }
+    /** Inspect original shared context without warming or altering the runtime model. */
+    async inspectGroupContext(workspaceId: string, options: ContextPageInput = {}): Promise<ContextPage<GroupContextEntry>> {
+        identity(workspaceId, 'workspaceId');
+        const input = contextPageInput(options);
+        return this.transaction(async db => {
+            await this.workspaces.inTransaction(db).requireWorkspace(workspaceId);
+            const [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+            if (settings && settings.context_format !== 1) throw new AppError('runtime_unavailable', 'Group context migration is incomplete', 503);
+            const revision = settings?.position ?? 0, total = settings?.context_length ?? 0;
+            checkContextPage(revision, total, input);
+            const records = await rows(db, 'SELECT position,id,entry FROM chat_context_entries WHERE workspace_id = ? AND position > ? AND position <= ? ORDER BY position LIMIT ' + input.limit + ' OFFSET ' + input.offset, [workspaceId, settings?.reset_position ?? 0, revision]);
+            if (records.length !== Math.min(input.limit, total - input.offset)) throw new AppError('corrupt_data', 'Group context page length is invalid', 500);
+            const entries = records.map(row => {
+                const entry = decode<GroupContextEntry>(row.entry, validateGroupContextEntry);
+                if (entry.messageId !== row.id || entry.metadata.groupPosition !== row.position || entry.metadata.workspaceId !== workspaceId)
+                    throw new AppError('corrupt_data', 'Group context row identity is invalid', 500);
+                return entry;
+            });
+            const next = input.offset + entries.length;
+            return { revision, offset: input.offset, total, nextOffset: next < total ? next : null, entries };
+        });
     }
     async readGroupContext(workspaceId: string, after: number): Promise<GroupContextMessage[]> {
         identity(workspaceId, 'workspaceId'); position(after);

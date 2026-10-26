@@ -70,6 +70,12 @@ Agent compaction may use this index to construct a deterministic member view. Fo
 
 Normal Agent runs continue to append original group messages in timeline order. Only the successful Agent compaction cutover may replace the incorporated group prefix with that Agent's deterministic view. The view is private model context, is not a new Team message, and does not advance or replace Agent-owned group consumption state. Team retains the original group messages and semantic index for later reads and recovery.
 
+### Read-only group and member context inspection
+
+Expose the original current shared group context in publication order, preserving native Pi message content, stable identities and sender/mention/origin metadata. It contains user input and accepted public member responses, not private working messages, pending response reservations or member-specific semantic projections. Inspection does not alter group consumption state, warm runtime context, schedule work or perform maintenance.
+
+Member context is owned and read by Agent. Team validates that the requested active member belongs to the named workspace before Agent inspection. API transport composes these owner operations without querying another owner's tables. Group inspection checks workspace existence and returns bounded, revision-checked detached pages. Publication or reset invalidates a previously selected group revision. No new persistence schema or context lifecycle policy is introduced.
+
 ## Constraints, specifications and requirements
 
 - Preserve existing HTTP/SSE message presentation, durable final references, reservation ordering and delta-stream recovery.

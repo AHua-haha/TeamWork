@@ -1,3 +1,4 @@
+import type { ContextPage, ContextPageInput } from '../../context-page.js';
 import { validateMessage, validateRun } from '../../agent/data/validation.js';
 import type { GroupContextMessage, GroupSemanticIndex } from '../../agent/data/context.js';
 import type { ImageContent, Message, JsonObject } from '@earendil-works/pi-ai';
@@ -57,6 +58,7 @@ export interface ChatPublication {
   workspaceId: string; author: ChatAuthor; text: string; images?: PreparedChatImage[]; recipients: string[]; exchangeId?: string; finalMessageId?: string;
 }
 export interface ChatStore extends ChatImageStore {
+  inspectGroupContext(workspaceId: string, input?: ContextPageInput): Promise<ContextPage<GroupContextEntry>>;
   readGroupContext(workspaceId: string, after: number): Promise<GroupContextMessage[]>;
   readGroupSemantic?(workspaceId: string): Promise<GroupSemanticIndex | undefined>;
   semanticInput?(workspaceId: string, through?: number): Promise<{ messages: GroupContextMessage[]; previous?: GroupSemanticIndex; through: number; baseRevision: number }>;

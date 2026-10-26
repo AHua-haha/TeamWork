@@ -14,6 +14,12 @@ Multipart parsing belongs to API; image preparation/validation semantics belong 
 
 `POST /workspaces/initialization` accepts directory and adopt and returns a read-only initialization inspection: canonical directory, cleanupPaths and cleanupRevision (null when no nonempty metadata). `POST /workspaces` additionally accepts optional cleanupRevision. Without matching reviewed cleanup consent, nonempty metadata returns a conflict. Existing content under `.rsi/context/` is preserved; source files and Git state are unchanged. Other registered workspaces cannot be cleaned or reinitialized through this operation.
 
+### Context inspection
+
+Provide read-only workspace-scoped endpoints for current retained member context and original shared group context. Each returns ordered entries with their native Pi message, stable identity and metadata, plus pagination and revision information. Require the selected revision on subsequent pages and report a conflict when the underlying context changes; the caller refreshes from the beginning.
+
+Validate query shape and member/workspace boundaries. Reads work during execution and without runtime ownership, return no transient stream chunks, and perform no synchronization, repair or compaction. Preserve signed and multimodal content exactly. Prevent caching these debug reads. Existing history/timeline and stream contracts remain unchanged. This increment supplies backend information only; frontend integration is deferred.
+
 ## Constraints, specifications and requirements
 
 - Preserve existing accepted observable behavior, record formats, revisions/cursors, API payloads and lifecycle guarantees during this migration.

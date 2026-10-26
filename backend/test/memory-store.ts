@@ -1,3 +1,4 @@
+import { contextPageInput, checkContextPage, type ContextPageInput } from '../src/core/context-page.js';
 import { imageContent, type PreparedChatImage } from '../src/core/team/data/chat-images.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -106,6 +107,15 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     return { message, runs, entries };
   }
 
+  async inspectGroupContext(workspaceId: string, options: ContextPageInput = {}) {
+    this.stored(workspaceId);
+    const input = contextPageInput(options), all = this.chatMessages.get(workspaceId) ?? [];
+    const revision = all.at(-1)?.position ?? this.resets.get(workspaceId)?.resetPosition ?? 0;
+    checkContextPage(revision, all.length, input);
+    const entries = all.slice(input.offset, input.offset + input.limit).map(message => groupEntry(message));
+    const next = input.offset + entries.length;
+    return { revision, offset: input.offset, total: all.length, nextOffset: next < all.length ? next : null, entries };
+  }
   async readGroupContext(workspaceId: string, after: number): Promise<GroupContextMessage[]> {
     return (this.chatMessages.get(workspaceId) ?? []).filter(message => message.position > after).map(message => ({
       position: message.position, sender: groupSender(message),

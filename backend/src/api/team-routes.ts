@@ -1,3 +1,4 @@
+import type { AgentRuntime } from '../core/agent/runtime.js';
 import { readImageSubmission } from './chat-images.js';
 import { body, fields, json, query, count, sse, type Route } from './http-helpers.js';
 import type { TeamSystem } from '../core/team/team-system.js';
@@ -6,12 +7,25 @@ import { AppError, identity, position } from '../core/agent/data/model.js';
 const maxBodyBytes = 1024 * 1024;
 
 /** Handles `/workspaces/:workspaceId/team` and everything under it. */
-export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
+export function teamRoutes(team: TeamSystem, runtime: AgentRuntime): (route: Route) => Promise<void> {
   return async ({ request, response, url, path, signal }) => {
     const [, workspaceId, , area, memberId, ...extra] = path;
     identity(workspaceId, 'workspaceId');
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
+    if (method === 'GET' && area === 'members' && memberId && extra.length === 1 && extra[0] === 'context') {
+      identity(memberId, 'memberId');
+      const input = contextQuery(url);
+      response.setHeader('Cache-Control', 'no-store');
+      await team.requireContextMember(workspaceId, memberId);
+      json(response, 200, await runtime.inspectContext(memberId, input));
+      return;
+    }
+    if (method === 'GET' && area === 'chat' && memberId === 'context' && !extra.length) {
+      response.setHeader('Cache-Control', 'no-store');
+      json(response, 200, await team.inspectGroupContext(workspaceId, contextQuery(url)));
+      return;
+    }
     if (area === 'changes') {
       if (method !== 'GET' || memberId !== undefined || extra.length) throw notFound();
       query(url, []);
@@ -102,4 +116,9 @@ export function teamRoutes(team: TeamSystem): (route: Route) => Promise<void> {
     identity(memberId, 'memberId');
     json(response, 200, await team.inspect(workspaceId, memberId));
   };
+}
+
+function contextQuery(url: URL) {
+  query(url, ['offset', 'limit', 'revision']);
+  return { offset: count(url, 'offset', 0), limit: count(url, 'limit', 50), revision: count(url, 'revision', null) ?? undefined };
 }

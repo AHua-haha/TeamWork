@@ -22,6 +22,10 @@ Core composes owner data-model operations on one technical transaction. Workspac
 
 Workspace inspects and prepares filesystem state while preserving existing context. Core creates a fresh root-design Team lead and registers its initial configuration, activation, context history and accepted baseline atomically through owner operations. Nonempty metadata cleanup requires explicit revision-bound user confirmation. Registration failure rolls back prepared filesystem additions and restores staged metadata; original context and project source are preserved.
 
+### Read-only context inspection coordination
+
+API can compose Team's workspace/member scope checks with Agent's retained-context inspection, or call Team's original-group inspection directly. Each owner serves complete native messages plus metadata through bounded, revision-checked read-only pages. Shared pagination mechanics contain no business message schema. No execution, synchronization, compaction, history rewrite or frontend integration is introduced by inspection.
+
 ## Constraints, specifications and requirements
 
 Preserve public HTTP/SSE presentation, shared-workspace single-member execution, mention/publication refusal behavior, image semantics, idle reset and member configuration rules. Context ownership and compaction introduce no public context-edit endpoint; workspace creation uses its initialization review.
