@@ -10,13 +10,10 @@ Design: [Frontend](../../../design/frontend/design.md).
 
 The source migration now follows the design tree:
 
-- `frontend/src/app/` owns startup, route parsing, the shell and global navigation.
+- `frontend/src/app/` owns startup, route parsing, the shell and global navigation. App is outside the Frontend Features member's ownership; Shared owns only the backend client and reusable UI.
 - `frontend/src/shared/backend-client/` owns the decomposed backend transport modules and the `BackendClient` facade/singleton.
 - `frontend/src/shared/ui/` owns presentation-only reusable visual primitives. `SequenceInspector` provides the context-viewer two-pane list/detail interaction; feature renderers supply their own data and content.
-- `frontend/src/features/providers/` owns Providers.
-- `frontend/src/features/chat/` owns solo/team conversation UI, adapters and chat state.
-- `frontend/src/features/workspace/` owns the workspace page and its Files, Design, Team, Changes and related sections.
-- `frontend/src/features/home/` owns the Home landing page, workspace overview/list and quick actions.
+- `frontend/src/features/providers/` owns Providers; `frontend/src/features/chat/` owns solo/team conversation UI, adapters and chat state; `frontend/src/features/workspace/` owns the workspace page and its Files, Design, Team, Changes and related sections; `frontend/src/features/home/` owns the Home landing page and quick actions. These Features areas are owned by the Frontend Features member.
 
 The migration moves source ownership without changing routes, API payloads, SSE behavior or user-facing workflows. Features use the shared `backendClient` facade while resource implementations remain internally decomposed.
 
