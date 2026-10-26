@@ -14,6 +14,7 @@ The workspace page may provide these sections:
 - **Team/Members** — inspect members and configuration, and expose existing review/activation controls.
 - **Changes** — inspect changes and supported review/commit approval workflows.
 - **Settings** — workspace-specific settings supported by the backend.
+- **Context** — one read-only inspection tab for the original Group context and each workspace member's current persisted Agent context. The source list selects Group or a member; the selected source is paginated at one pinned revision and displayed as a chronological message list with detail. Text, thinking, images, tool calls/results and unknown/raw message data remain inspectable. On `context_changed`, discard the mixed revision and explicitly reload from offset zero. These reads do not start or cancel Agent work.
 
 This list describes initial organization; preserve existing backend capabilities and user workflows. These sections are composed inside Workspace and do not expand global navigation.
 
@@ -21,13 +22,17 @@ This list describes initial organization; preserve existing backend capabilities
 
 Workspace uses the shared backend client and composes shared UI with workspace-scoped state and interactions. It submits required identities/revisions and presents backend refusals explicitly. Backend owns workspace registration, files, design/member records, validation and durable effects.
 
-**Input:** selected workspace identity, backend records, revisions and user actions.
+**Input:** selected workspace identity, backend records, revisions and user actions. Context inspection accepts a source selection (`group` or a workspace member) and the backend's bounded pagination cursor/revision.
 
-**Output:** tabbed workspace information, explicit requests and visible success/conflict/error outcomes.
+**Output:** tabbed workspace information, explicit requests and visible success/conflict/error outcomes. The Context tab renders the selected source's native Pi message entries through a two-pane chronological inspector with readable assistant-ui detail rendering and raw inspection.
 
-**Effect:** browser-side selection/tab state and user-authorized backend requests; no frontend authority over durable project state.
+**Effect:** browser-side selection/tab state and user-authorized backend requests; no frontend authority over durable project state. Context reads are read-only, do not start or cancel runs, and refresh from offset zero after a revision conflict.
 
-**Usage example:** after selecting a workspace from Home, a user opens its Design or Team tab; the feature requests the relevant records and displays the latest backend result and revision-aware outcomes.
+**Usage example:** after selecting a workspace from Home, a user opens its Design, Team or Context tab. In Context, the left source list offers Group and the workspace's members; selecting one loads ordered message pages at a pinned revision and displays the current message detail. If the backend reports `context_changed`, the feature reports the conflict and reloads that source from the beginning.
+
+### Workspace context inspection
+
+Workspace provides a Context tab selecting either Group context or a workspace member's current Agent context. Its source list is Group plus the current roster. The feature paginates read-only Pi message entries using a pinned revision, displays chronological entries and selected-message detail, and allows explicit refresh. A `context_changed` response is visible and requires restarting that source at offset zero; pages from different revisions must never be combined. Text/thinking, native images, tool calls and results, metadata and raw message inspection are presented read-only using assistant-ui-compatible rendering. The feature must not start, modify or cancel Agent runs.
 
 ### Workspace initialization review
 

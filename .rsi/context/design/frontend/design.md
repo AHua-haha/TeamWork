@@ -21,7 +21,7 @@ Keep the initial global navigation simple, with four destinations:
 1. **Home** — landing page, workspace overview/list and quick actions.
 2. **Providers** — provider connections, credentials and model configuration.
 3. **Chat** — conversation, composer, history and live progress.
-4. **Workspace** — selected-workspace information presented as tabs. Its initial sections may include Overview, Files, Design, Team/Members, Changes and Settings; these are not additional top-level destinations.
+4. **Workspace** — selected-workspace information presented as tabs. Its initial sections may include Overview, Files, Design, Team/Members, Changes, Settings and Context; these are not additional top-level destinations. The Context tab shows either group or member context, selected from a left-side source list.
 
 The four feature designs are [Home](features/home/design.md), [Providers](features/providers/design.md), [Chat](features/chat/design.md) and [Workspace](features/workspace/design.md).
 

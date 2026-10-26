@@ -1,6 +1,7 @@
 import { AgentClient, createAgent as createAgentRequest } from './agent-client.js';
 import { ChangesClient } from './changes-client.js';
 import { ConfigClient } from './config-client.js';
+import { ContextClient } from './context-client.js';
 import { GroupClient } from './group-client.js';
 import { WorkspaceClient } from './workspace-client.js';
 
@@ -14,6 +15,7 @@ import { WorkspaceClient } from './workspace-client.js';
 export class BackendClient {
   readonly config: ConfigClient;
   readonly workspace: WorkspaceClient;
+  readonly context: ContextClient;
 
   constructor(fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {
     // Resource clients currently use the browser fetch implementation. Keep
@@ -21,6 +23,7 @@ export class BackendClient {
     // incrementally migrated to the shared transport.
     this.config = new ConfigClient(fetcher);
     this.workspace = new WorkspaceClient();
+    this.context = new ContextClient(fetcher);
   }
 
   async createAgent(): Promise<string> {
@@ -40,7 +43,7 @@ export class BackendClient {
   }
 }
 
-export { AgentClient, ChangesClient, ConfigClient, GroupClient, WorkspaceClient };
+export { AgentClient, ChangesClient, ConfigClient, ContextClient, GroupClient, WorkspaceClient };
 export * from './config-client.js';
 export * from './workspace-client.js';
 export * from './protocol.js';

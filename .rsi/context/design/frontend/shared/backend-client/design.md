@@ -6,13 +6,13 @@ Backend Client owns one public frontend client for reaching the backend. It cent
 
 ## Interface contract
 
-**Input:** backend endpoint operations, request payloads, expected revisions/cursors, cancellation signals and stream options.
+**Input:** backend endpoint operations, request payloads, expected revisions/cursors, cancellation signals and stream options. Context inspection operations include read-only paged group context by workspace and read-only paged member context by workspace/member, each carrying offset, limit and optional selected revision.
 
-**Output:** parsed backend API representations, binary responses, SSE events and typed transport/protocol failures.
+**Output:** parsed backend API representations, binary responses, SSE events and typed transport/protocol failures. Context inspection returns the backend page representation unchanged at the envelope level: revision, offset, total, nextOffset and entries containing stable message IDs, native Pi messages and metadata. The frontend client types each context entry's `message` with Pi's public `Message` union and validates the entry envelope/role before returning it; it does not map or otherwise reinterpret message content.
 
-**Effect:** performs network requests and manages transport-level stream/reconnect/cancellation behavior. It does not own feature state, caching, optimistic updates, business workflows, business validation or feature-specific view-model mapping.
+**Effect:** performs network requests and manages transport-level stream/reconnect/cancellation behavior. It does not own feature state, caching, optimistic updates, business workflows, business validation or feature-specific view-model mapping. Context reads are no-store/read-only and revision conflicts remain explicit for the Workspace feature to recover.
 
-**Usage example:** `backend.workspaces.list()` returns backend workspace records; the Home or Workspace feature decides how to store, combine and display them. `backend.chat.follow(cursor)` returns decoded stream events; Chat decides how to merge them with stable history.
+**Usage example:** `backend.workspaces.list()` returns backend workspace records; the Home or Workspace feature decides how to store, combine and display them. Context inspection is available as `backend.context.group(workspaceId, options)` and `backend.context.member(workspaceId, memberId, options)`; each returns the backend page envelope unchanged, and the feature handles page progression and stale-revision recovery.
 
 ## Public shape
 

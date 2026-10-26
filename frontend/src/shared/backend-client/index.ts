@@ -10,6 +10,7 @@ export * from './commit-approval.js';
 export * from './config-client.js';
 export * from './discussion-reference.js';
 export * from './group-client.js';
+export * from './context-client.js';
 export * from './protocol.js';
 export * from './sse.js';
 export * from './workspace-client.js';
