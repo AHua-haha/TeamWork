@@ -2995,3 +2995,17 @@ test('Group context inspection reads original public entries, handles publicatio
     assert.equal((await f.team.inspectGroupContext(f.workspaceId)).total, 0);
   } finally { await f.close(); }
 });
+
+test('lightweight roster reads active SQL records without design, context or readiness inspection', {timeout: 30000}, async () => {
+  const f = await groupFixture();
+  try {
+    const fail = async () => { throw new Error('Inspection is forbidden in a roster read'); };
+    f.team.designs.working = fail; f.team.designs.read = fail; f.team.service.issues = fail;
+    const before = await store.agents.inspectContext(f.lead.memberId);
+    const result = await f.team.roster(f.workspaceId);
+    assert.deepEqual(result.members.map(member => member.name), ['Lead', 'Backend', 'Frontend']);
+    assert.ok(result.members.every(member => !member.running));
+    assert.ok(result.members.every(member => !('harness' in member) && !('settings' in member) && !('ready' in member)));
+    assert.deepEqual(await store.agents.inspectContext(f.lead.memberId), before);
+  } finally { await f.close(); }
+});

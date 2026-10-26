@@ -25,3 +25,7 @@ Validate query shape and member/workspace boundaries. Reads work during executio
 - Preserve existing accepted observable behavior, record formats, revisions/cursors, API payloads and lifecycle guarantees during this migration.
 - Refusals and failures remain explicit. Database transactions provide their agreed atomicity; executed tools/filesystem operations may leave earlier effects on failure.
 - This document is the design; matching implementation context documents exact inputs, outputs, effects and usage.
+
+## Lightweight team roster
+
+Provide a workspace-scoped read-only roster endpoint for chat presentation. Return only accepted active member identity/presentation fields and running flags, with no effective harness or readiness assessment. Existing detailed team/member endpoints remain available, preserving their behavior.

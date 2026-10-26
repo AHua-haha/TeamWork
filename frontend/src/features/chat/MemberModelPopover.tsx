@@ -61,7 +61,7 @@ function useMemberModel(workspaceId: string, memberId: string, onSaved: () => Pr
 }
 
 export function MemberModelPopover({ workspaceId, member, anchor, onClose, onEnter, onLeave, onSaved }: {
-  workspaceId: string; member: Member; anchor: HTMLButtonElement;
+  workspaceId: string; member: Pick<Member, 'memberId' | 'name' | 'running'>; anchor: HTMLButtonElement;
   onClose(): void; onEnter(): void; onLeave(): void; onSaved(): Promise<void>;
 }) {
   const control = useMemberModel(workspaceId, member.memberId, onSaved);

@@ -80,3 +80,15 @@ Legacy reference documents remain available under the existing `reference/` path
 ```json
 {"commands": []}
 ```
+
+## Temporary lightweight workspace mode
+
+**Input/config:** `src/features/workspace/workspace-features.ts` exports `workspaceDetailsEnabled=false`. Set it true and rebuild to restore the original detailed workspace. No deployment environment variable or backend permission switch is changed.
+
+**Output/effect:** `WorkspacePage` chooses `ChatWorkspacePage`; the retained `DetailedWorkspacePage` and its `WorkspacePanel/useTeam/useDesigns/ChangesTab` effects are not mounted. `useChatRoster`/`ChatRoster` uses GET team/roster with one request in flight and no timer. Chat timeline changes and explicit mutations refresh that narrow roster. Mentions display Select when readiness is unknown; backend admission remains authoritative. Model hover controls accept only member identity/name/running state.
+
+`MemberActivationPanel` loads nothing automatically. Check committed members explicitly calls committedMemberReview; Activate members submits its exact revision/digest. Concurrent clicks are blocked, invalid/no-change reviews cannot activate, failures discard the review and require another explicit check. Backend validates workspace idle state and stale reviews. On success refresh the roster. Explicit Git commit approval and a manually opened CommitReviewTab are retained. Hiding this temporary panel unmounts its content.
+
+**Usage:** open a workspace and chat normally. Open Member activation, click Check committed members, wait for work to finish, then Activate members. Design/Team/Changes/Files tabs are temporarily absent. No diffs, design catalog, workspace context feed or full team polling are started by this view.
+
+**Verification:** `test/temporary-workspace.test.ts` covers roster request coalescing/disposal/retry and explicit activation guards/tokens; mocked browser network verification covers active chat, panel open/close, stop, manual activation and narrow layout.

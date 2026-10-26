@@ -261,3 +261,26 @@ test('context inspection routes are read-only, scoped, paged and independent of 
   assert.equal(reads.length, before, 'scope failures never read another member context');
   assert.equal(fixture.runtime.runs.length, 0, 'inspection never starts work');
 }));
+
+test('chat roster lists active identities without resolving designs, harnesses or readiness', () => withServer(async (call, fixture) => {
+  const workerView = await worker(fixture, 'Builder', ['backend']);
+  const retired = await worker(fixture, 'Retired');
+  await fixture.team.service.retire(fixture.workspaceId, retired.memberId, retired.revision);
+  const fail = async () => { throw new Error('Heavy inspection must not run for the roster'); };
+  fixture.team.designs.working = fail;
+  fixture.team.designs.read = fail;
+  fixture.team.service.issues = fail;
+  const base = `/workspaces/${fixture.workspaceId}/team/roster`;
+  const result = await call(base);
+  assert.deepEqual(result.members.map((m:Body)=>m.name), ['Lead','Builder']);
+  const builder = result.members.find((m:Body)=>m.memberId===workerView.memberId);
+  assert.equal(builder.running,false);
+  assert.equal(builder.responsibility, workerView.responsibility);
+  assert.equal('harness' in builder,false);assert.equal('settings' in builder,false);
+  assert.equal('ready' in builder,false);assert.equal('issues' in builder,false);
+  await call('/workspaces/missing/team/roster',{status:404});
+  await call(`${base}?details=1`,{status:400});
+  await call(`${base}/extra`,{status:404});
+  await call(base,{method:'POST',status:404});
+  assert.equal(fixture.runtime.runs.length,0);
+}));

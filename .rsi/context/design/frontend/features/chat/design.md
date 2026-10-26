@@ -17,3 +17,7 @@ Chat uses the shared backend client for history, message submissions and SSE pro
 **Usage example:** the user submits a message; Chat renders the reserved/progress area from SSE, then reconciles with completed history and preserves editable input on supported refusals.
 
 Exact route paths and whether Chat requires an explicitly selected workspace are to follow the current interaction/API contract; this design does not create a new conversation lifecycle.
+
+## Lightweight workspace roster
+
+The temporary workspace mode supplies Chat with roster identities and live running flags, without requesting effective harnesses or readiness evaluation. Mentions remain available; unknown readiness is not represented as validated readiness. Backend admission decides whether a mentioned member can run. Refresh the cheap roster on initial load, shared timeline changes, model preference saves and member activation; do not use a periodic full team inspection. Model hover controls, streaming, stop/reset, pictures and commit approval remain available.

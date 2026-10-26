@@ -36,6 +36,9 @@ export interface MemberFields { name: string; role: string; responsibility: stri
 export interface StoredMember { id: string; workspaceId: string; revision: number; value: MemberRecord }
 export interface MemberView extends Omit<MemberFields, 'harness'> { harness: EffectiveHarnessConfig; memberId: string; workspaceId: string; revision: number; lead: boolean; issues: string[]; ready: boolean }
 export interface TeamView { workspaceId: string; members: MemberView[] }
+/** Identity/presentation only; no readiness or effective harness assessment. */
+export type RosterMember = Pick<MemberView, 'memberId' | 'workspaceId' | 'revision' | 'name' | 'role' | 'responsibility' | 'lead'>;
+export interface TeamRoster { workspaceId: string; members: RosterMember[] }
 
 /** A member to store, with its keys. `nameKey` is the lower-cased name. */
 export interface NewMember { id: string; workspaceId: string; lead: boolean; nameKey: string; value: MemberRecord }
@@ -145,6 +148,15 @@ export class TeamService {
   async team(workspaceId: string): Promise<TeamView> {
     await this.lead(workspaceId);
     return { workspaceId, members: await this.views((await this.active(workspaceId))) };
+  }
+
+  /** Cheap chat roster: no design reads, model checks or harness resolution. */
+  async roster(workspaceId: string): Promise<TeamRoster> {
+    await this.requireWorkspace(workspaceId);
+    return { workspaceId, members: (await this.active(workspaceId)).map(member => {
+      const {name, role, responsibility, lead} = member.value;
+      return { memberId: member.id, workspaceId, revision: member.revision, name, role, responsibility, lead };
+    }) };
   }
 
   /** A member of any team, retired or not, or null. */

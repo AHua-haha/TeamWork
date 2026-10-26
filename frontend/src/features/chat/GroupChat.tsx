@@ -6,16 +6,16 @@ import { imageUrl, type ChatImage, type GroupEntry, type GroupClient } from '../
 import type { AgentClient } from '../../shared/backend-client/index.js';
 import { discussionInput, referenceLabel, type Discussion } from '../../shared/backend-client/index.js';
 import type { ClientSnapshot } from '../../shared/backend-client/index.js';
-import type { TeamState } from '../workspace/useTeam.js';
+import type { ChatTeamState } from '../workspace/chat-roster.js';
 import { ConfirmDialog } from '../workspace/WorkspaceDialogs.js';
 import { MemberModelPopover } from './MemberModelPopover.js';
 import { Glyph } from '../workspace/Glyph.js';
 import { Markdown } from './Markdown.js';
 import { memberColor, mentionAt, mentionToken, workDuration, runActivity, isRunThinking, workToolSummary, toolSetSummary, type ActivityItem, type ToolActivity } from './group-work.js';
 
-export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion, onCommitReview }: {
-  workspaceId: string; title: string; team: TeamState; filesOpen: boolean; onFiles(open: boolean): void;
-  onRunning(running: boolean): void; discussion: Discussion; onCommitReview(id:string):void;
+export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion, onCommitReview, panelLabel = 'Design, team and files' }: {
+  workspaceId: string; title: string; team: ChatTeamState; filesOpen: boolean; onFiles(open: boolean): void;
+  panelLabel?: string; onRunning(running: boolean): void; discussion: Discussion; onCommitReview(id:string):void;
 }) {
   const client = useMemo(() => backendClient.group(workspaceId), [workspaceId]);
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
@@ -83,7 +83,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
         <button type="button" className="icon-button" aria-label="Reset group chat and member context" title={active ? 'Stop team work before resetting' : 'Reset chat and member context'}
           disabled={active || snapshot.sending || snapshot.stopping || snapshot.resetting || !snapshot.synchronized} onClick={() => { closeModel(); setResetOpen(true); }}><Glyph name="trash" /></button>
         <button type="button" className="icon-button" aria-label="Refresh group chat" onClick={client.refresh}>↻</button>
-        {!filesOpen && <button type="button" className="icon-button" aria-label="Show design, team and files" onClick={() => onFiles(true)}><Glyph name="panel" /></button>}
+        {!filesOpen && <button type="button" className="icon-button" aria-label={`Show ${panelLabel.toLowerCase()}`} onClick={() => onFiles(true)}><Glyph name="panel" /></button>}
       </div>
     </div>
     {resetOpen && <ConfirmDialog eyebrow="WORKSPACE GROUP" title="Reset chat and member context?" action="Reset chat"
@@ -91,7 +91,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
       onClose={() => setResetOpen(false)} onConfirm={async () => { await client.reset(); setResetOpen(false); pinned.current = true; }} />}
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={client.refresh}>Retry</button></div>}
     <div className="group-viewport" ref={viewport} onScroll={() => { const view = viewport.current!; pinned.current = view.scrollHeight - view.scrollTop - view.clientHeight < 80; }}>
-      {!snapshot.entries.length && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open design and team</button></div>}
+      {!snapshot.entries.length && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open {panelLabel.toLowerCase()}</button></div>}
       <div className="group-timeline" ref={timeline}>{snapshot.entries.map(entry => entry.kind === 'user'
         ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body">{entry.text && <p>{entry.text}</p>}{entry.attachments?.length ? <div className="group-message-images">{entry.attachments.map(image => <MessageImage key={image.id} workspaceId={workspaceId} image={image} />)}</div> : null}</div><div className="group-identity group-user-identity"><span className="group-avatar" aria-hidden="true">Y</span><strong className="group-identity-name">You</strong></div></article>
         : <MemberResponse key={entry.entryId} entry={entry} canConfigure={!!team.team?.members.some(member => member.memberId === entry.memberId)} modelOpen={modelTarget?.memberId === entry.memberId}
@@ -127,13 +127,14 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
       {mention && <div className="mention-suggestions" aria-label="Mention a member">
         {suggestions.map(member => {
           const busy = runningIds.includes(member.memberId) || member.running;
-          const unavailable = !member.ready || busy;
+          const readiness = 'ready' in member ? member.ready : undefined;
+          const unavailable = readiness === false || busy;
           return <button type="button" key={member.memberId} disabled={unavailable} onClick={() => {
             const token = mentionToken(member.name) + ' ';
             setDraft(draft.slice(0, mention.start) + token + draft.slice(caret)); setDismissed(true);
             const next = mention.start + token.length;
             requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(next, next); });
-          }}><strong>{member.name}</strong><span>{busy ? 'Working' : member.ready ? 'Available' : 'Cannot run'}</span></button>;
+          }}><strong>{member.name}</strong><span>{busy ? 'Working' : readiness === false ? 'Cannot run' : readiness === true ? 'Available' : 'Select'}</span></button>;
         })}
         {!suggestions.length && <p>No matching members</p>}
       </div>}

@@ -39,6 +39,8 @@ export interface Member {
 export type MemberModelSettings = Pick<RunSettings, 'connectionId' | 'modelId' | 'modelOptions'>;
 export interface MemberModelConfig extends ConfigRecord<MemberModelSettings> { issues: string[] }
 export interface Team { workspaceId: string; members: Member[] }
+export type RosterMember = Pick<Member, 'memberId' | 'workspaceId' | 'revision' | 'name' | 'role' | 'responsibility' | 'lead' | 'running'>;
+export interface TeamRoster { workspaceId: string; members: RosterMember[] }
 export interface HarnessResource { id: string; paths: string[]; exclude: string[]; commit: 'agent' | 'user'; prompt: string; context?: 'design' | 'impl' }
 export interface HarnessDefinition { id: string; tools: string[]; prompt: string; resources: HarnessResource[] }
 export interface MemberInspection {
@@ -53,7 +55,7 @@ export interface WorkspaceChanges {
   workspaceId: string; leadId: string; design: FileReview; members: FileReview;
   activation: { revision: string; activeRevision: string | null; hasChanges: boolean };
 }
-export interface MemberConfigurationReview { revision: string; digest: string; valid: boolean; issues: ConfigurationIssue[] }
+export interface MemberConfigurationReview { revision: string; digest: string; valid: boolean; issues: ConfigurationIssue[]; changes?: { type: 'create' | 'update' | 'delete'; path: string; name: string }[] }
 export interface ConfigurationCommit { revision: string; message: string; time: number; author: string }
 export interface CurrentMemberConfiguration {
   workspaceId: string; leadId: string;
@@ -85,6 +87,7 @@ export class WorkspaceClient {
   createWorkspace(input: WorkspaceInput): Promise<Workspace> { return this.write('/workspaces', 'POST', input); }
   getWorkspace(workspaceId: string): Promise<Workspace> { return this.get(this.base(workspaceId)); }
 
+  roster(workspaceId: string): Promise<TeamRoster> { return this.get(`${this.base(workspaceId)}/team/roster`); }
   team(workspaceId: string): Promise<Team> { return this.get(`${this.base(workspaceId)}/team`); }
   inspectMember(workspaceId: string, memberId: string): Promise<MemberInspection> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}`); }
   memberModelSettings(workspaceId: string, memberId: string): Promise<MemberModelConfig> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/model-settings`); }
