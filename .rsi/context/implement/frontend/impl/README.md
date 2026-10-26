@@ -12,7 +12,7 @@ The source migration now follows the design tree:
 
 - `frontend/src/app/` owns startup, route parsing, the shell and global navigation.
 - `frontend/src/shared/backend-client/` owns the decomposed backend transport modules and the `BackendClient` facade/singleton.
-- `frontend/src/shared/ui/` is intentionally empty for now; reusable UI extraction is deferred.
+- `frontend/src/shared/ui/` is intentionally empty for now; reusable UI extraction is deferred. The Shared member owns this surface and the backend-client design/implementation.
 - `frontend/src/features/providers/` owns Providers.
 - `frontend/src/features/chat/` owns solo/team conversation UI, adapters and chat state.
 - `frontend/src/features/workspace/` owns the workspace page and its Files, Design, Team, Changes and related sections.

@@ -1,0 +1,35 @@
+{
+  "name": "Shared",
+  "role": "Frontend Shared",
+  "responsibility": "Owns the frontend Shared system: the single public backend client and its transport/protocol parsing, plus reusable presentation-only UI components and their visual/interaction contracts. Keeps feature workflows, feature-specific data interpretation, application navigation, and backend business policy outside Shared.",
+  "settings": {
+    "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+    "modelId": "gpt-6.1-sol",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+        "modelId": "gpt-6.1-sol"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "frontend/shared/metadata.json",
+      "frontend/shared/backend-client/metadata.json",
+      "frontend/shared/ui/metadata.json"
+    ],
+    "dependencies": [
+      "frontend/metadata.json",
+      "frontend/app/metadata.json",
+      "frontend/features/metadata.json"
+    ]
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}
