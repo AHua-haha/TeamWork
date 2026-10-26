@@ -8,11 +8,11 @@ UI components may own immediate presentation mechanics such as focus, keyboard i
 
 ## Interface contract
 
-Shared UI provides reusable visual building blocks and presentation effects, not feature-level UI kits with a prescribed data model. Components focus on how supplied content is laid out and how immediate visual interactions behave. They must not require features to adopt Shared-owned domain types or data workflows.
+Shared UI provides direct UI component implementations and visual examples, not a UI-library SDK or mandatory abstraction layer. A component may expose a concrete, fixed presentation input shape for its example and immediate use. Features may copy, adapt, extend, or replace that code around their own data models rather than being required to conform to the Shared example.
 
-**Input:** Component-specific presentation inputs, children/rendered content, and callbacks. Shared UI may use generic props, React children, render props, slots, or narrowly typed visual options as appropriate; it does not define a canonical model for feature records.
+**Input:** The concrete example data and callbacks needed by each supplied component implementation. The example data exists to demonstrate the intended visual result; it is not a canonical feature or backend model.
 
-**Output:** Accessible, reusable browser UI and interaction callbacks.
+**Output:** Accessible browser UI source, visual examples, and local interaction behavior that feature developers can reuse or further develop.
 
 **Effect:** Presentation and local interaction only, including focus, keyboard behavior, selection, disclosure and other ephemeral visual mechanics. No data fetching, feature state ownership, business policy or feature-specific interpretation.
 
@@ -20,11 +20,11 @@ Shared UI provides reusable visual building blocks and presentation effects, not
 
 ## Constraints
 
-- Do not impose a fixed Shared data model or require features to adapt their records to one.
-- Prefer visual primitives, layouts and interaction patterns that features can compose around their own data.
-- Features own their data models, mapping, workflow, and complete feature-specific UI composition.
-- Shared components may provide slots/render props and callbacks, but must not interpret feature records or own business meaning.
-- Shared UI begins empty; add components only for genuine reuse or when explicitly requested.
+- Do not impose a Shared data model or require features to use the Shared component unchanged.
+- Provide direct, understandable component code with representative example data focused on the desired visual result.
+- Features own their data models, mapping, workflow, and complete feature-specific UI composition; they may further develop Shared code to fit those requirements.
+- Shared code must not interpret feature records or own business meaning.
+- Shared UI begins empty; add components or examples only for genuine reuse or when explicitly requested.
 - Keep feature-specific screens and one-off business interactions in their feature.
 - Preserve accessibility, keyboard interaction and local visual mechanics as part of component contracts.
 
@@ -38,7 +38,7 @@ Render the supplied Pi message list as one chronological list. Selecting an entr
 
 ### Presentation contract
 
-The Agent feature supplies the current ordered Pi messages and feature-owned loading, refresh, revision and error behavior. The Shared viewer supplies the visual composition and local interaction mechanics:
+The context feature may supply real ordered Pi messages when integrating the example, but Shared's responsibility is the direct visual implementation and representative data needed to demonstrate it. Feature-owned loading, refresh, revision and error behavior remains outside Shared. The Shared viewer supplies the visual composition and local interaction mechanics:
 
 - Chronological message list preserving supplied order.
 - Selected-row styling and selection callback.
@@ -48,7 +48,7 @@ The Agent feature supplies the current ordered Pi messages and feature-owned loa
 - Readable structured content where supported.
 - Optional read-only raw-data inspection.
 
-The initial concrete usage may accept Pi's message list directly, using the public Pi message type available to the frontend. This is a specific viewer contract and does not constrain other Shared UI components. The component must not expose a backend persistence-row contract. A feature may wrap or adapt messages if its own data needs require it.
+The initial implementation may use Pi's message list and representative Pi content directly because this viewer is an agreed concrete example. This does not establish a universal Shared UI model or SDK contract. A feature developer may copy the viewer code, keep its example input shape, or adapt/rewrite it around feature-owned records. The viewer must not expose a backend persistence-row contract.
 
 ### Assistant UI integration
 
