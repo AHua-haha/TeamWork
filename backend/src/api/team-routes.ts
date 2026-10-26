@@ -13,6 +13,12 @@ export function teamRoutes(team: TeamSystem, runtime: AgentRuntime): (route: Rou
     identity(workspaceId, 'workspaceId');
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
+    if (method === 'GET' && area === 'chat' && memberId === 'semantic-index' && !extra.length) {
+      query(url, []);
+      response.setHeader('Cache-Control', 'no-store');
+      json(response, 200, await team.inspectGroupSemantic(workspaceId));
+      return;
+    }
     if (method === 'GET' && area === 'members' && memberId && extra.length === 1 && extra[0] === 'context') {
       identity(memberId, 'memberId');
       const input = contextQuery(url);

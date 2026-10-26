@@ -3,9 +3,10 @@ import type { ContextClient, ContextEntry, GroupContextEntry, Member } from '../
 import { BackendError } from '../../shared/backend-client/index.js';
 import { SequenceInspector } from '../../shared/ui/index.js';
 import { ContextMessageDetail, contextMessageLabel, contextMessageRole } from './context-message.js';
+import { SemanticRangesView } from './SemanticRangesView.js';
 
 const PAGE_SIZE = 100;
-type Source = { kind: 'group' } | { kind: 'member'; memberId: string };
+type Source = { kind: 'group' } | { kind: 'semantic' } | { kind: 'member'; memberId: string };
 type Entry = ContextEntry | GroupContextEntry;
 type State = { entries: Entry[]; revision: number | null; nextOffset: number | null; loading: boolean; error: string | null; stale: boolean };
 const initial: State = { entries: [], revision: null, nextOffset: 0, loading: false, error: null, stale: false };
@@ -15,11 +16,13 @@ export function ContextTab({ workspaceId, members, client }: { workspaceId: stri
   const [source, setSource] = useState<Source>({ kind: 'group' });
   const [state, setState] = useState<State>(initial);
   const [selectedKey, setSelectedKey] = useState<string>();
+  const [semanticRefresh, setSemanticRefresh] = useState(0);
   const generation = useRef(0);
-  const sourceKey = source.kind === 'group' ? 'group' : `member:${source.memberId}`;
-  const sourceLabel = source.kind === 'group' ? 'Group chat' : members.find(member => member.memberId === source.memberId)?.name ?? 'Member';
+  const sourceKey = source.kind === 'member' ? `member:${source.memberId}` : source.kind;
+  const sourceLabel = source.kind === 'group' ? 'Group chat' : source.kind === 'semantic' ? 'Group semantic ranges' : members.find(member => member.memberId === source.memberId)?.name ?? 'Member';
 
   const load = useCallback(async (reset: boolean, sourceValue = source, currentState = state) => {
+    if (sourceValue.kind === 'semantic') return;
     const current = ++generation.current;
     const offset = reset ? 0 : currentState.nextOffset;
     if (offset === null) return;
@@ -41,23 +44,25 @@ export function ContextTab({ workspaceId, members, client }: { workspaceId: stri
 
   useEffect(() => {
     generation.current++;
-    setState({ ...initial, loading: true }); setSelectedKey(undefined);
-    void load(true, source, initial);
+    setState({ ...initial, loading: source.kind !== 'semantic' }); setSelectedKey(undefined);
+    if (source.kind !== 'semantic') void load(true, source, initial);
     return () => { generation.current++; };
   }, [sourceKey, workspaceId, client]);
 
-  const refresh = () => { setSelectedKey(undefined); void load(true, source, initial); };
+  const refresh = () => { if (source.kind === 'semantic') { setSemanticRefresh(value => value + 1); return; } setSelectedKey(undefined); void load(true, source, initial); };
   const key = (entry: Entry, index: number) => `${entry.messageId}:${index}`;
 
   return <section className="context-tab" aria-label="Workspace conversation context">
     <aside className="context-source-list" aria-label="Context sources">
-      <div className="context-source-heading"><div><span className="eyebrow">CONTEXT</span><h2>Message history</h2></div><button type="button" className="secondary-button" onClick={refresh} disabled={state.loading}>Refresh</button></div>
+      <div className="context-source-heading"><div><span className="eyebrow">CONTEXT</span><h2>Message history</h2></div><button type="button" className="secondary-button" onClick={refresh} disabled={source.kind !== 'semantic' && state.loading}>Refresh</button></div>
       <button type="button" className={`context-source${source.kind === 'group' ? ' selected' : ''}`} aria-pressed={source.kind === 'group'} onClick={() => setSource({ kind: 'group' })}>Group chat<span>Shared messages</span></button>
+      <button type="button" className={`context-source${source.kind === 'semantic' ? ' selected' : ''}`} aria-pressed={source.kind === 'semantic'} onClick={() => setSource({ kind: 'semantic' })}>Group semantic ranges<span>Topics and summaries</span></button>
       <h3>Members</h3>
       {!members.length && <p className="context-source-note">No workspace members found.</p>}
       {members.map(member => <button key={member.memberId} type="button" className={`context-source${source.kind === 'member' && source.memberId === member.memberId ? ' selected' : ''}`} aria-pressed={source.kind === 'member' && source.memberId === member.memberId} onClick={() => setSource({ kind: 'member', memberId: member.memberId })}>{member.name}<span>{member.role}{member.running ? ' · working' : ''}</span></button>)}
     </aside>
     <div className="context-content">
+      {source.kind === 'semantic' ? <SemanticRangesView key={`${workspaceId}:${semanticRefresh}`} workspaceId={workspaceId} members={members} client={client} /> : <>
       <header className="context-content-head"><div><span className="eyebrow">{sourceLabel}</span><h2>{state.entries.length} message{state.entries.length === 1 ? '' : 's'}</h2></div>{state.revision !== null && <span className="context-revision">Revision {state.revision}</span>}</header>
       {state.error && <div className="context-error" role="alert">{state.error}{state.stale && <button type="button" className="text-button" onClick={refresh}>Reload from start</button>}</div>}
       {state.loading && !state.entries.length ? <p className="context-loading" role="status">Loading {sourceLabel.toLowerCase()}…</p> : state.entries.length ? <>
@@ -67,6 +72,7 @@ export function ContextTab({ workspaceId, members, client }: { workspaceId: stri
         {state.nextOffset !== null && <button className="load-more-button" type="button" disabled={state.loading} onClick={() => void load(false)}>{state.loading ? 'Loading…' : 'Load more'}</button>}
         {state.loading && state.entries.length > 0 && <p className="context-loading" role="status">Loading more messages…</p>}
       </> : !state.error ? <p className="context-loading">No context messages are available.</p> : null}
+      </>}
     </div>
   </section>;
 }

@@ -32,6 +32,8 @@ createAgentServer receives AgentRuntime and configuration/workspace/team service
 
 ### Read-only context APIs
 
+**Semantic index:** `GET /workspaces/:workspaceId/team/chat/semantic-index` accepts no query parameters and returns 200 `{index: GroupSemanticIndex | null}` with `Cache-Control: no-store`. The saved index includes `revision`, `from`, `through`, `sourceDigest` and recursive `tree` nodes (`id`, `firstPosition`, `lastPosition`, `topic`, `summary`, `involvedMemberIds`, `children`). Team verifies the workspace exists before reading its saved index. Missing workspaces return 404; invalid query parameters return 400; writes and extra path segments return 404. Reads perform no generation, context loading or mutations. Example: fetch this endpoint on selecting Group semantic ranges, then browse all nodes locally; fetch again only on explicit refresh/reopening.
+
 **Input:**
 
 - `GET /workspaces/:workspaceId/team/members/:memberId/context`: current durable context of an active member in this workspace.

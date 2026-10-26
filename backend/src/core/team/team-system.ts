@@ -114,6 +114,10 @@ export class TeamSystem {
       throw new AppError('not_found', 'Member not found in this workspace', 404);
   }
   inspectGroupContext(workspaceId: string, input: ContextPageInput = {}) { return this.store.inspectGroupContext(workspaceId, input); }
+  async inspectGroupSemantic(workspaceId: string) {
+    await this.service.requireWorkspace(workspaceId);
+    return { index: await this.store.readGroupSemantic?.(workspaceId) ?? null };
+  }
 
   async inspect(workspaceId: string, memberId: string) {
     const { stored, member } = await this.service.inspect(workspaceId, memberId);

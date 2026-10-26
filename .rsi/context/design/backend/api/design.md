@@ -16,6 +16,8 @@ Multipart parsing belongs to API; image preparation/validation semantics belong 
 
 ### Context inspection
 
+Expose the latest persisted group semantic range index as a separate read-only workspace-scoped resource. Return the complete hierarchical ranges, topics, summaries, involved member IDs and index revision/source coverage; absence is a successful empty result. Inspection performs no generation, synchronization or context modification and must not be cached.
+
 Provide read-only workspace-scoped endpoints for current retained member context and original shared group context. Each returns ordered entries with their native Pi message, stable identity and metadata, plus pagination and revision information. Require the selected revision on subsequent pages and report a conflict when the underlying context changes; the caller refreshes from the beginning.
 
 Validate query shape and member/workspace boundaries. Reads work during execution and without runtime ownership, return no transient stream chunks, and perform no synchronization, repair or compaction. Preserve signed and multimodal content exactly. Prevent caching these debug reads. Existing history/timeline and stream contracts remain unchanged. This increment supplies backend information only; frontend integration is deferred.

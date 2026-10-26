@@ -6,6 +6,23 @@ export interface ContextEntry { messageId: string; message: Message; metadata: R
 export type GroupContextEntry = ContextEntry;
 export interface ContextPage<T = unknown> { revision: number; offset: number; total: number; nextOffset: number | null; entries: T[] }
 export interface ContextPageOptions { offset?: number; limit?: number; revision?: number }
+export interface GroupSemanticNode {
+  id: string; firstPosition: number; lastPosition: number; topic: string; summary: string;
+  involvedMemberIds: string[]; children: GroupSemanticNode[];
+}
+export interface GroupSemanticIndex {
+  revision: number; from: number; through: number; sourceDigest: string; tree: GroupSemanticNode[];
+}
+
+function semanticNode(value: unknown): value is GroupSemanticNode {
+  if (!value || typeof value !== 'object') return false;
+  const node = value as GroupSemanticNode;
+  return typeof node.id === 'string' && !!node.id && Number.isSafeInteger(node.firstPosition) && node.firstPosition >= 1
+    && Number.isSafeInteger(node.lastPosition) && node.lastPosition >= node.firstPosition
+    && typeof node.topic === 'string' && typeof node.summary === 'string'
+    && Array.isArray(node.involvedMemberIds) && node.involvedMemberIds.every(id => typeof id === 'string')
+    && Array.isArray(node.children) && node.children.every(semanticNode);
+}
 
 async function readJson(response: Response): Promise<unknown> {
   if (!response.ok) {
@@ -33,6 +50,19 @@ const identity = /^[A-Za-z0-9_-]{1,64}$/;
 /** Read-only paged inspection of retained Pi message context. */
 export class ContextClient {
   constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly basePath = '/workspaces') {}
+  async semantic(workspaceId: string): Promise<{ index: GroupSemanticIndex | null }> {
+    if (!identity.test(workspaceId)) throw new Error('Invalid workspace identity');
+    const response = await this.fetcher(`${this.basePath}/${encodeURIComponent(workspaceId)}/team/chat/semantic-index`, {
+      method: 'GET', headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+    });
+    const result = await readJson(response) as { index?: GroupSemanticIndex | null } | null;
+    if (result && result.index === null) return { index: null };
+    const index = result?.index;
+    if (!index || !Number.isSafeInteger(index.revision) || index.revision < 1 || !Number.isSafeInteger(index.from) || index.from < 1
+      || !Number.isSafeInteger(index.through) || index.through < index.from || typeof index.sourceDigest !== 'string'
+      || !Array.isArray(index.tree) || !index.tree.every(semanticNode)) throw new ProtocolError('Invalid group semantic index');
+    return { index };
+  }
   private async read<T>(path: string, options: ContextPageOptions): Promise<ContextPage<T>> {
     const query = new URLSearchParams();
     if (options.offset !== undefined) query.set('offset', String(options.offset));

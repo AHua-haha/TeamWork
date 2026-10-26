@@ -818,6 +818,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .context-message-metadata summary, .context-thinking summary, .context-tool summary, .context-thinking-signature summary { cursor: pointer; font-weight: 600; }
 .context-message-metadata pre, .context-tool pre, .context-thinking-signature pre, .context-raw { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .context-thinking-signature pre { max-height: 360px; }
+.semantic-index-coverage { margin: 0 0 12px; color: #77857b; font-size: 12px; }
+.semantic-range-tree { padding: 8px 4px; }
+.semantic-range-tree ul { list-style: none; margin: 0; padding: 0; }
+.semantic-range-tree ul ul { margin-left: 12px; border-left: 1px solid #e0e7ed; padding-left: 4px; }
+.semantic-range-row { display: flex; align-items: flex-start; gap: 2px; }
+.semantic-range-toggle { display: inline-flex; flex: 0 0 20px; width: 20px; height: 30px; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: #77857b; cursor: pointer; }
+.semantic-range-toggle svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.semantic-range-toggle svg.is-expanded { transform: rotate(90deg); }
+.semantic-range-node { flex: 1; min-width: 0; border: 0; border-radius: 5px; padding: 7px 6px; text-align: left; background: transparent; color: #34443a; cursor: pointer; }
+.semantic-range-node:hover, .semantic-range-node.is-selected { background: #eaf2e9; }
+.semantic-range-node.is-selected { box-shadow: inset 2px 0 #53845e; }
+.semantic-range-node strong { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.semantic-range-node span { display: block; margin-top: 4px; font-size: 11px; color: #77857d; }
+.semantic-range-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; font-size: 12px; }
+.semantic-range-fields dt { color: #77857b; }
+.semantic-range-fields dd { margin: 0; overflow-wrap: anywhere; }
+.semantic-range-fields ul { padding-left: 16px; margin: 0; }
 .context-raw { max-height: 60vh; padding: 12px; border: 1px solid #dce5dc; border-radius: 8px; background: #f7f9f7; }
 .context-rendered-text { line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .context-thinking { border-color: #f1d9a4; background: #fffaf0; }
