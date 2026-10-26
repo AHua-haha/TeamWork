@@ -758,3 +758,32 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .commit-approval-input { width: 100%; max-width: var(--group-reading-width); margin-inline: auto; box-sizing: border-box; }
 .commit-review-directory { overflow-wrap: anywhere; font-size: 12px; color: #859589; }
 @container (max-width: 520px) { .group-composer-footer { padding-inline: 16px; } }
+
+.sequence-inspector { display: grid; grid-template-columns: minmax(220px, 34%) 1fr; min-height: 320px; border: 1px solid var(--line, #27303a); border-radius: 10px; overflow: hidden; background: var(--surface, #11161c); }
+.sequence-inspector-list { overflow: auto; border-right: 1px solid var(--line, #27303a); padding: 6px; }
+.sequence-inspector-row { display: block; width: 100%; border: 0; border-radius: 7px; padding: 10px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.sequence-inspector-row:hover, .sequence-inspector-row.is-selected { background: var(--surface-raised, #202832); }
+.sequence-inspector-row:focus-visible { outline: 2px solid var(--accent, #7cb8ff); outline-offset: -2px; }
+.sequence-inspector-detail { overflow: auto; padding: 16px; }
+.sequence-inspector-empty { display: grid; min-height: 180px; place-items: center; color: var(--muted, #8793a1); padding: 24px; }
+@media (max-width: 700px) { .sequence-inspector { display: block; } .sequence-inspector-list { max-height: 240px; border-right: 0; border-bottom: 1px solid var(--line, #27303a); } }
+
+/* Storybook's light presentation for the context viewer. */
+.storybook-light-demo { min-height: 100vh; padding: 24px; color: #1f2933; background: #f7f9fb; }
+.storybook-light-demo h1 { margin: 0; color: #17212b; }
+.storybook-muted { color: #667586; }
+.storybook-light-demo .sequence-inspector { color: #263442; background: #fff; border-color: #d7dee7; box-shadow: 0 8px 24px rgb(30 55 80 / 8%); }
+.storybook-light-demo .sequence-inspector-list { border-color: #d7dee7; }
+.storybook-light-demo .sequence-inspector-row:hover, .storybook-light-demo .sequence-inspector-row.is-selected { background: #eaf2fb; }
+.storybook-light-demo .sequence-inspector-row:focus-visible { outline-color: #2563a8; }
+.storybook-light-demo .sequence-inspector-detail { background: #fff; }
+.storybook-light-demo .storybook-muted, .storybook-light-demo .sequence-inspector-empty { color: #667586; }
+.context-parts { display: grid; gap: 12px; margin-top: 20px; }
+.context-part { padding: 12px 14px; border: 1px solid #d7dee7; border-radius: 8px; background: #fbfcfe; }
+.context-part strong { display: block; margin-bottom: 6px; color: #526273; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
+.context-part p { margin: 0; line-height: 1.55; }
+.context-part-thinking { background: #fffaf0; border-color: #f1d9a4; }
+.context-part-thinking strong { color: #9a6818; }
+.context-part-tool { background: #f2f8f5; border-color: #b9dcc8; }
+.context-part-tool strong { color: #2f7650; }
+.context-part pre { margin: 0; white-space: pre-wrap; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }

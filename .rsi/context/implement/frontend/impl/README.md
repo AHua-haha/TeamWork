@@ -12,7 +12,7 @@ The source migration now follows the design tree:
 
 - `frontend/src/app/` owns startup, route parsing, the shell and global navigation.
 - `frontend/src/shared/backend-client/` owns the decomposed backend transport modules and the `BackendClient` facade/singleton.
-- `frontend/src/shared/ui/` is intentionally empty for now; reusable UI extraction is deferred. The Shared member owns this surface and the backend-client design/implementation.
+- `frontend/src/shared/ui/` owns presentation-only reusable visual primitives. `SequenceInspector` provides the context-viewer two-pane list/detail interaction; feature renderers supply their own data and content.
 - `frontend/src/features/providers/` owns Providers.
 - `frontend/src/features/chat/` owns solo/team conversation UI, adapters and chat state.
 - `frontend/src/features/workspace/` owns the workspace page and its Files, Design, Team, Changes and related sections.
@@ -25,6 +25,10 @@ Client modules fetch history/inspection and merge live deltas; adapters derive d
 ### Implemented contract
 
 **Input:** HTTP JSON/binary/SSE records, user interaction, cursor/revision state.
+
+**Shared UI contract:** Shared UI is a visual component and presentation-effects surface, not a fixed data-model SDK. Features use it around the data models they own, through generic visual props, children, slots, render callbacks and interaction callbacks. Shared UI does not require AgentMessage or any other feature/domain type, interpret records, fetch data, or own workflows. A feature may compose the shared visual pattern or implement additional feature-specific UI around it while retaining its own model and behavior.
+
+**Agent context viewer design:** The Shared UI design now specifies a two-pane chronological viewer for the Agent's current persisted Pi message list, with selectable rows, a right detail panel, assistant-ui presentation integration, readable supported content and optional raw-data inspection. This specific viewer may use Pi's public message type without establishing a universal Shared data model. Shared owns visual rendering and local interactions; the feature owns loading, mapping, lifecycle and feature meaning. This is a design contract only; no component implementation has been added.
 
 **Output:** Browser views and explicit requests carrying user decisions.
 
@@ -47,6 +51,8 @@ Client modules fetch history/inspection and merge live deltas; adapters derive d
 - [Frontend source](../../../../../frontend/src): migrated implementation organized under `app/`, `shared/backend-client/`, `shared/ui/` (intentionally empty), and `features/`.
 - [App](../../../../../frontend/src/app): startup, shell and routes.
 - [Backend Client](../../../../../frontend/src/shared/backend-client): transport modules and public facade.
+- [Shared UI](../../../../../frontend/src/shared/ui): presentation-only `SequenceInspector` list/detail component and its Storybook stories.
+- [Shared UI Storybook](../../../../../frontend/.storybook): isolated visual development configuration; run `npm run storybook --prefix frontend` and open `http://127.0.0.1:6006`.
 - [Home](../../../../../frontend/src/features/home), [Providers](../../../../../frontend/src/features/providers), [Chat](../../../../../frontend/src/features/chat), [Workspace](../../../../../frontend/src/features/workspace): feature implementations.
 - [Frontend tests](../../../../../frontend/test): client, adapter and UI regression checks.
 
