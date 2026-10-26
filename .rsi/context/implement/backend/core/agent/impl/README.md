@@ -2,6 +2,8 @@
 
 `AgentRuntime.runMaintenance` uses an ephemeral `maintenance_<uuid>` agent identity and ordinary UUID run identity, both valid under Agent state validation. Maintenance runs execute the actual in-memory model/tool loop without durable member context; Team owns their submission effects. `backend/test/team-semantic.test.ts` verifies startup scheduling through this public method, real state validation, tool execution and completion using a synthetic model stream.
 
+Maintenance additionally accepts an optional fourth `AgentObserver` argument, forwarded to `AgentExecution`. Callers can observe maintenance records and errors without introducing member publications or private context persistence. Team uses the message callback to report rejected semantic tool calls while allowing ordinary recoverable tool feedback and retries to continue.
+
 ## Result summary
 
 Agent owns both its core in-memory model and its durable data model. AgentExecution is the reusable model/tool mechanism; AgentRuntime supplies Agent-owned durable hosting, progress/follow and recovery. Neither imports concrete Team/Harness/Workspace models or repositories.

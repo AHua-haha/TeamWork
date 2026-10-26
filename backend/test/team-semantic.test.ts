@@ -66,8 +66,10 @@ test('startup checks eligible existing group context with a bound runtime and su
   assert.equal(calls, 1, 'startup scan is idempotent');
 }));
 
-test('startup semantic generation executes through the real AgentRuntime model/tool loop', () => withTeam(async f => {
+test('semantic Agent loop recovers both schema and backend submission errors before succeeding', t => withTeam(async f => {
   const data = semanticFixture(f);
+  const warnings: unknown[][] = [];
+  t.mock.method(console, 'warn', (...args: unknown[]) => { warnings.push(args); });
   const model = fauxProvider().getModel();
   const configuration: ResolvedRunConfig = { model, options: {}, tools: [], systemPrompt: '', source: { appRevision: 0, agentRevision: 0, catalogRevisions: {} } };
   const config = { resolveForRun: async () => configuration };
@@ -84,21 +86,39 @@ test('startup semantic generation executes through the real AgentRuntime model/t
     const metadata = { baseRevision: 0, through: 1, sourceDigest: semanticSourceDigest(data.messages) };
     assert.ok(request.context.systemPrompt?.includes(JSON.stringify(metadata)));
     const args = { ...metadata, tree: [{ id: 'root', firstPosition: 1, lastPosition: 1, topic: 'Project', summary: 'Agreed project context', involvedMemberIds: [], children: [] }] };
-    const message = modelCalls === 1 ? fauxAssistantMessage([{ type: 'toolCall', id: 'submit', name: 'submit_group_semantic_information', arguments: args }], { stopReason: 'toolUse' }) : fauxAssistantMessage('Semantic information saved.');
+    const invalid = { ...args, tree: [{ ...args.tree[0]!, children: [{ ...args.tree[0]!, id: 'Project design: scope' }] }] };
+    const invalidInvolvement = { ...args, tree: [{ ...args.tree[0]!, involvedMemberIds: [f.lead.memberId] }] };
+    const arguments_ = modelCalls === 1 ? invalid : modelCalls === 2 ? invalidInvolvement : args;
+    const message = modelCalls <= 3 ? fauxAssistantMessage([{ type: 'toolCall', id: `submit${modelCalls}`, name: 'submit_group_semantic_information', arguments: arguments_ }], { stopReason: 'toolUse' }) : fauxAssistantMessage('Semantic information saved.');
     if (modelCalls === 2) {
       const result = request.context.messages.find(message => message.role === 'toolResult');
+      assert.ok(result && result.role === 'toolResult' && result.isError, 'nested identifier constraints reject invalid tool input without stopping the loop');
+      assert.match(JSON.stringify(result), /tree.*children.*id/s);
+    }
+    if (modelCalls === 3) {
+      const result = request.context.messages.filter(message => message.role === 'toolResult').at(-1);
+      assert.ok(result && result.role === 'toolResult' && result.isError, 'backend validation failure returns to the same agent loop');
+      assert.match(JSON.stringify(result), /involvement must match authoritative senders and mentions/);
+      const beforeCorrection = data.saved;
+      assert.equal(beforeCorrection, undefined, 'neither failed submission advances the saved index');
+    }
+    if (modelCalls === 4) {
+      const result = request.context.messages.filter(message => message.role === 'toolResult').at(-1);
       assert.ok(result && result.role === 'toolResult' && !result.isError, 'real tool execution accepted the semantic index');
     }
     yield { type: 'start', partial: { ...message, content: [], stopReason: 'pending' } };
-    yield { type: 'done', reason: modelCalls === 1 ? 'toolUse' : 'stop', message };
+    yield { type: 'done', reason: modelCalls <= 3 ? 'toolUse' : 'stop', message };
   });
   await runtime.open();
   f.team.attach(runtime);
   try {
     await f.team.startMaintenance();
-    assert.equal(modelCalls, 2, 'maintenance reaches the model and resumes after its submission tool');
+    assert.equal(modelCalls, 4, 'maintenance sees both errors, corrects each, submits successfully and then finishes');
     assert.equal(data.saved?.revision, 1);
     assert.equal(data.saved?.through, 1);
+    assert.match(JSON.stringify(warnings), /Group semantic tool rejected/);
+    assert.equal(warnings.length, 2, 'both schema and backend tool rejections are observable');
+    assert.doesNotMatch(JSON.stringify(warnings), /Received arguments|Agreed project context|Project design: scope/, 'logs exclude submitted tree content');
   } finally {
     await f.team.closeMaintenance();
     await runtime.close();

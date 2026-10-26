@@ -13,7 +13,7 @@ export { configuredPolicy, fixedPolicy, piModelStream } from './agent.js';
 export type * from './contracts.js';
 import { validateCompactionSettings, type CompactionSettings } from './data/compaction.js';
 import { AgentMessageContext } from './data/context.js';
-import { AgentExecution } from './agent.js';
+import { AgentExecution, type AgentObserver } from './agent.js';
 import type { RuntimePolicy, ModelStream } from './contracts.js';
 
 interface Job { execution?: AgentExecution; agentId: string; controller: AbortController; done: Promise<void> }
@@ -121,7 +121,7 @@ export class AgentRuntime {
     throw new AppError('runtime_unavailable', 'Run has no live worker; restart runtime to recover', 503);
   }
 
-  async runMaintenance(configuration: import('./contracts.js').AgentConfiguration, entries: ContextEntry[], signal = new AbortController().signal): Promise<RunState> {
+  async runMaintenance(configuration: import('./contracts.js').AgentConfiguration, entries: ContextEntry[], signal = new AbortController().signal, observer: AgentObserver = {}): Promise<RunState> {
     this.available();
     const run: RunState = { agentId: `maintenance_${randomUUID()}`, runId: randomUUID(), status: 'running', phase: 'model', step: 0, startedAt: Date.now(), endedAt: null, endPosition: null, activeMessageId: null, error: null };
     const config = { ...configuration, compaction: undefined };
@@ -129,7 +129,7 @@ export class AgentRuntime {
       buildRequest: (_scope, history) => ({ model: config.model, models: config.models, tools: config.tools, options: config.options,
         context: { messages: history.entries.map(entry => entry.message), tools: config.tools.map(tool => tool.definition), ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}) } }),
     };
-    const execution = new AgentExecution(run, { revision: 0, entries: structuredClone(entries) }, 0, config, policy, this.stream, {}, new ProgressStore(), this.maxSteps);
+    const execution = new AgentExecution(run, { revision: 0, entries: structuredClone(entries) }, 0, config, policy, this.stream, observer, new ProgressStore(), this.maxSteps);
     return execution.run(signal);
   }
   /** Resolves with the run's final state once its work has ended here. A run this runtime does not run reports its stored state at once. */

@@ -101,16 +101,27 @@ export class TeamSystem {
     const sourceDigest = semanticSourceDigest(input.messages);
     const previous: ContextEntry = { messageId: randomUUID(), message: { role: 'user', content: `Previous semantic information result (it may be null):\n${JSON.stringify(input.previous ?? null)}`, timestamp: Date.now() }, metadata: { source: 'semantic-analysis-input' } };
     const metadata = { baseRevision: input.baseRevision, through: input.through, sourceDigest };
-    const prompt = `You are the Team semantic-analysis maintenance agent. Review the complete group chat context supplied as user messages and the previous semantic information result. Submit one complete semantic tree with submit_group_semantic_information. Copy these backend-owned submission fields exactly: ${JSON.stringify(metadata)}. The tree roots must cover every group position from the first supplied message through position ${input.through}; child ranges must be contained, ordered, and non-overlapping. Each node needs id, firstPosition, lastPosition, topic, summary, involvedMemberIds, and children. Set involvedMemberIds only from authoritative Sender/member IDs and Mentioned members shown in the source messages. Do not invent members, omit source ranges, or submit a partial suffix. After a successful tool submission, briefly confirm completion.`;
+    const prompt = `You are the Team semantic-analysis maintenance agent. Review the complete group chat context supplied as user messages and the previous semantic information result. Submit one complete semantic tree with submit_group_semantic_information. Copy these backend-owned submission fields exactly: ${JSON.stringify(metadata)}. The tree roots must cover every group position from the first supplied message through position ${input.through}; child ranges must be contained, ordered, and non-overlapping. Each node needs id, firstPosition, lastPosition, topic, summary, involvedMemberIds, and children. Every node id must be 1-64 ASCII letters, digits, underscores or hyphens, for example range_1_20; keep descriptive or multilingual labels in topic, not id. Set involvedMemberIds only from authoritative Sender/member IDs and Mentioned members shown in the source messages. Do not invent members, omit source ranges, or submit a partial suffix. This is a full agent loop: if submission returns an error, read the tool feedback, correct the tree and call the submission tool again. Do not report success before the submission is accepted. After a successful tool submission, briefly confirm completion.`;
     let submitted = false;
     const tool = this.harness.semanticTool(async submission => {
       const result = await submitGroupSemantic.call(this.store, workspaceId, submission);
       submitted = true;
+      console.info('Group semantic index accepted', { workspaceId, through: submission.through, roots: submission.tree.length });
       return result;
     });
     if (!runtime.runMaintenance) return;
     this.semanticController.signal.throwIfAborted();
-    const result = await runtime.runMaintenance({ ...resolved, tools: [tool], systemPrompt: prompt, compaction: undefined }, [...input.messages.map(message => structuredClone(message.entry)), previous], this.semanticController.signal);
+    console.info('Group semantic analysis started', { workspaceId, messages: input.messages.length, through: input.through, provider: resolved.model.provider, model: resolved.model.id });
+    const result = await runtime.runMaintenance({ ...resolved, tools: [tool], systemPrompt: prompt, compaction: undefined }, [...input.messages.map(message => structuredClone(message.entry)), previous], this.semanticController.signal, {
+      message: async record => {
+        if (record.message.role === 'toolResult' && record.message.isError) {
+          const feedback = record.message.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+          const message = feedback.split('\n\nReceived arguments:')[0]!.slice(0,2000);
+          console.warn('Group semantic tool rejected', { workspaceId, runId: record.runId, tool: record.message.toolName, message });
+        }
+        return record;
+      },
+    });
     if (!submitted) throw new AppError('semantic_analysis_failed', result.error?.message ?? 'Maintenance ended without an accepted semantic index', 500);
   }
   /** The runtime that runs the members and maintenance jobs. */
