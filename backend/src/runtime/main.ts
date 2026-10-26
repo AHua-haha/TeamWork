@@ -35,7 +35,9 @@ try {
     server.listen(port, process.env.HOST ?? '127.0.0.1', resolve);
   });
   console.log(`Agent backend listening on ${process.env.HOST ?? '127.0.0.1'}:${port}`);
+  void team.startMaintenance();
 } catch (error) {
+  await team.closeMaintenance();
   await team.runner.close();
   await runtime.close().catch(() => undefined);
   await closeBashRuntime();
@@ -49,7 +51,7 @@ async function shutdown() {
   if (closing) return;
   closing = true;
   const closed = new Promise<void>(resolve => server.close(() => resolve()));
-  try { await team.runner.close(); await runtime.close(); }
+  try { await team.closeMaintenance(); await team.runner.close(); await runtime.close(); }
   finally {
     server.closeAllConnections();
     await closed;

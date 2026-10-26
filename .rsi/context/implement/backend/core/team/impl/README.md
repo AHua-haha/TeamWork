@@ -40,6 +40,10 @@ TeamData owns the resident shared Pi context. TeamRunner supplies original share
 
 ### Semantic mechanism verification
 
+`TeamSystem.startMaintenance()` starts one idempotent background scan of registered workspaces after runtime ownership/recovery is ready. It schedules existing eligible group context even without a new publication, sequentially across workspaces; `scheduleSemantic` deduplicates against publication jobs and logs failures with workspace ID. `generateSemantic` calls `runtime.runMaintenance(...)` with its receiver intact, passes exact backend-owned `baseRevision`, `through`, and `sourceDigest` in the maintenance instructions, and requires a successful submission before treating the job as accepted. No model/provider call is needed to test scheduling. `closeMaintenance()` aborts its shared signal and awaits startup/active jobs before runtime/storage teardown. Failed jobs leave the saved watermark unchanged and can retry on later publications/restart.
+
+`backend/test/team-semantic.test.ts` covers retained-context startup generation, receiver binding, submission metadata, below-threshold skips, publication/startup deduplication, covered-message skips, visible errors with retry, missing submissions and shutdown cancellation/draining. These deterministic tests use a fake maintenance model and make no paid provider requests.
+
 `npm run check` passes. The full backend suite passes: 231 tests, 231 passed. `backend/test/semantic-context.test.ts` covers summary replacement, recursive opening of involved ranges, involved-leaf preservation and uncovered-message fallback. `git diff --check` passes. Direct live-provider semantic generation remains dependent on the configured model provider; rejected or failed maintenance submissions intentionally leave the previous index unchanged.
 
 ### Context inspection

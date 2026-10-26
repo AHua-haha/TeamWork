@@ -1,5 +1,7 @@
 # Runtime implementation context
 
+After `runtime.open()` and successful HTTP listen, the host calls `void team.startMaintenance()` to check retained group contexts without blocking startup on model generation. Both startup failure cleanup and normal shutdown await `team.closeMaintenance()` before closing the runtime/storage, so background semantic analysis is cancelled and drained safely.
+
 ## Result summary
 
 `backend/src/runtime/main.ts` is the process composition root. The model/tool execution loop is Core AgentExecution, hosted durably by AgentRuntime with AgentData, not this hosting system.

@@ -37,8 +37,10 @@ export class TeamSystem {
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
   private readonly semanticJobs = new Map<string, Promise<void>>();
+  private readonly semanticController = new AbortController();
+  private semanticStartup?: Promise<void>;
 
-  constructor(private readonly store: TeamStore & ChatStore, workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
+  constructor(private readonly store: TeamStore & ChatStore, private readonly workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
     this.designs = new DesignService(workspaces);
     this.service = new TeamService(store, workspaces, config, this.designs);
     this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id), web, permissionsEnabled);
@@ -52,13 +54,40 @@ export class TeamSystem {
   }
 
   private async scheduleSemantic(workspaceId: string): Promise<void> {
+    if (this.semanticController.signal.aborted) return;
+    const existing = this.semanticJobs.get(workspaceId);
+    if (existing) return existing;
     const runtime = this.runtime;
     const semanticInput = this.store.semanticInput;
     const submitGroupSemantic = this.store.submitGroupSemantic;
-    if (this.semanticJobs.has(workspaceId) || !runtime || !semanticInput || !submitGroupSemantic) return;
-    const job = this.generateSemantic(workspaceId, runtime, semanticInput, submitGroupSemantic).finally(() => { if (this.semanticJobs.get(workspaceId) === job) this.semanticJobs.delete(workspaceId); });
+    if (!runtime || !semanticInput || !submitGroupSemantic) return;
+    const job = this.generateSemantic(workspaceId, runtime, semanticInput, submitGroupSemantic).catch(error => {
+      if (!this.semanticController.signal.aborted) this.reportSemanticFailure(workspaceId, error);
+    }).finally(() => { if (this.semanticJobs.get(workspaceId) === job) this.semanticJobs.delete(workspaceId); });
     this.semanticJobs.set(workspaceId, job);
-    await job.catch(() => undefined);
+    await job;
+  }
+
+  private reportSemanticFailure(workspaceId: string, error: unknown): void {
+    console.error('Group semantic analysis failed', { workspaceId, message: error instanceof Error ? error.message : String(error) });
+  }
+
+  /** Called only after AgentRuntime.open. The host need not await background analysis. */
+  startMaintenance(): Promise<void> {
+    return this.semanticStartup ??= (async () => {
+      for (const workspace of await this.workspaces.list()) {
+        if (this.semanticController.signal.aborted) break;
+        await this.scheduleSemantic(workspace.workspaceId);
+      }
+    })().catch(error => {
+      if (!this.semanticController.signal.aborted) this.reportSemanticFailure('startup', error);
+    });
+  }
+
+  async closeMaintenance(): Promise<void> {
+    this.semanticController.abort();
+    await this.semanticStartup;
+    await Promise.allSettled(this.semanticJobs.values());
   }
 
   private async generateSemantic(workspaceId: string, runtime: RunHost, semanticInput: NonNullable<ChatStore['semanticInput']>, submitGroupSemantic: NonNullable<ChatStore['submitGroupSemantic']>): Promise<void> {
@@ -71,11 +100,18 @@ export class TeamSystem {
     const resolved = await this.runConfig.resolveForRun(lead.id);
     const sourceDigest = semanticSourceDigest(input.messages);
     const previous: ContextEntry = { messageId: randomUUID(), message: { role: 'user', content: `Previous semantic information result (it may be null):\n${JSON.stringify(input.previous ?? null)}`, timestamp: Date.now() }, metadata: { source: 'semantic-analysis-input' } };
-    const prompt = `You are the Team semantic-analysis maintenance agent. Review the complete group chat context supplied as user messages and the previous semantic information result. Submit one complete semantic tree with submit_group_semantic_information. The tree roots must cover every group position from the first supplied message through position ${input.through}; child ranges must be contained, ordered, and non-overlapping. Each node needs id, firstPosition, lastPosition, topic, summary, involvedMemberIds, and children. Set involvedMemberIds only from authoritative Sender/member IDs and Mentioned members shown in the source messages. Do not invent members, omit source ranges, or submit a partial suffix. After a successful tool submission, briefly confirm completion.`;
-    const tool = this.harness.semanticTool(submission => submitGroupSemantic.call(this.store, workspaceId, submission));
-    const runMaintenance = runtime.runMaintenance;
-    if (!runMaintenance) return;
-    await runMaintenance({ ...resolved, tools: [tool], systemPrompt: prompt, compaction: undefined }, [...input.messages.map(message => structuredClone(message.entry)), previous]);
+    const metadata = { baseRevision: input.baseRevision, through: input.through, sourceDigest };
+    const prompt = `You are the Team semantic-analysis maintenance agent. Review the complete group chat context supplied as user messages and the previous semantic information result. Submit one complete semantic tree with submit_group_semantic_information. Copy these backend-owned submission fields exactly: ${JSON.stringify(metadata)}. The tree roots must cover every group position from the first supplied message through position ${input.through}; child ranges must be contained, ordered, and non-overlapping. Each node needs id, firstPosition, lastPosition, topic, summary, involvedMemberIds, and children. Set involvedMemberIds only from authoritative Sender/member IDs and Mentioned members shown in the source messages. Do not invent members, omit source ranges, or submit a partial suffix. After a successful tool submission, briefly confirm completion.`;
+    let submitted = false;
+    const tool = this.harness.semanticTool(async submission => {
+      const result = await submitGroupSemantic.call(this.store, workspaceId, submission);
+      submitted = true;
+      return result;
+    });
+    if (!runtime.runMaintenance) return;
+    this.semanticController.signal.throwIfAborted();
+    const result = await runtime.runMaintenance({ ...resolved, tools: [tool], systemPrompt: prompt, compaction: undefined }, [...input.messages.map(message => structuredClone(message.entry)), previous], this.semanticController.signal);
+    if (!submitted) throw new AppError('semantic_analysis_failed', result.error?.message ?? 'Maintenance ended without an accepted semantic index', 500);
   }
   /** The runtime that runs the members and maintenance jobs. */
   attach(runtime: RunHost): void {
