@@ -1,3 +1,4 @@
+import { WorkspaceResizeHandle } from './WorkspaceResizeHandle.js';
 import { backendClient } from '../../shared/backend-client/index.js';
 import { CommitReviewTab } from '../chat/CommitApproval.js';
 import { writableContextPath } from './context-path.js';
@@ -67,7 +68,7 @@ export function WorkspacePanel({ open, expanded, workspaceId, team, onExpand, on
   else if (!workspace) body = notice(<p className="sidebar-muted">Opening workspace…</p>);
   else body = <WorkspaceView key={workspace.workspaceId} client={client} workspace={workspace} team={team} actions={actions} commitReview={commitReview} onDirty={onDirty} onDiscuss={onDiscuss} />;
 
-  return <aside className={`workspace-panel ${open ? 'open' : ''} ${expanded ? 'expanded' : ''}`} aria-label="Design, team and files" aria-hidden={!open} inert={!open}>{body}</aside>;
+  return <aside className={`workspace-panel ${open ? 'open' : ''} ${expanded ? 'expanded' : ''}`} aria-label="Design, team and files" aria-hidden={!open} inert={!open}><WorkspaceResizeHandle disabled={!open || expanded} />{body}</aside>;
 }
 
 /** The panel's top bar: tabs or a title on the left, panel actions on the right. */

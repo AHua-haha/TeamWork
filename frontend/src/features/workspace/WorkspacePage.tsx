@@ -1,3 +1,4 @@
+import { WorkspaceResizeHandle } from './WorkspaceResizeHandle.js';
 import { workspaceDetailsEnabled } from './workspace-features.js';
 import { useChatRoster } from './useChatRoster.js';
 import { MemberActivationPanel } from './MemberActivationPanel.js';
@@ -68,6 +69,7 @@ function ChatWorkspacePage({workspaceId, name, files}: Parameters<typeof Detaile
       panelLabel="Workspace tools" discussion={{reference: null, clear: () => {}, sent: () => {}}} onCommitReview={id => {setReview(id); showPanel(true);}} />
     {files.open && <><button type="button" className="workspace-scrim" aria-label="Hide workspace panel" onClick={() => showPanel(false)} />
       <aside className={`workspace-panel open ${files.expanded ? 'expanded' : ''}`} aria-label="Workspace context and activation">
+        <WorkspaceResizeHandle disabled={files.expanded} />
         <div className="workspace-bar"><div className="workspace-tabs">{panelActions}</div><div className="workspace-bar-actions"><button type="button" className="text-button" onClick={() => files.expand(!files.expanded)}>{files.expanded ? 'Restore' : 'Expand'}</button><button type="button" className="text-button" onClick={() => showPanel(false)}>Close</button></div></div>
         <div className="workspace-body"><div className="workspace-viewer">{review ? <CommitReviewTab key={review} workspaceId={workspaceId} id={review} /> : contextOpen ? <ContextTab workspaceId={workspaceId} members={state.team?.members ?? []} client={backendClient.context} /> : <MemberActivationPanel key={workspaceId} workspaceId={workspaceId} running={running} onActivated={state.refresh} />}</div></div>
       </aside></>}
