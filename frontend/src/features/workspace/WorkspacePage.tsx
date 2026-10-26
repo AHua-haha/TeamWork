@@ -56,12 +56,13 @@ function ChatWorkspacePage({workspaceId, name, files}: Parameters<typeof Detaile
   const {state, lead} = useChatRoster(workspaceId, backendClient.workspace);
   const [running, setRunning] = useState(false);
   const [review, setReview] = useState<string | null>(null);
-  const [contextOpen, setContextOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(true);
   const title = name ?? 'Workspace';
-  useEffect(() => { setReview(null); setRunning(false); setContextOpen(false); }, [workspaceId]);
+  useEffect(() => { setReview(null); setRunning(false); setContextOpen(true); }, [workspaceId]);
   if (!lead) return <div className="conversation-page"><div className="conversation"><div className="conversation-head"><h2>{title}</h2></div>{state.error ? <div className="error-banner" role="alert">{state.error}<button type="button" onClick={() => void state.refresh()}>Retry</button></div> : <p className="sidebar-muted">Opening workspace chat…</p>}</div></div>;
-  const showPanel = (open: boolean) => { setContextOpen(open); files.show(open); };
-  const panelActions = <div className="workspace-tab-actions"><button type="button" className={`workspace-tab ${contextOpen ? 'active' : ''}`} onClick={() => { setReview(null); setContextOpen(true); showPanel(true); }} aria-current={contextOpen && !review ? 'true' : undefined}>Context</button><button type="button" className={`workspace-tab ${!contextOpen && !review ? 'active' : ''}`} onClick={() => { setReview(null); setContextOpen(false); showPanel(true); }} aria-current={!contextOpen && !review ? 'true' : undefined}>Member activation</button>{review && <button type="button" className="workspace-tab active">Commit review</button>}</div>;
+  // Opening/closing the panel must not overwrite the selected tab.
+  const showPanel = files.show;
+  const panelActions = <div className="workspace-tab-actions"><button type="button" className={`workspace-tab ${contextOpen && !review ? 'active' : ''}`} onClick={() => { setReview(null); setContextOpen(true); showPanel(true); }} aria-current={contextOpen && !review ? 'true' : undefined}>Context</button><button type="button" className={`workspace-tab ${!contextOpen && !review ? 'active' : ''}`} onClick={() => { setReview(null); setContextOpen(false); showPanel(true); }} aria-current={!contextOpen && !review ? 'true' : undefined}>Member activation</button>{review && <button type="button" className="workspace-tab active">Commit review</button>}</div>;
   return <div className={`conversation-page ${files.open && files.expanded ? 'expanded' : ''}`}>
     <GroupChat key={workspaceId} workspaceId={workspaceId} team={state} title={title} filesOpen={files.open} onFiles={showPanel} onRunning={setRunning}
       panelLabel="Workspace tools" discussion={{reference: null, clear: () => {}, sent: () => {}}} onCommitReview={id => {setReview(id); showPanel(true);}} />

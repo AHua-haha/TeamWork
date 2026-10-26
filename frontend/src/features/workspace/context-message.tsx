@@ -1,7 +1,7 @@
 import type { Message } from '@earendil-works/pi-ai';
 import { useState } from 'react';
 import type { ContextEntry } from '../../shared/backend-client/context-client.js';
-import { AssistantRuntimeProvider, MessagePrimitive, useExternalStoreRuntime } from '@assistant-ui/react';
+import { AssistantRuntimeProvider, MessageByIndexProvider, MessagePrimitive, useExternalStoreRuntime } from '@assistant-ui/react';
 import type { ImageMessagePartProps, ReasoningMessagePartProps, TextMessagePartProps, ToolCallMessagePartProps, ThreadMessageLike } from '@assistant-ui/react';
 
 // Context inspection maps Pi content only at the feature boundary; stored messages are not mutated.
@@ -24,9 +24,15 @@ function ImagePart({ image }: ImageMessagePartProps) { return <img className="co
 function ToolPart({ toolName, argsText, result, isError }: ToolCallMessagePartProps) { return <details className={`context-tool${isError ? ' is-error' : ''}`}><summary>{toolName}{isError ? ' · error' : ''}</summary><pre>{argsText || '{}'}</pre>{result !== undefined && <pre>{typeof result === 'string' ? result : JSON.stringify(result, null, 2)}</pre>}</details>; }
 const partComponents = { Text: TextPart, Reasoning: ReasoningPart, Image: ImagePart, tools: { Fallback: ToolPart } };
 
+/** Status belongs only to assistant messages; group/user/system input must remain input. */
+export function contextThreadMessage(message: Message): ThreadMessageLike {
+  const role = message.role === 'toolResult' ? 'assistant' : message.role;
+  const base = { id: 'context-message', createdAt: new Date(message.timestamp), role, content: contentParts(message) };
+  return role === 'assistant' ? { ...base, status: { type: 'complete', reason: 'stop' } } : base;
+}
 function ReadOnlyMessage({ message }: { message: Message }) {
-  const runtime = useExternalStoreRuntime<ThreadMessageLike>({ messages: [{ id: 'context-message', createdAt: new Date(message.timestamp), role: message.role === 'toolResult' ? 'assistant' : message.role, content: contentParts(message), status: { type: 'complete', reason: 'stop' } }], convertMessage: value => value, onNew: async () => {} });
-  return <AssistantRuntimeProvider runtime={runtime}><MessagePrimitive.Root className="context-assistant-message"><MessagePrimitive.Parts components={partComponents} /></MessagePrimitive.Root></AssistantRuntimeProvider>;
+  const runtime = useExternalStoreRuntime<ThreadMessageLike>({ messages: [contextThreadMessage(message)], convertMessage: value => value, onNew: async () => {} });
+  return <AssistantRuntimeProvider runtime={runtime}><MessageByIndexProvider index={0}><MessagePrimitive.Root className="context-assistant-message"><MessagePrimitive.Parts components={partComponents} /></MessagePrimitive.Root></MessageByIndexProvider></AssistantRuntimeProvider>;
 }
 
 export function ContextMessageDetail({ entry, index }: { entry: ContextEntry; index: number }) {

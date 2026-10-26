@@ -92,3 +92,11 @@ Legacy reference documents remain available under the existing `reference/` path
 **Usage:** open a workspace and chat normally. Open Member activation, click Check committed members, wait for work to finish, then Activate members. Design/Team/Changes/Files tabs are temporarily absent. No diffs, design catalog, workspace context feed or full team polling are started by this view.
 
 **Verification:** `test/temporary-workspace.test.ts` covers roster request coalescing/disposal/retry and explicit activation guards/tokens; mocked browser network verification covers active chat, panel open/close, stop, manual activation and narrow layout.
+
+## Context sidebar rendering correction
+
+`context-message.tsx` maps native Pi messages with `contextThreadMessage`: only assistant presentation messages (including the tool-result presentation adapter) receive assistant-ui completion status. User/system messages omit status. Each selected message is rendered inside `MessageByIndexProvider index={0}` within its read-only AssistantRuntimeProvider. The provider selects the single adapter message and supplies MessagePrimitive.Root/Parts with message scope. Stored Pi messages, opaque signatures and metadata are not rewritten.
+
+`ChatWorkspacePage.showPanel` changes visibility only; `contextOpen` owns tab selection independently and defaults true. Member activation no longer flips back to Context; Context is not marked active while commit review is shown. Expensive Design/Team/Changes/Files views remain disabled. `test/context-message.test.ts` covers role/status mapping and multimodal non-mutation; browser verification reproduces the old crash and checks group/member rendering, raw signatures, tab switching and reopen behavior.
+
+The selected-message content area is a named inline-size container. At content widths up to 500px, SequenceInspector stacks its list above detail instead of letting the default 220px list column hide the detail. This responds to docked sidebar width independently of viewport width; wide expanded views retain the two-pane layout.

@@ -43,3 +43,9 @@ Workspace creation/adoption must use the existing review flow: inspect the targe
 `workspaceDetailsEnabled` is temporarily false. Workspace composes group chat with a narrow member roster and a manually opened panel for Context, activation and commit review. Existing Design, Team, Changes and Files implementations remain available in source but are not mounted, including after closing/reopening the panel. Their context feeds, design/harness inspection, full team polling and file diffs must not start while this mode is off. Context inspection is the explicit exception: it is available on demand, read-only, and uses the narrow roster plus the dedicated group/member context endpoints. Re-enable the switch to restore the existing detailed composition.
 
 Activation checks run only when the user selects Check committed members, and activation sends the exact reviewed revision/digest through the existing idle-team validation. Opening the panel, focus and elapsed time do not request activation review. Explicit commit approval/review remains available. Backend run and activation permission/configuration validation remains mandatory.
+
+### Context sidebar interaction and rendering
+
+Sidebar visibility is independent of its selected tab. The lightweight sidebar initially selects Context; selecting Member activation must not be overridden by opening the sidebar, and closing/reopening preserves the selected tab. Context rendering respects protocol roles: user/system inputs are not assistant completions. Native stored messages, signatures and metadata remain unchanged.
+
+The message inspector adapts to its available sidebar width, not just viewport size: constrained panes stack list/detail so the selected content remains visible; expanded views can present them side by side.
