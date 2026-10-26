@@ -48,4 +48,4 @@ Activation checks run only when the user selects Check committed members, and ac
 
 Sidebar visibility is independent of its selected tab. The lightweight sidebar initially selects Context; selecting Member activation must not be overridden by opening the sidebar, and closing/reopening preserves the selected tab. Context rendering respects protocol roles: user/system inputs are not assistant completions. Native stored messages, signatures and metadata remain unchanged.
 
-The message inspector adapts to its available sidebar width, not just viewport size: constrained panes stack list/detail so the selected content remains visible; expanded views can present them side by side.
+For each selected context, the chronological message list stays on the left and selected message data stays on the right, including in a docked or mobile sidebar. Both columns can shrink and scroll independently. On narrow sidebars the context source picker moves above this left–right inspector; it does not push the message detail below the message list.

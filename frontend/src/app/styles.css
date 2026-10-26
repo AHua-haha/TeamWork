@@ -248,7 +248,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .conversation-page { height: 100%; min-height: 0; display: flex; }
 .conversation-page > .conversation { flex: 1; min-width: 0; }
 .conversation-page.expanded > .conversation { display: none; }
-.workspace-panel { flex: none; width: 0; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: #fff; box-shadow: inset 1px 0 #e6ebe5; visibility: hidden; transition: width .22s ease, visibility 0s .22s; }
+.workspace-panel { container: workspace-panel / inline-size; flex: none; width: 0; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: #fff; box-shadow: inset 1px 0 #e6ebe5; visibility: hidden; transition: width .22s ease, visibility 0s .22s; }
 .workspace-panel.open { width: clamp(480px, 52%, 980px); visibility: visible; transition: width .22s ease; }
 .workspace-panel.open.expanded { flex: 1; }
 .workspace-scrim { display: none; }
@@ -801,16 +801,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .context-source.selected { box-shadow: inset 3px 0 #53845e; }
 .context-source span { display: block; margin-top: 3px; color: #7c8a80; font-size: 11px; }
 .context-source-note, .context-loading { padding: 16px; color: #77857b; }
-.context-content { container: context-message-pane / inline-size; min-width: 0; min-height: 0; overflow: auto; padding: 16px; }
+.context-content { min-width: 0; min-height: 0; overflow: auto; padding: 16px; }
 .context-content-head { display: flex; justify-content: space-between; align-items: center; margin: 0 0 12px; }
 .context-revision { color: #829087; font: 11px 'IBM Plex Mono', monospace; }
-.context-tab .sequence-inspector { min-height: 0; height: min(62vh, 720px); color: #263442; background: #fff; border-color: #d7dee7; }
-.context-tab .sequence-inspector-list { border-color: #e0e7ed; }
-.context-tab .sequence-inspector-row { display: grid; gap: 5px; color: #34443a; }
-.context-tab .sequence-inspector-row strong { font-size: 11px; text-transform: capitalize; }
+.context-tab .sequence-inspector { display: grid; grid-template-columns: minmax(96px, 30%) minmax(0, 1fr); min-height: 0; height: min(62vh, 720px); color: #263442; background: #fff; border-color: #d7dee7; }
+.context-tab .sequence-inspector-list { min-width: 0; max-height: none; border-right: 1px solid #e0e7ed; border-bottom: 0; }
+.context-tab .sequence-inspector-row { min-width: 0; display: grid; gap: 5px; color: #34443a; }
+.context-tab .sequence-inspector-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; text-transform: capitalize; }
 .context-tab .sequence-inspector-row span { overflow: hidden; color: #77857d; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .context-tab .sequence-inspector-row:hover, .context-tab .sequence-inspector-row.is-selected { background: #eaf2e9; }
-.context-tab .sequence-inspector-detail { color: #2d3a32; }
+.context-tab .sequence-inspector-detail { min-width: 0; color: #2d3a32; }
 .context-message-detail h3 { margin: 7px 0; overflow-wrap: anywhere; }
 .context-entry-id { color: #87948b; font: 11px 'IBM Plex Mono', monospace; }
 .context-detail-actions { margin: 12px 0; }
@@ -827,12 +827,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .context-error .text-button { margin-left: 10px; }
 .load-more-button { display: block; margin: 12px auto; padding: 8px 14px; border: 1px solid #dce5dc; border-radius: 8px; color: #34573e; background: #fff; cursor: pointer; }
 .load-more-button:disabled { opacity: .6; cursor: wait; }
-@media (max-width: 760px) { .context-tab { grid-template-columns: 150px minmax(0, 1fr); } .context-source-list { padding: 10px 6px; } .context-content { padding: 10px; } .context-tab .sequence-inspector { height: auto; min-height: 360px; } }
+@media (max-width: 760px) { .context-tab { grid-template-columns: 150px minmax(0, 1fr); } .context-source-list { padding: 10px 6px; } .context-content { padding: 10px; } .context-tab .sequence-inspector { min-height: 360px; } }
 @media (max-width: 560px) { .context-tab { display: flex; flex-direction: column; } .context-source-list { max-height: 180px; border-right: 0; border-bottom: 1px solid #e6ebe5; } .context-content { flex: 1; } }
 .member-activation-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-block: 16px; }
 
-/* A docked sidebar can be narrow even on a wide desktop viewport. */
-@container context-message-pane (max-width: 500px) {
-  .context-tab .sequence-inspector { display: block; height: auto; }
-  .context-tab .sequence-inspector-list { max-height: 240px; border-right: 0; border-bottom: 1px solid #e0e7ed; }
+/* Keep message list and detail side by side; move only the source picker above them. */
+@container workspace-panel (max-width: 700px) {
+  .context-tab { display: flex; flex-direction: column; }
+  .context-source-list { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; max-height: 180px; padding: 10px; border-right: 0; border-bottom: 1px solid #e6ebe5; }
+  .context-source-heading { flex: 1 0 100%; margin-bottom: 4px; }
+  .context-source-list h3 { margin: 0 8px; }
+  .context-source { flex: none; width: auto; max-width: 180px; margin: 0; }
+  .context-content { flex: 1; }
 }
