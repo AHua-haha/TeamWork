@@ -11,7 +11,7 @@ type State = { entries: Entry[]; revision: number | null; nextOffset: number | n
 const initial: State = { entries: [], revision: null, nextOffset: 0, loading: false, error: null, stale: false };
 
 /** Read-only browser inspector for original group context and member Agent context. */
-export function ContextTab({ workspaceId, members, client }: { workspaceId: string; members: readonly Member[]; client: ContextClient }) {
+export function ContextTab({ workspaceId, members, client }: { workspaceId: string; members: readonly Pick<Member, 'memberId' | 'name' | 'role' | 'running'>[]; client: ContextClient }) {
   const [source, setSource] = useState<Source>({ kind: 'group' });
   const [state, setState] = useState<State>(initial);
   const [selectedKey, setSelectedKey] = useState<string>();

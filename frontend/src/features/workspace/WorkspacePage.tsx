@@ -2,6 +2,7 @@ import { workspaceDetailsEnabled } from './workspace-features.js';
 import { useChatRoster } from './useChatRoster.js';
 import { MemberActivationPanel } from './MemberActivationPanel.js';
 import { CommitReviewTab } from '../chat/CommitApproval.js';
+import { ContextTab } from './ContextTab.js';
 import { backendClient } from '../../shared/backend-client/index.js';
 import { useEffect, useMemo, useState } from 'react';
 import { WorkspaceClient } from '../../shared/backend-client/index.js';
@@ -55,16 +56,19 @@ function ChatWorkspacePage({workspaceId, name, files}: Parameters<typeof Detaile
   const {state, lead} = useChatRoster(workspaceId, backendClient.workspace);
   const [running, setRunning] = useState(false);
   const [review, setReview] = useState<string | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
   const title = name ?? 'Workspace';
-  useEffect(() => { setReview(null); setRunning(false); }, [workspaceId]);
+  useEffect(() => { setReview(null); setRunning(false); setContextOpen(false); }, [workspaceId]);
   if (!lead) return <div className="conversation-page"><div className="conversation"><div className="conversation-head"><h2>{title}</h2></div>{state.error ? <div className="error-banner" role="alert">{state.error}<button type="button" onClick={() => void state.refresh()}>Retry</button></div> : <p className="sidebar-muted">Opening workspace chat…</p>}</div></div>;
+  const showPanel = (open: boolean) => { setContextOpen(open); files.show(open); };
+  const panelActions = <div className="workspace-tab-actions"><button type="button" className={`workspace-tab ${contextOpen ? 'active' : ''}`} onClick={() => { setReview(null); setContextOpen(true); showPanel(true); }} aria-current={contextOpen && !review ? 'true' : undefined}>Context</button><button type="button" className={`workspace-tab ${!contextOpen && !review ? 'active' : ''}`} onClick={() => { setReview(null); setContextOpen(false); showPanel(true); }} aria-current={!contextOpen && !review ? 'true' : undefined}>Member activation</button>{review && <button type="button" className="workspace-tab active">Commit review</button>}</div>;
   return <div className={`conversation-page ${files.open && files.expanded ? 'expanded' : ''}`}>
-    <GroupChat key={workspaceId} workspaceId={workspaceId} team={state} title={title} filesOpen={files.open} onFiles={files.show} onRunning={setRunning}
-      panelLabel="Member activation" discussion={{reference: null, clear: () => {}, sent: () => {}}} onCommitReview={id => {setReview(id); files.show(true);}} />
-    {files.open && <><button type="button" className="workspace-scrim" aria-label="Hide member activation" onClick={() => files.show(false)} />
-      <aside className={`workspace-panel open ${files.expanded ? 'expanded' : ''}`} aria-label="Member activation and commit review">
-        <div className="workspace-bar"><div className="workspace-tabs"><button type="button" className="text-button" onClick={() => setReview(null)}>Member activation</button>{review && <span>Commit review</span>}</div><div className="workspace-bar-actions"><button type="button" className="text-button" onClick={() => files.expand(!files.expanded)}>{files.expanded ? 'Restore' : 'Expand'}</button><button type="button" className="text-button" onClick={() => files.show(false)}>Close</button></div></div>
-        <div className="workspace-body"><div className="workspace-viewer">{review ? <CommitReviewTab key={review} workspaceId={workspaceId} id={review} /> : <MemberActivationPanel key={workspaceId} workspaceId={workspaceId} running={running} onActivated={state.refresh} />}</div></div>
+    <GroupChat key={workspaceId} workspaceId={workspaceId} team={state} title={title} filesOpen={files.open} onFiles={showPanel} onRunning={setRunning}
+      panelLabel="Workspace tools" discussion={{reference: null, clear: () => {}, sent: () => {}}} onCommitReview={id => {setReview(id); showPanel(true);}} />
+    {files.open && <><button type="button" className="workspace-scrim" aria-label="Hide workspace panel" onClick={() => showPanel(false)} />
+      <aside className={`workspace-panel open ${files.expanded ? 'expanded' : ''}`} aria-label="Workspace context and activation">
+        <div className="workspace-bar"><div className="workspace-tabs">{panelActions}</div><div className="workspace-bar-actions"><button type="button" className="text-button" onClick={() => files.expand(!files.expanded)}>{files.expanded ? 'Restore' : 'Expand'}</button><button type="button" className="text-button" onClick={() => showPanel(false)}>Close</button></div></div>
+        <div className="workspace-body"><div className="workspace-viewer">{review ? <CommitReviewTab key={review} workspaceId={workspaceId} id={review} /> : contextOpen ? <ContextTab workspaceId={workspaceId} members={state.team?.members ?? []} client={backendClient.context} /> : <MemberActivationPanel key={workspaceId} workspaceId={workspaceId} running={running} onActivated={state.refresh} />}</div></div>
       </aside></>}
   </div>;
 }

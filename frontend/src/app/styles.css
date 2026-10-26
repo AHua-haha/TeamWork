@@ -257,6 +257,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .workspace-bar-title { padding: 0 8px; font: 600 10px 'IBM Plex Mono', monospace; letter-spacing: .14em; color: #769081; }
 .workspace-bar-actions { flex: none; display: flex; align-items: center; gap: 2px; }
 .workspace-bar .tree-action[aria-pressed=true], .file-actions .tree-action[aria-pressed=true] { background: #e3ece1; color: #2d633e; }
+.workspace-tab-actions { display: flex; align-items: center; gap: 4px; }
 .workspace-tab { flex: none; display: flex; align-items: center; max-width: 210px; height: 30px; border-radius: 8px; color: #5f7566; }
 .workspace-tab:hover { background: #eff4ed; }
 .workspace-tab.active { background: #fff; color: #24402d; box-shadow: 0 0 0 1px #e1e8e0; }
