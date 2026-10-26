@@ -95,6 +95,8 @@ Legacy reference documents remain available under the existing `reference/` path
 
 ## Context sidebar rendering correction
 
+`ContextMessageDetail` also renders a collapsed `ThinkingSignature` disclosure for every nonempty native assistant thinking signature, labeled with its original content block number. Expanding lazily parses/formats JSON (including encrypted content and provider-specific fields), with an unchanged-text fallback for opaque signatures. The complete value is available in a wrapping, scrollable code area; signature-only blocks are included. This uses the existing context response without new requests or persistence changes, and full raw-message inspection remains available.
+
 `context-message.tsx` maps native Pi messages with `contextThreadMessage`: only assistant presentation messages (including the tool-result presentation adapter) receive assistant-ui completion status. User/system messages omit status. Each selected message is rendered inside `MessageByIndexProvider index={0}` within its read-only AssistantRuntimeProvider. The provider selects the single adapter message and supplies MessagePrimitive.Root/Parts with message scope. Stored Pi messages, opaque signatures and metadata are not rewritten.
 
 `ChatWorkspacePage.showPanel` changes visibility only; `contextOpen` owns tab selection independently and defaults true. Member activation no longer flips back to Context; Context is not marked active while commit review is shown. Expensive Design/Team/Changes/Files views remain disabled. `test/context-message.test.ts` covers role/status mapping and multimodal non-mutation; browser verification reproduces the old crash and checks group/member rendering, raw signatures, tab switching and reopen behavior.

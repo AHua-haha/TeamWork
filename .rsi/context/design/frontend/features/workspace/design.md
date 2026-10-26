@@ -32,6 +32,8 @@ Workspace uses the shared backend client and composes shared UI with workspace-s
 
 ### Workspace context inspection
 
+Selected assistant message details expose each nonempty `thinkingSignature` in its own collapsed section, identified by the original content block number. Expanding shows the complete stored value: JSON signatures are formatted for reading, including `encrypted_content` and provider metadata; opaque non-JSON signatures remain unchanged. Signature-only thinking blocks are inspectable even without readable thinking text. No signature content is truncated, decrypted or modified, and opening the section needs no additional backend request.
+
 Workspace provides a Context tab selecting either Group context or a workspace member's current Agent context. Its source list is Group plus the current roster. The feature paginates read-only Pi message entries using a pinned revision, displays chronological entries and selected-message detail, and allows explicit refresh. A `context_changed` response is visible and requires restarting that source at offset zero; pages from different revisions must never be combined. Text/thinking, native images, tool calls and results, metadata and raw message inspection are presented read-only using assistant-ui-compatible rendering. The feature must not start, modify or cancel Agent runs.
 
 ### Workspace initialization review

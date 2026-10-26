@@ -35,6 +35,18 @@ function ReadOnlyMessage({ message }: { message: Message }) {
   return <AssistantRuntimeProvider runtime={runtime}><MessageByIndexProvider index={0}><MessagePrimitive.Root className="context-assistant-message"><MessagePrimitive.Parts components={partComponents} /></MessagePrimitive.Root></MessageByIndexProvider></AssistantRuntimeProvider>;
 }
 
+function ThinkingSignature({ signature, block }: { signature: string; block: number }) {
+  const [open, setOpen] = useState(false);
+  let content = signature;
+  if (open) {
+    try { content = JSON.stringify(JSON.parse(signature), null, 2); } catch { /* Other providers may return an opaque signature rather than JSON. */ }
+  }
+  return <details className="context-thinking-signature" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>Thinking signature · block {block}</summary>
+    {open && <pre>{content}</pre>}
+  </details>;
+}
+
 export function ContextMessageDetail({ entry, index }: { entry: ContextEntry; index: number }) {
   const message = entry.message;
   const [raw, setRaw] = useState(false);
@@ -42,7 +54,11 @@ export function ContextMessageDetail({ entry, index }: { entry: ContextEntry; in
   return <article className="context-message-detail"><div className="eyebrow">ENTRY {String(index + 1).padStart(3, '0')} · {kind}</div><h3>{contextMessageLabel(message)}</h3><p className="context-entry-id">{entry.messageId}</p>
     {entry.metadata && <details className="context-message-metadata"><summary>Message metadata</summary><pre>{JSON.stringify(entry.metadata, null, 2)}</pre></details>}
     <div className="context-detail-actions"><button type="button" className="text-button" aria-expanded={raw} onClick={() => setRaw(value => !value)}>{raw ? 'Hide raw data' : 'Show raw data'}</button></div>
-    {raw ? <pre className="context-raw">{JSON.stringify(message, null, 2)}</pre> : <ReadOnlyMessage key={`${entry.messageId}:${entry.metadata?.source ?? ''}`} message={message} />}
+    {raw ? <pre className="context-raw">{JSON.stringify(message, null, 2)}</pre> : <>
+      <ReadOnlyMessage key={`${entry.messageId}:${entry.metadata?.source ?? ''}`} message={message} />
+      {message.role === 'assistant' && message.content.map((part, block) => part.type === 'thinking' && part.thinkingSignature
+        ? <ThinkingSignature key={`${entry.messageId}:${block}`} signature={part.thinkingSignature} block={block + 1} /> : null)}
+    </>}
   </article>;
 }
 

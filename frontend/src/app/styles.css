@@ -814,9 +814,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .context-message-detail h3 { margin: 7px 0; overflow-wrap: anywhere; }
 .context-entry-id { color: #87948b; font: 11px 'IBM Plex Mono', monospace; }
 .context-detail-actions { margin: 12px 0; }
-.context-message-metadata, .context-thinking, .context-tool { margin: 10px 0; padding: 10px 12px; border: 1px solid #dce5dc; border-radius: 8px; background: #f8faf8; }
-.context-message-metadata summary, .context-thinking summary, .context-tool summary { cursor: pointer; font-weight: 600; }
-.context-message-metadata pre, .context-tool pre, .context-raw { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.context-message-metadata, .context-thinking, .context-tool, .context-thinking-signature { margin: 10px 0; padding: 10px 12px; border: 1px solid #dce5dc; border-radius: 8px; background: #f8faf8; }
+.context-message-metadata summary, .context-thinking summary, .context-tool summary, .context-thinking-signature summary { cursor: pointer; font-weight: 600; }
+.context-message-metadata pre, .context-tool pre, .context-thinking-signature pre, .context-raw { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.context-thinking-signature pre { max-height: 360px; }
 .context-raw { max-height: 60vh; padding: 12px; border: 1px solid #dce5dc; border-radius: 8px; background: #f7f9f7; }
 .context-rendered-text { line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .context-thinking { border-color: #f1d9a4; background: #fffaf0; }
