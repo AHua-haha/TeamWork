@@ -1,33 +1,50 @@
 {
-  "version": 1,
+  "version": 2,
   "paths": {
-    "stateDirectory": "/absolute/path/to/rsi-state",
-    "developmentStateDirectory": "/absolute/path/to/rsi-agent/.run",
-    "deploymentSourceRoot": "/tmp/rsi-agent-deploy"
+    "stateDirectory": "${HOME}/.local/state/${PROJECT}",
+    "developmentStateDirectory": "${PROJECT_ROOT}/.run",
+    "deploymentSourceRoot": "/tmp/${PROJECT}-deploy"
   },
   "mysql": {
     "host": "127.0.0.1",
     "port": 13306,
-    "project": "team-work",
+    "project": "${PROJECT}",
     "dockerContext": "default",
-    "rootPassword": "GENERATED_BY_INIT"
+    "rootPassword": "GENERATED_BY_INIT",
+    "image": "mysql:8.4",
+    "containerName": "${PROJECT}-mysql",
+    "networkName": "${PROJECT}-network",
+    "volumeName": "${PROJECT}-mysql-data",
+    "networkKey": "database"
   },
   "development": {
-    "backendPort": 3000,
-    "frontendPort": 5273,
-    "database": { "name": "rsi_agent_dev", "username": "rsi_dev", "password": "GENERATED_BY_INIT" },
-    "encryptionKey": "GENERATED_BY_INIT_PRESERVE_EXISTING_KEY",
-    "environment": { "DEEPSEEK_WEB_API_KEY": "" },
+    "backendPort": 3100,
+    "frontendPort": 5373,
+    "database": {
+      "name": "team_work_dev",
+      "username": "team_work_dev",
+      "password": "GENERATED_BY_INIT"
+    },
+    "encryptionKey": "GENERATED_BY_INIT",
+    "environment": {
+      "DEEPSEEK_WEB_API_KEY": ""
+    },
     "harnessPermissionsEnabled": true,
-    "contextCompactionThresholdTokens": 64000
+    "contextCompactionThresholdTokens": 256000
   },
   "deployment": {
-    "backendPort": 3001,
-    "frontendPort": 5274,
-    "database": { "name": "rsi_agent", "username": "rsi", "password": "LOCAL_MYSQL_PASSWORD" },
-    "encryptionKey": "IMPORTED_BY_INIT_PRESERVE_EXISTING_KEY",
-    "environment": { "DEEPSEEK_WEB_API_KEY": "" },
+    "backendPort": 3101,
+    "frontendPort": 5374,
+    "database": {
+      "name": "team_work",
+      "username": "team_work_deploy",
+      "password": "GENERATED_BY_INIT"
+    },
+    "encryptionKey": "GENERATED_BY_INIT",
+    "environment": {
+      "DEEPSEEK_WEB_API_KEY": ""
+    },
     "harnessPermissionsEnabled": true,
-    "contextCompactionThresholdTokens": 64000
+    "contextCompactionThresholdTokens": 256000
   }
 }

@@ -2,9 +2,9 @@
 
 ## Result summary
 
-Operations owns setup/readiness, dependency installation from lockfiles, development and deployment processes, and the isolated development MySQL service lifecycle. Project settings are centralized in private `rsi.config.json`; it is generated on `dev.sh init` (mode 0600), not committed. The development MySQL Compose project is `team-work`, with container `team-work-dev-mysql`, network `team-work-dev-network`, volume `team-work-dev-mysql-data`, loopback host port 13306, and dedicated development credentials. It is distinct from the pre-existing `backend-mysql-1` service on 3306. Development and deployment application settings remain separate; only the dedicated dev service is managed by `database.sh`.
+Operations owns setup/readiness, dependency installation from lockfiles, host application lifecycle, and this project's supporting MySQL service. Private version-2 `rsi.config.json` is the single configuration source. It explicitly supplies environment settings, ports, state/release paths, MySQL image/context/Compose identity/container/network/volume, schema accounts, encryption keys and backend options. Initialization uses the checked-in example and generates fresh secrets; it never implicitly reads legacy env files or another checkout's configuration.
 
-**Current local setup:** private root `rsi.config.json` has been initialized and dependencies installed with `npm ci` under backend and frontend. Dedicated MySQL was created, health-checked, provisioned, and exercised by successful dev backend/frontend startup. Both applications and the dedicated service were then stopped cleanly. The pre-existing service remains running and untouched. Private config contains secrets and is not tracked.
+**Current local isolation:** team-work uses `team-work-dev-mysql` on 127.0.0.1:13306 with its existing network and volume preserved. Development uses `rsi_agent_dev` and ports 3100/5373. Deployment uses `team_work` and ports 3101/5374; state is `~/.local/state/team-work`, release source `/tmp/team-work-deploy`. The independent RSI service `backend-mysql-1` remains healthy on 3306. Configuration and SQL backups are private files outside Git.
 
 Design: [Operations](../../../design/operations/design.md).
 
@@ -22,11 +22,11 @@ Design: [Operations](../../../design/operations/design.md).
 
 ### Dedicated supporting database
 
-**Input:** `scripts/database.sh start|stop|status`; `mysql` configuration and development database credentials from `rsi.config.json`.
+**Input:** `scripts/database.sh start|stop|status`; `mysql` configuration and separate development/deployment database credentials from `rsi.config.json`.
 
 **Output:** Explicit service lifecycle/status; Compose health waits on start.
 
-**Effect:** Docker Compose arguments select the configured context/project and repository Compose file; unique project identity and explicit named volume/network/container isolate service resources. Start uses no-recreate; stop only targets this Compose project's MySQL. Configured host port is checked by Compose bind, so another listener causes start refusal without stopping it. No deployment DB settings are used for provisioning.
+**Effect:** Docker Compose arguments select the configured context/project and a generated Compose artifact under the configured state directory; unique project identity and explicit named volume/network/container isolate service resources. Start uses no-recreate; stop only targets this Compose project's MySQL. Configured host port is checked by Compose bind, so another listener causes start refusal without stopping it. Database start provisions and verifies both configured schemas/accounts; app start provisions/verifies its selected environment. Container, network, volume and address ownership mismatches are refused before Compose mutations. Existing containers are not recreated.
 
 **Usage:** `./scripts/database.sh start`, `./scripts/database.sh status`, `./scripts/database.sh stop`.
 
@@ -40,9 +40,31 @@ Design: [Operations](../../../design/operations/design.md).
 
 ### Configuration contract
 
-`rsi.config.json` is the sole private project config. `mysql.host` must be loopback, project identity is validated, and host port is explicit (initialized to 13306). Initialization generates a root credential and separate development encryption key while retaining imported deployment credentials; it does not modify legacy env files. `backendSettings(config, environment)` creates child-only backend settings. Context compaction threshold defaults to 64,000 and validates positive safe integers independently for development/deployment. Example template: [rsi.config.example.json](../../../../../rsi.config.example.json).
+`rsi.config.json` is the sole private project config. `mysql.host` must be loopback, project identity is validated, and host port is explicit (initialized to 13306). Initialization generates fresh root/application credentials and separate encryption keys without importing other settings. Existing config migration preserves keys and resource identity explicitly. `backendSettings(config, environment)` creates child-only backend settings. Context compaction threshold and harness switch are explicit per-environment inputs, with positive-safe-integer/Boolean validation and no launcher fallback values. Example template: [rsi.config.example.json](../../../../../rsi.config.example.json).
 
-## Verification
+### Explicit deployment snapshot copy
+
+**Input:** `node scripts/copy-deployment.mjs <source-config> <source-mysql-container>`. Target configuration must already preserve the source deployment encryption key.
+
+**Output:** Successful table/row counts and a private completed-copy record; refusals for same service, nonempty target, mismatched encryption key or source container identity.
+
+**Effect:** Reads a consistent SQL snapshot from the explicitly selected source, imports it into the isolated target schema, and verifies every table count. Source is never modified. Private backup `database/deployment-source.sql` and `database/deployment-copy.json` live under target state. Repeating a completed copy does nothing. No lifecycle command calls this migration implicitly. Workspace filesystem paths remain as stored.
+
+**Usage:** `node scripts/copy-deployment.mjs /Users/ahua/workspace/rsi-agent/rsi.config.json backend-mysql-1` (this machine's one-time copy is complete).
+
+## Isolation verification (2026-10-27)
+
+- One-time copy: 25 tables / 5,599 rows, all source/target table counts matched before deployment startup.
+- Original RSI MySQL on 3306 and isolated team-work MySQL on 13306 both remain healthy; existing team-work development schema and volume retained.
+- `deploy.sh deploy HEAD` built backend/frontend from committed `62241967cbebef390584ea69266c219e1faed655` under the new temporary release root and started backend 3101 / frontend 5374.
+- Backend and proxy `/agents`, `/workspaces`, `/config/connections` return HTTP 200; copied deployment has three provider connections.
+- Development backend/frontend launch independently on 3100/5373 using their own schema/account.
+- All 17 host/lifecycle tests passed, both deployment package builds passed, and the current frontend configuration built successfully. All three copied encrypted provider credentials were verified decryptable without printing them. Repeating the copy command made no changes.
+- Lifecycle tests cover private template initialization, explicit configuration, polluted ambient environments, build/launch recovery, ownership refusals and frontend streaming proxy.
+
+## Earlier development verification
+
+The following records describe the earlier setup, before the port and deployment isolation adjustment:
 
 - `docker ps` initially showed existing `backend-mysql-1` on 127.0.0.1:3306.
 - `./scripts/dev.sh init` generated private config with port 13306 and project `team-work`.
@@ -57,7 +79,8 @@ Design: [Operations](../../../design/operations/design.md).
 ## File lookup
 
 - [scripts](../../../../../scripts): lifecycle/configuration implementation and isolated host tests.
-- [backend/compose.yaml](../../../../../backend/compose.yaml): MySQL service definition.
+- [scripts/host-config.mjs](../../../../../scripts/host-config.mjs): configuration validation and generated MySQL service definition.
+- [scripts/copy-deployment.mjs](../../../../../scripts/copy-deployment.mjs): explicit one-time SQL snapshot migration.
 - [rsi.config.example.json](../../../../../rsi.config.example.json): private-config template.
 - [backend/package.json](../../../../../backend/package.json), [frontend/package.json](../../../../../frontend/package.json): dependency manifests and lifecycle scripts.
 - [frontend](../../../../../frontend): front-end source.
@@ -65,9 +88,9 @@ Design: [Operations](../../../design/operations/design.md).
 ## Remaining work and risks
 
 - Local private config is machine-specific and must be retained securely; template values are placeholders. Do not commit the private config.
-- Deployment database service provisioning/lifecycle is intentionally not coupled to this dev-only service.
+- Database isolation does not duplicate project directories referenced by copied workspaces.
 - npm audit findings require separate dependency/security triage; automatic upgrades were not attempted.
-- Source/service setup is not a deployed release; deployment remains an explicit operator action.
+- Deployment uses committed source only; current uncommitted controller/source changes are not automatically added to Git.
 
 ## Automatic retrieval
 

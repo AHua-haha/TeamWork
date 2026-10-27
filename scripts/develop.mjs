@@ -1,10 +1,10 @@
 import { join } from 'node:path';
-import { databaseStatus, provisionDevelopment, startDatabase } from './database.mjs';
+import { databaseStatus, provisionDatabase, startDatabase } from './database.mjs';
 import { root, processRecord, showLogs, startService, stopService, withLock, exists } from './host-common.mjs';
 
-import { backendSettings, hostEnvironment, initializeConfiguration, locations, readConfiguration } from './host-config.mjs';
+import { backendSettings, hostEnvironment, initializeConfiguration, locations } from './host-config.mjs';
 let config;
-try { config = await readConfiguration(); } catch (error) { console.error(error.message); process.exit(1); }
+try { config = await initializeConfiguration(); } catch (error) { console.error(error.message); process.exit(1); }
 const { developmentRun } = locations(config);
 
 const backend = join(root, 'backend/src/runtime/main.ts'), frontend = join(root, 'frontend/node_modules/vite/bin/vite.js');
@@ -23,7 +23,7 @@ async function start() {
   const development = backendSettings(config, 'development');
   const { backendPort, frontendPort } = config.development;
   if (!await exists(join(root, 'backend/node_modules/tsx')) || !await exists(frontend)) throw new Error('Install development dependencies with npm ci in backend/ and frontend/');
-  await startDatabase(config); await provisionDevelopment(config);
+  await startDatabase(config); await provisionDatabase(config, 'development');
   let startedBackend = false;
   try {
     startedBackend = await startService({ name: 'Development backend', entry: backend, args: ['--import', 'tsx'], cwd: join(root, 'backend'), env: { ...hostEnvironment(), ...development }, port: backendPort, url: `http://127.0.0.1:${backendPort}/agents`, pidFile: backPid, log: join(developmentRun, 'backend.log') });

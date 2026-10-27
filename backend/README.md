@@ -4,9 +4,9 @@ TypeScript backend with a backend-owned agent loop, Pi AI 0.87.1 provider integr
 
 ## Development and deployment
 
-Use the [root lifecycle commands](../README.md) to separate environments. `./scripts/dev.sh start` provisions the new `rsi_agent_dev` database, starts the source backend on 3000 and Vite on 5273. Both environments use the private project-root rsi.config.json; development logs remain in .run/. Application stop leaves shared MySQL running.
+Use the [root lifecycle commands](../README.md) to separate environments. `./scripts/dev.sh start` provisions the new `rsi_agent_dev` database, starts the source backend and Vite on the configured ports (this installation: 3100/5373). Both environments use the private project-root rsi.config.json; development logs remain in .run/. Application stop leaves shared MySQL running.
 
-`./scripts/deploy.sh init` preserves the former database URL and encryption key before development changes. `./scripts/deploy.sh deploy <git-ref>` builds committed source under /tmp and runs the compiled backend on 3001 with existing rsi_agent data. Deployment configuration is the deployment section of project-root rsi.config.json; never replace its encryption key when keeping saved provider credentials. The built frontend on 5274 proxies API/SSE/uploads to that backend. Development and deployment connections/settings are independent.
+`./scripts/deploy.sh init` initializes private version-2 project configuration from the example with fresh secrets; it never imports legacy settings implicitly. `./scripts/deploy.sh deploy <git-ref>` builds committed source under /tmp and runs the compiled backend with the configured deployment schema/account (this installation: team_work on its own MySQL service, backend port 3101). Deployment configuration is the deployment section of project-root rsi.config.json; never replace its encryption key when keeping saved provider credentials. The built frontend on the configured port (5374 here) proxies API/SSE/uploads to that backend. Development and deployment connections/settings are independent.
 
 For manual debugging, initialize/provision once with scripts/dev.sh start, then stop the managed applications with scripts/dev.sh stop. The shared MySQL service remains available. From backend/:
 
@@ -24,29 +24,29 @@ The HTTP server has no built-in authentication or tenant authorization and binds
 ## Submit and follow
 
 ```sh
-curl -s http://127.0.0.1:3000/agents \
+curl -s http://127.0.0.1:3100/agents \
   -H 'Content-Type: application/json' -d '{"agentId":"demo"}'
 
 # Create a reusable provider connection. Its API key is write-only in the API.
-curl -s http://127.0.0.1:3000/config/connections \
+curl -s http://127.0.0.1:3100/config/connections \
   -H 'Content-Type: application/json' \
   -d '{"id":"openai-main","value":{"label":"OpenAI","provider":"openai","baseUrl":"https://api.openai.com/v1","api":"openai-responses","apiKey":"YOUR_API_KEY"}}'
 
 # Ask the backend for available models; select a returned choice by its name.
-curl -s http://127.0.0.1:3000/config/connections/openai-main/models
-curl -s http://127.0.0.1:3000/agents/demo/config
-curl -s -X PUT http://127.0.0.1:3000/agents/demo/config \
+curl -s http://127.0.0.1:3100/config/connections/openai-main/models
+curl -s http://127.0.0.1:3100/agents/demo/config
+curl -s -X PUT http://127.0.0.1:3100/agents/demo/config \
   -H 'Content-Type: application/json' \
   -d '{"revision":0,"value":{"name":"Demo","connectionId":"openai-main","modelId":"gpt-4.1-mini","toolOptionIds":[],"prompt":"","promptOptionIds":[],"modelOptions":[]}}'
 
-curl -s http://127.0.0.1:3000/agents/demo/runs \
+curl -s http://127.0.0.1:3100/agents/demo/runs \
   -H 'Content-Type: application/json' -d '{"input":"Hello"}'
 
 # Use runId returned above. This request syncs history, follows one run, then ends.
-curl -N 'http://127.0.0.1:3000/agents/demo/follow?runId=RUN_ID&after=0'
+curl -N 'http://127.0.0.1:3100/agents/demo/follow?runId=RUN_ID&after=0'
 
-curl -s http://127.0.0.1:3000/agents/demo/state
-curl -s -X POST http://127.0.0.1:3000/agents/demo/runs/RUN_ID/cancel
+curl -s http://127.0.0.1:3100/agents/demo/state
+curl -s -X POST http://127.0.0.1:3100/agents/demo/runs/RUN_ID/cancel
 ```
 
 The model ID in the agent config comes from the backend's model-list response. Known Pi models appear without network discovery. The connection's protocol and base URL determine how every selected model is called, including Pi-known models; Pi supplies their identity and capability metadata. For an OpenAI-compatible custom endpoint, `POST /config/connections/{id}/models/refresh` refreshes and saves its `/models` list. For an Anthropic-compatible connection, choose `anthropic-messages` and the provider root URL (for example `https://api.anthropic.com`); refresh reads `/v1/models` with Anthropic headers and follows pagination. DeepSeek's Anthropic-compatible connection uses `https://api.deepseek.com/anthropic`. Unknown discovered models use conservative, unverified text-only limits. A failed refresh leaves the prior saved discovery list. An agent's `modelOptions` holds at most one entry per model, `{connectionId, modelId, reasoning?, temperature?, maxTokens?, contextBudget?}`; a run uses only the entry for its selected model. `reasoning` is one of `off`, `low`, `medium`, `high`, `xhigh`; each model choice's `reasoningSentAs` shows the Pi level actually sent when the model clamps it. The per-model context budget is saved separately; automatic compaction uses the environment-level `contextCompactionThresholdTokens` (default 64,000 tokens) for both before-call and after-run checks. Pi’s public estimate measures normalized context. Preparation retains all new private messages and preserves original group context; it does not create a group reply or extra run. Connection and agent edits are revisioned, and each run keeps the snapshot resolved at its start.
@@ -77,7 +77,7 @@ Requests have a 30-second deadline and a 4 MiB response-body limit. Core Markdow
 Create/adopt requires `models: {models: [{connectionId, modelId, reasoning?, temperature?, maxTokens?, contextBudget?}], defaultModel: {connectionId, modelId}}`. Configure 1–50 distinct connection/model pairs and a default from that list. Models must already be available from configured providers. For example:
 
 ```sh
-curl -s http://127.0.0.1:3000/workspaces -H 'Content-Type: application/json' -d '{
+curl -s http://127.0.0.1:3100/workspaces -H 'Content-Type: application/json' -d '{
   "name":"Example", "directory":"/absolute/path/example", "adopt":true,
   "models":{"models":[{"connectionId":"openai-main","modelId":"gpt-4.1-mini"}],
     "defaultModel":{"connectionId":"openai-main","modelId":"gpt-4.1-mini"}}
@@ -297,7 +297,7 @@ The workspace composer accepts PNG/JPEG/WebP pictures through picker, clipboard 
 Submit text-only JSON as before, or binary multipart with one text field and repeated images files:
 
 ```sh
-curl -X POST http://127.0.0.1:3000/workspaces/WORKSPACE_ID/team/chat/messages \
+curl -X POST http://127.0.0.1:3100/workspaces/WORKSPACE_ID/team/chat/messages \
   -F 'text=Examine this screenshot' \
   -F 'images=@/absolute/path/screenshot.png'
 ```
@@ -308,7 +308,7 @@ Working design assignments include the named node and all accepted descendant de
 
 ## Harness permission switch
 
-Set `development.harnessPermissionsEnabled` or `deployment.harnessPermissionsEnabled` in project-root `rsi.config.json`. The optional Boolean defaults to true. false grants all active members the available native file and management tools, permits outside-workspace/link file targets, and starts ordinary host Bash without the OS sandbox or Git commit approval broker. Host HOME and installed toolchains remain available; backend database/provider secrets are not injected into the shell environment. Commands have the backend account's OS authority, not administrator privilege. Input validation, result limits, timeouts, shell/job cleanup and semantic member validation/separate idle user activation remain. Operator config derives a child-only RSI_HARNESS_PERMISSIONS_ENABLED startup value; agents cannot change this setting through their member files. Restart with true to restore existing rules. A deployed release must contain the switch implementation; merely restarting an older release does not add it.
+Set `development.harnessPermissionsEnabled` or `deployment.harnessPermissionsEnabled` in project-root `rsi.config.json`. The version-2 configuration requires an explicit Boolean. false grants all active members the available native file and management tools, permits outside-workspace/link file targets, and starts ordinary host Bash without the OS sandbox or Git commit approval broker. Host HOME and installed toolchains remain available; backend database/provider secrets are not injected into the shell environment. Commands have the backend account's OS authority, not administrator privilege. Input validation, result limits, timeouts, shell/job cleanup and semantic member validation/separate idle user activation remain. Operator config derives a child-only RSI_HARNESS_PERMISSIONS_ENABLED startup value; agents cannot change this setting through their member files. Restart with true to restore existing rules. A deployed release must contain the switch implementation; merely restarting an older release does not add it.
 
 ## Business data ownership
 

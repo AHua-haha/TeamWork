@@ -57,9 +57,9 @@ export async function createFrontendServer(directory, backendOrigin) {
 }
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const port = Number(process.env.PORT ?? 5274);
+    const port = Number(process.env.PORT);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid frontend PORT');
-    const server = await createFrontendServer(process.env.FRONTEND_DIST, process.env.AGENT_BACKEND_ORIGIN ?? 'http://127.0.0.1:3001');
+    const server = await createFrontendServer(process.env.FRONTEND_DIST, process.env.AGENT_BACKEND_ORIGIN);
     server.listen(port, '127.0.0.1', () => console.log(`Deployed frontend: http://127.0.0.1:${port}`));
     for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { server.close(); server.closeAllConnections(); });
   } catch (error) { console.error(error.message); process.exitCode = 1; }

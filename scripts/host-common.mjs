@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { access, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { root, hostEnvironment } from './host-config.mjs';
+import { root, hostEnvironment, initializeConfiguration, locations } from './host-config.mjs';
 export { root } from './host-config.mjs';
 
 export async function exists(path) { try { await access(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
@@ -77,7 +77,7 @@ export async function showLogs(directory, part) {
   }
 }
 export async function withLock(action) {
-  const state = join(root, '.run');
+  const state = locations(await initializeConfiguration()).developmentRun;
   await mkdir(state, { recursive: true, mode: 0o700 });
   const path = join(state, 'manage.lock');
   let lock;

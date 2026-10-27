@@ -3,24 +3,30 @@ import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { exists, processRecord, root, run, capture, showLogs, startService, stopService, withLock } from './host-common.mjs';
-import { startDatabase } from './database.mjs';
-import { backendSettings, hostEnvironment, initializeConfiguration, locations, readConfiguration } from './host-config.mjs';
+import { provisionDatabase, startDatabase } from './database.mjs';
+import { backendSettings, hostEnvironment, initializeConfiguration, locations } from './host-config.mjs';
 
 let config;
-try { config = await readConfiguration(); } catch (error) { console.error(error.message); process.exit(1); }
+try { config = await initializeConfiguration(); } catch (error) { console.error(error.message); process.exit(1); }
 const { deployment } = locations(config);
 
 const manifestPath = join(deployment, 'active.json');
 const backPid = join(deployment, 'backend.pid'), frontPid = join(deployment, 'frontend.pid');
 
-async function manifest() { return await exists(manifestPath) ? JSON.parse(await readFile(manifestPath, 'utf8')) : null; }
+async function manifest() {
+  if (!await exists(manifestPath)) return null;
+  const value = JSON.parse(await readFile(manifestPath, 'utf8'));
+  if (value.owner !== root) throw new Error('Deployment state belongs to another checkout; configure a separate stateDirectory');
+  return value;
+}
 async function stop() {
+  await manifest();
   await stopService('Deployed frontend', frontPid);
   await stopService('Deployed backend', backPid);
 }
 async function saveManifest(value) {
   const temporary = `${manifestPath}.${process.pid}.tmp`;
-  await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); await rename(temporary, manifestPath);
+  await writeFile(temporary, JSON.stringify({ ...value, owner: root }, null, 2) + '\n', { mode: 0o600 }); await rename(temporary, manifestPath);
 }
 async function build(commit) {
   if (capture('git', ['-C', root, 'ls-tree', '--name-only', commit, '--', 'rsi.config.json'])) throw new Error('Refusing to deploy a revision containing private rsi.config.json');
@@ -51,7 +57,7 @@ async function backendEntry(directory) {
 async function launch(release) {
   const settings = backendSettings(config, 'deployment');
   const { backendPort, frontendPort } = config.deployment;
-  await startDatabase(config);
+  await startDatabase(config); await provisionDatabase(config, 'deployment');
   let startedBackend = false;
   try {
     startedBackend = await startService({ name: 'Deployed backend', entry: await backendEntry(release.directory), cwd: join(release.directory, 'backend'), env: { ...hostEnvironment(), ...settings, HOST: '127.0.0.1', PORT: String(backendPort), NODE_ENV: 'production' }, port: backendPort, url: `http://127.0.0.1:${backendPort}/agents`, pidFile: backPid, log: join(deployment, 'backend.log') });

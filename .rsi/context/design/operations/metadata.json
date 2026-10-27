@@ -2,7 +2,7 @@
   "implementation": [
     "scripts",
     "backend/scripts",
-    "backend/compose.yaml",
-    "rsi.config.example.json"
+    "rsi.config.example.json",
+    "frontend/vite.config.ts"
   ]
 }

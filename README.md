@@ -2,20 +2,20 @@
 
 ## Development and host deployment
 
-Both environments use the same local MySQL 8.4 service, with separate databases:
+Each checkout owns an isolated local MySQL service. Development and deployment share that service, with separate databases and accounts. This team-work installation uses:
 
 | | Development | Deployment |
 | --- | --- | --- |
-| Database | `rsi_agent_dev` (new, initially empty) | `rsi_agent` (existing data) |
-| Backend | `http://127.0.0.1:3000` | `http://127.0.0.1:3001` |
-| Frontend | `http://127.0.0.1:5273` | `http://127.0.0.1:5274` |
-| Source | This project checkout | Committed snapshots under `/tmp/rsi-agent-deploy/` |
+| Database | `rsi_agent_dev` (new, initially empty) | `team_work` (one-time copy of RSI deployment) |
+| Backend | `http://127.0.0.1:3100` | `http://127.0.0.1:3101` |
+| Frontend | `http://127.0.0.1:5373` | `http://127.0.0.1:5374` |
+| Source | This project checkout | Committed snapshots under `/tmp/team-work-deploy/` |
 | Settings | `rsi.config.json` → `development` | `rsi.config.json` → `deployment` |
-| Logs/PIDs | `.run/` | `~/.local/state/rsi-agent/deploy/` |
+| Logs/PIDs | `.run/` | `~/.local/state/team-work/deploy/` |
 
-Requires Node.js 22.19+, npm, Git, tar, curl, ps and Docker Compose. Application processes run directly on the host. MySQL retains the existing `backend` Compose project and data volume.
+Requires Node.js 22.19+, npm, Git, tar, curl, ps and Docker Compose. Application processes run directly on the host. The team-work service listens on 13306 and retains its existing `team-work` Compose project, container, network and volume. The original RSI service on 3306 is independent and remains unchanged.
 
-### First transition from the existing environment
+### Initialize this checkout
 
 ```sh
 ./scripts/dev.sh stop
@@ -24,9 +24,9 @@ Requires Node.js 22.19+, npm, Git, tar, curl, ps and Docker Compose. Application
 ./scripts/dev.sh start
 ```
 
-Initialization creates **`rsi.config.json` at this project’s root**. It imports existing `backend/.env` and saved deployment `backend.env` once, preserving database accounts, encryption keys and backend credentials. Old files are left untouched and are not read again once the project config exists. If the old database addresses conflict, initialization refuses to guess. No database is dropped, emptied or copied.
+Initialization creates **`rsi.config.json` at this project’s root**. It uses `rsi.config.example.json`, resolves its project/home path placeholders, and generates fresh passwords and separate encryption keys. It never imports legacy env files, another checkout’s settings or saved deployment state. Review the configured ports/resource names before first start. Initialization does not copy any data. Existing version-1 private configuration requires an explicit migration to version 2; preserve its keys and data-volume identity.
 
-The config contains a single `mysql` host/port, separate `development` and `deployment` database accounts/keys/backend options, service ports, a pinned Docker context, and `paths` for state and temporary release source. Run `init` to generate it; use [rsi.config.example.json](rsi.config.example.json) as a field reference, not as replacement credentials. The real file is mode 0600 and Git-ignored. **Preserve both encryption keys** to keep saved provider credentials readable. Never force-add the real file to Git; deployment refuses revisions containing it.
+The version-2 config contains the MySQL image, container/network/volume names, Compose network key (preserve it for existing resources), host/port, separate `development` and `deployment` database accounts/keys/backend options, service ports, a pinned Docker context, and `paths` for state and temporary release source. Run `init` to generate it; use [rsi.config.example.json](rsi.config.example.json) as a field reference, not as replacement credentials. The real file is mode 0600 and Git-ignored. **Preserve both encryption keys** to keep saved provider credentials readable. Never force-add the real file to Git; deployment refuses revisions containing it.
 
 The launchers construct settings only for their own child processes. They do not edit shell profiles, export variables into the caller, rewrite `.env` files or change Docker’s global context. Ambient `DATABASE_URL`, provider keys, `PORT`, `RSI_*`, `NODE_OPTIONS`, proxy and `COMPOSE_*` variables cannot override service inputs. Minimal OS/toolchain variables such as PATH/HOME/locale remain available. Configure intentional backend credentials/proxy options under that environment’s `environment` object. Other processes using the same OS user can still deliberately edit files permitted to that user; the config is not an OS security boundary.
 
@@ -65,9 +65,9 @@ Development uses Vite and the source backend. `init` initializes the project con
 
 `start` uses the selected commit. If its temporary source was cleaned, it rebuilds that exact commit from local Git. The source/build directories are replaceable; deployment settings, logs, release selection and user workspaces must remain outside them. No automatic boot supervisor or public exposure is configured.
 
-Edit the project `rsi.config.json` to change ports, paths or credentials, then restart the affected service. Each environment accepts optional `"contextCompactionThresholdTokens": 64000` (positive integer). One threshold triggers private Agent compaction before model calls and after work; restart the backend to apply changes. Original group messages remain unabridged. Each environment also accepts `"harnessPermissionsEnabled": true` (default). Set it to `false` to allow every member to use the available tools without file scope/path guards, the Bash sandbox or Git commit approval. Commands then have the backend OS account's ordinary permissions and host HOME/toolchains. Native tool limits/timeouts and separate user member activation remain. Set it back to `true` and restart to restore enforcement. A deployed release must include this feature before the setting can affect it. The former `RSI_STATE_DIR`, `XDG_STATE_HOME`, `RSI_DEPLOY_ROOT` and deployment-port environment overrides are ignored. `paths.deploymentSourceRoot` must stay beneath temporary storage. Default state/log/release-selection paths are retained during migration. The lifecycle lock belongs to this checkout’s `.run/manage.lock`.
+Edit the project `rsi.config.json` to change ports, paths or credentials, then restart the affected service. Each environment explicitly sets `"contextCompactionThresholdTokens"` (positive integer; example 256000). One threshold triggers private Agent compaction before model calls and after work; restart the backend to apply changes. Original group messages remain unabridged. Each environment explicitly sets `"harnessPermissionsEnabled"` (the example enables it). Set it to `false` to allow every member to use the available tools without file scope/path guards, the Bash sandbox or Git commit approval. Commands then have the backend OS account's ordinary permissions and host HOME/toolchains. Native tool limits/timeouts and separate user member activation remain. Set it back to `true` and restart to restore enforcement. A deployed release must include this feature before the setting can affect it. The former `RSI_STATE_DIR`, `XDG_STATE_HOME`, `RSI_DEPLOY_ROOT` and deployment-port environment overrides are ignored. `paths.deploymentSourceRoot` must stay beneath temporary storage. All state/log/release-selection paths come from configuration. Deployment manifests record their owning checkout and refuse foreign ownership. The lifecycle lock is `manage.lock` under the configured development state directory.
 
-### Manage the shared database service
+### Manage this project’s database service
 
 ```sh
 ./scripts/database.sh start
@@ -75,7 +75,17 @@ Edit the project `rsi.config.json` to change ports, paths or credentials, then r
 ./scripts/database.sh stop
 ```
 
-Application startup can ensure MySQL is running. Stopping either application or a failed application launch leaves MySQL running. Only explicit `database.sh stop` stops it; stop the applications first. The MySQL volume is preserved. Development provisioning creates the `rsi_dev` account with access only to `rsi_agent_dev`; the project config owns its local credentials. Compose receives an explicit project/file/context, `/dev/null` as its env file, and config-derived interpolation values. Starting an application never recreates an existing shared MySQL container; changing the database container’s binding requires an intentional infrastructure change.
+Application startup can ensure MySQL is running. Stopping either application or a failed application launch leaves MySQL running. Only explicit `database.sh stop` stops it; stop the applications first. The MySQL volume is preserved. Each application startup provisions and checks its configured schema/account; `database.sh start` provisions both. Accounts have access only to their own schema. The config owns their credentials. Compose is generated under the configured state directory from `rsi.config.json`; there is no separately maintained Compose config. It receives an explicit project/file/context, `/dev/null` as its env file, and child-only interpolation values. Existing container, volume and network ownership are checked before operations. Starting an application never recreates an existing shared MySQL container; changing the database container’s binding requires an intentional infrastructure change.
+
+### Explicit one-time deployment copy
+
+Normal init/start/update commands never copy another project's data. An operator may run:
+
+```sh
+node scripts/copy-deployment.mjs /absolute/path/to/source/rsi.config.json source-mysql-container
+```
+
+Before copying, explicitly preserve the source deployment encryption key in the target private configuration. The command requires different database services and an empty target deployment database, takes a consistent source snapshot, imports only into the target, compares every table's row count, and records the completed copy. It refuses overwriting an existing target. The private SQL backup and copy record stay under the target state's `database/` directory. A repeated successful copy command makes no changes. Referenced workspace directories retain their existing paths; database isolation does not duplicate those files.
 
 ### Verification
 

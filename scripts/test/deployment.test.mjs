@@ -34,40 +34,39 @@ async function fixture(run) {
   }
   await writeFile(join(root, 'backend/build.mjs'), `import{mkdir,copyFile}from'node:fs/promises';await mkdir('dist/src/runtime',{recursive:true});await copyFile('main.mjs','dist/src/runtime/main.js');`);
   await writeFile(join(root, 'frontend/build.mjs'), `import{mkdir,writeFile}from'node:fs/promises';await mkdir('dist',{recursive:true});await writeFile('dist/index.html','<h1>Snapshot</h1>');`);
-  await writeFile(join(directory, 'bin/docker'), `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(join(directory,'docker-calls.jsonl'))},JSON.stringify({args:process.argv.slice(2),composeProject:process.env.COMPOSE_PROJECT_NAME??null,dockerContext:process.env.DOCKER_CONTEXT??null,nodeOptions:process.env.NODE_OPTIONS??null,mysqlPort:process.env.RSI_MYSQL_PORT??null})+'\\n');if(process.argv.includes('context'))console.log('fixture-context');else if(process.argv.includes('ps'))console.log('mysql');else if(process.argv.includes('exec'))process.stdin.resume();\n`, { mode: 0o755 });
+  await writeFile(join(directory, 'bin/docker'), `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(join(directory,'docker-calls.jsonl'))},JSON.stringify({args:process.argv.slice(2),composeProject:process.env.COMPOSE_PROJECT_NAME??null,dockerContext:process.env.DOCKER_CONTEXT??null,nodeOptions:process.env.NODE_OPTIONS??null,mysqlPort:process.env.RSI_MYSQL_PORT??null})+'\\n');if(process.argv.includes('inspect')){console.error('No such container');process.exit(1);}else if(process.argv.includes('context'))console.log('fixture-context');else if(process.argv.includes('ps'))console.log('mysql');else if(process.argv.includes('exec'))process.stdin.resume();\n`, { mode: 0o755 });
   git(root, 'init', '-q'); git(root, 'add', '.'); git(root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture');
   const configPath = join(root, 'rsi.config.json');
   const config = {
-    version: 1,
+    version: 2,
     paths: { stateDirectory: state, developmentStateDirectory: join(root, '.run'), deploymentSourceRoot: join(directory, 'sources') },
-    mysql: { host: '127.0.0.1', port: 13306, project: 'fixture-project', dockerContext: 'fixture-context', rootPassword: 'fixture-root' },
-    development: { backendPort: await port(), frontendPort: await port(), database: { name: 'rsi_agent_dev', username: 'rsi_dev', password: 'rsi_dev' }, encryptionKey: randomBytes(32).toString('base64'), environment: {} },
-    deployment: { backendPort: await port(), frontendPort: await port(), database: { name: 'rsi_agent', username: 'rsi', password: 'rsi' }, encryptionKey: key, environment: { DEEPSEEK_WEB_API_KEY: 'retained-test-key' } },
+    mysql: { host: '127.0.0.1', port: 13306, project: 'fixture-project', dockerContext: 'fixture-context', rootPassword: 'fixture-root', image: 'mysql:8.4', containerName: 'fixture-mysql', networkName: 'fixture-network', networkKey: 'database', volumeName: 'fixture-data' },
+    development: { backendPort: await port(), frontendPort: await port(), database: { name: 'rsi_agent_dev', username: 'rsi_dev', password: 'rsi_dev' }, encryptionKey: randomBytes(32).toString('base64'), environment: {}, harnessPermissionsEnabled: true, contextCompactionThresholdTokens: 256000 },
+    deployment: { backendPort: await port(), frontendPort: await port(), database: { name: 'rsi_agent', username: 'rsi', password: 'rsi' }, encryptionKey: key, environment: { DEEPSEEK_WEB_API_KEY: 'retained-test-key' }, harnessPermissionsEnabled: true, contextCompactionThresholdTokens: 256000 },
   };
   await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
+  await writeFile(join(root, 'rsi.config.example.json'), JSON.stringify(config));
   const env = { ...process.env, HOME: home, PATH: join(directory, 'bin') + ':' + process.env.PATH, RSI_STATE_DIR: join(directory, 'wrong-state'), RSI_DEPLOY_ROOT: '/wrong-source', RSI_DEPLOY_BACKEND_PORT: '1', RSI_DEPLOY_FRONTEND_PORT: '2', DATABASE_URL: 'mysql://wrong:wrong@localhost/should_not_inherit', PORT: '1', CONFIG_ENCRYPTION_KEY: 'wrong-key', DEEPSEEK_WEB_API_KEY: 'wrong-provider-key', UNRELATED_SECRET: 'must-not-inherit', COMPOSE_PROJECT_NAME: 'unrelated-service', COMPOSE_FILE: '/wrong-compose', DOCKER_CONTEXT: 'wrong-context', HTTP_PROXY: 'http://127.0.0.1:1', HTTPS_PROXY: 'http://127.0.0.1:1', NODE_OPTIONS: '--require=/wrong-service-preload.cjs' };
   const call = async (...args) => command(root, env, ...args);
   try { await run({ root, directory, state, env, key, call, config, configPath, home }); }
   finally { await call('deploy', 'stop'); await rm(directory, { recursive: true, force: true }); }
 }
 
-test('initialization imports legacy credentials once into a private project file without modifying old files', () => fixture(async f => {
+test('initialization uses only the project example, generates fresh secrets, and leaves legacy files untouched', () => fixture(async f => {
   await rm(f.configPath);
   const oldPath = join(f.root, 'backend/.env'), original = await readFile(oldPath, 'utf8');
-  let result = await f.call('deploy', 'init'); assert.equal(result.code, 0, result.output);
+  const result = await f.call('deploy', 'init'); assert.equal(result.code, 0, result.output);
   const config = JSON.parse(await readFile(f.configPath, 'utf8'));
-  assert.equal(config.deployment.encryptionKey, f.key);
-  assert.equal(config.deployment.environment.DEEPSEEK_WEB_API_KEY, 'retained-test-key');
-  assert.equal(config.mysql.port, 13306); assert.equal(config.mysql.project, 'team-work'); assert.equal(config.mysql.dockerContext, 'fixture-context');
-  assert.equal(config.deployment.database.name, 'rsi_agent'); assert.equal(config.development.database.name, 'rsi_agent_dev');
-  assert.notEqual(config.development.encryptionKey, f.key);
+  assert.notEqual(config.deployment.encryptionKey, f.key);
+  assert.notEqual(config.deployment.database.password, f.config.deployment.database.password);
+  assert.notEqual(config.development.encryptionKey, config.deployment.encryptionKey);
+  assert.equal(config.paths.stateDirectory, f.state);
   assert.equal((await stat(f.configPath)).mode & 0o777, 0o600);
   assert.equal(await readFile(oldPath, 'utf8'), original);
   const saved = await readFile(f.configPath, 'utf8');
   await writeFile(oldPath, 'DATABASE_URL=mysql://wrong:wrong@127.0.0.1:4211/wrong\n');
-  result = await f.call('dev', 'init'); assert.equal(result.code, 0, result.output);
-  assert.equal(await readFile(f.configPath, 'utf8'), saved, 'legacy changes are ignored after import');
-  await assert.rejects(readFile(join(f.state, 'deploy/backend.env')));
+  assert.equal((await f.call('dev', 'init')).code, 0);
+  assert.equal(await readFile(f.configPath, 'utf8'), saved);
 }));
 
 test('deploy isolates committed source, preserves running release on build failure, restores it on launch failure, and rebuilds after tmp cleanup', { timeout: 60_000 }, () => fixture(async f => {
@@ -179,7 +178,7 @@ test('polluted shell settings and legacy env files cannot override either servic
     assert.equal(await readFile(join(f.root, 'backend/.env'), 'utf8'), oldFile);
     assert.equal(await readFile(profile, 'utf8'), profileText);
     const calls = (await readFile(join(f.directory, 'docker-calls.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
-    for (const call of calls) { assert.equal(call.composeProject, null); assert.equal(call.dockerContext, null); assert.equal(call.nodeOptions, null); assert.ok(call.args.includes('--context')); assert.ok(call.args.includes('/dev/null')); assert.ok(!call.args.includes('use')); }
+    for (const call of calls) { assert.equal(call.composeProject, null); assert.equal(call.dockerContext, null); assert.equal(call.nodeOptions, null); assert.ok(call.args.includes('--context')); if (!call.args.includes('inspect')) assert.ok(call.args.includes('/dev/null')); assert.ok(!call.args.includes('use')); }
     assert.ok(calls.some(call => call.args.includes('--no-recreate')));
     result = await f.call('dev', 'stop'); assert.equal(result.code, 0, result.output);
     assert.equal((await deployed()).database, '/rsi_agent');
@@ -191,24 +190,17 @@ test('polluted shell settings and legacy env files cannot override either servic
   } finally { await f.call('dev', 'stop'); }
 }));
 
-test('split legacy settings preserve both keys and credentials and refuse mismatched database servers', () => fixture(async f => {
-  await rm(f.configPath);
+test('foreign deployment state is refused without modifying its manifest', () => fixture(async f => {
   await mkdir(join(f.state, 'deploy'), { recursive: true });
-  const prod = `DATABASE_URL=mysql://rsi:preserved_password@127.0.0.1:3306/rsi_agent\nCONFIG_ENCRYPTION_KEY=${f.key}\nDEEPSEEK_WEB_API_KEY=existing-search-key\n`;
-  const dev = `DATABASE_URL=mysql://rsi_dev:dev_password@127.0.0.1:4211/rsi_agent_dev\nCONFIG_ENCRYPTION_KEY=${f.config.development.encryptionKey}\n`;
-  await writeFile(join(f.state, 'deploy/backend.env'), prod);
-  await writeFile(join(f.root, 'backend/.env'), dev);
-  let result = await f.call('deploy', 'init'); assert.notEqual(result.code, 0); assert.match(result.output, /addresses differ/);
-  await assert.rejects(readFile(f.configPath));
-  await writeFile(join(f.root, 'backend/.env'), dev.replace(':4211/', ':3306/'));
-  result = await f.call('deploy', 'init'); assert.equal(result.code, 0, result.output);
-  const value = JSON.parse(await readFile(f.configPath, 'utf8'));
-  assert.equal(value.development.encryptionKey, f.config.development.encryptionKey);
-  assert.equal(value.deployment.encryptionKey, f.key);
-  assert.equal(value.development.database.password, 'dev_password');
-  assert.equal(value.deployment.database.password, 'preserved_password');
-  assert.equal(value.deployment.environment.DEEPSEEK_WEB_API_KEY, 'existing-search-key');
-  assert.equal(await readFile(join(f.state, 'deploy/backend.env'), 'utf8'), prod);
+  const path = join(f.state, 'deploy/active.json');
+  const content = JSON.stringify({ owner: '/another/checkout', commit: 'foreign', directory: '/tmp/foreign-release' });
+  await writeFile(path, content);
+  for (const operation of ['start', 'stop', 'status']) {
+    const result = await f.call('deploy', operation);
+    assert.notEqual(result.code, 0); assert.match(result.output, /another checkout/);
+    assert.equal(await readFile(path, 'utf8'), content);
+  }
+  await rm(path);
 }));
 
 test('invalid or publicly readable project configuration refuses startup without leaking secrets', () => fixture(async f => {
@@ -257,4 +249,21 @@ test('a previously selected release with the old compiled entry can restart afte
   const output = await (await fetch(`http://127.0.0.1:${f.config.deployment.backendPort}/agents`)).json();
   assert.equal(output.version, 'first');
   assert.equal(JSON.parse(await readFile(join(f.state, 'deploy/active.json'), 'utf8')).directory, active.directory);
+}));
+
+test('foreign MySQL containers, networks and volumes are refused before Compose can change them', () => fixture(async f => {
+  const path = join(f.directory, 'bin/docker');
+  const original = await readFile(path, 'utf8');
+  for (const [name, kind, info] of [
+    ['fixture-mysql', 'container', { Config: { Labels: { 'com.docker.compose.project': 'another-project', 'com.docker.compose.service': 'mysql' } } }],
+    ['fixture-network', 'network', { Labels: { 'com.docker.compose.project': 'another-project', 'com.docker.compose.network': 'database' } }],
+    ['fixture-data', 'volume', { Labels: { 'com.docker.compose.project': 'another-project', 'com.docker.compose.volume': 'mysql-data' } }],
+  ]) {
+    const refusal = `if(process.argv.includes('inspect') && process.argv.at(-1)===${JSON.stringify(name)}){console.log(${JSON.stringify(JSON.stringify(info))});process.exit(0);}`;
+    await writeFile(path, original.replace("if(process.argv.includes('inspect'))", refusal + "if(process.argv.includes('inspect'))"));
+    const result = await f.call('database', 'start');
+    assert.notEqual(result.code, 0); assert.match(result.output, new RegExp(kind + ' belongs to another service'));
+  }
+  const calls = (await readFile(join(f.directory, 'docker-calls.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.ok(!calls.some(call => call.args.includes('up')), 'no Compose mutation may precede ownership checks');
 }));
