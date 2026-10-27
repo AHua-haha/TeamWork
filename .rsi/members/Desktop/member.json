@@ -1,0 +1,36 @@
+{
+  "name": "Desktop",
+  "role": "Electron Desktop",
+  "responsibility": "Owns the Electron desktop host for the shared React application: Electron main/preload lifecycle and packaging integration. The initial desktop version connects through the existing BackendClient to a separately started backend and does not bundle, launch, supervise, or stop backend services. Does not own frontend feature workflows, backend business logic, storage, or Operations lifecycle outside desktop packaging.",
+  "settings": {
+    "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+    "modelId": "gpt-6.1-sol",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+        "modelId": "gpt-6.1-sol"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "desktop/metadata.json"
+    ],
+    "dependencies": [
+      "metadata.json",
+      "frontend/metadata.json",
+      "frontend/app/metadata.json",
+      "frontend/shared/metadata.json",
+      "frontend/shared/backend-client/metadata.json",
+      "operations/metadata.json"
+    ]
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}
