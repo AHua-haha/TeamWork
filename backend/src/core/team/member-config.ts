@@ -5,11 +5,11 @@ import { dirname, join } from 'node:path';
 import { keys, obj, validateRunSettings } from './data/config.js';
 import { resolveHarness, type HarnessService } from '../harness/harness.js';
 import { harnessConfig } from '../harness/data/config.js';
-import { sourceBundle, type MemberConfigSource } from './data/member-config.js';
-import { memberFields, maxMembers, type MemberFields, type MemberActivationState, type NewMember, type StoredMember, type TeamService } from './data/members.js';
+import { sourceBundle, currentMemberPaths, type MemberConfigSource } from './data/member-config.js';
+import { memberFields, memberName, maxMembers, type MemberFields, type MemberActivationState, type NewMember, type StoredMember, type TeamService } from './data/members.js';
 import { modelRunSettings } from '../workspace/data/models.js';
 import { encodeText, sha256 } from '../text.js';
-import { AppError, identity } from '../agent/data/model.js';
+import { AppError } from '../agent/data/model.js';
 
 interface MemberChange {
   type: 'create' | 'update' | 'delete'; path: string; name: string; memberId?: string;
@@ -58,7 +58,7 @@ export class MemberConfigService {
       const activeFiles:Record<string,string>={};
       for(const member of pending.active)for(const [path,text]of Object.entries(member.value.configuration!.files))activeFiles[`${dirname(member.value.configuration!.path)}/${path}`]=text;
       const history=await configurationCommits((await this.harness.environment(lead.id)).root,marker?.revision??null);
-      const changes=await fileChanges(activeFiles,current.files),pendingFiles=await fileChanges(accepted.files,current.files);
+      const changes=await fileChanges(activeFiles,current.files),pendingFiles=await fileChanges(currentMemberPaths(accepted.files,pending.active.map(member=>member.value.configuration!)),current.files);
       const files=Object.entries(current.files).map(([path,content])=>({path,content,problem:null,size:Buffer.byteLength(content)}));
       return {
         workspaceId, leadId: lead.id,
@@ -97,8 +97,9 @@ export class MemberConfigService {
     const activation = await this.team.activation(workspaceId);
     const configurations: Plan['configurations'] = [];
     const models=await this.team.models(workspaceId),selected=await this.harness.controlFiles(leadId,origin,memberRoot);
-    const revision=selected.revision, paths=Object.keys(selected.files);
-    const textAt=async(path:string)=>{const text=selected.files[path];if(text===undefined)throw new AppError('invalid_config',`Referenced file is missing: ${path}`);encodeText(text);return text;};
+    const selectedFiles = origin === 'committed' ? currentMemberPaths(selected.files, active.map(member => member.value.configuration!)) : selected.files;
+    const revision=selected.revision, paths=Object.keys(selectedFiles);
+    const textAt=async(path:string)=>{const text=selectedFiles[path];if(text===undefined)throw new AppError('invalid_config',`Referenced file is missing: ${path}`);encodeText(text);return text;};
     const review:MemberConfigReview={origin,revision,digest:'',valid:false,changes:[],issues:[]};
     const issue=(path:string,error:unknown)=>{if(!(error instanceof AppError)||error.status>=500)throw error;review.issues.push({path,code:error.code,message:error.message});};
     const designs = new Map<string, string>(), known = new Map(active.map(m => [m.value.configuration!.path.toLowerCase(), m]));
@@ -106,8 +107,8 @@ export class MemberConfigService {
     for (const path of manifests) {
       try {
         const match = /^\.rsi\/members\/([^/]+)\/member\.json$/.exec(path);
-        if (!match) throw new AppError('invalid_path', 'Member manifests belong at .rsi/members/<bundle>/member.json');
-        identity(match[1], 'bundle');
+        if (!match) throw new AppError('invalid_path', 'Member manifests belong at .rsi/members/<name>/member.json');
+        memberName(match[1]);
         if (seen.has(path.toLowerCase())) throw new AppError('invalid_config', 'Duplicate member bundle ignoring case');
         seen.add(path.toLowerCase());
         const current = known.get(path.toLowerCase());
@@ -140,9 +141,10 @@ export class MemberConfigService {
           if (fields.name !== current.value.name || fields.role !== current.value.role || !same(withoutPrompt(fields.settings), withoutPrompt(current.value.settings)) || !same(assignment(fields.harness.designScope), assignment(current.value.harness.designScope))) throw new AppError('forbidden_update', 'Update may change only responsibility, supplementary prompts and execution rules');
           fields.harness.designScope = current.value.harness.designScope;
         } else if (!harness.designScope.working.length && !harness.designScope.dependencies.length) throw new AppError('invalid_config', 'A new worker needs a design assignment');
+        if (match[1] !== fields.name) throw new AppError('invalid_config', 'Member directory must exactly match its name');
         const resolved = await resolveHarness(this.harness.designs, workspaceId, fields.harness);
         for (const design of [...resolved.working, ...resolved.dependencies]) designs.set(design.path, design.revision);
-        const source = { ...sourceBundle(path, files, 'user'), acceptedRevision: origin === 'committed' ? revision : undefined, ...(current?.value.configuration?.previous ? { previous: current.value.configuration.previous } : {}) };
+        const source = { ...sourceBundle(path, files, 'user'), ...(current?.value.configuration?.legacyPaths ? {legacyPaths: current.value.configuration.legacyPaths} : {}), acceptedRevision: origin === 'committed' ? revision : undefined, ...(current?.value.configuration?.previous ? { previous: current.value.configuration.previous } : {}) };
         const changed = !current || source.digest !== current.value.configuration?.digest;
         if (changed) {
           const [issues] = await this.team.settingsIssues([{ ...fields.settings, ...current?.value.modelSettings }]);

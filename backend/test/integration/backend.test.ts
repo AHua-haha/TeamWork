@@ -1754,17 +1754,17 @@ test('member file activation atomically replaces/updates the team, retains histo
     const { dirname, join: pathJoin } = await import('node:path');
     await rm(pathJoin(files.root, backendSource.path));
     await files.write.writeFile(pathJoin(files.root, frontendSource.path), JSON.stringify({ ...JSON.parse(frontendSource.files['member.json']!), responsibility: 'Updated atomically' }));
-    await files.write.mkdir(pathJoin(files.root, '.rsi/members/replacement/prompts'));
-    const manifest = { name:'Backend',role:'developer',responsibility:'Replacement',settings:{},promptFiles:['prompts/member.md'],designScope:{working:['metadata.json'],dependencies:[]},execute:{allowedCommands:[]} };
-    await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/member.json'), JSON.stringify(manifest));
-    await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/prompts/member.md'), 'Accepted prompt');
+    await files.write.mkdir(pathJoin(files.root, '.rsi/members/Replacement/prompts'));
+    const manifest = { name:'Replacement',role:'developer',responsibility:'Replacement',settings:{},promptFiles:['prompts/member.md'],designScope:{working:['metadata.json'],dependencies:[]},execute:{allowedCommands:[]} };
+    await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/member.json'), JSON.stringify(manifest));
+    await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/prompts/member.md'), 'Accepted prompt');
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
     await acceptFiles(f);
     const review = await f.team.reviewConfiguration(f.workspaceId);
     assert.deepEqual(review.changes.map(c => c.type).sort(), ['create','delete','update']);
-    await files.write.writeFile(pathJoin(files.root, '.rsi/members/replacement/prompts/member.md'), 'Pending after commit');
+    await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/prompts/member.md'), 'Pending after commit');
     await f.team.activateConfiguration(f.workspaceId, review.revision, review.digest);
-    const replacement = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
+    const replacement = (await f.team.service.byName(f.workspaceId, 'Replacement'))!;
     const marker = await store.team.getMemberActivation(f.workspaceId);
     assert.equal(marker!.revision, review.revision);
     const reopenedStore = new CoreData(new MySqlStorage(databaseUrl!));
@@ -2247,7 +2247,7 @@ test('continuous member context survives failure, success and runtime restart wi
     const before = await store.agents.getContext(f.backend.memberId);
     assert.match(JSON.stringify(before.entries),/Useful private work/);
     assert.equal(JSON.stringify(before.entries).split('Accepted public result').length-1,1,'own accepted answer appears once');
-    assert.match(JSON.stringify(before.entries),/Sender: Backend/);
+    assert.match(JSON.stringify(before.entries),/sender: Backend/);
     await f.runtime.close();
     restarted = new AgentRuntime(store.agents, f.team.runConfig, f.team.policy(configuredPolicy()), request => {
       const events = new Queue<AssistantMessageEvent>(); f.requests.push({request,events}); return events;
@@ -2376,7 +2376,7 @@ test('legacy adoption restores recorded work once without rewriting stable histo
       const adopted=await reopened.agents.getContext(f.backend.memberId);
       assert.match(JSON.stringify(adopted.entries),/Durable legacy result/);
       assert.equal(JSON.stringify(adopted.entries).split('Durable legacy result').length-1,1);
-      assert.match(JSON.stringify(adopted.entries),/Sender: Backend/);
+      assert.match(JSON.stringify(adopted.entries),/sender: Backend/);
       assert.deepEqual(await reopened.agents.runMessages(f.backend.memberId,accepted.runs[0]!.runId),history);
       await reopened.pool.query('ALTER TABLE agents ALTER COLUMN context_format SET DEFAULT 0');
       await reopened.migrate();assert.deepEqual(await reopened.agents.getContext(f.backend.memberId),adopted,'migration is idempotent');
@@ -2472,7 +2472,7 @@ test('finishing compaction persists a private trace and atomically replaces cont
     assert.equal(history.at(-1)!.message.role==='assistant'&&history.at(-1)!.position>terminal.endPosition!,true,'public range remains pinned before maintenance');
     const current=await store.agents.getContext(f.backend.memberId);
     assert.match(JSON.stringify(current.entries),/Preserved private continuation/);
-    assert.match(JSON.stringify(current.entries),/Sender: Backend|shared objective/,'original group messages remain');
+    assert.match(JSON.stringify(current.entries),/sender: Backend|shared objective/,'original group messages remain');
     assert.doesNotMatch(JSON.stringify(current.entries),/Checkpoint: after-run/);
     const continuation=current.entries.find(record=>record.metadata.contextUsageInvalidated)!.message;
     assert.equal(continuation.role==='assistant'&&continuation.usage.totalTokens,0);
@@ -2782,7 +2782,7 @@ test('Team reuses one Pi group-context load across publications, members and run
     const shared = await store.team.readGroupContext(f.workspaceId, 0);
     assert.equal(loads, 1); assert.equal(shared.length, 4);
     assert.deepEqual(shared.map(item => item.entry.message.role), ['user', 'user', 'user', 'user']);
-    assert.match(JSON.stringify(shared), /Sender: Lead/); assert.match(JSON.stringify(shared), /Sender: User/);
+    assert.match(JSON.stringify(shared), /sender: Lead/); assert.match(JSON.stringify(shared), /sender: user/);
     assert.doesNotMatch(JSON.stringify(shared), /private-encrypted-thinking/);
     assert.ok(shared[1]!.origin); assert.equal(shared[1]!.entry.metadata.finalRef !== undefined, true);
     const copy = structuredClone(shared); shared[0]!.entry.message.content = 'forged';
@@ -2922,7 +2922,7 @@ test('adoption imports preserved context and fresh lead atomically after reviewe
     assert.equal(members[0]!.value.name,'Lead');
     assert.deepEqual(members[0]!.value.harness.designScope,{working:['metadata.json'],dependencies:[]});
     assert.equal((await store.agents.getState(members[0]!.id)).historyPosition,0);
-    assert.deepEqual(await readdir(join(root,'members')),[members[0]!.id]);
+    assert.deepEqual(await readdir(join(root,'members')),[members[0]!.value.name]);
     const activation=await store.team.getMemberActivation(created.workspaceId);
     assert.equal(activation?.revision,members[0]!.value.configuration?.acceptedRevision);
     const baseline=await store.workspaces.getGitBaseline(created.workspaceId);
@@ -2981,7 +2981,7 @@ test('Group context inspection reads original public entries, handles publicatio
     const original = (await store.team.readGroupContext(f.workspaceId, 0)).map(item => item.entry);
     assert.deepEqual([...first.entries, ...second.entries], original);
     assert.doesNotMatch(JSON.stringify(original), /private-signature/);
-    assert.match(JSON.stringify(second.entries), /Sender: Lead/);
+    assert.match(JSON.stringify(second.entries), /sender: Lead/);
     assert.ok(second.entries[0]!.metadata.finalRef);
     const memberContext = await f.runtime.inspectContext(f.lead.memberId);
     assert.match(JSON.stringify(memberContext), /private-signature/);
@@ -3082,4 +3082,63 @@ test('summary migration retires semantic metadata and preserves original group s
     const [columns]=await storage.pool.query<any[]>('SHOW COLUMNS FROM chat_settings');assert.ok(columns.some(row=>row.Field==='context_revision'));assert.ok(!columns.some(row=>row.Field.startsWith('semantic_')));
     await data.team.migrate();assert.deepEqual((await data.team.inspectGroupContext(workspace.workspaceId,{limit:100})).entries,page.entries,'migration is idempotent');
   }finally{await workspaceService.close();await data.close();await store.pool.query(`DROP DATABASE ${database}`);await rm(directory,{recursive:true,force:true});}
+});
+
+test('group envelope migration preserves stable records and identities, refreshes private attribution once and survives reload', {timeout:30000}, async()=>{
+  const f=await groupFixture();
+  try {
+    const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend review the current design');
+    const step=await f.requests.next();
+    answer(step.events, fauxAssistantMessage([{type:'thinking',thinking:'',thinkingSignature:'opaque-thinking'},{type:'text',text:'Completed review.',textSignature:'signed-answer'}]));
+    await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
+    for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+    const shared=await store.team.readGroupContext(f.workspaceId,0), original=shared.map(item=>item.entry);
+    const history=await store.team.chatSnapshot(f.workspaceId), privateHistory=await store.agents.runMessages(f.backend.memberId,accepted.runs[0]!.runId);
+    const context=await store.agents.getContext(f.backend.memberId);
+    const oldHeader=(entry:any)=>{
+      const m=entry.metadata,a=m.author;
+      return `[Group message ${m.groupPosition}]\n${a.type==='user'?'Sender: User [user]':`Sender: ${a.name} [member: ${a.memberId}]`}\n${m.recipients.length?`[Mentioned members: ${m.recipients.join(', ')}]\n`:''}`;
+    };
+    const prefix=(content:any)=>typeof content==='string'?content:content[0].text;
+    const body=(content:any)=>prefix(content).slice(prefix(content).indexOf('</metadata>\n\n')+'</metadata>\n\n'.length);
+    const oldById=new Map<string,any>();
+    for(const entry of original){
+      const old=structuredClone(entry);old.message.content=oldHeader(entry)+body(entry.message.content);delete old.metadata.recipientNames;oldById.set(entry.messageId,old);
+      await store.pool.execute('UPDATE chat_context_entries SET entry = ? WHERE workspace_id = ? AND id = ?',[encode(old),f.workspaceId,old.messageId]);
+    }
+    const updates=context.entries.flatMap(entry=>{
+      const source=oldById.get(entry.metadata.groupMessageId as string);if(!source)return [];
+      const old=structuredClone(entry);
+      if(old.message.role==='user'){old.message=source.message;delete old.metadata.recipientNames;}
+      else if(old.message.role==='assistant'){const first=old.message.content.find(part=>part.type!=='thinking');if(first?.type==='text')first.text=oldHeader(source);}
+      return [old];
+    });
+    await store.agents.patchContext(f.backend.memberId,context.revision,{append:[],update:updates});
+    await store.pool.execute('UPDATE chat_settings SET context_format = 1 WHERE workspace_id = ?',[f.workspaceId]);
+    store.team.close();
+    await store.team.migrateGroupContext();
+    const migrated=await store.team.inspectGroupContext(f.workspaceId);
+    assert.deepEqual(migrated.entries,original);assert.equal(migrated.revision,original.length+1);
+    assert.deepEqual(await store.team.chatSnapshot(f.workspaceId),history,'stable group history is immutable');
+    assert.deepEqual(await store.agents.runMessages(f.backend.memberId,accepted.runs[0]!.runId),privateHistory,'stable signed history is immutable');
+    const refreshed=await store.agents.getContext(f.backend.memberId);
+    assert.deepEqual(refreshed.entries,context.entries,'only generated private attribution changes');
+    await store.team.migrateGroupContext();
+    assert.deepEqual(await store.agents.getContext(f.backend.memberId),refreshed,'second startup writes nothing');
+    const {dirname}=await import('node:path'),{rename}=await import('node:fs/promises');
+    const root=(await f.team.harness.environment(f.lead.memberId)).root;
+    const stored=(await store.team.getMember(f.backend.memberId))!,source=stored.value.configuration!,legacy=`.rsi/members/${stored.id}/member.json`;
+    await rename(join(root,dirname(source.path)),join(root,dirname(legacy)));
+    await store.team.updateMember(stored.id,stored.revision,stored.value.name.toLowerCase(),{...stored.value,configuration:{...source,path:legacy}});
+    await initGit({...f,directory:root});await gitText(root,['add','-f','-A','--','.rsi/members']);await gitText(root,['commit','-m','Legacy paths']);
+    await writeFile(join(root,dirname(legacy),'prompts/member.md'),'Unaccepted prompt');
+    await f.team.initialize();
+    const member=(await store.team.getMember(stored.id))!;
+    assert.equal(member.value.configuration!.path,source.path);assert.deepEqual(member.value.configuration!.legacyPaths,[legacy]);
+    assert.equal(await readFile(join(root,dirname(source.path),'prompts/member.md'),'utf8'),'Unaccepted prompt');
+    assert.deepEqual((await f.team.reviewConfiguration(f.workspaceId)).changes,[],'old committed paths resolve to the same members');
+    const reopened=new CoreData(new MySqlStorage(databaseUrl!));
+    try{assert.deepEqual((await reopened.team.inspectGroupContext(f.workspaceId)).entries,original);assert.deepEqual(await reopened.agents.getContext(f.backend.memberId),refreshed);assert.deepEqual(await reopened.team.getMember(stored.id),member);}
+    finally{await reopened.close();}
+  }finally{await f.close();}
 });

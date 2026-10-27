@@ -88,7 +88,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     const messages = this.chatMessages.get(input.workspaceId) ?? [];
     const { images, ...publication } = input;
     for (const image of images ?? []) this.chatImages.set(`${input.workspaceId}:${image.metadata.id}`, image);
-    const message: ChatMessage = { ...publication, ...(images?.length ? { attachments: images.map(image => image.metadata) } : {}), exchangeId, messageId: randomUUID(), position: (messages.at(-1)?.position ?? this.resets.get(input.workspaceId)?.resetPosition ?? 0) + 1, time: Date.now() };
+    const message: ChatMessage = { ...publication, recipientNames: input.recipients.map(id => this.members.get(id)!.member.value.name), ...(images?.length ? { attachments: images.map(image => image.metadata) } : {}), exchangeId, messageId: randomUUID(), position: (messages.at(-1)?.position ?? this.resets.get(input.workspaceId)?.resetPosition ?? 0) + 1, time: Date.now() };
     messages.push(structuredClone(message)); this.chatMessages.set(input.workspaceId, messages);
     exchange.used += input.recipients.length; this.exchanges.set(exchangeId, exchange);
     const entries: TimelineEntry[] = [];
@@ -200,7 +200,7 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
       if (entry && entry.member.value.settings.connectionId === null && entry.member.value.settings.modelId === null) {
         const defaults = defaultRunSettings(value), member = entry.member;
         const updated = { ...member.value, settings: { ...member.value.settings, connectionId: defaults.connectionId, modelId: defaults.modelId, modelOptions: defaults.modelOptions } };
-        updated.configuration = generatedSource(updated, member.id);
+        updated.configuration = generatedSource(updated);
         if (member.value.configuration) updated.configuration.path = member.value.configuration.path;
         entry.member = { ...member, revision: member.revision + 1, value: updated };
       }

@@ -7,6 +7,7 @@ import { finalAnswer, textPhase } from '../agent/final-answer.js';
 import type { ChatStore } from './data/group-chat.js';
 import { AppError } from '../agent/data/model.js';
 import type { ConfigService } from './data/config.js';
+import { currentMemberPaths } from './data/member-config.js';
 import { MemberConfigService } from './member-config.js';
 import { DesignService } from '../workspace/design.js';
 import { HarnessService, resolveHarness } from '../harness/harness.js';
@@ -222,7 +223,7 @@ export class TeamSystem {
       const scopes = await this.harness.changes(lead.id), active = await this.service.activation(workspaceId);
       const committed = await this.harness.controlFiles(lead.id,'committed','.rsi/members');
       const activeFiles:Record<string,string>={};for(const member of await this.service.active(workspaceId))if(member.value.configuration)for(const [path,text]of Object.entries(member.value.configuration.files))activeFiles[`${member.value.configuration.path.slice(0,-'member.json'.length)}${path}`]=text;
-      return { workspaceId, leadId: lead.id, ...scopes, activation: { revision: scopes.members.base, activeRevision: active?.revision ?? null, hasChanges: filesRevision(committed.files) !== filesRevision(activeFiles) } };
+      return { workspaceId, leadId: lead.id, ...scopes, activation: { revision: scopes.members.base, activeRevision: active?.revision ?? null, hasChanges: filesRevision(currentMemberPaths(committed.files, (await this.service.active(workspaceId)).map(member => member.value.configuration!))) !== filesRevision(activeFiles) } };
     });
   }
   private status(member: MemberView): MemberStatus {

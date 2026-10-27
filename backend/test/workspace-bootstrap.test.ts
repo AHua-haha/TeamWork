@@ -12,7 +12,7 @@ test('new workspace has a ready root-design lead, exact active files and clean b
   assert.deepEqual(lead.harness.implementationScope,{paths:[],usePaths:[]}); assert.deepEqual(lead.harness.allowedCommands,[]);
   assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.map(d=>d.path),['metadata.json']);
   const source = await f.team.configuration.accepted(f.workspaceId,lead.memberId);
-  for (const [path, content] of Object.entries(source.files)) assert.equal(await readFile(join(f.directory,'.rsi/members',lead.memberId,path),'utf8'),content);
+  for (const [path, content] of Object.entries(source.files)) assert.equal(await readFile(join(f.directory,'.rsi/members',lead.name,path),'utf8'),content);
   assert.deepEqual((await readdir(join(f.directory,'.rsi'))).sort(),['context','members']);
   const view = await f.team.currentConfiguration(f.workspaceId);
   assert.equal(view.status.valid,true); assert.equal(view.status.hasPending,false); assert.equal(view.status.commits.length,0);
@@ -23,7 +23,7 @@ test('new workspace has a ready root-design lead, exact active files and clean b
   await assert.rejects(files.read.readFile(join(files.root,'.rsi/harness/objects')),code('not_found'));
   assert.equal((await f.workspaces.files(f.workspaceId)).constructor.name,'ProjectFiles');
   assert.ok(!(await (await f.workspaces.files(f.workspaceId)).tree('',1)).entries.some(entry=>entry.path==='.rsi'));
-  await files.write.writeFile(join(files.root,'.rsi/members',lead.memberId,'prompts/member.md'),'Pending after bootstrap');
+  await files.write.writeFile(join(files.root,'.rsi/members',lead.name,'prompts/member.md'),'Pending after bootstrap');
   const reopened = new TeamSystem(f.store,f.workspaces,stubConfig); reopened.attach(f.runtime);
   try {
     await reopened.initialize();

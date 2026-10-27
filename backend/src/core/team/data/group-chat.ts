@@ -12,7 +12,7 @@ export const defaultMentionLimit = 32;
 export type ChatAuthor = { type: 'user' } | { type: 'member'; memberId: string; name: string; runId: string };
 export interface ChatMessage {
   workspaceId: string; messageId: string; position: number; exchangeId: string;
-  author: ChatAuthor; text: string; attachments?: ChatImage[]; recipients: string[]; time: number;
+  author: ChatAuthor; text: string; attachments?: ChatImage[]; recipients: string[]; recipientNames?: string[]; time: number;
 }
 export interface GroupContextEntry { messageId: string; message: Message; metadata: JsonObject }
 export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; /** UTF-16 offset in the joined selected text; backend-owned. */ bodyOffset?: number; /** Historical accepted response-tool records only. */ toolCallId?: string }
@@ -116,16 +116,23 @@ export function userMentions(text: string): string[] {
   return [...result.values()];
 }
 
-export function groupSender(message: Pick<ChatMessage, 'author'>): string {
-  return message.author.type === 'user' ? 'Sender: User [user]' : `Sender: ${message.author.name} [member: ${message.author.memberId}]`;
+/** Plain text inside one delimiter; IDs and ordering never enter model-visible content. */
+export function groupEnvelope(sender: string, mentions: readonly string[] = []): string {
+  if (!sender || /[\r\n<>]/.test(sender) || mentions.some(name => !name || /[\r\n<>]/.test(name))) throw new AppError('invalid_data', 'Invalid group sender or mention name');
+  return `<metadata>\nsender: ${sender}\n${mentions.length ? `mentions: ${mentions.join(', ')}\n` : ''}</metadata>\n\n`;
+}
+export function groupSender(message: Pick<ChatMessage, 'author' | 'recipients' | 'recipientNames'>): string {
+  if (message.recipients.length !== (message.recipientNames?.length ?? 0)) throw new AppError('invalid_data', 'Group mentions require authoritative member names');
+  if (message.recipientNames !== undefined && (!Array.isArray(message.recipientNames) || message.recipientNames.some(name => typeof name !== 'string'))) throw new AppError('invalid_data', 'Invalid group mention names');
+  return groupEnvelope(message.author.type === 'user' ? 'user' : message.author.name, message.recipientNames);
 }
 
 export function groupEntry(message: ChatMessage, images: ImageContent[] = [], finalRef?: FinalReference): GroupContextEntry {
-  const text = `[Group message ${message.position}]\n${groupSender(message)}\n${message.recipients.length ? `[Mentioned members: ${message.recipients.join(', ')}]\n` : ''}${message.text}`;
+  const text = groupSender(message) + message.text;
   return {
     messageId: message.messageId,
     message: { role: 'user', content: images.length ? [{ type: 'text', text }, ...images.map(image => ({...image}))] : text, timestamp: message.time },
-    metadata: { source: 'group-chat', workspaceId: message.workspaceId, groupPosition: message.position, exchangeId: message.exchangeId, author: {...message.author}, recipients: [...message.recipients],
+    metadata: { source: 'group-chat', workspaceId: message.workspaceId, groupPosition: message.position, exchangeId: message.exchangeId, author: {...message.author}, recipients: [...message.recipients], recipientNames: [...(message.recipientNames ?? [])],
       ...(message.attachments ? {attachments: message.attachments.map(image => ({...image}))} : {}), ...(finalRef ? {finalRef: {...structuredClone(finalRef)}} : {}) },
   };
 }
@@ -144,12 +151,12 @@ export function validateGroupContextEntry(value: unknown): asserts value is Grou
   const metadata = entry.metadata;
   const text = typeof entry.message.content === 'string' ? entry.message.content : entry.message.content[0]?.type === 'text' ? entry.message.content[0].text : '';
   const record = {workspaceId: metadata.workspaceId, messageId: entry.messageId, position: metadata.groupPosition,
-    exchangeId: metadata.exchangeId, author: metadata.author, recipients: metadata.recipients, time: entry.message.timestamp,
+    exchangeId: metadata.exchangeId, author: metadata.author, recipients: metadata.recipients, recipientNames: metadata.recipientNames, time: entry.message.timestamp,
     text, ...(metadata.attachments ? {attachments: metadata.attachments} : {})} as unknown as ChatMessage;
   identity(record.workspaceId); identity(record.exchangeId); position(record.position);
   if (!record.position || !Number.isSafeInteger(record.time) || record.time < 0) throw new AppError('corrupt_data', 'Invalid group position or time', 500);
   validateRouting(record.author, record.recipients);
-  const prefix = `[Group message ${record.position}]\n${groupSender(record)}\n${record.recipients.length ? `[Mentioned members: ${record.recipients.join(', ')}]\n` : ''}`;
+  const prefix = groupSender(record);
   if (!text.startsWith(prefix)) throw new AppError('corrupt_data', 'Group sender content differs from authoritative metadata', 500);
   chatText(text.slice(prefix.length), record.attachments);
   const images = typeof entry.message.content === 'string' ? [] : entry.message.content.filter(block => block.type === 'image');
@@ -163,11 +170,33 @@ export function validateGroupContextEntry(value: unknown): asserts value is Grou
   }
 }
 
+/** One-time conversion uses authoritative metadata and preserves the exact original body/images. */
+export function migrateGroupEnvelope(entry: GroupContextEntry, names: ReadonlyMap<string, string>): GroupContextEntry {
+  const copy = structuredClone(entry), metadata = copy.metadata;
+  const author = metadata.author as unknown as ChatAuthor, recipients = metadata.recipients as string[];
+  validateRouting(author, recipients);
+  const oldSender = author.type === 'user' ? 'Sender: User [user]' : `Sender: ${author.name} [member: ${author.memberId}]`;
+  const oldPrefix = `[Group message ${metadata.groupPosition}]\n${oldSender}\n${recipients.length ? `[Mentioned members: ${recipients.join(', ')}]\n` : ''}`;
+  const text = typeof copy.message.content === 'string' ? copy.message.content : copy.message.content[0]?.type === 'text' ? copy.message.content[0].text : '';
+  if (!text.startsWith(oldPrefix)) throw new AppError('corrupt_data', 'Legacy group envelope differs from authoritative metadata', 500);
+  const recipientNames = recipients.map(id => {
+    const name = names.get(id);
+    if (!name) throw new AppError('corrupt_data', 'Legacy group recipient is unavailable', 500);
+    return name;
+  });
+  metadata.recipientNames = recipientNames;
+  const content = groupSender({author, recipients, recipientNames}) + text.slice(oldPrefix.length);
+  if (typeof copy.message.content === 'string') copy.message.content = content;
+  else if (copy.message.content[0]?.type === 'text') copy.message.content[0].text = content;
+  validateGroupContextEntry(copy);
+  return copy;
+}
+
 /** The Agent port is a detached projection of Team-owned Pi messages, not reconstructed text. */
 export function groupContextMessage(entry: GroupContextEntry): GroupContextMessage {
-  if (entry.metadata.source === 'group-summary') return { position: Number(entry.metadata.groupPosition), entry, sender: 'Sender: Team shared context [system]' };
+  if (entry.metadata.source === 'group-summary') return { position: Number(entry.metadata.groupPosition), entry, sender: groupEnvelope('system') };
   const author = entry.metadata.author as unknown as ChatAuthor;
   const ref = entry.metadata.finalRef as unknown as FinalReference | undefined;
-  return {position: Number(entry.metadata.groupPosition), sender: groupSender({author}), entry,
+  return {position: Number(entry.metadata.groupPosition), sender: groupSender({author, recipients: entry.metadata.recipients as string[], recipientNames: entry.metadata.recipientNames as string[]}), entry,
     ...(ref ? {origin: {agentId: ref.agentId, messageId: ref.messageId}} : {})};
 }

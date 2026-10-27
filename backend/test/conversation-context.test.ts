@@ -38,7 +38,7 @@ test('Agent selects incoming shared messages using its own context, preserving c
   const next = await new AgentMessageContext('member',{revision:1,entries:[...first!,working]}).incoming(reference);
   assert.deepEqual(reads,[1]);
   assert.deepEqual(next!.map(e => e.messageId),['g1','Private-result','g2']);
-  assert.match(JSON.stringify(next![0]!.message), /Sender: User/);
+  assert.match(JSON.stringify(next![0]!.message), /sender: user/);
   assert.equal(await new AgentMessageContext('member',{revision:2,entries:next!}).incoming(reference),undefined);
   assert.deepEqual(reads,[1,2]);
 });
@@ -50,7 +50,7 @@ test('own accepted final retains signed original blocks and adds attribution/pro
   const reference = {id:'workspace',read:async (after: number) => after ? [] : [shared]};
   const entries = await new AgentMessageContext('lead',{revision:0,entries:[original]}).incoming(reference);
   assert.equal(entries!.length,1);
-  assert.match(JSON.stringify(entries![0]!.message),/Sender: Lead/);
+  assert.match(JSON.stringify(entries![0]!.message),/sender: Lead/);
   assert.deepEqual((entries![0]!.message.content as unknown[])[0],(copy.message.content as unknown[])[0], 'thinking remains first and signed');
   assert.deepEqual((entries![0]!.message.content as unknown[]).at(-1),(copy.message.content as unknown[]).at(-1));
   assert.deepEqual(original,copy,'history/source values are untouched');
@@ -89,4 +89,23 @@ test('legacy adoption regenerates context-only interrupted results once in the c
   const adopted=adoptRecordedContext('member','workspace',existing,[call,later],[]);
   assert.equal(adopted.filter(entry=>entry.message.role==='toolResult').length,1);
   assert.deepEqual(adopted.map(entry=>entry.message.role),['assistant','toolResult','user']);
+});
+
+test('attribution migration updates mutable group context without changing signed thinking or answer blocks', async () => {
+  const {sharedAttributionUpdates} = await import('../src/core/agent/data/context.js');
+  const own = group(1,'Done',{agentId:'lead',messageId:'final'}), incoming = group(2,'New input');
+  const entries:ContextEntry[] = [
+    {messageId:'final',message:fauxAssistantMessage([{type:'thinking',thinking:'',thinkingSignature:'opaque'},{type:'text',text:'[Group message 1]\nSender: Lead [member: lead]\n'},{type:'text',text:'Done',textSignature:'signed-answer'}]),metadata:{groupContextId:'workspace',groupMessageId:own.entry.messageId,groupPosition:1}},
+    {...structuredClone(incoming.entry),message:{role:'user',content:'[Group message 2]\nSender: User [user]\nNew input',timestamp:2},metadata:{...incoming.entry.metadata,groupContextId:'workspace',groupMessageId:incoming.entry.messageId,groupPosition:2}},
+  ];
+  const before=structuredClone(entries),updates=sharedAttributionUpdates(entries,'workspace',[own,incoming]);
+  assert.equal(updates.length,2);assert.deepEqual(entries,before,'source stays immutable');
+  const assistant=updates[0]!.message;assert.equal(assistant.role,'assistant');
+  if(assistant.role==='assistant'&&before[0]!.message.role==='assistant'){
+    assert.deepEqual(assistant.content[0],before[0]!.message.content[0]);
+    assert.deepEqual(assistant.content[2],before[0]!.message.content[2]);
+    assert.equal(assistant.content[1]!.type,'text');assert.match(JSON.stringify(assistant.content[1]),/sender: Lead/);
+  }
+  assert.equal(updates[1]!.message.content,incoming.entry.message.content);
+  assert.deepEqual(sharedAttributionUpdates(updates,'workspace',[own,incoming]),[]);
 });

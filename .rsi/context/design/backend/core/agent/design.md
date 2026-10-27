@@ -41,7 +41,7 @@ Do not aggregate all shared messages into a new prefix at each activation. Reorg
 
 ### Sender and source identity
 
-Each incorporated group message carries its stable shared identity, ordering and structured sender/mention data. Its model-visible text explicitly names the sender, including a stable sender identifier when available. Preserve Team's representation; do not infer the sender from the model protocol role. User messages and messages from different members can share a provider role without losing their actual authorship.
+Each incorporated group message carries its stable shared identity, ordering and structured sender/mention data. Its model-visible text preserves Team’s plain-text `<metadata>` envelope with the unified sender and mention names; do not add message indices or internal IDs to content. Preserve Team's representation; do not infer the sender from the model protocol role. User messages and messages from different members can share a provider role without losing their actual authorship.
 
 Preserve native image blocks and their order. Add sender text without generating an image description or converting image content into text. Private tool messages retain their protocol roles and call identifiers; sender decoration must not break tool-call/result pairing.
 
@@ -105,6 +105,6 @@ Inspection is detached and read-only. It works while idle or running and does no
 2. The same example ending in failure still retains recorded W1. Run status does not select a different context-retention policy.
 3. G3 arrives during work on G2. It is incorporated after that work finishes, once, without interrupting a pending tool interaction or automatically starting a new run.
 4. Backend restart restores both the assembled context and Agent's consumption state. G1 and G2 are not reinserted and recorded tool effects are not replayed.
-5. A member sees `Sender: Lead [member: <stable-id>]` in the group message content, not only in hidden metadata, even when the model protocol encodes it as a user-role input.
+5. A member sees `sender: Lead` inside one plain-text `<metadata>` area in the group message content, not only in hidden metadata, even when the model protocol encodes it as a user-role input.
 6. Below the configured threshold, run boundaries preserve the interleaved context. Above it, private preparation retains the complete new trace, reads the shared group summary/tail at cutover, and never publishes a preparation answer.
 7. During compaction, read the shared summary/tail through the Agent-owned consumed boundary. If the latest summary covers future positions, retain archived original messages for this checkpoint instead.

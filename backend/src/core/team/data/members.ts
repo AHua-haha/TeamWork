@@ -4,7 +4,7 @@ import type { DesignService } from '../../workspace/design.js';
 import { emptyHarness, harnessConfig, type HarnessConfig, type EffectiveHarnessConfig } from '../../harness/data/config.js';
 import { resolveHarness } from '../../harness/harness.js';
 import { AppError } from '../../agent/data/model.js';
-import { generatedSource, migrateMemberSource, type MemberConfigSource } from './member-config.js';
+import { generatedSource, migrateMemberSource, relocateMemberSource, type MemberConfigSource } from './member-config.js';
 import type { RunConfigSource } from './config.js';
 import type { WorkspaceService } from '../../workspace/workspace.js';
 import { defaultRunSettings } from '../../workspace/data/models.js';
@@ -74,7 +74,7 @@ export function newLead(workspaceId: string, settings: RunSettings = emptyRunSet
   const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: { ...emptyHarness(), designScope: { working, dependencies: [] } }, settings };
   return {
     id, workspaceId, lead: true, nameKey: 'lead',
-    value: { workspaceId, ...fields, configuration: generatedSource(fields, id), lead: true, createdAt: Date.now(), retiredAt: null },
+    value: { workspaceId, ...fields, configuration: generatedSource(fields), lead: true, createdAt: Date.now(), retiredAt: null },
   };
 }
 
@@ -129,7 +129,9 @@ export class TeamService {
         const { implementationScope: legacyPaths, ...assignment } = data.harness ?? emptyHarness();
         const harness = harnessConfig({ ...emptyHarness(), ...assignment });
         const member = { ...data, harness } as MemberRecord;
-        const converted = data.configuration ? migrateMemberSource(data.configuration, harness.allowedCommands) : generatedSource(member, raw.id);
+        let converted = data.configuration ? migrateMemberSource(data.configuration, harness.allowedCommands) : generatedSource(member);
+        const relocated = await relocateMemberSource((await this.workspaces.record(workspace.workspaceId)).directory, converted ?? member.configuration!, memberName(member.name));
+        converted = relocated ?? converted;
         if (legacyPaths !== undefined || data.scope !== undefined || converted) {
           const { scope: _legacyScope, ...value } = member as MemberRecord & { scope?: unknown };
           await this.store.updateMember(raw.id, raw.revision, value.name.toLowerCase(), { ...value, configuration: converted ?? member.configuration });
@@ -227,8 +229,8 @@ export class TeamService {
   async update(workspaceId: string, memberId: string, revision: number, value: unknown, source?: MemberConfigSource): Promise<MemberView> {
     const current = await this.member(workspaceId, memberId);
     const fields = memberFields(value);
-    const generated = generatedSource(fields, memberId);
-    if (current.value.configuration) generated.path = current.value.configuration.path;
+    const generated = generatedSource(fields);
+    if (current.value.configuration) { generated.path = current.value.configuration.path; generated.legacyPaths = current.value.configuration.legacyPaths; }
     const next: MemberRecord = { ...current.value, ...fields, configuration: source ?? generated };
     const changedScope = JSON.stringify(fields.harness) !== JSON.stringify(current.value.harness);
     return this.view(await this.store.updateMember(memberId, revision, nameKey(fields.name), next, Boolean(source) || changedScope));
@@ -272,7 +274,7 @@ export class TeamService {
 
   private async insert(workspaceId: string, fields: MemberFields, source?: MemberConfigSource): Promise<StoredMember> {
     const id = randomUUID();
-    return this.store.createMember({ id, workspaceId, lead: false, nameKey: nameKey(fields.name), value: { ...fields, configuration: source ?? generatedSource(fields, id), workspaceId, lead: false, createdAt: Date.now(), retiredAt: null } });
+    return this.store.createMember({ id, workspaceId, lead: false, nameKey: nameKey(fields.name), value: { ...fields, configuration: source ?? generatedSource(fields), workspaceId, lead: false, createdAt: Date.now(), retiredAt: null } });
   }
 
   private async view(member: StoredMember): Promise<MemberView> {

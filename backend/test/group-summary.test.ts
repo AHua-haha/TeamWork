@@ -32,6 +32,7 @@ test('shared full reads replace the prefix, preserve the pinned tail and preserv
   model.apply({summary: acceptedSummary(source)});
   assert.equal(model.read(0).length, 31);
   assert.equal(model.read(0)[0]!.metadata.source, 'group-summary');
+  assert.equal(model.read(0)[0]!.message.content, '<metadata>\nsender: system\n</metadata>\n\n' + acceptedSummary(source).text);
   assert.deepEqual(model.read(0).slice(1), tail);
   const all = summaryMessages(45);
   for (const item of all.slice(40)) model.apply({append: item.entry, before: item.position-1});

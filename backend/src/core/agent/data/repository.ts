@@ -2,7 +2,7 @@ import { contextPageInput, checkContextPage, type ContextPageInput, type Context
 import type { AgentRecord, AgentExecutionState } from './model.js';
 import { validateEntries, validateRun } from './validation.js';
 import { interruptedCompactionContext, validateCompactionState, type CompactionState } from './compaction.js';
-import { adoptRecordedContext } from './context.js';
+import { adoptRecordedContext, sharedAttributionUpdates, type GroupContextMessage } from './context.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import type { MySqlStorage } from '../../../storage/mysql.js';
@@ -151,6 +151,16 @@ export class AgentData {
     }
     async getContext(agentId: string): Promise<ContextHistory> {
         return this.transaction(async db => this.contextRows(db, await this.agent(db, agentId)));
+    }
+    /** Startup-only attribution migration; update changed rows without touching stable history. */
+    async refreshSharedAttribution(agentId: string, groupId: string, groups: readonly GroupContextMessage[]): Promise<void> {
+        await this.transaction(async db => {
+            const agent = await this.agent(db, agentId, true);
+            if (agent.contextFormat !== 1) return; // Legacy adoption below uses the current shared envelopes.
+            const context = await this.contextRows(db, agent);
+            const update = sharedAttributionUpdates(context.entries, groupId, groups);
+            if (update.length) await this.inTransaction(db).patchContext(agentId, context.revision, {append: [], update});
+        });
     }
     /** Detached, bounded SQL read; no runtime lease, resident context, repair or synchronization. */
     async inspectContext(agentId: string, options: ContextPageInput = {}): Promise<ContextPage<ContextEntry>> {

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { GroupContextMessage } from '../../agent/data/context.js';
 import { AppError, identity } from '../../agent/data/model.js';
-import type { GroupContextEntry } from './group-chat.js';
+import { groupEnvelope, type GroupContextEntry } from './group-chat.js';
 
 export const groupSummaryTokenThreshold = 32_000;
 export const retainedGroupMessages = 30;
@@ -50,7 +50,7 @@ export function prepareGroupSummary(messages: GroupContextMessage[], resetPositi
 
 export function groupSummaryEntry(workspaceId: string, summary: GroupSummary): GroupContextEntry {
   return { messageId: summary.messageId, message: { role: 'user', timestamp: summary.time,
-    content: `[Shared group context summary ${summary.from}-${summary.through}]\nSender: Team shared context [system]\n${summary.text}` },
+    content: groupEnvelope('system') + summary.text },
     metadata: { source: 'group-summary', workspaceId, groupPosition: summary.through, summaryRevision: summary.revision,
       summaryFrom: summary.from, summaryThrough: summary.through, analyzedThrough: summary.analyzedThrough, author: { type: 'system', name: 'Team shared context' } } };
 }

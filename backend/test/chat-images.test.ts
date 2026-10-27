@@ -20,7 +20,7 @@ test('Pi public preparation decodes and resizes pictures and native blocks conta
   const content = imageContent(image);
   assert.equal(content.type, 'image'); assert.deepEqual(Buffer.from(content.data, 'base64'), image.bytes);
   assert.equal(chatText('', [image.metadata]), '');
-  const entry = groupEntry({ workspaceId: 'w', messageId: 'm', position: 1, exchangeId: 'e', author: { type: 'user' }, text: '', attachments: [image.metadata], recipients: ['lead'], time: 1 }, [content]);
+  const entry = groupEntry({ workspaceId: 'w', messageId: 'm', position: 1, exchangeId: 'e', author: { type: 'user' }, text: '', attachments: [image.metadata], recipients: ['lead'], recipientNames: ['Lead'], time: 1 }, [content]);
   assert.ok(Array.isArray(entry.message.content));
   assert.deepEqual(entry.message.content[1], content);
   assert.throws(() => chatText(''), /group message/);

@@ -37,7 +37,7 @@ test('startup generates a shared summary for existing eligible context with pinn
   const data=summaryFixture(f);let calls=0;
   Object.assign(f.runtime,{async runMaintenance(configuration:AgentConfiguration,entries:unknown[],signal:AbortSignal){
     assert.equal(this,f.runtime);assert.equal(signal.aborted,false);assert.equal(entries.length,10,'latest 30 are not passed to summarizer');
-    assert.equal(configuration.compaction,undefined);calls++;await data.submit(configuration);return terminal();
+    assert.equal(configuration.compaction,undefined);assert.match(configuration.systemPrompt??'',/messages 1 through 10/);calls++;await data.submit(configuration);return terminal();
   }});
   await f.team.startMaintenance();assert.equal(calls,1);assert.equal(data.saved?.through,10);assert.equal(data.saved?.analyzedThrough,40);
   assert.equal(f.runtime.runs.length,0);await f.team.startMaintenance();assert.equal(calls,1);
@@ -49,7 +49,7 @@ test('full maintenance Agent loop corrects schema and submission failures before
   let calls=0;
   const runtime=new AgentRuntime(ownership,{resolveForRun:async()=>data.config},fixedPolicy(data.config.model),async function*(request){
     calls++;
-    assert.equal(request.context.messages[0]?.role,'user');assert.doesNotMatch(JSON.stringify(request.context.messages),/\[Group message 11\]/);
+    assert.equal(request.context.messages[0]?.role,'user');assert.doesNotMatch(JSON.stringify(request.context.messages),/Message (?:1[1-9]|[23][0-9]|40):/);
     const args={summary:calls===1?'':calls===2?'   ':'Preserved project goals and decisions.'};
     if(calls===2||calls===3){const error=request.context.messages.filter(message=>message.role==='toolResult').at(-1);assert.ok(error&&error.role==='toolResult'&&error.isError);const before=data.saved;assert.equal(before,undefined);}
     if(calls===3)assert.match(JSON.stringify(request.context.messages.at(-1)),/nonempty summary text/);

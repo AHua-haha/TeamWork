@@ -12,17 +12,22 @@ Manage member inspection, file validation and user-triggered atomic idle activat
 
 ### Authoritative group context
 
-Maintain ordered accepted user messages and accepted member final responses. Records expose stable message identity/order, sender kind/identity/display name, mention recipients, text and any prepared image references/content. Preserve final-message origin references and existing shared response reservations. Pending, failed, cancelled or refused response slots do not become fabricated shared conversational messages.
+Maintain ordered accepted user messages and accepted member final responses. Records expose stable message identity/order, sender kind/internal identity/unified name, mention recipients, text and any prepared image references/content. Preserve final-message origin references and existing shared response reservations. Pending, failed, cancelled or refused response slots do not become fabricated shared conversational messages.
 
-Sender attribution is also part of the group message's model-visible content. Use one consistent representation for the shared context and its incorporation into member context. For example:
+Use one unified readable member name for the UI, mentions, sender attribution and `.rsi/members/<name>/`. Keep existing file-safe names (including supported spaces and case), unique ignoring case within a workspace; do not introduce a separate display name or slug. Internal UUIDs remain backend relationship keys, not model-visible labels. A manifest's name must match its directory name exactly. Existing active member directories migrate without changing member identities, prompt contents, pending edits or history. Preserve backend-only legacy path aliases for reviewing commits made before relocation; never interpret a directory migration as retirement/recreation. Do not automatically commit filesystem changes or overwrite a conflicting destination.
+
+The backend prefixes each original group's model-visible text with a single plain-text metadata area:
 
 ```text
-Sender: Lead [member: <stable-member-id>]
+<metadata>
+sender: backend
+mentions: frontend, shared
+</metadata>
 
 Please implement the agreed backend interface.
 ```
 
-The precise delimiter is an implementation detail; sender visibility and consistent attribution are required. Preserve structured sender/mention metadata for programmatic use. Render attribution from authoritative message authorship, not text written by another member. Native image blocks remain images. No semantic image description is generated.
+For user messages use `sender: user`. Omit the mentions line when empty. Sender and mention names come from authoritative accepted authorship/routing, never from body text. This is not strict XML and has no nested elements. Preserve the original body and native images. Message indices, UUIDs, exchange identifiers and other bookkeeping stay in structured metadata, not in content. Agent preserves the same envelope when attributing its own published answer without duplicating the answer body or altering signed thinking. Summarization receives covered message positions in its separate maintenance instructions, not per-message content. Its shared summary envelope also contains no position range. Migrate existing persisted group envelopes once while preserving IDs/order/authorship/images/final references and stable history.
 
 ### Incremental message data model
 

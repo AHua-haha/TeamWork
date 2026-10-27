@@ -24,7 +24,7 @@ const commit=(f:Fixture)=>acceptFiles(f);
 const activate = async (f: Fixture) => { const review = await commit(f); assert.equal(review.valid, true, JSON.stringify(review.issues)); return f.team.activateConfiguration(f.workspaceId, review.revision, review.digest); };
 
 test('file validation and user commit do not activate; separate activation consumes committed bytes only', () => withTeam(async f => {
-  await setup(f); const path = '.rsi/members/backend/member.json', value = manifest('Backend');
+  await setup(f); const path = '.rsi/members/Backend/member.json', value = manifest('Backend');
   const files = await draft(f, path, value, 'Accepted prompt');
   const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members');
   assert.equal(pending.valid, true, JSON.stringify(pending.issues)); assert.equal(pending.changes[0]!.type, 'create');
@@ -44,7 +44,7 @@ test('file validation and user commit do not activate; separate activation consu
 }));
 
 test('updates allow responsibility, prompt and execute rules while preserving identity, models and assignments', () => withTeam(async f => {
-  await setup(f); const path = '.rsi/members/backend/member.json'; await draft(f, path, manifest('Backend')); await activate(f);
+  await setup(f); const path = '.rsi/members/Backend/member.json'; await draft(f, path, manifest('Backend')); await activate(f);
   const before = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
   const original = JSON.parse(before.value.configuration!.files['member.json']!);
   await draft(f, path, { ...original, responsibility: 'New responsibility', execute: { allowedCommands: [{ kind: 'executable', executable: 'bash' }] } }, 'New prompt');
@@ -63,7 +63,7 @@ test('updates allow responsibility, prompt and execute rules while preserving id
 }));
 
 test('scoped Git deletion persists through materialization/restart and activation retires without erasing history', () => withTeam(async f => {
-  await setup(f); const path = '.rsi/members/backend/member.json'; await draft(f, path, manifest('Backend')); await activate(f);
+  await setup(f); const path = '.rsi/members/Backend/member.json'; await draft(f, path, manifest('Backend')); await activate(f);
   const member = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
   f.store.agentContexts.set(member.id, [{ messageId: 'retained', message: { role: 'user', content: 'History', timestamp: 0 }, metadata: {} }]);
   const deletion = await f.team.harness.bash(f.lead.memberId, { command: `git rm -r -- ${dirname(path)}` }, signal());
@@ -78,7 +78,7 @@ test('scoped Git deletion persists through materialization/restart and activatio
 }));
 
 test('malformed references, lead deletion, duplicate names and base-policy overrides refuse activation without changing active state', () => withTeam(async f => {
-  await setup(f); const path = '.rsi/members/backend/member.json', original = await f.team.service.team(f.workspaceId);
+  await setup(f); const path = '.rsi/members/Backend/member.json', original = await f.team.service.team(f.workspaceId);
   for (const change of [{ promptFiles: ['../escape.md'] }, { promptFiles: ['prompts/missing.md'] }, { designScope: { working: ['missing/metadata.json'], dependencies: [] } }, { name: 'Lead' }, { extra: true }, { execute: { tools: ['anything'], allowedCommands: [] } }]) {
     await draft(f, path, { ...manifest('Backend'), ...change });
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, false);
@@ -92,7 +92,7 @@ test('malformed references, lead deletion, duplicate names and base-policy overr
 
 test('unrelated running workspace member blocks activation; stale active/config/design reviews fail without partial application', () => withTeam(async f => {
   await setup(f); const other = await worker(f, 'Other', ['other']);
-  await draft(f, '.rsi/members/backend/member.json', manifest('Backend'));
+  await draft(f, '.rsi/members/Backend/member.json', manifest('Backend'));
   const review = await commit(f); const before = await f.team.service.team(f.workspaceId);
   await f.team.runner.postUser(f.workspaceId, '@Other work');
   await assert.rejects(f.team.activateConfiguration(f.workspaceId, review.revision, review.digest), code('workspace_busy'));
@@ -110,13 +110,13 @@ test('unrelated running workspace member blocks activation; stale active/config/
 
 test('create/update/delete activate together and a concurrent group input sees only the resulting team', () => withTeam(async f => {
   await setup(f);
-  await draft(f, '.rsi/members/old/member.json', manifest('Old')); await activate(f);
-  await draft(f, '.rsi/members/stay/member.json', manifest('Stay')); await activate(f);
+  await draft(f, '.rsi/members/Old/member.json', manifest('Old')); await activate(f);
+  await draft(f, '.rsi/members/Stay/member.json', manifest('Stay')); await activate(f);
   const old = (await f.team.service.byName(f.workspaceId, 'Old'))!, stay = (await f.team.service.byName(f.workspaceId, 'Stay'))!;
   const files = await f.team.harness.files(f.lead.memberId);
-  await rm(join(files.root, '.rsi/members/old/member.json'));
-  await draft(f, '.rsi/members/stay/member.json', { ...manifest('Stay'), responsibility: 'Changed together' });
-  await draft(f, '.rsi/members/new/member.json', manifest('New'));
+  await rm(join(files.root, '.rsi/members/Old/member.json'));
+  await draft(f, '.rsi/members/Stay/member.json', { ...manifest('Stay'), responsibility: 'Changed together' });
+  await draft(f, '.rsi/members/New/member.json', manifest('New'));
   const review = await commit(f); assert.equal(review.valid, true, JSON.stringify(review.issues));
   assert.deepEqual(review.changes.map(c => c.type).sort(), ['create', 'delete', 'update']);
   const entered = deferred(), release = deferred();
@@ -137,7 +137,7 @@ test('create/update/delete activate together and a concurrent group input sees o
 }));
 
 test('workspace finalization blocks activation even after a sender releases its mention slot', () => withTeam(async f => {
-  await setup(f); await draft(f, '.rsi/members/backend/member.json', manifest('Backend')); const review = await commit(f);
+  await setup(f); await draft(f, '.rsi/members/Backend/member.json', manifest('Backend')); const review = await commit(f);
   const finish = deferred();
   const original = f.runtime.finished.bind(f.runtime);
   f.runtime.finished = async (...args) => { const state = await original(...args); await finish.promise; return state; };
@@ -149,7 +149,7 @@ test('workspace finalization blocks activation even after a sender releases its 
 }));
 
 test('admission already in progress takes precedence and activation refuses after its run becomes active', () => withTeam(async f => {
-  await setup(f); await draft(f, '.rsi/members/backend/member.json', manifest('Backend')); const review = await commit(f);
+  await setup(f); await draft(f, '.rsi/members/Backend/member.json', manifest('Backend')); const review = await commit(f);
   const entered = deferred(), release = deferred();
   const original = f.runtime.prepareRun.bind(f.runtime);
   f.runtime.prepareRun = async (...args) => { entered.resolve(); await release.promise; return original(...args); };
@@ -161,9 +161,9 @@ test('admission already in progress takes precedence and activation refuses afte
 }));
 
 test('binary prompt bytes and an active configuration changed after review are rejected without activation', () => withTeam(async f => {
-  await setup(f); const path = '.rsi/members/backend/member.json'; const files = await draft(f, path, manifest('Backend'));
+  await setup(f); const path = '.rsi/members/Backend/member.json'; const files = await draft(f, path, manifest('Backend'));
   const { writeFile } = await import('node:fs/promises');
-  await writeFile(join(files.root, '.rsi/members/backend/prompts/member.md'), Buffer.from([0xff, 0xfe]));
+  await writeFile(join(files.root, '.rsi/members/Backend/prompts/member.md'), Buffer.from([0xff, 0xfe]));
   await assert.rejects(f.team.configuration.validate(f.lead.memberId,'.rsi/members'),/UTF-8/);
   await draft(f, path, manifest('Backend')); const review = await commit(f);
   const lead = (await f.team.service.find(f.lead.memberId))!;

@@ -70,12 +70,33 @@ function incorporate(entries: ContextEntry[], agentId: string, groupId: string, 
   if (own && own.message.role === 'assistant') {
     // Keep original signed blocks intact. One extra attribution block, no second answer body.
     const firstVisible = own.message.content.findIndex(part => part.type !== 'thinking');
-    own.message.content.splice(firstVisible < 0 ? own.message.content.length : firstVisible, 0, { type: 'text', text: `[Group message ${item.position}]\n${item.sender}\n` });
+    own.message.content.splice(firstVisible < 0 ? own.message.content.length : firstVisible, 0, { type: 'text', text: item.sender });
     own.metadata = { ...own.metadata, ...metadata };
   } else {
     if (entries.some(entry => entry.messageId === item.entry.messageId)) throw new AppError('invalid_context', 'Group identity already exists without incorporation state');
     entries.push({ ...structuredClone(item.entry), metadata: { ...item.entry.metadata, ...metadata } });
   }
+}
+
+/** Refresh only Team attribution in mutable context; immutable history/signed blocks stay intact. */
+export function sharedAttributionUpdates(entries: readonly ContextEntry[], groupId: string, groups: readonly GroupContextMessage[]): ContextEntry[] {
+  const shared = new Map(groups.map(item => [item.entry.messageId, item]));
+  const updates: ContextEntry[] = [];
+  for (const entry of entries) {
+    if (entry.metadata.groupContextId !== groupId || typeof entry.metadata.groupMessageId !== 'string') continue;
+    const item = shared.get(entry.metadata.groupMessageId);
+    if (!item) continue;
+    const copy = structuredClone(entry);
+    if (copy.message.role === 'user') { copy.message = structuredClone(item.entry.message); copy.metadata = {...copy.metadata, ...structuredClone(item.entry.metadata)}; }
+    else if (copy.message.role === 'assistant' && item.origin?.messageId === copy.messageId) {
+      const first = copy.message.content.find(part => part.type !== 'thinking');
+      // Previous incorporation added an attribution-only text block, never changed signed blocks.
+      if (first?.type !== 'text' || !first.text.startsWith(`[Group message ${item.position}]\nSender: `)) continue;
+      first.text = item.sender;
+    } else continue;
+    if (JSON.stringify(copy.message) !== JSON.stringify(entry.message)) updates.push(copy);
+  }
+  return updates;
 }
 
 /** One-time transition of legacy member context; stable records are never modified. */
