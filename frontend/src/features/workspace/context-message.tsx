@@ -11,7 +11,7 @@ function contentParts(message: Message): Part[] {
   if (message.role === 'user') return typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content.map(part => part.type === 'image' ? { type: 'image', image: `data:${part.mimeType};base64,${part.data}` } : { type: 'text', text: part.text });
   if (message.role === 'toolResult') return message.content.map<Part>(part => part.type === 'image'
     ? { type: 'image', image: `data:${part.mimeType};base64,${part.data}` }
-    : { type: 'text', text: part.text }).concat(message.details === undefined ? [] : [{ type: 'text', text: `Tool details:\n${JSON.stringify(message.details, null, 2)}` }]);
+    : { type: 'text', text: part.text });
   return message.content.map(part => {
     if (part.type === 'text') return { type: 'text', text: part.text };
     if (part.type === 'thinking') return { type: 'reasoning', text: part.thinking };

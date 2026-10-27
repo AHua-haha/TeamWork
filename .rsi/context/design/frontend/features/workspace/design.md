@@ -32,6 +32,8 @@ Workspace uses the shared backend client and composes shared UI with workspace-s
 
 ### Workspace context inspection
 
+The readable tool-result view renders only native content blocks (text/images). Do not append the tool’s internal `details` object as message content; it is not an additional model-visible result. Preserve the stored message unchanged, including `details` in explicit raw-data inspection.
+
 
 Selected assistant message details expose each nonempty `thinkingSignature` in its own collapsed section, identified by the original content block number. Expanding shows the complete stored value: JSON signatures are formatted for reading, including `encrypted_content` and provider metadata; opaque non-JSON signatures remain unchanged. Signature-only thinking blocks are inspectable even without readable thinking text. No signature content is truncated, decrypted or modified, and opening the section needs no additional backend request.
 
