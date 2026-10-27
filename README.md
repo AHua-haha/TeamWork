@@ -13,9 +13,20 @@ Each checkout owns an isolated local MySQL service. Development and deployment s
 | Settings | `rsi.config.json` → `development` | `rsi.config.json` → `deployment` |
 | Logs/PIDs | `.run/` | `~/.local/state/team-work/deploy/` |
 
-Requires Node.js 22.19+, npm, Git, tar, curl, ps and Docker Compose. Application processes run directly on the host. The team-work service listens on 13306 and retains its existing `team-work` Compose project, container, network and volume. The original RSI service on 3306 is independent and remains unchanged.
+Requires Node.js 22.19.x LTS, npm, Git, tar, curl, ps and Docker Compose. Use the repository `.nvmrc` or `.node-version`; Node 26 is outside the supported project range. Application processes run directly on the host. The team-work service listens on 13306 and retains its existing `team-work` Compose project, container, network and volume. The original RSI service on 3306 is independent and remains unchanged.
 
 ### Initialize this checkout
+
+Select the supported Node runtime before installing dependencies:
+
+```sh
+nvm install
+nvm use
+node --version
+```
+
+The project packages enforce Node `>=22.19.0 <23` with `engine-strict=true`. Run each package's `npm ci` only under Node 22.19.x.
+
 
 ```sh
 ./scripts/dev.sh stop
@@ -47,6 +58,17 @@ Install development dependencies once with `npm ci` in `backend/` and `frontend/
 ```
 
 Development uses Vite and the source backend. `init` initializes the project configuration without launching applications. A legacy managed development process is stopped before `start` switches it to the development database. Configure development provider connections independently through its UI. Direct backend npm commands also read the project configuration’s development section. Vite does not load separate `.env` files.
+
+### Run the desktop app with a selected backend
+
+Operations can start the backend for one environment, configure the Electron app for that backend for the duration of the session, and run the desktop host in the foreground:
+
+```sh
+./scripts/desktop.sh start development
+./scripts/desktop.sh start deployment
+```
+
+`development` uses the source backend and development database; `deployment` uses the selected committed deployment release and deployment database. Deployment must already have a selected release (`./scripts/deploy.sh deploy <git-ref>`). The command starts only the selected backend and Electron app; it does not start the Vite web server. When Electron exits, the launcher stops a backend it started and restores the previous per-user Desktop config. The project MySQL service remains running. Use `./scripts/desktop.sh status development|deployment` or `stop development|deployment` for the desktop launcher backend records.
 
 ### Manage deployment
 
