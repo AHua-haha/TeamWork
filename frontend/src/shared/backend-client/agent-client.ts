@@ -1,3 +1,4 @@
+import { apiFetch } from './transport.js';
 import { ProgressReducer, type ProgressEvent } from './progress.js';
 import { ProtocolError, readSse } from './sse.js';
 import type { ClientSnapshot, CompletedRecord, FollowEvent, LiveMessage, RunState, UserInput } from './protocol.js';
@@ -18,7 +19,7 @@ async function requireJson(response: Response): Promise<unknown> {
   return response.json();
 }
 
-export async function createAgent(fetcher: typeof fetch = fetch, basePath = '/agents'): Promise<string> {
+export async function createAgent(fetcher: typeof fetch = apiFetch, basePath = '/agents'): Promise<string> {
   const response = await fetcher(basePath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   const state = await requireJson(response) as { agentId?: unknown };
   if (typeof state.agentId !== 'string' || !validId.test(state.agentId)) throw new ProtocolError('Backend did not return an agent identity');
@@ -77,7 +78,7 @@ export class AgentClient {
   constructor(agentId: string, options: Options = {}) {
     if (!validId.test(agentId)) throw new Error('Invalid agent identity');
     this.agentId = agentId;
-    this.fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
+    this.fetcher = options.fetcher ?? apiFetch;
     this.basePath = options.basePath ?? '/agents';
     this.retryDelayMs = options.retryDelayMs ?? (attempt => Math.min(500 * 2 ** Math.min(attempt, 4), 8000));
     this.snapshot = { agentId, completed: [], live: [], historyPosition: options.historyAfter ?? 0, synchronized: false, connection: 'idle', run: null, sending: false, error: null };
