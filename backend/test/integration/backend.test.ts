@@ -3009,3 +3009,77 @@ test('lightweight roster reads active SQL records without design, context or rea
     assert.deepEqual(await store.agents.inspectContext(f.lead.memberId), before);
   } finally { await f.close(); }
 });
+
+test('shared summary persists a pinned prefix, keeps 30 originals and concurrent arrivals, and never rewrites stable history', {timeout:30000}, async()=>{
+  const f=await groupFixture();
+  try {
+    const publish=async(position:number)=>store.team.publishChat({workspaceId:f.workspaceId,author:{type:'user'},text:`Original message ${position}`,recipients:[]});
+    for(let position=1;position<=40;position++)await publish(position);
+    const source=await store.team.readGroupContext(f.workspaceId,0);
+    const stable=await store.team.chatSnapshot(f.workspaceId,0,100);
+    const input=await store.team.summaryInput(f.workspaceId);
+    assert.equal(input.messages.length,10);assert.equal(input.through,10);assert.equal(input.analyzedThrough,40);
+    for(let position=41;position<=45;position++)await publish(position);
+    const before=await store.team.inspectGroupContext(f.workspaceId,{limit:10});
+    const {previous:_previous,messages:_messages,uncoveredTokens:_tokens,...pinned}=input;
+    const accepted=await store.team.submitGroupSummary(f.workspaceId,{...pinned,text:'Preserved goals, accepted decisions and remaining work.'});
+    assert.equal(accepted.revision,1);
+    const view=await store.team.readGroupContext(f.workspaceId,0);
+    assert.equal(view.length,36,'summary plus 30 pinned originals and 5 new arrivals');
+    assert.equal(view[0]!.entry.metadata.source,'group-summary');
+    assert.deepEqual(view.slice(1,31),source.slice(10));
+    const page=await store.team.inspectGroupContext(f.workspaceId,{limit:1});
+    assert.equal(page.total,36);assert.equal(page.entries[0]!.messageId,accepted.messageId);assert.equal(page.nextOffset,1);
+    assert.ok(page.revision>before.revision);
+    await assert.rejects(store.team.inspectGroupContext(f.workspaceId,{offset:10,revision:before.revision}),/Context changed/);
+    const tail=await store.team.inspectGroupContext(f.workspaceId,{offset:1,revision:page.revision,limit:100});
+    assert.equal(tail.entries.length,35);assert.equal(tail.nextOffset,null);
+    const [raw]=await store.pool.query<any[]>('SELECT entry FROM chat_context_entries WHERE workspace_id=? ORDER BY position',[f.workspaceId]);
+    assert.equal(raw.length,45,'original source rows remain immutable');
+    const afterStable=await store.team.chatSnapshot(f.workspaceId,0,100);
+    assert.deepEqual(afterStable.messages.slice(0,40),stable.messages);
+    assert.deepEqual((await store.team.readGroupContext(f.workspaceId,0,8)),source.slice(0,8),'older member checkpoint cannot see future summary');
+    store.team.close();
+    assert.deepEqual(await store.team.readGroupContext(f.workspaceId,0),view,'summary and full tail survive resident reload');
+    await assert.rejects(store.team.submitGroupSummary(f.workspaceId,{...pinned,text:'Stale update'}),/revision changed/);
+    const next=await store.team.summaryInput(f.workspaceId);
+    assert.equal(next.previous?.messageId,accepted.messageId);assert.deepEqual(next.messages.map(item=>item.position),[11,12,13,14,15]);
+    const {previous:_old,messages:_new,uncoveredTokens:_uncovered,...nextPinned}=next;
+    await assert.rejects(store.team.submitGroupSummary(f.workspaceId,{...nextPinned,text:'  '}),/nonempty/);
+    assert.equal((await store.team.readGroupSummary(f.workspaceId))?.revision,1);
+    await store.team.submitGroupSummary(f.workspaceId,{...nextPinned,text:'Updated summary merges the prior summary and five newly older messages.'});
+    assert.equal((await store.team.readGroupContext(f.workspaceId,0)).length,31);
+    assert.deepEqual((await store.team.chatSnapshot(f.workspaceId,0,100)).messages,afterStable.messages);
+    await store.team.resetChat(f.workspaceId);
+    assert.equal(await store.team.readGroupSummary(f.workspaceId),undefined);
+    assert.equal((await store.team.inspectGroupContext(f.workspaceId)).total,0);
+    await assert.rejects(store.team.submitGroupSummary(f.workspaceId,{...nextPinned,text:'Before reset'}),/revision changed|boundary|source changed/);
+  } finally {await f.close();}
+});
+
+test('summary migration retires semantic metadata and preserves original group source', {timeout:30000}, async()=>{
+  const database='summary_migration_'+randomUUID().replaceAll('-','');
+  const url=new URL(databaseUrl!);url.pathname='/'+database;
+  await store.pool.query(`CREATE DATABASE ${database}`);
+  const storage=new MySqlStorage(url.href),data=new CoreData(storage);
+  const directory=await realpath(await mkdtemp(join(tmpdir(),'summary-migration-')));
+  const workspaceService=new WorkspaceService(data.workspaces,testModelValidator);
+  try {
+    await data.migrate();
+    const workspace=await workspaceService.create({name:'Migration',directory:join(directory,'project'),models:testModels(),adopt:false});
+    const {summaryMessages}=await import('../group-summary-fixture.js');
+    const original=summaryMessages(40,10,workspace.workspaceId);
+    await storage.pool.execute('INSERT INTO chat_settings (workspace_id,position,context_length,context_revision) VALUES (?,40,40,40)',[workspace.workspaceId]);
+    for(const item of original)await storage.pool.execute('INSERT INTO chat_context_entries (workspace_id,position,id,entry) VALUES (?,?,?,?)',[workspace.workspaceId,item.position,item.entry.messageId,encode(item.entry)]);
+    await storage.pool.query('ALTER TABLE chat_settings DROP COLUMN context_revision, ADD COLUMN semantic_position BIGINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN semantic_revision BIGINT UNSIGNED NOT NULL DEFAULT 0');
+    await storage.pool.query('CREATE TABLE chat_semantic_indexes (workspace_id VARCHAR(64) PRIMARY KEY,data JSON NOT NULL)');
+    await storage.pool.execute('INSERT INTO chat_semantic_indexes VALUES (?,?)',[workspace.workspaceId,encode({tree:[{topic:'Old derived index'}]})]);
+    await data.team.migrate();
+    assert.equal(await data.team.readGroupSummary(workspace.workspaceId),undefined,'old semantic tree is never accepted as a group summary');
+    const page=await data.team.inspectGroupContext(workspace.workspaceId,{limit:100});
+    assert.equal(page.revision,40);assert.deepEqual(page.entries,original.map(item=>item.entry));
+    const [tables]=await storage.pool.query<any[]>("SHOW TABLES LIKE 'chat_semantic_indexes'");assert.equal(tables.length,0);
+    const [columns]=await storage.pool.query<any[]>('SHOW COLUMNS FROM chat_settings');assert.ok(columns.some(row=>row.Field==='context_revision'));assert.ok(!columns.some(row=>row.Field.startsWith('semantic_')));
+    await data.team.migrate();assert.deepEqual((await data.team.inspectGroupContext(workspace.workspaceId,{limit:100})).entries,page.entries,'migration is idempotent');
+  }finally{await workspaceService.close();await data.close();await store.pool.query(`DROP DATABASE ${database}`);await rm(directory,{recursive:true,force:true});}
+});

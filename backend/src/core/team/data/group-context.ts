@@ -1,8 +1,9 @@
 import { AppError, identity, position } from '../../errors.js';
 import { validateGroupContextEntry, type GroupContextEntry } from './group-chat.js';
+import { groupSummaryEntry, validateGroupSummary, type GroupSummary } from './group-summary.js';
 
-export interface GroupContextHistory { position: number; resetPosition: number; entries: GroupContextEntry[] }
-type Change = {append: GroupContextEntry; before: number} | {reset: number};
+export interface GroupContextHistory { position: number; resetPosition: number; entries: GroupContextEntry[]; summary?: GroupSummary }
+type Change = {append: GroupContextEntry; before: number} | {reset: number} | {summary: GroupSummary};
 
 /** Team's model-facing shared transcript, independent of presentation and member context. */
 export class GroupContextState {
@@ -11,6 +12,10 @@ export class GroupContextState {
   constructor(readonly workspaceId: string, history: GroupContextHistory) {
     identity(workspaceId); position(history.position); position(history.resetPosition);
     if (history.resetPosition > history.position) throw new AppError('corrupt_data', 'Invalid group reset boundary', 500);
+    if (history.summary) {
+      validateGroupSummary(history.summary);
+      if (history.summary.from !== history.resetPosition + 1 || history.summary.analyzedThrough > history.position) throw new AppError('corrupt_data', 'Group summary source differs from context', 500);
+    }
     let after = history.resetPosition;
     const ids = new Set<string>();
     for (const entry of history.entries) {
@@ -24,9 +29,11 @@ export class GroupContextState {
   }
   invalidate(): void { this.valid = false; }
   private assert(): void { if (!this.valid) throw new AppError('context_conflict', 'Group context acknowledgement is uncertain; restore before reading', 409); }
-  read(after: number): GroupContextEntry[] {
+  source(after = 0, through = this.value.position): GroupContextEntry[] {
     this.assert(); position(after);
     if (after > this.value.position) throw new AppError('invalid_cursor', 'Group consumption position is ahead of history', 409);
+    position(through);
+    if (through > this.value.position) throw new AppError('invalid_cursor', 'Group upper boundary is ahead of history', 409);
     const boundary = Math.max(after, this.value.resetPosition);
     let low = 0, high = this.value.entries.length;
     while (low < high) {
@@ -34,11 +41,24 @@ export class GroupContextState {
       if (Number(this.value.entries[mid]!.metadata.groupPosition) <= boundary) low = mid + 1;
       else high = mid;
     }
-    return structuredClone(this.value.entries.slice(low));
+    return structuredClone(this.value.entries.slice(low).filter(entry => Number(entry.metadata.groupPosition) <= through));
+  }
+  summary(): GroupSummary | undefined { this.assert(); return this.value.summary ? structuredClone(this.value.summary) : undefined; }
+  get resetPosition(): number { this.assert(); return this.value.resetPosition; }
+  read(after: number, through = this.value.position): GroupContextEntry[] {
+    const source = this.source(after, through), summary = this.value.summary;
+    // Incremental delivery stays chronological. Full reads/compaction use the shared view.
+    if (after !== 0 || !summary || summary.through > through) return source;
+    return [groupSummaryEntry(this.workspaceId, summary), ...source.filter(entry => Number(entry.metadata.groupPosition) > summary.through)];
   }
   apply(change: Change): void {
     this.assert();
-    if ('reset' in change) {
+    if ('summary' in change) {
+      validateGroupSummary(change.summary);
+      if (change.summary.from !== this.value.resetPosition + 1 || change.summary.analyzedThrough > this.value.position) throw new AppError('context_conflict', 'Group summary acknowledgement is stale', 409);
+      if ((this.value.summary?.revision ?? 0) >= change.summary.revision) return;
+      this.value.summary = structuredClone(change.summary);
+    } else if ('reset' in change) {
       if (change.reset <= this.value.position) return;
       this.value = {position: change.reset, resetPosition: change.reset, entries: []};
     } else {

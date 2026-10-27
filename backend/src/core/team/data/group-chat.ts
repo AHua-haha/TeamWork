@@ -1,6 +1,7 @@
 import type { ContextPage, ContextPageInput } from '../../context-page.js';
 import { validateMessage, validateRun } from '../../agent/data/validation.js';
-import type { GroupContextMessage, GroupSemanticIndex } from '../../agent/data/context.js';
+import type { GroupContextMessage } from '../../agent/data/context.js';
+import type { GroupSummary, GroupSummaryInput, GroupSummarySubmission } from './group-summary.js';
 import type { ImageContent, Message, JsonObject } from '@earendil-works/pi-ai';
 import { validateChatImages, type ChatImage, type PreparedChatImage, type ChatImageStore } from './chat-images.js';
 import type { RunState } from '../../agent/data/model.js';
@@ -59,11 +60,10 @@ export interface ChatPublication {
 }
 export interface ChatStore extends ChatImageStore {
   inspectGroupContext(workspaceId: string, input?: ContextPageInput): Promise<ContextPage<GroupContextEntry>>;
-  readGroupContext(workspaceId: string, after: number): Promise<GroupContextMessage[]>;
-  readGroupSemantic?(workspaceId: string): Promise<GroupSemanticIndex | undefined>;
-  semanticInput?(workspaceId: string, through?: number): Promise<{ messages: GroupContextMessage[]; previous?: GroupSemanticIndex; through: number; baseRevision: number }>;
-  submitGroupSemantic?(workspaceId: string, submission: import('./semantic.js').GroupSemanticSubmission): Promise<GroupSemanticIndex>;
-  semanticReady?(workspaceId: string): Promise<boolean>;
+  readGroupContext(workspaceId: string, after: number, through?: number): Promise<GroupContextMessage[]>;
+  readGroupSummary?(workspaceId: string): Promise<GroupSummary | undefined>;
+  summaryInput?(workspaceId: string): Promise<GroupSummaryInput>;
+  submitGroupSummary?(workspaceId: string, submission: GroupSummarySubmission): Promise<GroupSummary>;
   publishChat(input: ChatPublication): Promise<ChatAcceptance>;
   chatSnapshot(workspaceId: string, after?: number, limit?: number): Promise<ChatSnapshot>;
   chatTimeline(workspaceId: string, after?: number, limit?: number): Promise<TimelineSnapshot>;
@@ -165,6 +165,7 @@ export function validateGroupContextEntry(value: unknown): asserts value is Grou
 
 /** The Agent port is a detached projection of Team-owned Pi messages, not reconstructed text. */
 export function groupContextMessage(entry: GroupContextEntry): GroupContextMessage {
+  if (entry.metadata.source === 'group-summary') return { position: Number(entry.metadata.groupPosition), entry, sender: 'Sender: Team shared context [system]' };
   const author = entry.metadata.author as unknown as ChatAuthor;
   const ref = entry.metadata.finalRef as unknown as FinalReference | undefined;
   return {position: Number(entry.metadata.groupPosition), sender: groupSender({author}), entry,

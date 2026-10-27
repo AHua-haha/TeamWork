@@ -1,29 +1,19 @@
 import { createEditTool, createFindTool, createGrepTool, createLsTool, createReadTool, createWriteTool } from '@earendil-works/pi-coding-agent';
 import { Type, type JsonObject } from '@earendil-works/pi-ai';
-import type { GroupSemanticSubmission } from '../team/data/semantic.js';
+import { maxGroupSummaryCharacters, type GroupSummary } from '../team/data/group-summary.js';
 import type { HarnessService } from './harness.js';
 import type { RuntimeTool } from '../agent/contracts.js';
-export function semanticSubmissionTool(submit: (value: GroupSemanticSubmission) => Promise<unknown>): RuntimeTool {
-  const identity = Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' });
-  const node = Type.Object({
-    id: Type.String({ ...identity, description: 'Short opaque ASCII identifier, for example range_1_20. Not a topic label; at most 64 letters, digits, underscores or hyphens.' }),
-    firstPosition: Type.Integer({ minimum: 1 }), lastPosition: Type.Integer({ minimum: 1 }),
-    topic: Type.String({ minLength: 1, maxLength: 1000 }), summary: Type.String({ minLength: 1, maxLength: 100_000 }),
-    involvedMemberIds: Type.Array(identity, { uniqueItems: true }),
-    children: Type.Array(Type.Ref('#/$defs/semanticNode')),
-  }, { additionalProperties: false });
+export function groupSummaryTool(submit: (text: string) => Promise<GroupSummary>): RuntimeTool {
   return {
-    definition: { name: 'submit_group_semantic_information', description: 'Submit the complete hierarchical semantic information for the pinned full group context. Team validates and stores the result; do not submit a partial suffix.', parameters: Type.Object({
-      baseRevision: Type.Integer({ minimum: 0 }), through: Type.Integer({ minimum: 1 }), sourceDigest: Type.String({ minLength: 64, maxLength: 64, pattern: '^[a-f0-9]{64}$' }), tree: Type.Array(Type.Ref('#/$defs/semanticNode'), { minItems: 1 }),
-    }, { additionalProperties: false, $defs: { semanticNode: node } }) },
+    definition: { name: 'submit_group_summary', description: 'Submit the updated shared summary of the supplied older group context. Keep the latest 30 original messages outside the summary. If rejected, correct the summary using the tool feedback and submit again.',
+      parameters: Type.Object({ summary: Type.String({ minLength: 1, maxLength: maxGroupSummaryCharacters, description: 'Concise plain-text or Markdown summary of the supplied previous summary and older messages only.' }) }, { additionalProperties: false }) },
     execute: async (args: JsonObject) => {
-      const result = await submit(args as unknown as GroupSemanticSubmission);
-      return { content: [{ type: 'text', text: `Semantic information accepted for group positions ${(result as {from?: number; through?: number}).from ?? '?'}-${(result as {through?: number}).through ?? '?'}.` }], details: result as any, isError: false };
+      const result = await submit(args.summary as string);
+      return { content: [{ type: 'text', text: `Group summary accepted for positions ${result.from}-${result.through}. The latest 30 original messages remain unchanged.` }],
+        details: { revision: result.revision, from: result.from, through: result.through, analyzedThrough: result.analyzedThrough, retainedMessages: 30 }, isError: false };
     },
   };
 }
-
-
 
 /** Pi owns schemas, operations and results. Harness checks invocation inputs only. */
 export function harnessFileTools(harness: HarnessService, writable: boolean): RuntimeTool[] {

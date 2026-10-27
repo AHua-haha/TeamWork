@@ -14,7 +14,7 @@ The workspace page may provide these sections:
 - **Team/Members** — inspect members and configuration, and expose existing review/activation controls.
 - **Changes** — inspect changes and supported review/commit approval workflows.
 - **Settings** — workspace-specific settings supported by the backend.
-- **Context** — one read-only inspection tab for the original Group context and each workspace member's current persisted Agent context. The source list selects Group or a member; the selected source is paginated at one pinned revision and displayed as a chronological message list with detail. Text, thinking, images, tool calls/results and unknown/raw message data remain inspectable. On `context_changed`, discard the mixed revision and explicitly reload from offset zero. These reads do not start or cancel Agent work.
+- **Context** — one read-only inspection tab for the current shared Group context and each workspace member's current persisted Agent context. The source list selects Group or a member; the selected source is paginated at one pinned revision and displayed as a chronological message list with detail. Text, thinking, images, tool calls/results and unknown/raw message data remain inspectable. On `context_changed`, discard the mixed revision and explicitly reload from offset zero. These reads do not start or cancel Agent work.
 
 This list describes initial organization; preserve existing backend capabilities and user workflows. These sections are composed inside Workspace and do not expand global navigation.
 
@@ -32,7 +32,6 @@ Workspace uses the shared backend client and composes shared UI with workspace-s
 
 ### Workspace context inspection
 
-The source list includes Group semantic ranges alongside Group chat and member contexts. Selecting it reads the saved semantic index and opens a two-pane inspector: the left pane is an expandable range hierarchy with topic and group-message positions; the right pane shows the selected range's full topic/summary, positions, involved member names (falling back to IDs), ID and child count. Show index revision and analyzed coverage above the panes. No saved index shows “No semantic ranges generated yet.” Refresh explicitly reloads; selection/expansion needs no backend request and never triggers generation. Message and range views share the existing resizable panel and retain left/right layout at narrow widths.
 
 Selected assistant message details expose each nonempty `thinkingSignature` in its own collapsed section, identified by the original content block number. Expanding shows the complete stored value: JSON signatures are formatted for reading, including `encrypted_content` and provider metadata; opaque non-JSON signatures remain unchanged. Signature-only thinking blocks are inspectable even without readable thinking text. No signature content is truncated, decrypted or modified, and opening the section needs no additional backend request.
 
@@ -57,3 +56,7 @@ For each selected context, the chronological message list stays on the left and 
 ### Resizable workspace panel
 
 The right panel has a draggable left edge. Moving the edge left widens it; moving right narrows it. The edge is also a keyboard-accessible vertical separator. Width is a browser-session layout preference, preserved through closing/reopening and Expand/Restore. Bounds keep the panel within the viewport and reserve usable chat space when docked. Resizing changes presentation only and must not reload context or start backend inspection.
+
+### Shared group summary inspection
+
+The Context source list includes Group summary alongside Group chat and member contexts. Show one summary entry at left and its complete text, revision, summarized prefix, analyzed snapshot and retained-message count at right. No semantic tree or member-involvement information remains. Empty/loading/error states and explicit Refresh use the existing context inspector pattern. Group chat context inspection shows the shared summary followed by the retained original messages; stable chat history is unchanged.

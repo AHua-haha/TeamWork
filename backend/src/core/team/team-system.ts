@@ -14,13 +14,18 @@ import { inspectHarnesses } from '../harness/data/bases.js';
 import { MemberInstructions } from './member-instructions.js';
 import { teamTools } from './member-tools.js';
 import type { RuntimePolicy, RuntimeTool } from '../agent/contracts.js';
-import { semanticSourceDigest, semanticTokenCount, semanticTokenThreshold } from './data/semantic.js';
+import { groupSummaryEntry, groupSummaryTokenThreshold, retainedGroupMessages } from './data/group-summary.js';
+import { readFileSync } from 'node:fs';
+
 import { webTools } from '../harness/web-tools.js';
-import { randomUUID } from 'node:crypto';
 import type { ContextEntry } from '../agent/data/model.js';
 import { TeamRunner, type RunHost } from './team-runner.js';
 import { TeamService, teamRunConfig, type MemberView, type TeamStore, type TeamView } from './data/members.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
+
+const summaryInstructions = readFileSync(new URL('../../../prompts/team/group-summary.md', import.meta.url), 'utf8').trim();
+if (!summaryInstructions) throw new Error('Group summary instructions must not be empty');
+
 
 /** A member as the team's callers see it: its record, and whether it has a run in progress. */
 export interface MemberStatus extends MemberView { running: boolean }
@@ -36,9 +41,9 @@ export class TeamSystem {
   readonly harness: HarnessService;
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
-  private readonly semanticJobs = new Map<string, Promise<void>>();
-  private readonly semanticController = new AbortController();
-  private semanticStartup?: Promise<void>;
+  private readonly summaryJobs = new Map<string, Promise<void>>();
+  private readonly summaryController = new AbortController();
+  private summaryStartup?: Promise<void>;
 
   constructor(private readonly store: TeamStore & ChatStore, private readonly workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
     this.designs = new DesignService(workspaces);
@@ -48,81 +53,90 @@ export class TeamSystem {
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
-    }, ids => this.harness.closeShells(ids), workspaceId => { void this.scheduleSemantic(workspaceId); });
+    }, ids => this.harness.closeShells(ids), workspaceId => { void this.scheduleSummary(workspaceId); });
     this.configuration = new MemberConfigService(this.service, this.harness);
     this.runConfig = teamRunConfig(this.service, config);
   }
 
-  private async scheduleSemantic(workspaceId: string): Promise<void> {
-    if (this.semanticController.signal.aborted) return;
-    const existing = this.semanticJobs.get(workspaceId);
+  private async scheduleSummary(workspaceId: string): Promise<void> {
+    if (this.summaryController.signal.aborted) return;
+    const existing = this.summaryJobs.get(workspaceId);
     if (existing) return existing;
     const runtime = this.runtime;
-    const semanticInput = this.store.semanticInput;
-    const submitGroupSemantic = this.store.submitGroupSemantic;
-    if (!runtime || !semanticInput || !submitGroupSemantic) return;
-    const job = this.generateSemantic(workspaceId, runtime, semanticInput, submitGroupSemantic).catch(error => {
-      if (!this.semanticController.signal.aborted) this.reportSemanticFailure(workspaceId, error);
-    }).finally(() => { if (this.semanticJobs.get(workspaceId) === job) this.semanticJobs.delete(workspaceId); });
-    this.semanticJobs.set(workspaceId, job);
+    const summaryInput = this.store.summaryInput;
+    const submitGroupSummary = this.store.submitGroupSummary;
+    if (!runtime || !summaryInput || !submitGroupSummary) return;
+    const job = this.generateSummary(workspaceId, runtime, summaryInput, submitGroupSummary).catch(error => {
+      if (!this.summaryController.signal.aborted) this.reportSummaryFailure(workspaceId, error);
+    }).finally(() => { if (this.summaryJobs.get(workspaceId) === job) this.summaryJobs.delete(workspaceId); });
+    this.summaryJobs.set(workspaceId, job);
     await job;
   }
 
-  private reportSemanticFailure(workspaceId: string, error: unknown): void {
-    console.error('Group semantic analysis failed', { workspaceId, message: error instanceof Error ? error.message : String(error) });
+  private reportSummaryFailure(workspaceId: string, error: unknown): void {
+    console.error('Group summary generation failed', { workspaceId, message: error instanceof Error ? error.message : String(error) });
   }
 
   /** Called only after AgentRuntime.open. The host need not await background analysis. */
   startMaintenance(): Promise<void> {
-    return this.semanticStartup ??= (async () => {
+    return this.summaryStartup ??= (async () => {
       for (const workspace of await this.workspaces.list()) {
-        if (this.semanticController.signal.aborted) break;
-        await this.scheduleSemantic(workspace.workspaceId);
+        if (this.summaryController.signal.aborted) break;
+        await this.scheduleSummary(workspace.workspaceId);
       }
     })().catch(error => {
-      if (!this.semanticController.signal.aborted) this.reportSemanticFailure('startup', error);
+      if (!this.summaryController.signal.aborted) this.reportSummaryFailure('startup', error);
     });
   }
 
   async closeMaintenance(): Promise<void> {
-    this.semanticController.abort();
-    await this.semanticStartup;
-    await Promise.allSettled(this.semanticJobs.values());
+    this.summaryController.abort();
+    await this.summaryStartup;
+    await Promise.allSettled(this.summaryJobs.values());
   }
 
-  private async generateSemantic(workspaceId: string, runtime: RunHost, semanticInput: NonNullable<ChatStore['semanticInput']>, submitGroupSemantic: NonNullable<ChatStore['submitGroupSemantic']>): Promise<void> {
-    const input = await semanticInput.call(this.store, workspaceId);
-    const previousThrough = input.previous?.through ?? 0;
-    const uncovered = input.messages.filter(message => message.position > previousThrough);
-    if (semanticTokenCount(uncovered) < semanticTokenThreshold || !input.messages.length) return;
+  private async generateSummary(workspaceId: string, runtime: RunHost, summaryInput: NonNullable<ChatStore['summaryInput']>, submitGroupSummary: NonNullable<ChatStore['submitGroupSummary']>): Promise<void> {
+    const input = await summaryInput.call(this.store, workspaceId);
+    if (input.uncoveredTokens < groupSummaryTokenThreshold || !input.messages.length) return;
     const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);
-    if (!lead) return;
+    if (!lead || !runtime.runMaintenance) return;
     const resolved = await this.runConfig.resolveForRun(lead.id);
-    const sourceDigest = semanticSourceDigest(input.messages);
-    const previous: ContextEntry = { messageId: randomUUID(), message: { role: 'user', content: `Previous semantic information result (it may be null):\n${JSON.stringify(input.previous ?? null)}`, timestamp: Date.now() }, metadata: { source: 'semantic-analysis-input' } };
-    const metadata = { baseRevision: input.baseRevision, through: input.through, sourceDigest };
-    const prompt = `You are the Team semantic-analysis maintenance agent. Review the complete group chat context supplied as user messages and the previous semantic information result. Submit one complete semantic tree with submit_group_semantic_information. Copy these backend-owned submission fields exactly: ${JSON.stringify(metadata)}. The tree roots must cover every group position from the first supplied message through position ${input.through}; child ranges must be contained, ordered, and non-overlapping. Each node needs id, firstPosition, lastPosition, topic, summary, involvedMemberIds, and children. Every node id must be 1-64 ASCII letters, digits, underscores or hyphens, for example range_1_20; keep descriptive or multilingual labels in topic, not id. Set involvedMemberIds only from authoritative Sender/member IDs and Mentioned members shown in the source messages. Do not invent members, omit source ranges, or submit a partial suffix. This is a full agent loop: if submission returns an error, read the tool feedback, correct the tree and call the submission tool again. Do not report success before the submission is accepted. After a successful tool submission, briefly confirm completion.`;
+    const { baseRevision, from, through, analyzedThrough, sourceDigest } = input;
+    const pinned = { baseRevision, from, through, analyzedThrough, sourceDigest };
+    const prompt = summaryInstructions.replaceAll('{{from}}', String(from)).replaceAll('{{through}}', String(through));
+    const stale = new AbortController();
+    const signal = AbortSignal.any([this.summaryController.signal, stale.signal]);
     let submitted = false;
-    const tool = this.harness.semanticTool(async submission => {
-      const result = await submitGroupSemantic.call(this.store, workspaceId, submission);
-      submitted = true;
-      console.info('Group semantic index accepted', { workspaceId, through: submission.through, roots: submission.tree.length });
-      return result;
+    const tool = this.harness.summaryTool(async text => {
+      try {
+        const result = await submitGroupSummary.call(this.store, workspaceId, { ...pinned, text });
+        submitted = true;
+        console.info('Group summary accepted', { workspaceId, through, analyzedThrough });
+        return result;
+      } catch (error) {
+        // A reset/competing replacement requires a new snapshot, not more text retries.
+        if (error instanceof AppError && error.code === 'context_conflict') stale.abort(error);
+        throw error;
+      }
     });
-    if (!runtime.runMaintenance) return;
-    this.semanticController.signal.throwIfAborted();
-    console.info('Group semantic analysis started', { workspaceId, messages: input.messages.length, through: input.through, provider: resolved.model.provider, model: resolved.model.id });
-    const result = await runtime.runMaintenance({ ...resolved, tools: [tool], systemPrompt: prompt, compaction: undefined }, [...input.messages.map(message => structuredClone(message.entry)), previous], this.semanticController.signal, {
+    const entries: ContextEntry[] = [
+      ...(input.previous ? [groupSummaryEntry(workspaceId, input.previous)] : []),
+      ...input.messages.map(message => structuredClone(message.entry)),
+    ];
+    signal.throwIfAborted();
+    console.info('Group summary generation started', { workspaceId, messages: input.messages.length, previousSummary: !!input.previous, through, analyzedThrough, provider: resolved.model.provider, model: resolved.model.id });
+    const result = await runtime.runMaintenance({ ...resolved, tools: [tool], systemPrompt: prompt, compaction: undefined }, entries, signal, {
       message: async record => {
         if (record.message.role === 'toolResult' && record.message.isError) {
           const feedback = record.message.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
           const message = feedback.split('\n\nReceived arguments:')[0]!.slice(0,2000);
-          console.warn('Group semantic tool rejected', { workspaceId, runId: record.runId, tool: record.message.toolName, message });
+          console.warn('Group summary tool rejected', { workspaceId, runId: record.runId, tool: record.message.toolName, message });
         }
         return record;
       },
     });
-    if (!submitted) throw new AppError('semantic_analysis_failed', result.error?.message ?? 'Maintenance ended without an accepted semantic index', 500);
+    if (stale.signal.aborted) throw stale.signal.reason;
+    if (!submitted) throw new AppError('group_summary_failed', result.error?.message ?? 'Maintenance ended without an accepted group summary', 500);
   }
   /** The runtime that runs the members and maintenance jobs. */
   attach(runtime: RunHost): void {
@@ -161,9 +175,9 @@ export class TeamSystem {
       throw new AppError('not_found', 'Member not found in this workspace', 404);
   }
   inspectGroupContext(workspaceId: string, input: ContextPageInput = {}) { return this.store.inspectGroupContext(workspaceId, input); }
-  async inspectGroupSemantic(workspaceId: string) {
+  async inspectGroupSummary(workspaceId: string) {
     await this.service.requireWorkspace(workspaceId);
-    return { index: await this.store.readGroupSemantic?.(workspaceId) ?? null };
+    return { summary: await this.store.readGroupSummary?.(workspaceId) ?? null, retainedMessages: retainedGroupMessages };
   }
 
   async inspect(workspaceId: string, memberId: string) {
@@ -226,7 +240,7 @@ export class TeamSystem {
       groupContext: async agentId => {
         const member = await this.service.find(agentId);
         if (!member) return base.groupContext?.(agentId);
-        return { id: member.workspaceId, read: after => this.store.readGroupContext(member.workspaceId, after), ...(this.store.readGroupSemantic ? { semantic: () => this.store.readGroupSemantic!(member.workspaceId) } : {}) };
+        return { id: member.workspaceId, read: (after, through) => this.store.readGroupContext(member.workspaceId, after, through) };
       },
       acquireRun: async (run, signal) => {
         const release = await this.runner.acquireExecution(run.agentId, signal);

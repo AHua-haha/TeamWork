@@ -41,23 +41,22 @@ test('malformed context pages are protocol errors and invalid identities are rej
   assert.throws(() => client.member('ws-1', '../bad'), /Invalid context identity/);
 });
 
-test('semantic inspection preserves nested ranges and empty results using read-only requests', async () => {
-  const node = { id: 'topic', firstPosition: 1, lastPosition: 5, topic: 'Project', summary: 'Agreed scope', involvedMemberIds: ['lead'], children: [] };
-  const index = { revision: 3, from: 1, through: 10, sourceDigest: 'a'.repeat(64), tree: [{ ...node, lastPosition: 10, children: [node] }] };
+test('summary inspection preserves text and coverage and empty results using read-only requests', async () => {
+  const summary = { revision: 3, from: 1, through: 10, analyzedThrough: 40, sourceDigest: 'a'.repeat(64), text: 'Agreed goals and outstanding work', messageId: 'summary-3', time: 1 };
   let requested = ''; let init: RequestInit | undefined;
-  const client = new ContextClient(async (url, options) => { requested = String(url); init = options; return Response.json({ index }); });
-  assert.deepEqual(await client.semantic('ws-1'), { index });
-  assert.equal(requested, '/workspaces/ws-1/team/chat/semantic-index');
+  const client = new ContextClient(async (url, options) => { requested = String(url); init = options; return Response.json({ summary, retainedMessages: 30 }); });
+  assert.deepEqual(await client.summary('ws-1'), { summary, retainedMessages: 30 });
+  assert.equal(requested, '/workspaces/ws-1/team/chat/summary');
   assert.equal(init?.method, 'GET');
   assert.equal((init?.headers as Record<string, string>)['Cache-Control'], 'no-cache');
-  assert.deepEqual(await new ContextClient(async () => Response.json({ index: null })).semantic('ws-1'), { index: null });
+  assert.deepEqual(await new ContextClient(async () => Response.json({ summary: null, retainedMessages: 30 })).summary('ws-1'), { summary: null, retainedMessages: 30 });
 });
 
-test('semantic inspection rejects malformed trees and preserves server failures', async () => {
-  for (const index of [undefined, {}, { revision: 1, from: 1, through: 2, sourceDigest: 'a', tree: [{ id: 'bad', children: [] }] }]) {
-    await assert.rejects(new ContextClient(async () => Response.json({ index })).semantic('ws-1'), ProtocolError);
+test('summary inspection rejects malformed coverage and preserves server failures', async () => {
+  for (const payload of [{}, {summary:null}, {summary:{revision:1,from:1,through:2,analyzedThrough:3,text:'bad'},retainedMessages:30}]) {
+    await assert.rejects(new ContextClient(async () => Response.json(payload)).summary('ws-1'), ProtocolError);
   }
   const client = new ContextClient(async () => Response.json({ error: { code: 'not_found', message: 'Workspace not found' } }, { status: 404 }));
-  await assert.rejects(client.semantic('ws-1'), error => error instanceof BackendError && error.code === 'not_found');
-  await assert.rejects(client.semantic('../bad'), /Invalid workspace identity/);
+  await assert.rejects(client.summary('ws-1'), error => error instanceof BackendError && error.code === 'not_found');
+  await assert.rejects(client.summary('../bad'), /Invalid workspace identity/);
 });

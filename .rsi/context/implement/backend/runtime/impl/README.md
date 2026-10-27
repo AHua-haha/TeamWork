@@ -1,6 +1,6 @@
 # Runtime implementation context
 
-After `runtime.open()` and successful HTTP listen, the host calls `void team.startMaintenance()` to check retained group contexts without blocking startup on model generation. Both startup failure cleanup and normal shutdown await `team.closeMaintenance()` before closing the runtime/storage, so background semantic analysis is cancelled and drained safely.
+After `runtime.open()` and successful HTTP listen, the host calls `void team.startMaintenance()` to check retained group contexts without blocking startup on model generation. Both startup failure cleanup and normal shutdown await `team.closeMaintenance()` before closing the runtime/storage, so background shared-summary generation is cancelled and drained safely.
 
 ## Result summary
 

@@ -262,20 +262,21 @@ test('context inspection routes are read-only, scoped, paged and independent of 
   assert.equal(fixture.runtime.runs.length, 0, 'inspection never starts work');
 }));
 
-test('semantic index inspection returns saved hierarchy or null without starting maintenance', () => withServer(async (call, fixture) => {
-  const path = `/workspaces/${fixture.workspaceId}/team/chat/semantic-index`;
-  assert.deepEqual(await call(path), { index: null });
-  const index = { revision: 2, from: 1, through: 8, sourceDigest: 'a'.repeat(64), tree: [{ id: 'topic', firstPosition: 1, lastPosition: 8, topic: 'Design', summary: 'Agreed interfaces', involvedMemberIds: [fixture.lead.memberId], children: [{ id: 'detail', firstPosition: 3, lastPosition: 5, topic: 'API', summary: 'Input and output', involvedMemberIds: [], children: [] }] }] };
+test('group summary inspection returns saved text or null without starting maintenance', () => withServer(async (call, fixture) => {
+  const path = `/workspaces/${fixture.workspaceId}/team/chat/summary`;
+  assert.deepEqual(await call(path), { summary: null, retainedMessages: 30 });
+  const summary = { revision: 2, from: 1, through: 8, analyzedThrough: 38, sourceDigest: 'a'.repeat(64), text: 'Accepted shared goals and remaining work', messageId: 'summary-2', time: 1 };
   let reads = 0;
-  Object.assign(fixture.store, { readGroupSemantic: async (workspaceId: string) => { reads++; assert.equal(workspaceId, fixture.workspaceId); return structuredClone(index); } });
-  assert.deepEqual(await call(path), { index });
+  Object.assign(fixture.store, { readGroupSummary: async (workspaceId: string) => { reads++; assert.equal(workspaceId, fixture.workspaceId); return structuredClone(summary); } });
+  assert.deepEqual(await call(path), { summary, retainedMessages: 30 });
   assert.equal(reads, 1);
-  await call('/workspaces/missing/team/chat/semantic-index', { status: 404 });
-  assert.equal(reads, 1, 'scope is checked before reading the index');
+  await call('/workspaces/missing/team/chat/summary', { status: 404 });
+  assert.equal(reads, 1, 'scope is checked before reading the summary');
   for (const suffix of ['?unknown=1', '?revision=2', '?revision=2&revision=2']) await call(path + suffix, { status: 400 });
   for (const method of ['POST', 'PUT', 'DELETE']) await call(path, { method, status: 404 });
   await call(path + '/extra', { status: 404 });
-  assert.equal(reads, 1, 'invalid requests never read the index');
+  await call(`/workspaces/${fixture.workspaceId}/team/chat/semantic-index`, { status: 404 });
+  assert.equal(reads, 1, 'invalid requests never read the summary');
   assert.equal(fixture.runtime.runs.length, 0, 'inspection starts no member run');
 }));
 

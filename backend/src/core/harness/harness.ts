@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { DesignService, type ResolvedDesign } from '../workspace/design.js';
 import type { HarnessConfig } from './data/config.js';
 import { executeBash, parseBashInput, resetMemberShell, type CommandResult } from './harness-command.js';
-import { harnessBashTool, harnessFileTools, semanticSubmissionTool } from './harness-tools.js';
+import { harnessBashTool, harnessFileTools, groupSummaryTool } from './harness-tools.js';
 import { resourceOwns, type HarnessDefinition } from './data/resources.js';
 import { OperationQueue, committedFiles, currentFiles, filesRevision, fileChanges } from '../workspace/workspace-git.js';
 import { GitCommitControl } from './git-approval.js';
@@ -154,7 +154,7 @@ export class HarnessService {
     const review=async(prefix:'.rsi/members'|'.rsi/context/design')=>{const [before,after]=await Promise.all([this.controlFiles(id,'committed',prefix),this.controlFiles(id,'pending',prefix)]);return {base:before.revision,revision:after.revision,changes:await fileChanges(before.files,after.files)};};
     const [design,members]=await Promise.all([review('.rsi/context/design'),review('.rsi/members')]);return {design,members};
   }
-  semanticTool(submit: Parameters<typeof semanticSubmissionTool>[0]): RuntimeTool { return semanticSubmissionTool(submit); }
+  summaryTool(submit: Parameters<typeof groupSummaryTool>[0]): RuntimeTool { return groupSummaryTool(submit); }
   async prepare(id: string, teamTools: RuntimeTool[]): Promise<{ tools: RuntimeTool[]; context: string }> {
     const member = await this.active(id);
     const resolved = await resolveHarness(this.designs, member.workspaceId, member.value.harness);
