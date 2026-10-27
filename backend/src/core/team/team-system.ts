@@ -162,6 +162,13 @@ export class TeamSystem {
   }
 
   modelSettings(workspaceId: string, memberId: string) { return this.service.modelSettings(workspaceId, memberId); }
+  async memberMetadata(workspaceId: string, memberId: string) {
+    const roster = await this.roster(workspaceId);
+    const member = roster.members.find(item => item.memberId === memberId);
+    if (!member) throw new AppError('not_found', 'Member not found in this workspace', 404);
+    return member;
+  }
+
   updateModelSettings(workspaceId: string, memberId: string, revision: number, value: unknown) {
     return this.runner.workspaceOperation(workspaceId, () => this.service.updateModelSettings(workspaceId, memberId, revision, value));
   }

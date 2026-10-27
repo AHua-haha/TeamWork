@@ -16,7 +16,7 @@ test('chat roster uses its narrow endpoint and coalesces concurrent refreshes', 
   const api = new WorkspaceClient((async input => { calls.push(String(input)); return new Promise(resolve => {finish=resolve;}); }) as typeof fetch);
   const model = new ChatRoster('w1', api);
   const first = model.refresh(); assert.equal(model.refresh(), first);
-  assert.deepEqual(calls, ['/workspaces/w1/team/roster']);
+  assert.deepEqual(calls, ['/workspaces/w1/members']);
   finish(new Response(JSON.stringify(roster))); await first;
   assert.deepEqual(model.getSnapshot(), {team:roster,loading:false,error:null});
   model.dispose(); await model.refresh(); assert.equal(calls.length, 1);

@@ -9,7 +9,7 @@ const entry = { kind: 'user', workspaceId: 'w', entryId: 'm', messageId: 'm', po
 test('image-only send uses binary multipart, and stable timeline retains only image references', async () => {
   const file = new File(['image'], 'screen.png', { type: 'image/png' });
   const client = new GroupClient('w', { fetcher: async (url, init) => {
-    assert.equal(url, '/workspaces/w/team/chat/messages');
+    assert.equal(url, '/workspaces/w/chat/messages');
     assert.equal(init?.headers, undefined); assert.ok(init?.body instanceof FormData);
     assert.equal(init.body.get('text'), '');
     const upload = init.body.get('images'); assert.ok(upload instanceof File); assert.equal(upload.name, file.name); assert.equal(await upload.text(), 'image');
@@ -17,7 +17,7 @@ test('image-only send uses binary multipart, and stable timeline retains only im
   } });
   await client.send('', [file]);
   assert.deepEqual(client.getSnapshot().entries, [entry]);
-  assert.equal(imageUrl('w', 'picture1'), '/workspaces/w/team/chat/attachments/picture1');
+  assert.equal(imageUrl('w', 'picture1'), '/workspaces/w/chat/attachments/picture1');
   client.dispose();
 });
 

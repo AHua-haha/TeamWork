@@ -38,7 +38,7 @@ export class ContextClient {
   constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly basePath = '/workspaces') {}
   async summary(workspaceId: string): Promise<{ summary: GroupSummary | null; retainedMessages: number }> {
     if (!identity.test(workspaceId)) throw new Error('Invalid workspace identity');
-    const response = await this.fetcher(`${this.basePath}/${encodeURIComponent(workspaceId)}/team/chat/summary`, {
+    const response = await this.fetcher(`${this.basePath}/${encodeURIComponent(workspaceId)}/chat/summary`, {
       method: 'GET', headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
     });
     const result = await readJson(response) as { summary?: GroupSummary | null; retainedMessages?: number } | null;
@@ -62,10 +62,10 @@ export class ContextClient {
   }
   group(workspaceId: string, options: ContextPageOptions = {}): Promise<ContextPage<GroupContextEntry>> {
     if (!identity.test(workspaceId)) throw new Error('Invalid workspace identity');
-    return this.read(`${this.basePath}/${encodeURIComponent(workspaceId)}/team/chat/context`, options);
+    return this.read(`${this.basePath}/${encodeURIComponent(workspaceId)}/chat/context`, options);
   }
   member(workspaceId: string, memberId: string, options: ContextPageOptions = {}): Promise<ContextPage<ContextEntry>> {
     if (!identity.test(workspaceId) || !identity.test(memberId)) throw new Error('Invalid context identity');
-    return this.read(`${this.basePath}/${encodeURIComponent(workspaceId)}/team/members/${encodeURIComponent(memberId)}/context`, options);
+    return this.read(`${this.basePath}/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}/context`, options);
   }
 }

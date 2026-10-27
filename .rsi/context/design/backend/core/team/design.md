@@ -94,6 +94,13 @@ Member context is owned and read by Agent. Team validates that the requested act
 4. A member is unmentioned and stays idle while its group context can synchronize. A busy member defers incorporation until its current work finishes.
 5. SQL restoration preserves Agent-owned incorporation state alongside its context. Already incorporated group inputs do not reappear after backend restart.
 
-## Chat roster read
 
-Provide a narrow read of active member identities, names, roles, responsibilities and current running flags for ordinary chat presentation. This read checks workspace existence and projects accepted member records; it does not inspect design files, resolve harnesses, validate model availability or declare readiness. Detailed inspection remains a separate capability. Run admission and configuration activation continue to perform required validation regardless of frontend mode.
+### REST resource metadata and retained public inspection
+
+The public HTTP surface uses workspace resources rather than exposing Team's internal inspection hierarchy. `GET /workspaces/:workspaceId` returns only the registered workspace metadata (`workspaceId`, `name`, `directory`, `createdAt`) and never loads the managed context overview. Active member metadata is exposed by `GET /workspaces/:workspaceId/members`; one active member is exposed by `GET /workspaces/:workspaceId/members/:memberId`. These responses contain identity, role, responsibility, lead, revision and running state only. They do not resolve designs, Harnesses, provider availability, private context or group messages.
+
+The old public roster and detailed member-inspection routes are retired. The Team-owned member metadata operation remains internal and is the source for the REST resources. Configuration review/activation and model-settings operations remain separate Team capabilities because they are user-controlled configuration workflows, not metadata reads.
+
+Agent context is a member subresource at `GET /workspaces/:workspaceId/members/:memberId/context`, preserving bounded Pi-message pagination, revision checks, `context_changed`, no-store behavior and read-only execution semantics. Group chat is a workspace resource at `/workspaces/:workspaceId/chat`; its snapshot, timeline, follow, message, stop, reset and settings operations retain their existing payloads and effects. Group summary and effective group context are read-only chat subresources at `/chat/summary` and `/chat/context`.
+
+Legacy public design, project-file, managed-context browsing and detailed Team inspection endpoints are not part of this surface. Their internal Workspace/Design/ContextBase and Harness mechanisms remain available to initialization, persistence, permissions and Agent tools. API composition may call Workspace and Team owner operations, but neither owner reads the other's persistence directly.

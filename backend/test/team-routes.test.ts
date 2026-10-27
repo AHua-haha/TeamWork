@@ -41,38 +41,38 @@ function withServer(run: (call: (path: string, init?: { method?: string; data?: 
   });
 }
 
-test('member inspection is read-only, returns accepted configuration and three harnesses without opening a worktree', () => withServer(async (call, fixture) => {
-  const base = `/workspaces/${fixture.workspaceId}/team`;
+test('workspace member metadata uses REST resources; legacy detailed inspection and roster routes are unavailable', () => withServer(async (call, fixture) => {
   const created = await worker(fixture, 'Backend', ['backend']);
   const root = join(fixture.folder, '.rsi-harness');
   await assert.rejects(stat(root));
-  const view = await call(`${base}/members/${created.memberId}`);
-  assert.equal(view.member.name, 'Backend');
-  assert.equal(JSON.parse(view.configuration.files['member.json']).name, 'Backend');
-  assert.deepEqual(view.harnesses.map((h: Body) => h.id), ['management', 'implementation', 'execute']);
-  assert.ok(!view.harnesses[0].resources.some((p: Body) => p.id === 'design'));
-  assert.deepEqual(view.harnesses[0].tools,['ls','read','grep','find']);
-  await assert.rejects(stat(root), 'inspection creates no harness Git storage');
-  const before = await fixture.team.service.find(created.memberId);
-  for (const [method, path, data] of [
-    ['POST', `${base}/members`, { name: 'Other', role: 'developer' }],
-    ['PUT', `${base}/members/${created.memberId}`, { revision: created.revision, value: {} }],
-    ['DELETE', `${base}/members/${created.memberId}`, { revision: created.revision }],
-    ['GET', `${base}/members/${created.memberId}/config`, undefined],
-  ] as const) await call(path, { method, data, status: 404 });
-  assert.deepEqual(await fixture.team.service.find(created.memberId), before);
-  await call(`/workspaces/other/team/members/${created.memberId}`, { status: 404 });
-  const lead = await call(`${base}/members/${fixture.lead.memberId}`);
-  assert.ok(lead.harnesses[0].tools.includes('bash'));
-  assert.ok(!lead.harnesses[0].tools.includes('submit_member_config'));
-  assert.equal(lead.harnesses[0].resources.find((p: Body) => p.id === 'member-config').commit, 'user');
-  assert.deepEqual((await call(base)).members.map((m: Body) => m.name), ['Lead', 'Backend']);
+
+  const workspace = await call(`/workspaces/${fixture.workspaceId}`);
+  assert.equal(workspace.workspaceId, fixture.workspaceId);
+  assert.equal('context' in workspace, false);
+  const memberList = await call(`/workspaces/${fixture.workspaceId}/members`);
+  assert.deepEqual(memberList.members.map((m: Body) => m.name), ['Lead', 'Backend']);
+  const member = await call(`/workspaces/${fixture.workspaceId}/members/${created.memberId}`);
+  assert.equal(member.memberId, created.memberId);
+  assert.equal(member.name, 'Backend');
+  assert.equal(member.running, false);
+  assert.equal('harness' in member, false);
+  assert.equal('settings' in member, false);
+  assert.equal('issues' in member, false);
+  assert.equal('ready' in member, false);
+  await assert.rejects(stat(root), 'metadata reads do not resolve Harnesses or create Harness storage');
+
+  await call(`/workspaces/${fixture.workspaceId}/team/roster`, { status: 404 });
+  await call(`/workspaces/${fixture.workspaceId}/team/members/${created.memberId}`, { status: 404 });
+  await call(`/workspaces/other/members/${created.memberId}`, { status: 404 });
+  await call(`/workspaces/${fixture.workspaceId}/members/missing`, { status: 404 });
+  await call(`/workspaces/${fixture.workspaceId}/members/${created.memberId}/harness`, { status: 404 });
+  assert.deepEqual((await call(`/workspaces/${fixture.workspaceId}/members`)).members.map((m: Body) => m.memberId), [fixture.lead.memberId, created.memberId]);
 }));
 
 test('workspace input goes to group chat; direct member input is refused', () => withServer(async (call, fixture) => {
   const member = await worker(fixture, 'Backend');
   for (const id of [fixture.lead.memberId, member.memberId]) assert.equal((await call(`/agents/${id}/runs`, { method: 'POST', status: 409, data: { input: 'hello' } })).error.code, 'member_conversation');
-  const base = `/workspaces/${fixture.workspaceId}/team/chat`;
+  const base = `/workspaces/${fixture.workspaceId}/chat`;
   const accepted = await call(`${base}/messages`, { method: 'POST', status: 202, data: { text: 'Build a reading list' } });
   assert.deepEqual(accepted.message.author, { type: 'user' });
   assert.equal(accepted.runs[0].agentId, fixture.lead.memberId);
@@ -87,7 +87,7 @@ test('workspace input goes to group chat; direct member input is refused', () =>
 }));
 
 test('group timeline endpoints expose persisted reservations and paged changes', () => withServer(async (call, fixture) => {
-  const base = `/workspaces/${fixture.workspaceId}/team/chat`;
+  const base = `/workspaces/${fixture.workspaceId}/chat`;
   const accepted = await call(`${base}/messages`, { method: 'POST', data: { text: 'work' }, status: 202 });
   assert.deepEqual(accepted.entries.map((entry: { kind: string }) => entry.kind), ['user', 'member']);
   const page = await call(`${base}/timeline?after=0&limit=1`);
@@ -119,21 +119,21 @@ test('configuration review and separate user activation enforce exact input and 
 
 test('user model settings persist independently of member files, reject stale/foreign/extra writes and allow busy saves', () => withServer(async (call, f) => {
   const member = await worker(f, 'Backend', ['src']);
-  const path = `/workspaces/${f.workspaceId}/team/members/${member.memberId}`;
+  const path = `/workspaces/${f.workspaceId}/members/${member.memberId}`;
   const initial = await call(path + '/model-settings');
-  const source = (await call(path)).configuration;
   const value = { connectionId: 'conn', modelId: 'other-user-model', modelOptions: [{ connectionId: 'conn', modelId: 'other-user-model', reasoning: 'high', temperature: 0.5, maxTokens: 100, contextBudget: 2000 }] };
   const saved = await call(path + '/model-settings', { method: 'PUT', data: { revision: initial.revision, value } });
   assert.deepEqual(saved.value, value); assert.equal(saved.revision, initial.revision + 1);
-  assert.deepEqual((await call(path)).configuration, source);
-  assert.equal((await call(path)).member.settings.modelId, value.modelId);
-  assert.equal((await call(`/workspaces/${f.workspaceId}/team`)).members.find((m: Body) => m.memberId === member.memberId).settings.modelId, value.modelId);
+  const memberMetadata = await call(path);
+  assert.equal(memberMetadata.name, 'Backend');
+  assert.equal('settings' in memberMetadata, false);
+  assert.deepEqual((await call(`/workspaces/${f.workspaceId}/members`)).members.map((m: Body) => m.memberId), [f.lead.memberId, member.memberId]);
   const before = await f.team.service.find(member.memberId);
   await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{connectionId:'conn',modelId:'model'}}});
   await call(path + '/model-settings', { method:'PUT', status:409, data:{revision:initial.revision,value} });
   for (const extra of [{ prompt:'bypass' }, { toolOptionIds:['admin'] }, { harness:{} }]) await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{...value,...extra}}});
   await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{...value,modelOptions:[{connectionId:'conn',modelId:'model',temperature:10}]}}});
-  await call(`/workspaces/wrong/team/members/${member.memberId}/model-settings`,{status:404});
+  await call(`/workspaces/wrong/members/${member.memberId}/model-settings`,{status:404});
   assert.deepEqual(await f.team.service.find(member.memberId), before);
   await f.team.runner.postUser(f.workspaceId,'@Backend work');
   await call(path+'/model-settings',{method:'PUT',data:{revision:saved.revision,value:{...value,modelId:'third-model'}}});
@@ -147,7 +147,7 @@ test('user model settings persist independently of member files, reject stale/fo
 }));
 
 test('user reset endpoint clears idle conversations and rejects busy, unknown and invalid routes', () => withServer(async (call, f) => {
-  const base = `/workspaces/${f.workspaceId}/team/chat`;
+  const base = `/workspaces/${f.workspaceId}/chat`;
   await call(`${base}/messages`, { method: 'POST', status: 202, data: { text: 'Old chat' } });
   assert.equal((await call(`${base}/reset`, { method: 'POST', status: 409 })).error.code, 'workspace_busy');
   assert.equal((await call(base)).messages.length, 1);
@@ -160,8 +160,8 @@ test('user reset endpoint clears idle conversations and rejects busy, unknown an
   assert.deepEqual((await call(base)).messages, []);
   await call(`${base}/reset`, { status: 404 });
   await call(`${base}/reset?unexpected=1`, { method: 'POST', status: 400 });
-  await call('/workspaces/missing/team/chat/reset', { method: 'POST', status: 404 });
-  assert.equal((await call(`/workspaces/${f.workspaceId}/team`)).members.length, 1);
+  await call('/workspaces/missing/chat/reset', { method: 'POST', status: 404 });
+  assert.equal((await call(`/workspaces/${f.workspaceId}/members`)).members.length, 1);
 }));
 
 test('Changes endpoint returns only protected reviews and activation references without full configuration inspection', () => withServer(async (call, f) => {
@@ -182,7 +182,7 @@ test('Changes endpoint returns only protected reviews and activation references 
 test('multipart HTTP publication stores scoped pictures, preserves image-only input and refuses atomically', () => withTeam(async fixture => {
   const { png } = await import('./image-fixture.js');
   const server = createAgentServer(fixture.runtime as unknown as AgentRuntime, stubConfig, fixture.workspaces, fixture.team);
-  const base = `/workspaces/${fixture.workspaceId}/team/chat`;
+  const base = `/workspaces/${fixture.workspaceId}/chat`;
   const upload = async (files: Uint8Array[], textValue = '') => {
     const form = new FormData(); form.set('text', textValue);
     files.forEach((bytes, i) => form.append('images', new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'image/png' }), `picture-${i}.png`));
@@ -206,7 +206,7 @@ test('multipart HTTP publication stores scoped pictures, preserves image-only in
     assert.equal(response.statusCode, 200); assert.equal(response.headers['content-type'], 'image/png');
     const chunks: Buffer[] = []; for await (const chunk of response) chunks.push(chunk);
     assert.deepEqual(Buffer.concat(chunks), png());
-    const cross = await send(server, `/workspaces/other/team/chat/attachments/${image.id}`);
+    const cross = await send(server, `/workspaces/other/chat/attachments/${image.id}`);
     assert.equal(cross.statusCode, 404); await text(cross);
     const busy = await upload([png()], 'try again'); assert.equal(busy.statusCode, 409); await text(busy);
     assert.equal(fixture.store.chatImages.size, 1);
@@ -224,13 +224,13 @@ test('commit approval endpoints expose pending command and right-panel diff; dec
  const list=await call(base);assert.equal(list.approvals[0].id,request.id);assert.equal(list.approvals[0].changes,undefined);
  const review=await call(`${base}/${request.id}`);assert.ok(review.changes.length);assert.match(review.command,/Review members/);
  await call(`${base}/${request.id}`,{method:'POST',data:{action:'feedback',message:'Revise the prompt'}});assert.match((await running).output,/Revise the prompt/);
- await call(`${base}/${request.id}`,{status:404});await call(`/workspaces/${f.workspaceId}/team/members/${f.lead.memberId}/harness`,{status:404});
+ await call(`${base}/${request.id}`,{status:404});await call(`/workspaces/${f.workspaceId}/members/${f.lead.memberId}/harness`,{status:404});
  await call(`/workspaces/${f.workspaceId}/team/configuration/commit`,{method:'POST',data:{},status:404});
 }));
 
 
 test('context inspection routes are read-only, scoped, paged and independent of execution state', () => withServer(async (call, fixture) => {
-  const base = `/workspaces/${fixture.workspaceId}/team`;
+  const base = `/workspaces/${fixture.workspaceId}`;
   const created = await worker(fixture, 'Inspector');
   const entry = { messageId: 'retained', message: { role: 'user', content: 'Retained context', timestamp: 1 }, metadata: { source: 'group-chat', marker: 'exact' } };
   const reads: { agentId: string; input: unknown }[] = [];
@@ -253,8 +253,8 @@ test('context inspection routes are read-only, scoped, paged and independent of 
     await call(`${base}/${suffix}/extra`, { status: 404 });
   }
   const before = reads.length;
-  await call(`/workspaces/other/team/members/${created.memberId}/context`, { status: 404 });
-  await call('/workspaces/other/team/chat/context', { status: 404 });
+  await call(`/workspaces/other/members/${created.memberId}/context`, { status: 404 });
+  await call('/workspaces/other/chat/context', { status: 404 });
   await call(`${base}/members/missing/context`, { status: 404 });
   await fixture.team.service.retire(fixture.workspaceId, created.memberId, created.revision);
   await call(`${base}/members/${created.memberId}/context`, { status: 404 });
@@ -263,42 +263,48 @@ test('context inspection routes are read-only, scoped, paged and independent of 
 }));
 
 test('group summary inspection returns saved text or null without starting maintenance', () => withServer(async (call, fixture) => {
-  const path = `/workspaces/${fixture.workspaceId}/team/chat/summary`;
+  const path = `/workspaces/${fixture.workspaceId}/chat/summary`;
   assert.deepEqual(await call(path), { summary: null, retainedMessages: 30 });
   const summary = { revision: 2, from: 1, through: 8, analyzedThrough: 38, sourceDigest: 'a'.repeat(64), text: 'Accepted shared goals and remaining work', messageId: 'summary-2', time: 1 };
   let reads = 0;
   Object.assign(fixture.store, { readGroupSummary: async (workspaceId: string) => { reads++; assert.equal(workspaceId, fixture.workspaceId); return structuredClone(summary); } });
   assert.deepEqual(await call(path), { summary, retainedMessages: 30 });
   assert.equal(reads, 1);
-  await call('/workspaces/missing/team/chat/summary', { status: 404 });
+  await call('/workspaces/missing/chat/summary', { status: 404 });
   assert.equal(reads, 1, 'scope is checked before reading the summary');
   for (const suffix of ['?unknown=1', '?revision=2', '?revision=2&revision=2']) await call(path + suffix, { status: 400 });
   for (const method of ['POST', 'PUT', 'DELETE']) await call(path, { method, status: 404 });
   await call(path + '/extra', { status: 404 });
-  await call(`/workspaces/${fixture.workspaceId}/team/chat/semantic-index`, { status: 404 });
+  await call(`/workspaces/${fixture.workspaceId}/chat/semantic-index`, { status: 404 });
   assert.equal(reads, 1, 'invalid requests never read the summary');
   assert.equal(fixture.runtime.runs.length, 0, 'inspection starts no member run');
 }));
 
-test('chat roster lists active identities without resolving designs, harnesses or readiness', () => withServer(async (call, fixture) => {
+test('REST workspace resources expose lightweight member metadata and keep chat/context inspection separate', () => withServer(async (call, fixture) => {
   const workerView = await worker(fixture, 'Builder', ['backend']);
   const retired = await worker(fixture, 'Retired');
   await fixture.team.service.retire(fixture.workspaceId, retired.memberId, retired.revision);
-  const fail = async () => { throw new Error('Heavy inspection must not run for the roster'); };
+  const fail = async () => { throw new Error('Heavy inspection must not run for metadata reads'); };
   fixture.team.designs.working = fail;
   fixture.team.designs.read = fail;
   fixture.team.service.issues = fail;
-  const base = `/workspaces/${fixture.workspaceId}/team/roster`;
+  const workspace = await call(`/workspaces/${fixture.workspaceId}`);
+  assert.equal(workspace.workspaceId, fixture.workspaceId);
+  assert.equal('context' in workspace, false);
+  const base = `/workspaces/${fixture.workspaceId}/members`;
   const result = await call(base);
   assert.deepEqual(result.members.map((m:Body)=>m.name), ['Lead','Builder']);
-  const builder = result.members.find((m:Body)=>m.memberId===workerView.memberId);
+  const builder = await call(`${base}/${workerView.memberId}`);
   assert.equal(builder.running,false);
   assert.equal(builder.responsibility, workerView.responsibility);
   assert.equal('harness' in builder,false);assert.equal('settings' in builder,false);
   assert.equal('ready' in builder,false);assert.equal('issues' in builder,false);
-  await call('/workspaces/missing/team/roster',{status:404});
+  await call('/workspaces/missing/members',{status:404});
   await call(`${base}?details=1`,{status:400});
   await call(`${base}/extra`,{status:404});
-  await call(base,{method:'POST',status:404});
+  await call(`${base}/${workerView.memberId}/harness`,{status:404});
+  await call(`/workspaces/${fixture.workspaceId}/team/roster`,{status:404});
+  await call(`/workspaces/${fixture.workspaceId}/team/members/${workerView.memberId}`,{status:404});
+  await call(`/workspaces/${fixture.workspaceId}/team/chat`,{status:404});
   assert.equal(fixture.runtime.runs.length,0);
 }));

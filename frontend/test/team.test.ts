@@ -106,5 +106,5 @@ test('member model client sends only model settings and the reviewed revision', 
   }) as typeof fetch);
   assert.deepEqual(await api.memberModelSettings('w 1','lead/1'),record);
   assert.deepEqual(await api.updateMemberModelSettings('w 1','lead/1',3,value),record);
-  assert.deepEqual(calls,[{path:'/workspaces/w%201/team/members/lead%2F1/model-settings',method:'GET',body:undefined},{path:'/workspaces/w%201/team/members/lead%2F1/model-settings',method:'PUT',body:{revision:3,value}}]);
+  assert.deepEqual(calls,[{path:'/workspaces/w%201/members/lead%2F1/model-settings',method:'GET',body:undefined},{path:'/workspaces/w%201/members/lead%2F1/model-settings',method:'PUT',body:{revision:3,value}}]);
 });

@@ -83,10 +83,11 @@ interface Tab extends FileTarget { key: number; startEditing: boolean; onDirty(d
 function WorkspaceView({ client, workspace, team, actions, onDirty, onDiscuss, commitReview }: { commitReview?:{id:string;request:number}|null; client: WorkspaceClient; workspace: Workspace; team: TeamState; actions: ReactNode; onDirty(dirty: boolean): void; onDiscuss(reference: DiscussionReference): void }) {
   const id = workspace.workspaceId;
   const [feed, setFeed] = useState<ContextFeed | null>(null);
-  const [feedFrom, setFeedFrom] = useState({ seq: workspace.context.seq });
+  const initialSeq = workspace.context?.seq ?? 0;
+  const [feedFrom, setFeedFrom] = useState({ seq: initialSeq });
   const [restartError, setRestartError] = useState<string | null>(null);
   const status = useSyncExternalStore(feed?.subscribe ?? noSubscribe, feed?.getSnapshot ?? idleSnapshot);
-  const [overview, setOverview] = useState<ContextOverview>(workspace.context);
+  const [overview, setOverview] = useState<ContextOverview>(workspace.context ?? { workspaceId: id, seq: initialSeq, files: 0, bytes: 0, problems: [] });
   const context = useFolders(useCallback((path: string) => client.contextTree(id, path), [client, id]), ['']);
   const project = useFolders(useCallback((path: string) => client.projectTree(id, path), [client, id]), ['']);
   const [filter, setFilter] = useState('');

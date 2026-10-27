@@ -15,7 +15,7 @@ test('group context preserves backend page shape, pagination and read-only no-ca
   });
   const result = await client.group('ws-1', { offset: 10, limit: 10, revision: 7 });
   assert.deepEqual(result, samplePage);
-  assert.equal(requested, '/workspaces/ws-1/team/chat/context?offset=10&limit=10&revision=7');
+  assert.equal(requested, '/workspaces/ws-1/chat/context?offset=10&limit=10&revision=7');
   assert.equal(init?.method, 'GET');
   assert.equal((init?.headers as Record<string, string>)['Cache-Control'], 'no-cache');
 });
@@ -24,7 +24,7 @@ test('member context encodes workspace and member IDs and omits unset pagination
   let requested = '';
   const client = new ContextClient(async input => { requested = String(input); return Response.json({ ...samplePage, offset: 0 }); });
   const result = await client.member('ws-2', 'member_3');
-  assert.equal(requested, '/workspaces/ws-2/team/members/member_3/context');
+  assert.equal(requested, '/workspaces/ws-2/members/member_3/context');
   assert.equal(result.revision, samplePage.revision);
   assert.deepEqual(result.entries, samplePage.entries);
 });
@@ -46,7 +46,7 @@ test('summary inspection preserves text and coverage and empty results using rea
   let requested = ''; let init: RequestInit | undefined;
   const client = new ContextClient(async (url, options) => { requested = String(url); init = options; return Response.json({ summary, retainedMessages: 30 }); });
   assert.deepEqual(await client.summary('ws-1'), { summary, retainedMessages: 30 });
-  assert.equal(requested, '/workspaces/ws-1/team/chat/summary');
+  assert.equal(requested, '/workspaces/ws-1/chat/summary');
   assert.equal(init?.method, 'GET');
   assert.equal((init?.headers as Record<string, string>)['Cache-Control'], 'no-cache');
   assert.deepEqual(await new ContextClient(async () => Response.json({ summary: null, retainedMessages: 30 })).summary('ws-1'), { summary: null, retainedMessages: 30 });

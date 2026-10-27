@@ -10,7 +10,7 @@ export interface WorkspaceInput { name: string; directory: string; adopt: boolea
 export interface WorkspaceInitialization { directory: string; cleanupPaths: string[]; cleanupRevision: string | null }
 export interface Problem { path: string; code: string; message: string }
 export interface ContextOverview { workspaceId: string; seq: number; files: number; bytes: number; problems: Problem[] }
-export interface Workspace extends WorkspaceRecord { context: ContextOverview }
+export interface Workspace extends WorkspaceRecord { context?: ContextOverview }
 export type Author = { type: 'user' } | { type: 'external' } | { type: 'lead'; memberId: string; runId: string };
 export type FileAction = 'create' | 'update' | 'move' | 'delete';
 export interface FolderEntry { path: string; type: 'folder' }
@@ -86,12 +86,13 @@ export class WorkspaceClient {
   inspectInitialization(input: Pick<WorkspaceInput, 'directory' | 'adopt'>): Promise<WorkspaceInitialization> { return this.write('/workspaces/initialization', 'POST', input); }
   createWorkspace(input: WorkspaceInput): Promise<Workspace> { return this.write('/workspaces', 'POST', input); }
   getWorkspace(workspaceId: string): Promise<Workspace> { return this.get(this.base(workspaceId)); }
-
-  roster(workspaceId: string): Promise<TeamRoster> { return this.get(`${this.base(workspaceId)}/team/roster`); }
+  members(workspaceId: string): Promise<TeamRoster> { return this.get(`${this.base(workspaceId)}/members`); }
+  member(workspaceId: string, memberId: string): Promise<RosterMember> { return this.get(`${this.base(workspaceId)}/members/${encodeURIComponent(memberId)}`); }
+  roster(workspaceId: string): Promise<TeamRoster> { return this.members(workspaceId); }
   team(workspaceId: string): Promise<Team> { return this.get(`${this.base(workspaceId)}/team`); }
   inspectMember(workspaceId: string, memberId: string): Promise<MemberInspection> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}`); }
-  memberModelSettings(workspaceId: string, memberId: string): Promise<MemberModelConfig> { return this.get(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/model-settings`); }
-  updateMemberModelSettings(workspaceId: string, memberId: string, revision: number, value: MemberModelSettings): Promise<MemberModelConfig> { return this.write(`${this.base(workspaceId)}/team/members/${encodeURIComponent(memberId)}/model-settings`, 'PUT', { revision, value }); }
+  memberModelSettings(workspaceId: string, memberId: string): Promise<MemberModelConfig> { return this.get(`${this.base(workspaceId)}/members/${encodeURIComponent(memberId)}/model-settings`); }
+  updateMemberModelSettings(workspaceId: string, memberId: string, revision: number, value: MemberModelSettings): Promise<MemberModelConfig> { return this.write(`${this.base(workspaceId)}/members/${encodeURIComponent(memberId)}/model-settings`, 'PUT', { revision, value }); }
 
   currentMemberConfiguration(workspaceId: string): Promise<CurrentMemberConfiguration> { return this.get(`${this.base(workspaceId)}/team/configuration/current`); }
   changes(workspaceId: string): Promise<WorkspaceChanges> { return this.get(`${this.base(workspaceId)}/team/changes`); }

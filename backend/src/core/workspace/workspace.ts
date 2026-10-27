@@ -168,7 +168,10 @@ export class WorkspaceService {
       await prepared.files.finish();
     });
     this.creating = created.catch(() => undefined);
-    return created.then(() => this.get(workspaceId));
+    return created.then(async () => {
+      const record = await this.record(workspaceId);
+      return { ...record, context: await (await this.context(workspaceId)).overview() };
+    });
   }
 
   async close(): Promise<void> {

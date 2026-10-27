@@ -8,11 +8,29 @@ const maxBodyBytes = 1024 * 1024;
 
 /** Handles `/workspaces/:workspaceId/team` and everything under it. */
 export function teamRoutes(team: TeamSystem, runtime: AgentRuntime): (route: Route) => Promise<void> {
-  return async ({ request, response, url, path, signal }) => {
-    const [, workspaceId, , area, memberId, ...extra] = path;
-    identity(workspaceId, 'workspaceId');
+  return async ({ request, response, url, path: routePath, signal }) => {
     const method = request.method;
     const notFound = () => new AppError('not_found', 'Endpoint not found', 404);
+    if (routePath[2] === 'team' && (routePath[3] === 'roster' || routePath[3] === 'chat' || routePath[3] === 'members' || routePath.length === 3)) throw notFound();
+    // REST resources are canonical; normalize them to the existing Team handler below.
+    const path = routePath[2] === 'chat' || routePath[2] === 'members'
+      ? [routePath[0]!, routePath[1]!, 'team', ...routePath.slice(2)]
+      : routePath;
+    const [, workspaceId, , area, memberId, ...extra] = path;
+    identity(workspaceId, 'workspaceId');
+    if (routePath[2] === 'members' && routePath.length === 3) {
+      if (method !== 'GET') throw notFound();
+      query(url, []);
+      json(response, 200, await team.roster(workspaceId));
+      return;
+    }
+    if (routePath[2] === 'members' && routePath.length === 4) {
+      if (method !== 'GET') throw notFound();
+      query(url, []);
+      identity(routePath[3]!, 'memberId');
+      json(response, 200, await team.memberMetadata(workspaceId, routePath[3]!));
+      return;
+    }
     if (method === 'GET' && area === 'chat' && memberId === 'summary' && !extra.length) {
       query(url, []);
       response.setHeader('Cache-Control', 'no-store');

@@ -13,7 +13,7 @@ export function createAgentServer(runtime: AgentRuntime, config: ConfigService, 
   const teamRoute = teamRoutes(team, runtime);
   return createServer(respond(async route => {
     const { request, response, url, path, signal } = route;
-    if (path[0] === 'workspaces') return path[2] === 'team' ? teamRoute(route) : workspaceRoute(route);
+    if (path[0] === 'workspaces') return path[2] === 'team' || path[2] === 'chat' || path[2] === 'members' ? teamRoute(route) : workspaceRoute(route);
     if (path[0] === 'config') {
       if (path.length === 2 && path[1] === 'capabilities' && request.method === 'GET') { json(response, 200, config.capabilities()); return; }
       if (path.length === 2 && path[1] === 'app') {
