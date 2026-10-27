@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { backendClient, emptySettings, type AgentSummary, type ConfigRecord, type ConnectionView, type WorkspaceRecord } from '../shared/backend-client/index.js';
 import { HomePage } from '../features/home/HomePage.js';
 import { ProvidersPage } from '../features/providers/ProvidersPage.js';
-import { readRoute as parseRoute, routeUrl, sameRoute, validId, type Route } from './routes.js';
+import { readRoute as parseRoute, routeUrl, validId, type Route } from './routes.js';
 import { SoloPage } from '../features/chat/SoloPage.js';
-import { ConfirmDialog, CreateWorkspaceDialog } from '../features/workspace/WorkspaceDialogs.js';
+import { CreateWorkspaceDialog } from '../features/workspace/WorkspaceDialogs.js';
 import { WorkspacePage } from '../features/workspace/WorkspacePage.js';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed';
@@ -36,10 +36,6 @@ export function App() {
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth > 760);
   const [filesOpen, setFilesOpen] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
-  const [leaving, setLeaving] = useState<Route | null>(null);
-  const filesDirty = useRef(false);
-  const routeRef = useRef(route);
-  routeRef.current = route;
   const [title, setTitle] = useState('RSI Agent');
   const [allowCreation, setAllowCreation] = useState(true);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -100,12 +96,6 @@ export function App() {
   useEffect(() => {
     const onPop = () => {
       const next = readRoute();
-      // Leaving a workspace page closes its open files, so unsaved edits are confirmed first.
-      if (filesDirty.current && !sameRoute(next, routeRef.current)) {
-        window.history.pushState(null, '', routeUrl(routeRef.current));
-        setLeaving(next);
-        return;
-      }
       setRoute(next);
       const chat = chatRoute(next);
       if (chat) setLastChat(chat);
@@ -113,10 +103,8 @@ export function App() {
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
-  const onFilesDirty = useCallback((dirty: boolean) => { filesDirty.current = dirty; }, []);
 
   function navigate(next: Route) {
-    if (filesDirty.current && !sameRoute(next, route)) { setLeaving(next); return; }
     if (window.location.search !== routeUrl(next)) window.history.pushState(null, '', routeUrl(next));
     setRoute(next); setError(null);
     const chat = chatRoute(next);
@@ -126,11 +114,6 @@ export function App() {
   function showFiles(open: boolean) {
     if (open && window.innerWidth <= 760) setPanelOpen(false);
     setFilesOpen(open);
-  }
-  function showConversation() {
-    setFilesExpanded(false);
-    if (window.innerWidth <= 1100) setFilesOpen(false);
-    if (window.innerWidth <= 760) setPanelOpen(false);
   }
   function chooseSection(next: 'conversations' | 'config') {
     if (section === next) { setPanelOpen(!panelOpen); return; }
@@ -220,14 +203,11 @@ export function App() {
     <main className="main-area">
       {error && <div className="setup-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
       {route.page === 'workspace' && <WorkspacePage key={route.id} workspaceId={route.id} name={workspaces.find(item => item.workspaceId === route.id)?.name ?? null}
-        files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded, onDirty: onFilesDirty, showConversation }} />}
+        files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded }} />}
       {route.page === 'conversation' && <SoloPage key={route.id} agentId={route.id} api={api} configRefresh={configRefresh} />}
       {route.page === 'home' && <HomePage onAddWorkspace={() => setAddingWorkspace(true)} onNewConversation={() => void newConversation()} creating={creating} allowCreation={allowCreation} />}
       {route.page === 'providers' && <ProvidersPage api={api} records={connections} loading={connectionsLoading} loadError={connectionsError} refresh={loadConnections} focusId={focusProviderId} clearFocus={() => setFocusProviderId(null)} />}
     </main>
-    {leaving && <ConfirmDialog eyebrow="UNSAVED CHANGES" title="Leave with unsaved changes?" action="Discard and leave"
-      message="Some open workspace files have changes that are not saved. Leaving this workspace closes them and discards the changes."
-      onClose={() => setLeaving(null)} onConfirm={() => { const next = leaving; setLeaving(null); filesDirty.current = false; navigate(next); }} />}
     {addingWorkspace && <CreateWorkspaceDialog client={workspaceClient} onClose={() => setAddingWorkspace(false)} onCreated={created => {
       setAddingWorkspace(false);
       setWorkspaces(list => [...list.filter(item => item.workspaceId !== created.workspaceId), created].sort((a, b) => a.name.localeCompare(b.name)));

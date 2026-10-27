@@ -6,7 +6,6 @@ import { WorkspaceClient, BackendError, type TeamRoster, type MemberConfiguratio
 import { ChatRoster } from '../src/features/workspace/chat-roster.js';
 import { MemberActivation } from '../src/features/workspace/member-activation.js';
 import { MemberActivationView } from '../src/features/workspace/MemberActivationPanel.js';
-import { workspaceDetailsEnabled } from '../src/features/workspace/workspace-features.js';
 const roster: TeamRoster = {workspaceId: 'w1', members: [{memberId:'lead',workspaceId:'w1',revision:0,name:'Lead',role:'Lead',responsibility:'Help',lead:true,running:false}]};
 const review: MemberConfigurationReview = {revision:'commit',digest:'digest',valid:true,issues:[],changes:[{type:'create',path:'.rsi/members/b/member.json',name:'Builder'}]};
 
@@ -53,8 +52,7 @@ test('invalid or unchanged activation is refused and conflicts require another e
   await model.check();assert.equal(await model.activate(),false);
   assert.equal(model.getSnapshot().review,null);assert.equal(model.getSnapshot().error,'Workspace is busy');model.dispose();
 });
-test('temporary mode defaults off and activation view exposes only explicit actions', () => {
-  assert.equal(workspaceDetailsEnabled,false);
+test('activation view exposes only explicit activation actions', () => {
   const markup=renderToStaticMarkup(createElement(MemberActivationView,{state:{review:null,busy:null,error:null,notice:null},running:false,onCheck:()=>{},onActivate:async()=>{}}));
   assert.match(markup,/Check committed members/);assert.match(markup,/disabled=""[^>]*>Activate members/);
   assert.doesNotMatch(markup,/FileDiff|Reading changes|DesignTab|TeamTab/);

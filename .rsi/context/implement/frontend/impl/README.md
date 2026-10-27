@@ -27,7 +27,7 @@ Client modules fetch history/inspection and merge live deltas; adapters derive d
 
 **Agent context viewer design:** The Shared UI design specifies a two-pane chronological viewer for the Agent's current persisted Pi message list, with selectable rows, a right detail panel, assistant-ui presentation integration, readable supported content and optional raw-data inspection. Pi messages and example content are a concrete visual example for this viewer, not a universal Shared data model. Feature developers may further develop the direct component code around their own requirements. This is a design and presentation implementation; feature loading and lifecycle remain outside Shared.
 
-**Workspace context inspection:** Temporary lightweight workspace mode keeps expensive Design, Team, Changes and Files inspection disabled, while the manually opened panel provides Context (read-only Group/member message context), Member activation and explicit commit review. Opening/focusing the panel does not trigger activation validation; context reads occur only when Context is selected.
+**Workspace feature cleanup:** The detailed Design, Team inspection, Changes, project-file and managed-context browser UI has been removed, along with the temporary `workspaceDetailsEnabled` gate and its alternate detailed mode. Workspace retains chat plus an on-demand panel for Context, explicit Member activation and Workspace models. Commit-review UI and its frontend client were removed. Direct local filesystem inspection remains deferred.
 
 **Backend context client:** `BackendClient.context.group(workspaceId, options)` and `.member(workspaceId, memberId, options)` perform read-only paged inspection. They preserve the backend page envelope (`revision`, `offset`, `total`, `nextOffset`, `entries`); each entry's `message` is typed as Pi's public `Message` from `@earendil-works/pi-ai`. The client validates the page and context-entry envelope/message role without transforming message content, sends GET with no-cache request headers, and preserves typed `BackendError` codes including `context_changed`.
 
@@ -48,6 +48,10 @@ Client modules fetch history/inspection and merge live deltas; adapters derive d
 **Effect and failure:** No create request is sent during review/cancellation. Confirmation submits the captured creation input with its reviewed revision; changing form inputs requires returning from review. On cleanup_required, return to the form and display the conflict so resubmission performs a fresh inspection. Other errors remain visible. No browser-native confirmation or silent cleanup is used.
 
 **Usage example:** choose Use an existing folder, configure a default model, click Create workspace, review the cleanup paths and explicitly confirm. Backend handles durable/file effects; the browser stores only form/review state.
+
+- The Workspace feature now consists of `WorkspacePage.tsx`, `ContextTab.tsx`, `GroupSummaryView.tsx`, `MemberActivationPanel.tsx`, resize behavior, roster state, and workspace/model settings dialogs. Legacy Design, Files, detailed Team, Changes and commit-review components were removed; filesystem browsing is deferred.
+- `WorkspaceClient` retains workspace listing/metadata, member metadata, configuration activation, and workspace/member model settings. Legacy inspection methods, context feed, changes client and commit-approval client are removed.
+- Frontend verification after cleanup: `npm run check`, `npm test` (**74 passed**), `npm run build`, and `git diff --check` passed. Build retains the existing large-chunk advisory.
 
 ## File lookup
 
@@ -81,17 +85,11 @@ Legacy reference documents remain available under the existing `reference/` path
 {"commands": []}
 ```
 
-## Temporary lightweight workspace mode
+## Workspace feature cleanup
 
-**Input/config:** `src/features/workspace/workspace-features.ts` exports `workspaceDetailsEnabled=false`. Set it true and rebuild to restore the original detailed workspace. No deployment environment variable or backend permission switch is changed.
+The temporary switch and alternate detailed Workspace composition have been removed. Workspace now exposes chat with an on-demand Context, Member activation and Workspace models panel; no design/file/team/change browsing or commit-review UI remains. Direct filesystem inspection is deferred. Activation review remains explicit and does not run merely from opening the panel.
 
-**Output/effect:** `WorkspacePage` chooses `ChatWorkspacePage`; the retained `DetailedWorkspacePage` and its `WorkspacePanel/useTeam/useDesigns/ChangesTab` effects are not mounted. `useChatRoster`/`ChatRoster` uses GET team/roster with one request in flight and no timer. Chat timeline changes and explicit mutations refresh that narrow roster. Mentions display Select when readiness is unknown; backend admission remains authoritative. Model hover controls accept only member identity/name/running state.
-
-`MemberActivationPanel` loads nothing automatically. Check committed members explicitly calls committedMemberReview; Activate members submits its exact revision/digest. Concurrent clicks are blocked, invalid/no-change reviews cannot activate, failures discard the review and require another explicit check. Backend validates workspace idle state and stale reviews. On success refresh the roster. Explicit Git commit approval and a manually opened CommitReviewTab are retained. Hiding this temporary panel unmounts its content.
-
-**Usage:** open a workspace and chat normally. Open Member activation, click Check committed members, wait for work to finish, then Activate members. Design/Team/Changes/Files tabs are temporarily absent. No diffs, design catalog, workspace context feed or full team polling are started by this view.
-
-**Verification:** `test/temporary-workspace.test.ts` covers roster request coalescing/disposal/retry and explicit activation guards/tokens; mocked browser network verification covers active chat, panel open/close, stop, manual activation and narrow layout.
+`WorkspacePage` keeps the selected panel tab independent of open/close. It defaults to Context; Member activation is manual; Workspace models opens a dedicated editor dialog. Legacy detailed browsing and commit review were removed. Direct workspace filesystem access is deferred.
 
 ## Context sidebar rendering correction
 

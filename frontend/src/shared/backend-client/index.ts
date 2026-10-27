@@ -1,12 +1,9 @@
 export { BackendClient, backendClient } from './backend-client.js';
 export { AgentClient } from './agent-client.js';
-export { ChangesClient } from './changes-client.js';
 export { ConfigClient } from './config-client.js';
 export { GroupClient } from './group-client.js';
 export { WorkspaceClient } from './workspace-client.js';
 export * from './agent-client.js';
-export * from './changes-client.js';
-export * from './commit-approval.js';
 export * from './config-client.js';
 export * from './discussion-reference.js';
 export * from './group-client.js';

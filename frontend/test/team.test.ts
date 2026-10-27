@@ -1,30 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BackendError } from '../src/shared/backend-client/agent-client.js';
-import type { Member, Team } from '../src/shared/backend-client/workspace-client.js';
 import { WorkspaceClient } from '../src/shared/backend-client/workspace-client.js';
 import { readRoute, routeUrl, sameRoute } from '../src/app/routes.js';
-import { findLead, memberStatus, modelText, pollIntervalMs, shouldPoll } from '../src/features/workspace/team-state.js';
 import { callRecipient, toolHeading, toolLabels } from '../src/features/chat/tool-label.js';
-
 const settings = { connectionId: 'main', modelId: 'm1', toolOptionIds: ['t'], prompt: 'Be brief', promptOptionIds: [], modelOptions: [{ connectionId: 'main', modelId: 'm1', reasoning: 'high' as const }] };
-const member = (patch: Partial<Member> = {}): Member => ({
-  memberId: 'lead-1', workspaceId: 'w1', revision: 3, name: 'Lead', role: 'Lead', responsibility: 'Works with the user', harness: { designScope: { working: ['metadata.json'], dependencies: [] }, implementationScope: { paths: [], usePaths: [] }, allowedCommands: [] }, lead: true,
-  settings, issues: [], ready: true, running: false, ...patch,
-});
-
-test('the team client reads roster and consolidated member inspection without a member write API', async () => {
-  const calls: { path: string; method: string }[] = [];
-  const inspection = { member: member(), configuration: { path: '.rsi/members/lead/member.json', files: { 'member.json': '{}', 'prompts/member.md': 'Be brief' }, digest: 'digest', submittedBy: 'user', submittedAt: 1 }, harnesses: [{ id: 'project', tools: ['read'], resources: [], prompt: 'Fixed rules' }] };
-  const api = new WorkspaceClient((async (input, init) => {
-    calls.push({ path: String(input), method: init?.method ?? 'GET' });
-    return new Response(JSON.stringify(String(input).endsWith('/team') ? { workspaceId: 'w 1', members: [member()] } : inspection));
-  }) as typeof fetch);
-  assert.equal((await api.team('w 1')).members[0]!.name, 'Lead');
-  assert.deepEqual(await api.inspectMember('w 1', 'lead/1'), inspection);
-  assert.equal('updateMember' in api, false);
-  assert.deepEqual(calls, [{ path: '/workspaces/w%201/team', method: 'GET' }, { path: '/workspaces/w%201/team/members/lead%2F1', method: 'GET' }]);
-});
 
 test('workspace model settings preserve revisions and backend conflicts', async () => {
   const calls: { path: string; method: string; body?: unknown }[] = [];
@@ -38,28 +18,6 @@ test('workspace model settings preserve revisions and backend conflicts', async 
   assert.deepEqual(calls, [{ path: '/workspaces/w%201/models', method: 'GET', body: undefined }, { path: '/workspaces/w%201/models', method: 'PUT', body: { revision: 3, value } }]);
   const failing = new WorkspaceClient((async () => new Response(JSON.stringify({ error: { code: 'config_conflict', message: 'Workspace models changed' } }), { status: 409 })) as typeof fetch);
   await assert.rejects(failing.updateWorkspaceModels('w1', 0, value), (error: unknown) => error instanceof BackendError && error.code === 'config_conflict');
-});
-
-test('the lead is discovered independently of roster order', () => {
-  const lead = member();
-  const team: Team = { workspaceId: 'w1', members: [member({ lead: false, memberId: 'b', name: 'Backend' }), lead] };
-  assert.equal(findLead(team)?.memberId, 'lead-1');
-  assert.equal(findLead(null), null);
-});
-
-test('a member is working, idle, or unable to run, and the model shows its connection', () => {
-  assert.deepEqual(memberStatus(member({ running: true })), { label: 'Working', reasons: [] });
-  assert.deepEqual(memberStatus(member()), { label: 'Idle', reasons: [] });
-  assert.deepEqual(memberStatus(member({ ready: false, issues: ['Select a provider and model'] })), { label: 'Cannot run', reasons: ['Select a provider and model'] });
-  assert.deepEqual(memberStatus(member({ running: true, ready: false, issues: ['x'] })), { label: 'Working', reasons: [] });
-  assert.equal(modelText(member()), 'm1 · main');
-  assert.equal(modelText(member({ settings: { ...settings, modelId: null } })), null);
-});
-
-test('the team is read on a timer only while team work runs', () => {
-  assert.equal(shouldPoll(true), true);
-  assert.equal(shouldPoll(false), false);
-  assert.ok(pollIntervalMs >= 1000 && pollIntervalMs <= 10_000);
 });
 
 test('addresses name a workspace, a solo conversation, config, or home', () => {

@@ -11,7 +11,7 @@ export function MemberActivationPanel({workspaceId, running, onActivated}: {work
 export function MemberActivationView({state, running, onCheck, onActivate}: {state: ActivationState; running: boolean; onCheck(): void; onActivate(): Promise<void>}) {
   const {review, busy, error, notice} = state;
   return <section className="changes-tab" aria-label="Member activation">
-    <header className="changes-head"><div><span className="eyebrow">MEMBERS</span><h2>Activate committed members</h2><p>Detailed workspace inspection is temporarily disabled. Check committed configuration when you are ready to activate it.</p></div></header>
+    <header className="changes-head"><div><span className="eyebrow">MEMBERS</span><h2>Activate committed members</h2><p>Review committed member configuration explicitly when you are ready to activate it.</p></div></header>
     <div className="member-activation-actions">
       <button type="button" className="secondary-button" disabled={!!busy} onClick={onCheck}>{busy === 'check' ? 'Checking…' : 'Check committed members'}</button>
       <button type="button" className="primary-button" disabled={!!busy || running || !review?.valid || review.changes?.length === 0} onClick={() => void onActivate()}>{busy === 'activate' ? 'Activating…' : 'Activate members'}</button>

@@ -1,5 +1,4 @@
 import { backendClient } from '../../shared/backend-client/index.js';
-import { CommitApprovalInput } from './CommitApproval.js';
 import { useImageDraft } from './useImageDraft.js';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { imageUrl, type ChatImage, type GroupEntry, type GroupClient } from '../../shared/backend-client/index.js';
@@ -13,9 +12,9 @@ import { Glyph } from '../workspace/Glyph.js';
 import { Markdown } from './Markdown.js';
 import { memberColor, mentionAt, mentionToken, workDuration, runActivity, isRunThinking, workToolSummary, toolSetSummary, type ActivityItem, type ToolActivity } from './group-work.js';
 
-export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion, onCommitReview, panelLabel = 'Design, team and files' }: {
+export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion, panelLabel = 'Workspace tools' }: {
   workspaceId: string; title: string; team: ChatTeamState; filesOpen: boolean; onFiles(open: boolean): void;
-  panelLabel?: string; onRunning(running: boolean): void; discussion: Discussion; onCommitReview(id:string):void;
+  panelLabel?: string; onRunning(running: boolean): void; discussion: Discussion;
 }) {
   const client = useMemo(() => backendClient.group(workspaceId), [workspaceId]);
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
@@ -99,7 +98,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
     </div>
     {modelTarget && modelMember && <MemberModelPopover key={modelTarget.memberId} workspaceId={workspaceId} member={modelMember} anchor={modelTarget.anchor}
       onClose={closeModel} onEnter={keepModelOpen} onLeave={leaveModel} onSaved={refreshTeam} />}
-    <div className="group-composer-footer"><CommitApprovalInput workspaceId={workspaceId} running={active} onReview={onCommitReview} onResolved={()=>void team.refresh()} /><form className={`composer ${dragging ? 'composer-dragging' : ''}`}
+    <div className="group-composer-footer"><form className={`composer ${dragging ? 'composer-dragging' : ''}`}
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (!snapshot.sending) setDragging(true); } }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
       onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); setDragging(false); if (!snapshot.sending && !snapshot.resetting) pictures.add([...event.dataTransfer.files]); }}

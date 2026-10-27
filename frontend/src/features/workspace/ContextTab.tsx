@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ContextClient, ContextEntry, GroupContextEntry, Member } from '../../shared/backend-client/index.js';
+import type { ContextClient, ContextEntry, GroupContextEntry, RosterMember } from '../../shared/backend-client/index.js';
 import { BackendError } from '../../shared/backend-client/index.js';
 import { SequenceInspector } from '../../shared/ui/index.js';
 import { ContextMessageDetail, contextMessageLabel, contextMessageRole } from './context-message.js';
@@ -12,7 +12,7 @@ type State = { entries: Entry[]; revision: number | null; nextOffset: number | n
 const initial: State = { entries: [], revision: null, nextOffset: 0, loading: false, error: null, stale: false };
 
 /** Read-only browser inspector for current shared group context and member Agent context. */
-export function ContextTab({ workspaceId, members, client }: { workspaceId: string; members: readonly Pick<Member, 'memberId' | 'name' | 'role' | 'running'>[]; client: ContextClient }) {
+export function ContextTab({ workspaceId, members, client }: { workspaceId: string; members: readonly Pick<RosterMember, 'memberId' | 'name' | 'role' | 'running'>[]; client: ContextClient }) {
   const [source, setSource] = useState<Source>({ kind: 'group' });
   const [state, setState] = useState<State>(initial);
   const [selectedKey, setSelectedKey] = useState<string>();

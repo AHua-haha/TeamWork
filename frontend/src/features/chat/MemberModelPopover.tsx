@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BackendError } from '../../shared/backend-client/index.js';
 import { emptySettings, type AgentConfig, type AgentSettings, type ConfigClient } from '../../shared/backend-client/index.js';
-import { type Member, type MemberModelConfig, type WorkspaceClient } from '../../shared/backend-client/index.js';
+import { type RosterMember, type MemberModelConfig, type WorkspaceClient } from '../../shared/backend-client/index.js';
 import { ModelSettingsPanel } from './ComposerSettings.js';
 import type { SettingsControl } from './useAgentConfig.js';
 
@@ -61,7 +61,7 @@ function useMemberModel(workspaceId: string, memberId: string, onSaved: () => Pr
 }
 
 export function MemberModelPopover({ workspaceId, member, anchor, onClose, onEnter, onLeave, onSaved }: {
-  workspaceId: string; member: Pick<Member, 'memberId' | 'name' | 'running'>; anchor: HTMLButtonElement;
+  workspaceId: string; member: Pick<RosterMember, 'memberId' | 'name' | 'running'>; anchor: HTMLButtonElement;
   onClose(): void; onEnter(): void; onLeave(): void; onSaved(): Promise<void>;
 }) {
   const control = useMemberModel(workspaceId, member.memberId, onSaved);

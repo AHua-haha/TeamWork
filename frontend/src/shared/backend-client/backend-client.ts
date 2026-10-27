@@ -1,5 +1,4 @@
 import { AgentClient, createAgent as createAgentRequest } from './agent-client.js';
-import { ChangesClient } from './changes-client.js';
 import { ConfigClient } from './config-client.js';
 import { ContextClient } from './context-client.js';
 import { GroupClient } from './group-client.js';
@@ -38,12 +37,9 @@ export class BackendClient {
     return new GroupClient(workspaceId);
   }
 
-  changes(workspaceId: string): ChangesClient {
-    return new ChangesClient(workspaceId, this.workspace);
-  }
 }
 
-export { AgentClient, ChangesClient, ConfigClient, ContextClient, GroupClient, WorkspaceClient };
+export { AgentClient, ConfigClient, ContextClient, GroupClient, WorkspaceClient };
 export * from './config-client.js';
 export * from './workspace-client.js';
 export * from './protocol.js';

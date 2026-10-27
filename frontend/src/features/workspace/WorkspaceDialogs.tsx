@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+
+const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed';
 import type { Workspace, WorkspaceClient, WorkspaceModels, WorkspaceInput, WorkspaceInitialization } from '../../shared/backend-client/index.js';
 import { BackendError } from '../../shared/backend-client/index.js';
-import { errorText } from './FileTree.js';
 import { WorkspaceModelsEditor } from './WorkspaceModelsEditor.js';
 import { workspaceModelsError } from './workspace-model-state.js';
+
+
 
 /** A modal in the providers-dialog style, portaled so panel transforms and clipping do not affect it. */
 export function Dialog({ eyebrow, title, busy, onClose, children }: { eyebrow: string; title: string; busy: boolean; onClose(): void; children: ReactNode }) {
