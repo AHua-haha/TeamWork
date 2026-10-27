@@ -66,15 +66,16 @@ Design: [Operations](../../../design/operations/design.md).
 
 The following records describe the earlier setup, before the port and deployment isolation adjustment:
 
+
 - `docker ps` initially showed existing `backend-mysql-1` on 127.0.0.1:3306.
 - `./scripts/dev.sh init` generated private config with port 13306 and project `team-work`.
-- `./scripts/database.sh start` created and health-checked the dedicated container; `./scripts/dev.sh start` successfully started both app processes.
-- Confirmed separate containers/ports and distinct `backend_mysql-data` vs `team-work-dev-mysql-data` volumes.
-- `./scripts/dev.sh stop`, `./scripts/database.sh stop` left `backend-mysql-1` running on 3306.
-- `node --test scripts/test/*.test.mjs`: 15 passed.
-- `npm --prefix backend test`: 228 passed; `npm --prefix frontend test`: 88 passed.
-- Backend/frontend `npm run check`: passed.
-- npm reported dependency audit issues (backend: 6 total, including 5 high; frontend: 3 high); no audit fix was applied.
+- `./scripts/dev.sh start` first refused because the existing process record had a different config fingerprint; `./scripts/dev.sh restart` cleanly restarted only this project's frontend/backend processes, preserving the database.
+- `curl http://127.0.0.1:3000/agents`: HTTP 200 with `[]` (no registered workspaces/agents in this development state).
+- `curl http://127.0.0.1:3000/workspaces`: HTTP 200 with `{"workspaces":[]}`.
+- `curl http://127.0.0.1:5273/`: HTTP 200; Vite served the app entry page.
+- `./scripts/dev.sh status` and `./scripts/database.sh status`: isolated DB and both dev application processes reported running; Docker confirmed separate services at ports 13306 and 3306.
+- `npm --prefix backend run check`: passed.
+- `npm --prefix backend test`: 247 passed, 0 failed, 1 platform-dependent test skipped.
 
 ## File lookup
 
