@@ -28,3 +28,6 @@ Pi read/ls/grep/find use default operations for workspace reads. write/edit reta
 ## Private context preparation
 
 `harness/context-compaction.md` is the release-owned instruction passed by Runtime to Agent. Agent uses one configured token threshold before ordinary model calls and after work ends. Every new preparation message after the control prompt is retained. The instruction strictly prohibits continuing the original task during compaction: use tools to read useful content, inspect workspace state and verify existing conclusions, then retain conclusions, evidence, work already performed and Next steps without executing them. Runtime resumes ordinary work only after successful cutover when the checkpoint calls for it. Agent durably hosts preparation/cutover; Team preserves original shared history. No extra routing tool or group response is introduced.
+
+
+`harness/bash-timeout.md` supplies model-facing foreground timeout recovery guidance in the Bash result metadata. `harness/bash-background-timeout.md` describes the separate background-launch acknowledgment deadline. These release-owned prompts identify tool-enforced limits, preserve shell/job-reset semantics and never request an automatic retry.

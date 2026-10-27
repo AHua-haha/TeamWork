@@ -1,5 +1,6 @@
 import { AppError } from '../../errors.js';
 export const commandTimeoutMs = 60000;
+export const backgroundStartTimeoutMs = 10000;
 export const commandOutputBytes = 50 * 1024;
 export interface BashInput {
     command: string;

@@ -2,7 +2,7 @@
 
 ## Result summary
 
-Harness owns reusable tools, available capabilities, scope enforcement, execution resources, explicit Git approval and backend-owned maintenance prompts. Its tool and permission behavior is unchanged; data definitions and related operations are now aggregated under data/.
+Harness owns reusable tools, available capabilities, scope enforcement, execution resources, explicit Git approval and backend-owned maintenance prompts. Data definitions and related operations are aggregated under data/. Bash result feedback separates captured command output from execution metadata and recovery hints while preserving execution and permission behavior.
 
 Design: [Harness](../../../../../design/backend/core/harness/design.md).
 
@@ -19,6 +19,18 @@ HarnessService obtains public member configuration and Workspace design/file inf
 **Effect and failure:** Preserves accepted recursive working scope, dependency reads, scoped write/edit, broad Bash resource policy, timeout/background-job lifecycle and explicit protected-commit approval. Operator bypass remains. Tool/file effects can survive failure; no checkpoint or replay is added.
 
 **Usage example:** Construct HarnessService with WorkspaceService, DesignService and the member lookup. Call prepare(memberId) to obtain tools/context for a model request; invoke its returned RuntimeTool with Agent StepScope. Close member shells on lifecycle transitions.
+
+### Bash result and timeout feedback
+
+**Input:** The custom Bash tool receives `command`, optional `cwd`, `timeout` in seconds, `background` and metadata under its existing schema.
+
+**Output:** Captured stdout/stderr is preserved as the body. One trailing `<metadata>` block carries tool status, exit/job information, errors and hints; empty output has no synthetic no-output body. Shell restart and truncation notices stay in the footer. Structured details retain the same facts and hint.
+
+**Effect/failure:** A tool-enforced timeout returns `isError: true`, `error_code: tool_timeout`, the effective `timeout_seconds`, `background` and `timeout_phase`. Foreground guidance comes from `bash-timeout.md` and instructs explicit background retry with user-managed logs/jobs. A background launch deadline uses `bash-background-timeout.md` and the actual 10-second acknowledgment limit, not an explicit job lifetime. Command-reported network errors remain ordinary command output/exit failures, with no tool-timeout hint. Execution limits, cancellation, shell/job cleanup, permission modes and the agent loop are unchanged. No automatic retry is introduced.
+
+**Usage:** `{"command":"npm install > install.log 2>&1","background":true}`; inspect the file and native job using later Bash calls. Prompt assets are copied by the existing build step.
+
+**Verification:** 15 focused Bash session, tool-result and permission tests passed, including a real foreground timeout with retained output and command-reported network-error separation. Backend build passed; compiled prompt loading and both packaged timeout prompt assets were verified.
 
 ### Compaction instruction asset
 

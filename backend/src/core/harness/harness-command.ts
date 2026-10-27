@@ -1,4 +1,4 @@
-import { commandTimeoutMs, commandOutputBytes, parseBashInput, type BashInput, type CommandResult } from './data/bash.js';
+import { backgroundStartTimeoutMs, commandTimeoutMs, commandOutputBytes, parseBashInput, type BashInput, type CommandResult } from './data/bash.js';
 export { commandTimeoutMs, commandOutputBytes, parseBashInput, type BashInput, type CommandResult } from './data/bash.js';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -209,7 +209,7 @@ const s=connect(${JSON.stringify(this.socketPath)});let raw='';s.on('connect',()
     if(token && git)this.gitCalls.set(token,{git});
     // Absolute explicit Git executables use the same commit gate. Other commands are untouched.
     const command = token ? request.command.replace(/(^|[;&|\n]\s*|\b(?:command|exec)\s+)["']?(?:\/[^\s;&|()"']+\/git)["']?(?=\s)/gm, '$1git') : request.command;
-    const result = await this.invoke(command, request.background ?? false, request.cwd, token, signal, request.background ? 10_000 : (request.timeout === undefined ? commandTimeoutMs : request.timeout * 1000));
+    const result = await this.invoke(command, request.background ?? false, request.cwd, token, signal, request.background ? backgroundStartTimeoutMs : (request.timeout === undefined ? commandTimeoutMs : request.timeout * 1000));
     if (!this.alive) await this.stop();
     for (const [pid, timer] of this.timers) if (!result.jobs?.includes(pid)) { clearTimeout(timer); this.timers.delete(pid); }
     for (const pid of this.jobPids) if (!result.jobs?.includes(pid)) this.jobPids.delete(pid);

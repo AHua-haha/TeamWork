@@ -49,3 +49,63 @@ test('custom management/Bash content is readable with metadata, errors retain st
   const fresh = await call('bash', { command: 'printf "${FLAG:-fresh}"' });
   assert.match(text(fresh), /fresh/); assert.match(text(fresh), /shell_restarted: true/);
 }));
+
+test('Bash tool timeouts preserve command output and keep recovery guidance inside metadata', { timeout: 15000 }, () => withTeam(async f => {
+  const prepared = await f.team.harness.prepare(f.lead.memberId, []);
+  const tool = prepared.tools.find(t => t.definition.name === 'bash')!;
+  const call = (args: Record<string, unknown>) => tool.execute(args as never, scope(f.lead.memberId), { id: 'timeout' } as never);
+  const result = await call({ command: "printf 'install-started\\n'; sleep 10", timeout: .15 });
+  assert.equal(result.isError, true);
+  const output = text(result), boundary = output.lastIndexOf('<metadata>');
+  assert.ok(boundary > 0);
+  const body = output.slice(0, boundary), footer = output.slice(boundary);
+  assert.match(body, /^install-started\n/);
+  assert.doesNotMatch(body, /execution limit|hint:|background: true|Command timed out/);
+  assert.match(footer, /error_code: "tool_timeout"/);
+  assert.match(footer, /timeout_seconds: 0\.15/);
+  assert.match(footer, /background: false/);
+  assert.match(footer, /timeout_phase: "foreground"/);
+  assert.match(footer, /hint:\nThe command exceeded the Bash tool's foreground execution limit of 0\.15 seconds/);
+  assert.match(footer, /not a network timeout reported by the command/);
+  assert.match(footer, /background: true/);
+  assert.match(footer, /install\.log 2>&1/);
+  assert.match(footer, /shell and all its jobs were stopped/);
+  assert.match((result.details as { hint: string }).hint, /jobs -l/);
+  const fresh = await call({ command: 'printf fresh' });
+  assert.match(text(fresh), /^fresh\n\n<metadata>/);
+  assert.doesNotMatch(text(fresh).split('<metadata>')[0]!, /shell restarted/);
+  assert.match(text(fresh), /shell_restarted: true/);
+  const network = await call({ command: "printf 'Network timeout from installer' >&2; (exit 28)" });
+  assert.equal(network.isError, true);
+  assert.match(text(network), /^Network timeout from installer\n\n<metadata>/);
+  assert.doesNotMatch(text(network), /tool_timeout|timeout_seconds|hint:|background: true/);
+  assert.equal((network.details as { exit_code: number }).exit_code, 28);
+  const empty = await call({ command: 'true' });
+  assert.match(text(empty), /^<metadata>/); assert.doesNotMatch(text(empty), /\(no output\)/);
+  const job = await call({ command: 'sleep 10', background: true });
+  assert.equal(job.isError, false);
+  assert.match(text(job), /^<metadata>/); assert.doesNotMatch(text(job), /Started background command/);
+  assert.ok((job.details as { job_id: number }).job_id);
+}, false));
+
+test('Bash reports actual default and background-launch limits, and keeps truncation guidance in metadata', () => withTeam(async f => {
+  const prepared = await f.team.harness.prepare(f.lead.memberId, []);
+  const tool = prepared.tools.find(t => t.definition.name === 'bash')!;
+  const original = f.team.harness.bash;
+  try {
+    f.team.harness.bash = async () => ({ output: '', exitCode: null, durationMs: 60000, truncated: false, timedOut: true, error: 'Command timed out; shell stopped' });
+    const foreground = await tool.execute({ command: 'install' }, scope(f.lead.memberId), { id: 'default' } as never);
+    assert.match(text(foreground), /^<metadata>/);
+    assert.match(text(foreground), /timeout_seconds: 60/);
+    assert.match(text(foreground), /foreground execution limit of 60 seconds/);
+    const background = await tool.execute({ command: 'install', background: true, timeout: 300 }, scope(f.lead.memberId), { id: 'background-start' } as never);
+    assert.match(text(background), /timeout_seconds: 10/);
+    assert.match(text(background), /timeout_phase: "background_start"/);
+    assert.match(text(background), /10-second launch-response limit/);
+    assert.doesNotMatch(text(background), /foreground execution limit|timeout_seconds: 300/);
+    f.team.harness.bash = async () => ({ output: 'captured-tail', exitCode: 0, durationMs: 1, truncated: true, timedOut: false });
+    const truncated = await tool.execute({ command: 'generate output' }, scope(f.lead.memberId), { id: 'truncated' } as never);
+    assert.match(text(truncated), /^captured-tail\n\n<metadata>/);
+    assert.match(text(truncated).slice(text(truncated).indexOf('<metadata>')), /hint:\nOutput truncated/);
+  } finally { f.team.harness.bash = original; }
+}));
