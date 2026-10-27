@@ -8,7 +8,7 @@ Agent owns its assembled model-facing context and its tracking of incorporated s
 
 ## Interface contract
 
-Manage member inspection, file validation and user-triggered atomic idle activation through existing interfaces. Own durable provider/application settings. Workspace owns its registry/context/models/baseline persistence; Team obtains workspace identity, locks and model revisions through Workspace public operations.
+Manage member inspection, file validation and user-triggered atomic idle activation through existing interfaces. Member configuration bundles under `.rsi/members/` must be tracked by project Git, including the lead, existing workers and referenced prompt files. Commit directory relocations with their replacement bundles so the committed configuration retains the complete intended team. Activation reads committed configuration; removing a bundle represents member retirement, not an implicit directory migration. Own durable provider/application settings. Workspace owns its registry/context/models/baseline persistence; Team obtains workspace identity, locks and model revisions through Workspace public operations.
 
 ### Authoritative group context
 

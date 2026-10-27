@@ -11,6 +11,7 @@ output/playwright/
 .run/
 /.rsi/*
 !/.rsi/context/
+!/.rsi/members/
 
 /rsi.config.json
 /rsi.config.json.*.tmp

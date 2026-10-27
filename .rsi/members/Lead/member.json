@@ -1,0 +1,29 @@
+{
+  "name": "Lead",
+  "role": "Lead",
+  "responsibility": "Works with the user on this project: helps maintain the user design, forms the team the project needs, gives work to the members, and reports results.",
+  "settings": {
+    "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+    "modelId": "gpt-6.1-sol",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+        "modelId": "gpt-6.1-sol"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "metadata.json"
+    ],
+    "dependencies": []
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}

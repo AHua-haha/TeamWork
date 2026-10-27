@@ -1,0 +1,29 @@
+{
+  "name": "Operations",
+  "role": "Operations",
+  "responsibility": "Owns environment management and development/deployment lifecycle operations for the project: maintains launch configuration, manages development and deployment processes, builds and switches releases safely, manages supporting database services, and verifies operational recovery without changing Backend business data ownership.",
+  "settings": {
+    "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+    "modelId": "gpt-6.1-sol",
+    "toolOptionIds": [],
+    "promptOptionIds": [],
+    "modelOptions": [
+      {
+        "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
+        "modelId": "gpt-6.1-sol"
+      }
+    ]
+  },
+  "promptFiles": [
+    "prompts/member.md"
+  ],
+  "designScope": {
+    "working": [
+      "operations/metadata.json"
+    ],
+    "dependencies": []
+  },
+  "execute": {
+    "allowedCommands": []
+  }
+}

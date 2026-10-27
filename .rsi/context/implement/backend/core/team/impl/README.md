@@ -2,6 +2,8 @@
 
 ## Result summary
 
+Project Git tracks `.rsi/members/` alongside `.rsi/context/`; other runtime-managed `.rsi` directories remain ignored. Named member bundles and their referenced Markdown prompts are committed together. A directory rename must retain the bundle in the committed tree, because activation treats missing committed bundles as deletions.
+
 Team owns membership, provider/application/member configuration, shared chat and presentation data. Its data/ part aggregates models, validation, file serialization, schemas, SQL repositories and transient coordination state. Agent owns its own private context/history/run/compaction persistence; Workspace owns its own registry/context/models persistence.
 
 Design: [Team](../../../../../design/backend/core/team/design.md).
