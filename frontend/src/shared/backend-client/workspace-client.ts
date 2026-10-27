@@ -1,3 +1,4 @@
+import { apiFetch } from './transport.js';
 import { json, type RunSettings, type ModelOptions, type ConfigRecord } from './config-client.js';
 
 export interface WorkspaceRecord { workspaceId: string; name: string; directory: string; createdAt: number }
@@ -16,7 +17,7 @@ export interface MemberConfigurationReview { revision: string; digest: string; v
 
 /** Workspace metadata, member metadata, activation, and model settings. */
 export class WorkspaceClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  constructor(private readonly fetcher: typeof fetch = apiFetch) {}
   private get<T>(path: string): Promise<T> { return this.fetcher(path).then(json<T>); }
   private write<T>(path: string, method: 'POST' | 'PUT', data: object): Promise<T> {
     return this.fetcher(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json<T>);

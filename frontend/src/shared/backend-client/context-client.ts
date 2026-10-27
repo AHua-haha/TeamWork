@@ -1,3 +1,4 @@
+import { apiFetch } from './transport.js';
 import type { JsonValue, Message } from '@earendil-works/pi-ai';
 import { BackendError } from './agent-client.js';
 import { ProtocolError } from './sse.js';
@@ -35,7 +36,7 @@ const identity = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** Read-only paged inspection of retained Pi message context. */
 export class ContextClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly basePath = '/workspaces') {}
+  constructor(private readonly fetcher: typeof fetch = apiFetch, private readonly basePath = '/workspaces') {}
   async summary(workspaceId: string): Promise<{ summary: GroupSummary | null; retainedMessages: number }> {
     if (!identity.test(workspaceId)) throw new Error('Invalid workspace identity');
     const response = await this.fetcher(`${this.basePath}/${encodeURIComponent(workspaceId)}/chat/summary`, {

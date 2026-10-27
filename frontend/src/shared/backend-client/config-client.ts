@@ -1,3 +1,4 @@
+import { apiFetch } from './transport.js';
 import { BackendError } from './agent-client.js';
 
 /** The shared reasoning scale; the backend clamps each level to one the model supports (see `reasoningSentAs`). */
@@ -38,7 +39,7 @@ export async function json<T>(response: Response): Promise<T> {
 
 /** Config requests stay in the backend's record format; no assistant-ui types enter here. */
 export class ConfigClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  constructor(private readonly fetcher: typeof fetch = apiFetch) {}
   private get<T>(path: string): Promise<T> { return this.fetcher(path).then(json<T>); }
   private write<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', data: object): Promise<T> {
     return this.fetcher(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json<T>);

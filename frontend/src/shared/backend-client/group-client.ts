@@ -1,9 +1,10 @@
+import { apiFetch, apiUrl } from './transport.js';
 import { BackendError, waitForRetry } from './agent-client.js';
 import { ProtocolError, readSse } from './sse.js';
 import type { RunState } from './protocol.js';
 
 export interface ChatImage { id: string; name: string; mimeType: string; width: number; height: number; size: number }
-export const imageUrl = (workspaceId: string, imageId: string) => `/workspaces/${encodeURIComponent(workspaceId)}/chat/attachments/${encodeURIComponent(imageId)}`;
+export const imageUrl = (workspaceId: string, imageId: string) => apiUrl(`/workspaces/${encodeURIComponent(workspaceId)}/chat/attachments/${encodeURIComponent(imageId)}`);
 export interface FinalReference { agentId: string; runId: string; messageId: string; position: number; contentIndices?: number[]; bodyOffset?: number; toolCallId?: string }
 interface EntryBase { workspaceId: string; entryId: string; position: number; revision: number; exchangeId: string; time: number }
 export type GroupEntry = EntryBase & (
@@ -59,7 +60,7 @@ export class GroupClient {
   private readonly path: string;
   constructor(readonly workspaceId: string, options: { fetcher?: typeof fetch; retryDelayMs?: (attempt: number) => number } = {}) {
     if (!id.test(workspaceId)) throw new Error('Invalid workspace identity');
-    this.fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
+    this.fetcher = options.fetcher ?? apiFetch;
     this.retryDelay = options.retryDelayMs ?? (attempt => Math.min(500 * 2 ** Math.min(attempt, 4), 8000));
     this.path = `/workspaces/${workspaceId}/chat`;
   }

@@ -3,6 +3,7 @@ import { ConfigClient } from './config-client.js';
 import { ContextClient } from './context-client.js';
 import { GroupClient } from './group-client.js';
 import { WorkspaceClient } from './workspace-client.js';
+import { apiFetch } from './transport.js';
 
 /**
  * The single frontend boundary for backend communication.
@@ -16,25 +17,28 @@ export class BackendClient {
   readonly workspace: WorkspaceClient;
   readonly context: ContextClient;
 
-  constructor(fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {
+  private readonly fetcher: typeof fetch;
+
+  constructor(fetcher: typeof fetch = apiFetch) {
+    this.fetcher = fetcher;
     // Resource clients currently use the browser fetch implementation. Keep
     // construction centralized here while their endpoint implementations are
     // incrementally migrated to the shared transport.
     this.config = new ConfigClient(fetcher);
-    this.workspace = new WorkspaceClient();
+    this.workspace = new WorkspaceClient(fetcher);
     this.context = new ContextClient(fetcher);
   }
 
   async createAgent(): Promise<string> {
-    return createAgentRequest();
+    return createAgentRequest(this.fetcher);
   }
 
   agent(agentId: string, options?: ConstructorParameters<typeof AgentClient>[1]): AgentClient {
-    return new AgentClient(agentId, options);
+    return new AgentClient(agentId, { ...options, fetcher: options?.fetcher ?? this.fetcher });
   }
 
   group(workspaceId: string): GroupClient {
-    return new GroupClient(workspaceId);
+    return new GroupClient(workspaceId, { fetcher: this.fetcher });
   }
 
 }
