@@ -20,3 +20,4 @@ Frontend owns user interaction and presentation. Backend owns application behavi
 - Child system: frontend.
 - Child system: backend.
 - Child system: operations.
+- Child system: desktop.
