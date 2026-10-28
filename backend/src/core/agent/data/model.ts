@@ -14,6 +14,11 @@ export interface ContextHistory {
   entries: ContextEntry[];
 }
 
+export interface AssistantResponseHandlerData {
+  revision: number;
+  data: JsonObject;
+}
+
 export interface ContextPatch {
   append: ContextEntry[];
   update: ContextEntry[];

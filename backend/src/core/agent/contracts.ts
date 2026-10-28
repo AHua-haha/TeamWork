@@ -1,7 +1,7 @@
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, JsonObject, Message, Model, Models, SimpleStreamOptions, Tool, ToolCall, ToolResultMessage } from '@earendil-works/pi-ai';
 import type { CompactionSettings } from './data/compaction.js';
 import type { GroupContextReference } from './data/context.js';
-import type { CompletedMessage, ContextEntry, ContextHistory, RunState } from './data/model.js';
+import type { CompletedMessage, ContextEntry, ContextHistory, RunState, AssistantResponseHandlerData } from './data/model.js';
 
 export interface AgentConfiguration {
   model: Model<Api>; models?: Models; tools: RuntimeTool[]; systemPrompt: string;
@@ -56,8 +56,16 @@ export interface AssistantResponseHandler {
   handle(response: AssistantMessage, context: AssistantResponseHandlerContext): Promise<void>;
 }
 
+/** Creates one durable handler instance for an Agent. The instance is reused across runs. */
+export interface AssistantResponseHandlerFactory {
+  handlerId: string;
+  create(data: AssistantResponseHandlerData, persist: (revision: number, data: JsonObject) => Promise<AssistantResponseHandlerData>): AssistantResponseHandler;
+}
+
 export interface RuntimePolicy {
-  /** Creates run-local handlers so mutable handler state cannot leak between Agent executions. */
+  /** Creates durable handler factories. AgentRuntime initializes each factory once per Agent and reuses the instances across runs. */
+  createAssistantResponseHandlerFactories?(agentId: string): AssistantResponseHandlerFactory[];
+  /** Legacy compatibility: instances are cached per Agent, not created per run. */
   createAssistantResponseHandlers?(agentId: string): AssistantResponseHandler[];
   /** Read reference only; Agent selects incoming messages using its own state. */
   groupContext?(agentId: string): Promise<GroupContextReference | undefined>;

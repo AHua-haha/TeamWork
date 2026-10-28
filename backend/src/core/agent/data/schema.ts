@@ -14,6 +14,14 @@ export const schema = [
     entry JSON NOT NULL, PRIMARY KEY(agent_id, position), UNIQUE KEY(agent_id, id),
     FOREIGN KEY (agent_id) REFERENCES agents(id)
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS agent_assistant_response_handler_state (
+    agent_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    handler_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    data JSON NOT NULL,
+    PRIMARY KEY(agent_id, handler_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS runs (
     id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     agent_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -37,4 +45,4 @@ export const schema = [
   ) ENGINE=InnoDB`,
 ];
 
-export const tables = ["agents", "agent_context_entries", "runs", "messages", "context_compactions"] as const;
+export const tables = ["agents", "agent_context_entries", "agent_assistant_response_handler_state", "runs", "messages", "context_compactions"] as const;

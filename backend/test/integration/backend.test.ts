@@ -2604,7 +2604,10 @@ test('Agent owns durable execution/context independently of Team or Workspace sc
     const history=await data.runMessages(agentId,run.runId),context=await data.getContext(agentId);
     assert.deepEqual(Object.keys(await data.executionState(agentId)).sort(),['activeRunId','historyPosition','id']);
     const [tables]=await storage.pool.query<any[]>('SHOW TABLES');
-    assert.deepEqual(tables.map(row=>Object.values(row)[0]).sort(),['agent_context_entries','agents','context_compactions','messages','runs']);
+    assert.deepEqual(tables.map(row=>Object.values(row)[0]).sort(),['agent_assistant_response_handler_state','agent_context_entries','agents','context_compactions','messages','runs']);
+    const savedHandlerState=await data.saveAssistantResponseHandlerData(agentId,'file-handler',0,{lastPath:'README.md'});
+    assert.deepEqual(savedHandlerState,{revision:1,data:{lastPath:'README.md'}});
+    await assert.rejects(data.saveAssistantResponseHandlerData(agentId,'file-handler',0,{lastPath:'stale'}),code('context_conflict'));
     const rolledBack=randomUUID();
     await assert.rejects(storage.transaction(async db=>{
       const session=data.inTransaction(db);await session.createRecord(rolledBack);await session.admitRun(rolledBack);throw new Error('rollback owner operations');
@@ -2613,6 +2616,7 @@ test('Agent owns durable execution/context independently of Team or Workspace sc
     await runtime.close();await storage.close();
     reopened=new MySqlStorage(url.toString());const restored=new AgentData(reopened);await restored.migrate();
     assert.deepEqual(await restored.getContext(agentId),context);assert.deepEqual(await restored.runMessages(agentId,run.runId),history);
+    assert.deepEqual(await restored.getAssistantResponseHandlerData(agentId,'file-handler'),savedHandlerState);
   }finally{await runtime.close();await storage.close();await reopened?.close();await store.pool.query(`DROP DATABASE ${database}`);}
 });
 

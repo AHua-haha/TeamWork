@@ -1,6 +1,6 @@
 import { contextPageInput, checkContextPage, type ContextPageInput, type ContextPage } from '../../context-page.js';
 import type { AgentRecord, AgentExecutionState } from './model.js';
-import { validateEntries, validateRun } from './validation.js';
+import { validateEntries, validateRun, validateAssistantResponseHandlerData } from './validation.js';
 import { interruptedCompactionContext, validateCompactionState, type CompactionState } from './compaction.js';
 import { adoptRecordedContext, sharedAttributionUpdates, type GroupContextMessage } from './context.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -8,7 +8,7 @@ import type { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/prom
 import type { MySqlStorage } from '../../../storage/mysql.js';
 import type { UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode } from '../../codec.js';
-import { AppError, identity, position, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type RunState, type RunStatus } from './model.js';
+import { AppError, identity, position, type AssistantResponseHandlerData, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type RunState, type RunStatus } from './model.js';
 import { clearTables, dataTransaction, insertRows, rows, type DataConnection as Db } from '../../data-transaction.js';
 import { schema } from './schema.js';
 import { ResidentContexts, type ContextChange } from './resident-context.js';
@@ -148,6 +148,35 @@ export class AgentData {
             throw new AppError('corrupt_data', 'Context row identity is invalid', 500);
         validateEntries(entries);
         return {revision: agent.contextRevision, entries};
+    }
+    async getAssistantResponseHandlerData(agentId: string, handlerId: string): Promise<AssistantResponseHandlerData> {
+        identity(agentId, 'agentId'); identity(handlerId, 'handlerId');
+        return this.transaction(async db => {
+            await this.agent(db, agentId);
+            const [row] = await rows(db, 'SELECT revision,data FROM agent_assistant_response_handler_state WHERE agent_id = ? AND handler_id = ?', [agentId, handlerId]);
+            if (!row) return {revision: 0, data: {}};
+            const value = {revision: row.revision, data: decode<Record<string, unknown>>(row.data, data => validateAssistantResponseHandlerData({revision: row.revision, data}))};
+            validateAssistantResponseHandlerData(value);
+            return structuredClone(value);
+        });
+    }
+    async saveAssistantResponseHandlerData(agentId: string, handlerId: string, revision: number, data: Record<string, unknown>): Promise<AssistantResponseHandlerData> {
+        identity(agentId, 'agentId'); identity(handlerId, 'handlerId'); position(revision);
+        const next = {revision: revision + 1, data: structuredClone(data)};
+        validateAssistantResponseHandlerData(next);
+        return this.transaction(async db => {
+            await this.agent(db, agentId, true);
+            const [row] = await rows(db, 'SELECT revision FROM agent_assistant_response_handler_state WHERE agent_id = ? AND handler_id = ? FOR UPDATE', [agentId, handlerId]);
+            if (!row) {
+                if (revision !== 0) throw new AppError('context_conflict', 'Assistant response handler state revision changed', 409);
+                await db.execute('INSERT INTO agent_assistant_response_handler_state (agent_id,handler_id,revision,data) VALUES (?,?,?,?)', [agentId, handlerId, next.revision, encode(next.data)]);
+            } else {
+                if (row.revision !== revision) throw new AppError('context_conflict', 'Assistant response handler state revision changed', 409);
+                const [result] = await db.execute<ResultSetHeader>('UPDATE agent_assistant_response_handler_state SET revision = ?, data = ? WHERE agent_id = ? AND handler_id = ? AND revision = ?', [next.revision, encode(next.data), agentId, handlerId, revision]);
+                if (result.affectedRows !== 1) throw new AppError('context_conflict', 'Assistant response handler state revision changed', 409);
+            }
+            return structuredClone(next);
+        });
     }
     async getContext(agentId: string): Promise<ContextHistory> {
         return this.transaction(async db => this.contextRows(db, await this.agent(db, agentId)));
@@ -499,7 +528,7 @@ export class AgentData {
                 const agent = await this.agent(db, id, true);
                 if (agent.activeRunId)
                     throw new AppError('workspace_busy', 'Stop team work before resetting context', 409);
-                for (const table of ['context_compactions', 'messages', 'runs'])
+                for (const table of ['context_compactions', 'messages', 'runs', 'agent_assistant_response_handler_state'])
                     await db.execute(`DELETE FROM ${table} WHERE agent_id = ?`, [id]);
                 await this.writeContext(db, id, []);
                 await db.execute('UPDATE agents SET context_length = 0, context_revision = context_revision + 1, history_position = 0, active_run_id = NULL, latest_run_id = NULL WHERE id = ?', [id]);
@@ -507,7 +536,7 @@ export class AgentData {
             }
         });
     }
-    async clearHistory(): Promise<void> { await clearTables(this.pool, ['context_compactions', 'agent_context_entries', 'messages', 'runs']); }
+    async clearHistory(): Promise<void> { await clearTables(this.pool, ['context_compactions', 'agent_assistant_response_handler_state', 'agent_context_entries', 'messages', 'runs']); }
     async deleteRecords(): Promise<void> {
         await clearTables(this.pool, ['agents']);
         if (this.connection) this.storage.afterCommit(this.connection, () => this.contexts.clear());

@@ -37,9 +37,10 @@ export class AgentExecution {
   constructor(run: RunState, context: ContextHistory | AgentContextState, historyPosition: number,
     private readonly config: AgentConfiguration, private readonly policy: RuntimePolicy,
     private readonly stream: ModelStream, private readonly observer: AgentObserver = {},
-    readonly progress = new ProgressStore(), private readonly maxSteps = 64) {
+    readonly progress = new ProgressStore(), private readonly maxSteps = 64,
+    responseHandlers?: AssistantResponseHandler[]) {
     this.state=new AgentState(run,context,historyPosition);
-    this.responseHandlers = policy.createAssistantResponseHandlers?.(run.agentId) ?? [];
+    this.responseHandlers = responseHandlers ?? policy.createAssistantResponseHandlers?.(run.agentId) ?? [];
     if (config.compaction) validateCompactionSettings(config.compaction);
     if (!Number.isSafeInteger(maxSteps) || maxSteps < 1) throw new AppError('invalid_config', 'Invalid model call limit');
   }
