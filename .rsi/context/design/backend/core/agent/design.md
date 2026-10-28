@@ -19,6 +19,12 @@ Team owns group content and provides a read reference. Agent determines what sha
 
 Exact field names and boundary encoding are implementation details. These semantic distinctions must remain observable through the public state contract used for persistence/restoration.
 
+### Assistant response handling
+
+Agent's model/tool loop delegates each completed assistant response to an Agent-owned Assistant Response Dispatcher. The dispatcher selects an Assistant Response Handler; handlers are extensible Agent orchestration components, not new Harness tools or a replacement tool-definition pattern. A handler may own multiple related tool calls, execute tools through the existing Harness-backed RuntimeTool capability, construct and record native Pi tool-result messages, update existing context-entry metadata, and append private hint messages. A handler is not required to execute a tool for every reaction. The default handler preserves current behavior for every configured tool: validate and execute each tool call, construct and record its paired result, and return the results to the existing continuation logic.
+
+Handlers do not own durable context or SQL. They use Agent-provided acknowledged context operations. Content of an existing stored message is immutable under model-facing suppression; metadata may control whether/how an entry is included when building future model requests. Read-only context inspection continues to expose retained entries and their original message content. Assistant/tool call IDs and provider protocol pairing must remain valid; auxiliary hints must not be inserted where they break pending tool-result pairing. Cancellation, recoverable tool errors, execution tracking and no-replay behavior remain unchanged.
+
 ## Interface contract
 
 ### Run with a group-context reference

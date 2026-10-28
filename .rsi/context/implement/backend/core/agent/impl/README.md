@@ -50,7 +50,16 @@ AgentData beginCompaction/commitCompactionMessage/finishCompaction journals tent
 
 adoptLegacyContext and finishLegacyMigration keep the existing once-only context_format transition; Core supplies original Team references. Agent owns the adoption algorithm and its SQL, and retires old retention/transient tables without deleting stable history. legacyContextIds avoids loading/locking already migrated contexts.
 
-### Shared summary verification
+### Assistant response handlers
+
+`AgentExecution` creates these run-local handler instances once from `RuntimePolicy.createAssistantResponseHandlers(agentId)`. The dispatcher invokes every matching handler, then invokes `DefaultAssistantResponseHandler` for any unhandled tool calls. It validates unique call IDs, executes calls at most once and preserves assistant call/result order. Hints are buffered until all tool results are recorded so they cannot break protocol pairing.
+
+`DefaultAssistantResponseHandler` is the compatibility path: it delegates each configured tool call through the existing RuntimePolicy/Harness tool executor, records the native Pi `toolResult` with its call ID/name and current error recovery behavior, then returns to the existing continuation loop. Existing tool definitions and implementations are unchanged. Handler metadata updates retain the original stored Pi message and use Agent's acknowledged context patch/replacement operations. Context inspection remains unchanged. Handler instances are created for each AgentExecution so mutable handler-local state cannot cross execution lifetimes; persistence of such state is not introduced by this mechanism.
+
+**Handler input:** `AssistantMessage` and `AssistantResponseHandlerContext` (`scope`, `toolCalls`, `execute`, `appendHint`, `updateMetadata`). **Output:** handlers perform scoped effects; dispatcher returns the protocol-ordered `ToolResultMessage[]` to `RuntimePolicy.shouldContinue`. **Effect:** existing tools execute exactly as before; metadata-only updates persist before resident state advances; hints append as private Agent messages after outstanding tool results. **Usage:** `RuntimePolicy.createAssistantResponseHandlers` returns per-run handler instances, e.g. a future file-oriented handler whose `canHandle` recognizes file calls; it can call `context.execute(call)` for selected calls, update old entries' metadata without touching message content, and queue a hint. Remaining calls go through the default handler. No file-specific handler or metadata hide convention is implemented in this mechanism change.
+
+Focused verification: `backend/test/agent-execution.test.ts` covers existing default execution, specialized handling, acknowledged metadata patching, unchanged stored message content, deferred hint ordering, no-tool hint insertion, and tool/result pairing. Backend verification: TypeScript check and all **252 backend tests** pass; `git diff --check` passes.
+
 
 `backend/test/group-summary.test.ts` verifies summary/tail reads at the Agent's consumed boundary without introducing future messages or changing normal incremental incorporation. `backend/test/team-summary.test.ts` exercises the real public maintenance runtime and full model/tool correction loop. Group summary persistence remains Team-owned.
 
@@ -59,6 +68,8 @@ adoptLegacyContext and finishLegacyMigration keep the existing once-only context
 - [backend/src/core/agent/data/resident-context.ts](../../../../../../../backend/src/core/agent/data/resident-context.ts): lazy resident models and committed revision reconciliation.
 - [backend/test/resident-context.test.ts](../../../../../../../backend/test/resident-context.test.ts): load coalescing, cross-run identity and group patches.
 - [backend/src/core/agent/data](../../../../../../../backend/src/core/agent/data): memory/durable models, validation and operations.
+- [backend/src/core/agent/assistant-response-handler.ts](../../../../../../../backend/src/core/agent/assistant-response-handler.ts): default response handler fallback.
+- [backend/src/core/agent/contracts.ts](../../../../../../../backend/src/core/agent/contracts.ts): handler and scoped callback interfaces.
 - [backend/src/core/agent/runtime.ts](../../../../../../../backend/src/core/agent/runtime.ts): Agent-owned durable host and follow.
 
 - [backend/src/core/agent](../../../../../../../backend/src/core/agent): owned source.

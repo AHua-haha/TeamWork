@@ -39,7 +39,26 @@ export interface ModelRequest {
   options?: SimpleStreamOptions;
 }
 
+export interface AssistantResponseHandlerContext {
+  scope: StepScope;
+  toolCalls: ToolCall[];
+  /** Executes one existing configured tool and records its protocol-paired result. */
+  execute(call: ToolCall): Promise<ToolResultMessage>;
+  /** Append an Agent-owned private message after outstanding tool results have been recorded. */
+  appendHint(message: Message, metadata?: JsonObject): Promise<void>;
+  /** Persist targeted metadata changes without modifying stored message content. */
+  updateMetadata(updates: Array<{messageId: string; metadata: JsonObject}>): Promise<void>;
+}
+
+/** Agent-owned reaction to an assistant response; handlers orchestrate existing tools, not define new tool capabilities. */
+export interface AssistantResponseHandler {
+  canHandle(response: AssistantMessage): boolean;
+  handle(response: AssistantMessage, context: AssistantResponseHandlerContext): Promise<void>;
+}
+
 export interface RuntimePolicy {
+  /** Creates run-local handlers so mutable handler state cannot leak between Agent executions. */
+  createAssistantResponseHandlers?(agentId: string): AssistantResponseHandler[];
   /** Read reference only; Agent selects incoming messages using its own state. */
   groupContext?(agentId: string): Promise<GroupContextReference | undefined>;
   /** Acquire execution authority before any model/tool work; release after terminal finalization. */

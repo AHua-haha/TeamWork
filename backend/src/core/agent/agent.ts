@@ -3,11 +3,13 @@ import { compactedContext, compactionInput, estimateRequestTokens, interruptedCo
 import { finalAnswer, textPhase } from './final-answer.js';
 import { AgentMessageContext, type GroupContextReference } from './data/context.js';
 import { randomUUID } from 'node:crypto';
-import { AssistantMessageFrameEncoder, getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type Model, type Models, type SimpleStreamOptions, type ToolResultMessage, type JsonObject } from '@earendil-works/pi-ai';
+import { AssistantMessageFrameEncoder, getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type Model, type Models, type SimpleStreamOptions, type ToolResultMessage, type JsonObject, type Message } from '@earendil-works/pi-ai';
 import { validateEntries } from './data/validation.js';
 import { ProgressStore } from './data/progress.js';
 import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type ContextPatch, type RunState } from './data/model.js';
-import type { ModelStream, ModelRequest, AgentConfiguration, RuntimePolicy, RuntimeTool, StepScope } from './contracts.js';
+import type { ModelStream, ModelRequest, AgentConfiguration, RuntimePolicy, RuntimeTool, StepScope, AssistantResponseHandler, AssistantResponseHandlerContext } from './contracts.js';
+import { DefaultAssistantResponseHandler } from './assistant-response-handler.js';
+export { DefaultAssistantResponseHandler } from './assistant-response-handler.js';
 export type * from './contracts.js';
 
 /** Optional caller acknowledgements. No database, record codec or hosting dependency is required. */
@@ -24,6 +26,7 @@ export interface AgentObserver {
 }
 export class AgentExecution {
   private readonly state:AgentState;
+  private readonly responseHandlers: AssistantResponseHandler[];
   private get context(){return this.state.context;}
   private set context(value:ContextHistory){this.state.acceptContext(value);}
   private get runState(){return this.state.run;}
@@ -36,6 +39,7 @@ export class AgentExecution {
     private readonly stream: ModelStream, private readonly observer: AgentObserver = {},
     readonly progress = new ProgressStore(), private readonly maxSteps = 64) {
     this.state=new AgentState(run,context,historyPosition);
+    this.responseHandlers = policy.createAssistantResponseHandlers?.(run.agentId) ?? [];
     if (config.compaction) validateCompactionSettings(config.compaction);
     if (!Number.isSafeInteger(maxSteps) || maxSteps < 1) throw new AppError('invalid_config', 'Invalid model call limit');
   }
@@ -48,6 +52,34 @@ export class AgentExecution {
     const proposed = { ...entry, agentId: this.runState.agentId, runId: this.runState.runId, position: this.historyPosition + 1 };
     const record = await this.observer.message?.(structuredClone(proposed)) ?? proposed;
     this.receive(record); return structuredClone(record);
+  }
+  private async patchContext(patch: ContextPatch): Promise<void> {
+    const revision = this.context.revision;
+    if (this.observer.contextPatched) {
+      await this.observer.contextPatched(revision, patch);
+      this.state.patchContext(revision + 1, patch);
+    } else if (this.observer.contextChanged) {
+      const next = new AgentContextState(this.context);
+      next.patch(revision + 1, patch);
+      await this.replaceContext(revision, next.history.entries);
+    } else this.state.patchContext(revision + 1, patch);
+  }
+  private async updateContextMetadata(updates: Array<{messageId: string; metadata: JsonObject}>): Promise<void> {
+    if (!updates.length) return;
+    const ids = new Set<string>();
+    const entries = new Map(this.context.entries.map(entry => [entry.messageId, entry]));
+    const update = updates.map(item => {
+      if (!item.messageId || ids.has(item.messageId)) throw new AppError('invalid_context_update', 'Context metadata updates require unique message identities');
+      ids.add(item.messageId);
+      const entry = entries.get(item.messageId);
+      if (!entry) throw new AppError('invalid_context_update', `Context entry not found: ${item.messageId}`);
+      return {...structuredClone(entry), metadata: structuredClone(item.metadata)};
+    });
+    await this.patchContext({append: [], update});
+  }
+  private async appendHint(message: Message, metadata: JsonObject = {}): Promise<void> {
+    await this.record({messageId: randomUUID(), message: structuredClone(message), metadata: structuredClone(metadata)});
+    this.progress.changed(this.runState.agentId);
   }
   async replaceContext(revision: number, entries: ContextEntry[]): Promise<ContextHistory> {
     validateEntries(entries);
@@ -71,17 +103,7 @@ export class AgentExecution {
       const change = await new AgentMessageContext(run.agentId, this.context).changes(group);
       if (!change) return;
       if ('replace' in change) await this.replaceContext(this.context.revision, change.replace);
-      else {
-        const revision = this.context.revision;
-        if (this.observer.contextPatched) {
-          await this.observer.contextPatched(revision, change.patch);
-          this.state.patchContext(revision + 1, change.patch);
-        } else if (this.observer.contextChanged) {
-          const next = new AgentContextState(this.context);
-          next.patch(revision + 1, change.patch);
-          await this.replaceContext(revision, next.history.entries);
-        } else this.state.patchContext(revision + 1, change.patch);
-      }
+      else await this.patchContext(change.patch);
     };
     const pendingEffects = new Set<Promise<unknown>>();
     const track = <T>(operation: Promise<T>): Promise<T> => {
@@ -274,8 +296,23 @@ export class AgentExecution {
     if (scope.mode === 'compaction' && response.stopReason === 'length') throw new AppError('incomplete_compaction', 'Compaction output reached its token limit');
     const calls = response.content.filter(part => part.type === 'toolCall');
     if (new Set(calls.map(call => call.id)).size !== calls.length) throw new AppError('invalid_tool_calls', 'Duplicate tool-call identity');
-    const results: ToolResultMessage[] = [];
-    for (const call of calls) {
+    const executed = new Map<string, ToolResultMessage>();
+    const hints: Array<{message: Message; metadata?: JsonObject}> = [];
+    const execute = async (call: typeof calls[number]): Promise<ToolResultMessage> => {
+      const existing = executed.get(call.id);
+      if (existing) return structuredClone(existing);
+      const index = calls.findIndex(candidate => candidate.id === call.id);
+      if (index < 0) throw new AppError('invalid_tool_calls', `Assistant handler requested unknown tool call: ${call.id}`);
+      // Keep native call/result order even when a specialized handler selects only a subset.
+      for (let prior = 0; prior < index; prior++) {
+        const pending = calls[prior]!;
+        if (!executed.has(pending.id)) await executeOne(pending);
+      }
+      return executeOne(call);
+    };
+    const executeOne = async (call: typeof calls[number]): Promise<ToolResultMessage> => {
+      const existing = executed.get(call.id);
+      if (existing) return structuredClone(existing);
       signal.throwIfAborted();
       let result: ToolResultMessage;
       try {
@@ -284,17 +321,30 @@ export class AgentExecution {
         if (!definition || !tool) throw new AppError('unknown_tool', `Tool is unavailable: ${call.name}`);
         const args = validateToolArguments(definition, call) as JsonObject;
         const output = await abortable(track(this.policy.executeTool ? this.policy.executeTool(tool, args, scope, call) : tool.execute(args, scope, call)), signal);
-        result = { ...output, role: 'toolResult', toolCallId: call.id, toolName: call.name, timestamp: Date.now() };
+        result = {...output, role: 'toolResult', toolCallId: call.id, toolName: call.name, timestamp: Date.now()};
       } catch (error) {
         signal.throwIfAborted();
         this.observer.assertActive?.();
-        result = { role: 'toolResult', toolCallId: call.id, toolName: call.name, content: [{ type: 'text', text: error instanceof Error ? error.message : 'Tool failed' }], isError: true, timestamp: Date.now() };
+        result = {role: 'toolResult', toolCallId: call.id, toolName: call.name, content: [{type: 'text', text: error instanceof Error ? error.message : 'Tool failed'}], isError: true, timestamp: Date.now()};
       }
       signal.throwIfAborted();
-      await recordMessage({ messageId: randomUUID(), message: result, metadata: this.policy.messageMetadata?.(scope, result) ?? {} });
+      await recordMessage({messageId: randomUUID(), message: result, metadata: this.policy.messageMetadata?.(scope, result) ?? {}});
       if (scope.mode !== 'compaction') this.progress.changed(run.agentId);
-      results.push(result);
-    }
+      executed.set(call.id, result);
+      return structuredClone(result);
+    };
+    const handlerContext: AssistantResponseHandlerContext = {
+      scope, toolCalls: calls, execute,
+      appendHint: async (message, metadata = {}) => { hints.push({message: structuredClone(message), metadata: structuredClone(metadata)}); },
+      updateMetadata: updates => this.updateContextMetadata(updates),
+    };
+    const handlers = this.responseHandlers;
+    for (const handler of handlers) if (handler.canHandle(response)) await handler.handle(response, handlerContext);
+    const fallback = new DefaultAssistantResponseHandler();
+    await fallback.handle(response, {...handlerContext, toolCalls: calls.filter(call => !executed.has(call.id))});
+    const results = calls.flatMap(call => executed.has(call.id) ? [structuredClone(executed.get(call.id)!)] : []);
+    if (results.length !== calls.length) throw new AppError('invalid_tool_calls', 'Assistant response handler did not produce a result for every tool call');
+    for (const hint of hints) await this.appendHint(hint.message, hint.metadata);
     return {response, results, record};
   }
 
