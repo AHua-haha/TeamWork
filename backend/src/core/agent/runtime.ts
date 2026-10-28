@@ -16,8 +16,7 @@ import { AgentMessageContext } from './data/context.js';
 import { AgentExecution, type AgentObserver } from './agent.js';
 import type { RuntimePolicy, ModelStream, AssistantResponseHandler, AssistantResponseHandlerFactory } from './contracts.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
-
-interface ResidentHandlerSet { handlers: AssistantResponseHandler[] }
+import { ResidentHandlers } from './data/resident-handlers.js';
 
 interface Job { execution?: AgentExecution; agentId: string; controller: AbortController; done: Promise<void> }
 
@@ -31,7 +30,7 @@ export class AgentRuntime {
   private readonly contextFailures = new Map<string, unknown>();
   private readonly maxSteps: number;
   private readonly pendingStarts = new Set<Promise<RunState>>();
-  private readonly responseHandlers = new Map<string, Promise<ResidentHandlerSet>>();
+  private readonly residentHandlers = new ResidentHandlers();
 
   constructor(readonly store: AgentData, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, private readonly options: { progressCapacity?: number; maxSteps?: number; compaction?: CompactionSettings } = {}) {
     if (options.compaction) validateCompactionSettings(options.compaction);
@@ -50,7 +49,7 @@ export class AgentRuntime {
       await this.store.recoverCompactions();
       await this.store.recoverInterruptedRuns(async run => this.policy.afterRun?.({ ...run, status: 'interrupted' }));
       this.finalizationFailures.clear();
-      this.responseHandlers.clear();
+      this.residentHandlers.clear();
       this.accepting = true;
     } catch (error) {
       await this.store.releaseRuntime();
@@ -59,42 +58,56 @@ export class AgentRuntime {
   }
 
   private async handlersFor(agentId: string): Promise<AssistantResponseHandler[]> {
-    const existing = this.responseHandlers.get(agentId);
-    if (existing) return (await existing).handlers;
-    const loading = (async () => {
+    return this.residentHandlers.get(agentId, async () => {
       const factories = this.policy.createAssistantResponseHandlerFactories?.(agentId) ?? [];
       const ids = new Set<string>();
       const handlers: AssistantResponseHandler[] = [];
+
       for (const factory of factories) {
-        if (!factory.handlerId || ids.has(factory.handlerId)) throw new AppError('invalid_config', `Duplicate or empty assistant response handler id: ${factory.handlerId}`);
+        if (!factory.handlerId || ids.has(factory.handlerId)) {
+          throw new AppError('invalid_config', `Duplicate or empty assistant response handler id: ${factory.handlerId}`);
+        }
         ids.add(factory.handlerId);
+
         const state = await this.store.getAssistantResponseHandlerData(agentId, factory.handlerId);
         let acknowledged = state;
         let saving = Promise.resolve();
+
         const persist = (revision: number, data: JsonObject) => {
           const operation = saving.then(async () => {
             try {
               const next = await this.store.saveAssistantResponseHandlerData(agentId, factory.handlerId, revision, data);
               acknowledged = next;
+              // Notify resident that handler state has been persisted
+              this.residentHandlers.changed(agentId, {
+                baseRevision: (state as any).revision ?? 0,
+                revision: (next as any).revision ?? ((state as any).revision ?? 0) + 1,
+                handlerId: factory.handlerId,
+                data: (next as any).data ?? next,
+              });
               return structuredClone(next);
             } catch (error) {
-              this.responseHandlers.delete(agentId);
+              this.residentHandlers.invalidate(agentId);
               throw error;
             }
           });
           saving = operation.then(() => undefined);
           return operation;
         };
-        const handler = factory.create(structuredClone(acknowledged), persist);
-        if (!handler || typeof handler.handle !== 'function' || typeof handler.canHandle !== 'function') throw new AppError('invalid_config', `Invalid assistant response handler: ${factory.handlerId}`);
+
+        const handler = factory.create(acknowledged as any, persist);
+        if (!handler || typeof handler.handle !== 'function' || typeof handler.canHandle !== 'function') {
+          throw new AppError('invalid_config', `Invalid assistant response handler: ${factory.handlerId}`);
+        }
         handlers.push(handler);
       }
-      if (!factories.length) handlers.push(...(this.policy.createAssistantResponseHandlers?.(agentId) ?? []));
-      return {handlers};
-    })();
-    this.responseHandlers.set(agentId, loading);
-    try { return (await loading).handlers; }
-    catch (error) { if (this.responseHandlers.get(agentId) === loading) this.responseHandlers.delete(agentId); throw error; }
+
+      if (!factories.length) {
+        handlers.push(...(this.policy.createAssistantResponseHandlers?.(agentId) ?? []));
+      }
+
+      return handlers;
+    });
   }
 
   private available(): void {
@@ -109,7 +122,7 @@ export class AgentRuntime {
     for (const job of this.jobs.values()) job.controller.abort();
     this.progress.close();
     await Promise.allSettled([...this.jobs.values()].map(job => job.done));
-    this.responseHandlers.clear();
+    this.residentHandlers.clear();
     await this.store.releaseRuntime();
   }
 
