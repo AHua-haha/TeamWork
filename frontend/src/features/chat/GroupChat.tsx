@@ -1,6 +1,6 @@
 import { backendClient } from '../../shared/backend-client/index.js';
 import { useImageDraft } from './useImageDraft.js';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { imageUrl, type ChatImage, type GroupEntry, type GroupClient } from '../../shared/backend-client/index.js';
 import type { AgentClient } from '../../shared/backend-client/index.js';
 import { discussionInput, referenceLabel, type Discussion } from '../../shared/backend-client/index.js';
@@ -48,6 +48,21 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
   const viewport = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const timeline = useRef<HTMLDivElement>(null);
+  const olderAnchor = useRef<{entryId: string; top: number} | null>(null);
+  useLayoutEffect(() => {
+    if (snapshot.loadingOlder || !olderAnchor.current || !viewport.current) return;
+    const anchor = olderAnchor.current; olderAnchor.current = null;
+    const element = [...(timeline.current?.querySelectorAll<HTMLElement>('[data-entry-id]') ?? [])].find(item => item.dataset.entryId === anchor.entryId);
+    if (element) viewport.current.scrollTop += element.getBoundingClientRect().top - anchor.top;
+  }, [snapshot.entries, snapshot.loadingOlder]);
+  function loadOlder() {
+    if (snapshot.loadingOlder || !viewport.current) return;
+    const top = viewport.current.getBoundingClientRect().top;
+    const element = [...(timeline.current?.querySelectorAll<HTMLElement>('[data-entry-id]') ?? [])].find(item => item.getBoundingClientRect().bottom >= top);
+    olderAnchor.current = element ? {entryId: element.dataset.entryId!, top: element.getBoundingClientRect().top} : null;
+    pinned.current = false;
+    void client.loadOlder();
+  }
   const runningIds = snapshot.entries.flatMap(entry => entry.kind === 'member' && entry.run.status === 'running' ? [entry.memberId] : []);
   const active = runningIds.length > 0;
   useEffect(() => { client.follow(); return () => client.dispose(); }, [client]);
@@ -90,8 +105,12 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
       onClose={() => setResetOpen(false)} onConfirm={async () => { await client.reset(); setResetOpen(false); pinned.current = true; }} />}
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={client.refresh}>Retry</button></div>}
     <div className="group-viewport" ref={viewport} onScroll={() => { const view = viewport.current!; pinned.current = view.scrollHeight - view.scrollTop - view.clientHeight < 80; }}>
-      {!snapshot.entries.length && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open {panelLabel.toLowerCase()}</button></div>}
-      <div className="group-timeline" ref={timeline}>{snapshot.entries.map(entry => entry.kind === 'user'
+      {!snapshot.entries.length && !snapshot.initialized && !snapshot.error && <div className="empty-state" role="status">Loading recent history…</div>}
+      {!snapshot.entries.length && snapshot.initialized && <div className="empty-state"><div className="empty-mark">✳</div><h3>Work with your team</h3><p>Talk to the lead, or mention members with @ to bring them into the work.</p><button type="button" className="text-button" onClick={() => onFiles(true)}>Open {panelLabel.toLowerCase()}</button></div>}
+      <div className="group-timeline" ref={timeline}>
+        {snapshot.hasOlder && <div className="group-history-controls"><button type="button" className="text-button" disabled={snapshot.loadingOlder} onClick={loadOlder}>{snapshot.loadingOlder ? 'Loading older messages…' : 'Load older messages'}</button></div>}
+        {snapshot.historyError && <div className="error-banner" role="alert">{snapshot.historyError}<button type="button" disabled={snapshot.loadingOlder} onClick={loadOlder}>Retry older messages</button></div>}
+        {snapshot.entries.map(entry => entry.kind === 'user'
         ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body">{entry.text && <p>{entry.text}</p>}{entry.attachments?.length ? <div className="group-message-images">{entry.attachments.map(image => <MessageImage key={image.id} workspaceId={workspaceId} image={image} />)}</div> : null}</div><div className="group-identity group-user-identity"><span className="group-avatar" aria-hidden="true">Y</span><strong className="group-identity-name">You</strong></div></article>
         : <MemberResponse key={entry.entryId} entry={entry} canConfigure={!!team.team?.members.some(member => member.memberId === entry.memberId)} modelOpen={modelTarget?.memberId === entry.memberId}
           onModel={openModel} onModelLeave={leaveModel} />)}</div>
@@ -149,7 +168,7 @@ function MemberResponse({ entry, canConfigure, modelOpen, onModel, onModelLeave 
   entry: Extract<GroupEntry, { kind: 'member' }>; canConfigure: boolean; modelOpen: boolean;
   onModel(memberId: string, anchor: HTMLButtonElement, immediate?: boolean): void; onModelLeave(): void;
 }) {
-  const [expanded, setExpanded] = useState(entry.finalRef === null);
+  const [expanded, setExpanded] = useState(entry.run.status === 'running');
   const accepted = entry.finalRef !== null;
   const seenFinal = useRef(accepted);
   const client = useMemo(() => backendClient.agent(entry.memberId, { historyAfter: entry.working.after }), [entry.memberId, entry.run.runId, entry.working.after]);

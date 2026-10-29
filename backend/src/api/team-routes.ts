@@ -106,6 +106,15 @@ export function teamRoutes(team: TeamSystem, runtime: AgentRuntime): (route: Rou
         response.end(image.bytes); return;
       }
       if (extra.length) throw notFound();
+      if (method === 'GET' && memberId === 'history') {
+        query(url, ['before', 'limit', 'resetCursor']);
+        response.setHeader('Cache-Control', 'no-store');
+        json(response, 200, await team.runner.history(workspaceId, {
+          before: count(url, 'before', null) ?? undefined, limit: count(url, 'limit', 50),
+          resetCursor: count(url, 'resetCursor', null) ?? undefined,
+        }));
+        return;
+      }
       if (method === 'GET' && (memberId === undefined || memberId === 'follow' || memberId === 'timeline' || memberId === 'timeline-follow')) {
         query(url, memberId === 'follow' || memberId === 'timeline-follow' ? ['after'] : ['after', 'limit']);
         const after = count(url, 'after', 0);

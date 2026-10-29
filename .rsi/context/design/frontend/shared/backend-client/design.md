@@ -27,3 +27,7 @@ Application startup creates one configured client instance and makes it availabl
 ## Chat roster transport
 
 Expose the backend's narrow roster separately from full team inspection. The frontend feature owns refresh coalescing and temporary-mode policy; transport does not synthesize missing readiness/harness fields. Member activation continues to use the committed-review and revision/digest activation endpoints.
+
+## Group-history transport contract
+
+The group presentation client reads a latest-50 snapshot once, with separate older-history and live-update cursors. Older pages are explicit reads guarded by reset generation. Refresh and reconnect reuse the applied update cursor and loaded pages; duplicates do not advance it twice, and malformed/gapped events leave it at the last successfully applied update. Reset or a backend-declared invalid/expired cursor causes a bounded latest snapshot recovery. Public final-response content and private Agent working history remain separate reads.

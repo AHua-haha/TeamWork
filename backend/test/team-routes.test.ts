@@ -96,6 +96,25 @@ test('group timeline endpoints expose persisted reservations and paged changes',
   assert.equal(next.changes[0].entry.position, 2);
 }));
 
+test('group history pages current entries separately from changes and guard older pages against reset', () => withServer(async (call, f) => {
+  const base = `/workspaces/${f.workspaceId}/chat`;
+  assert.deepEqual((await call(`${base}/history`)).entries, []);
+  await call(`${base}/messages`, {method: 'POST', data: {text: 'work'}, status: 202});
+  const first = await call(`${base}/history?limit=1`);
+  assert.equal(first.entries.length, 1); assert.equal(first.entries[0].kind, 'member');
+  assert.equal(first.cursor, 2); assert.equal(first.nextBefore, 2); assert.equal(first.hasOlder, true);
+  const older = await call(`${base}/history?before=2&limit=1&resetCursor=0`);
+  assert.equal(older.entries[0].kind, 'user'); assert.equal(older.hasOlder, false); assert.equal(older.nextBefore, null);
+  for (const query of ['limit=0', 'limit=101', 'before=0&resetCursor=0', 'before=2', 'resetCursor=0', 'limit=1&limit=2', 'unknown=1']) await call(`${base}/history?${query}`, {status: 400});
+  await call('/workspaces/missing/chat/history', {status: 404});
+  await call(`${base}/history`, {method: 'POST', status: 404});
+  await call(`${base}/stop`, {method: 'POST', status: 202});
+  await new Promise(resolve => setImmediate(resolve));
+  await call(`${base}/reset`, {method: 'POST'});
+  assert.equal((await call(`${base}/history?before=2&resetCursor=0`, {status: 409})).error.code, 'history_reset');
+  assert.deepEqual((await call(`${base}/history`)).entries, []);
+}));
+
 test('configuration review and separate user activation enforce exact input and whole-workspace idle state', () => withServer(async (call, f) => {
   const member = await worker(f, 'Backend', ['src']);
   const source = await f.team.configuration.accepted(f.workspaceId, member.memberId), files = await f.team.harness.files(f.lead.memberId);

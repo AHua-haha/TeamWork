@@ -67,3 +67,13 @@ Both accept only optional `offset`, `limit`, `revision` query parameters as nonn
 **Effect/failure:** delegates to TeamSystem.roster with no design/harness inspection or writes. Unknown workspaces return not_found/404; unknown/repeated query parameters return invalid_input/400; extra segments and write methods are not endpoints.
 
 **Usage:** ordinary chat calls roster; deliberate detailed inspection can still call the existing GET team API. Committed configuration review and activate endpoints retain existing validation and revision/digest semantics.
+
+### Bounded group-history HTTP contract
+
+**Input:** `GET /workspaces/:id/chat/history?limit=50` (legacy `/team/chat/history` alias is also available). Older pages: `?before=<nextBefore>&limit=50&resetCursor=<resetCursor>`. Accept only these three nonnegative integer query parameters; Core requires positive before and limit 1–100.
+
+**Output:** 200 `{workspaceId,cursor,resetCursor,entries,nextBefore,hasOlder}`, `Cache-Control:no-store`. Current public entries are ascending by display position. Snapshot cursor and reset generation are consistent with the returned values. Working messages are not embedded; their existing Agent follow resource remains separate.
+
+**Effect:** read-only Team delegation, no SQL in API. Unknown/repeated parameters are 400; missing workspace is 404; reset-generation mismatch is `history_reset`/409. Refresh/reconnect use the existing `/workspaces/:id/chat/timeline-follow?after=<last-applied-change>` endpoint, rather than fetching history again. Existing backend `invalid_cursor` errors and reset events permit bounded resnapshot recovery; no change records are pruned by this feature.
+
+**Usage:** fetch the initial history page; then follow from its cursor. Use nextBefore only for explicit older-page reads. Do not use a display position as a live-update cursor.

@@ -11,7 +11,7 @@ import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation
 import { defaultRunSettings, type WorkspaceModels } from '../../workspace/data/models.js';
 import { generatedSource } from './member-config.js';
 import { AppError, identity, position, type RunState } from '../../agent/data/model.js';
-import { defaultMentionLimit, groupEntry, groupContextMessage, migrateGroupEnvelope, validateGroupContextEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset, type GroupContextEntry } from './group-chat.js';
+import { chatHistoryInput, defaultMentionLimit, groupEntry, groupContextMessage, migrateGroupEnvelope, validateGroupContextEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatHistoryInput, type ChatHistoryPage, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset, type GroupContextEntry } from './group-chat.js';
 import { clearTables, dataTransaction, rows, insertRows, limitClause, duplicate, type DataConnection as Db } from '../../data-transaction.js';
 import { schema } from './schema.js';
 import { GroupContexts, GroupContextState, type GroupContextHistory } from './group-context.js';
@@ -387,6 +387,22 @@ export class TeamData implements TeamStore, ChatStore {
     }
     private async resolveTimelineEntry(db: PoolConnection, entry: TimelineEntry): Promise<TimelineEntry> {
         return entry.kind === 'member' && entry.finalRef ? { ...entry, text: await this.finalText(db, entry.finalRef) } : entry;
+    }
+    async chatHistory(workspaceId: string, options: ChatHistoryInput = {}): Promise<ChatHistoryPage> {
+        identity(workspaceId, 'workspaceId');
+        const input = chatHistoryInput(options);
+        return this.transaction(async db => {
+            await this.workspaces.inTransaction(db).requireWorkspace(workspaceId, false);
+            // All reads share this transaction's consistent snapshot, including resolved final references.
+            const [clock] = await rows(db, 'SELECT seq FROM chat_clock WHERE workspace_id = ?', [workspaceId]);
+            const [settings] = await rows(db, 'SELECT reset_cursor FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+            const cursor = Number(clock?.seq ?? 0), resetCursor = Number(settings?.reset_cursor ?? 0);
+            if (input.resetCursor !== undefined && input.resetCursor !== resetCursor) throw new AppError('history_reset', 'Chat was reset; reload the latest history', 409);
+            const records = await rows(db, 'SELECT data FROM chat_entries FORCE INDEX (workspace_id) WHERE workspace_id = ?' + (input.before === undefined ? '' : ' AND position < ?') + ' ORDER BY position DESC' + limitClause(input.limit + 1), input.before === undefined ? [workspaceId] : [workspaceId, input.before]);
+            const hasOlder = records.length > input.limit;
+            const entries = await Promise.all(records.slice(0, input.limit).reverse().map(row => this.resolveTimelineEntry(db, decode<TimelineEntry>(row.data, validateTimelineEntry))));
+            return {workspaceId, cursor, resetCursor, entries, nextBefore: hasOlder ? entries[0]!.position : null, hasOlder};
+        });
     }
     async chatTimeline(workspaceId: string, after = 0, limit = 100): Promise<TimelineSnapshot> {
         identity(workspaceId, 'workspaceId');

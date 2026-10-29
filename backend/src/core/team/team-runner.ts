@@ -4,7 +4,7 @@ import { OperationQueue } from '../workspace/workspace-git.js';
 import type { AgentRuntime } from '../agent/runtime.js';
 import type { TeamService, TeamStore } from './data/members.js';
 import { Changes } from '../changes.js';
-import { chatText, userMentions, mentionLimit, type ChatStore, type ChatMessage, type ChatAcceptance } from './data/group-chat.js';
+import { chatText, userMentions, mentionLimit, type ChatHistoryInput, type ChatStore, type ChatMessage, type ChatAcceptance } from './data/group-chat.js';
 import { parseMemberResponse } from './member-response.js';
 import { AppError, type RunState } from '../agent/data/model.js';
 
@@ -129,6 +129,7 @@ export class TeamRunner {
 
   async snapshot(workspaceId: string, after = 0, limit = 100) { return this.store.chatSnapshot(workspaceId, after, limit); }
   async timeline(workspaceId: string, after = 0, limit = 100) { return this.store.chatTimeline(workspaceId, after, limit); }
+  async history(workspaceId: string, input: ChatHistoryInput = {}) { return this.store.chatHistory(workspaceId, input); }
 
   async *followTimeline(workspaceId: string, after = 0, signal?: AbortSignal) {
     let first = true;

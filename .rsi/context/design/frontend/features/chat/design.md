@@ -21,3 +21,9 @@ Exact route paths and whether Chat requires an explicitly selected workspace are
 ## Lightweight workspace roster
 
 The temporary workspace mode supplies Chat with roster identities and live running flags, without requesting effective harnesses or readiness evaluation. Mentions remain available; unknown readiness is not represented as validated readiness. Backend admission decides whether a mentioned member can run. Refresh the cheap roster on initial load, shared timeline changes, model preference saves and member activation; do not use a periodic full team inspection. Model hover controls, streaming, stop/reset, pictures and commit approval remain available.
+
+## Bounded history and recovery
+
+Open with the latest 50 group timeline entries and follow changes after that snapshot's update cursor. Offer explicit older-history loading by before-position; retain loaded older pages across refresh/reconnect and preserve the scroll anchor when prepending. Group final-response history and private working history load separately. All terminal runs start folded, including unsuccessful runs; fetch private records when expanded. Running responses still follow private output.
+
+Apply changes by entry identity and revision and advance the update cursor only after successful application. Ignore duplicates. Updates to unloaded older entries advance the cursor without loading those entries. Reconcile live updates arriving during an older-page read so stale page data cannot replace newer state. Manual refresh and ordinary error recovery preserve current content and resume from the recorded cursor. Only explicit reset or a backend-declared invalid/expired cursor permits replacing the loaded view with a fresh latest-50 snapshot; never load all history as recovery.

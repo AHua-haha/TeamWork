@@ -1667,6 +1667,9 @@ test('group timeline reserves deterministic positions, pins final references and
     const snapshot = await store.team.chatTimeline(f.workspaceId);
     const current = new Map(snapshot.changes.map(change => [change.entry.entryId, change.entry]));
     const ordered = [...current.values()].sort((a, b) => a.position - b.position);
+    const history = await store.team.chatHistory(f.workspaceId);
+    assert.deepEqual(history.entries, ordered, 'history resolves only public final text and retains working references');
+    assert.equal(history.cursor, snapshot.cursor);
     assert.deepEqual(ordered.map(entry => entry.kind === 'member' ? entry.name : 'User'), ['User', 'Backend', 'Frontend', 'User', 'Lead']);
     const backend = ordered[1]!;
     assert.equal(backend.kind, 'member');
@@ -1688,6 +1691,39 @@ test('group timeline reserves deterministic positions, pins final references and
     const reopened = new CoreData(new MySqlStorage(databaseUrl!));
     try { await reopened.migrate(); assert.deepEqual(await reopened.team.chatTimeline(f.workspaceId), snapshot); } finally { await reopened.close(); }
   } finally { await f.close(); }
+});
+
+test('bounded history uses the ordered position index, retains original rows and resumes after the snapshot cursor', {timeout: 30_000}, async () => {
+  const f = await groupFixture();
+  try {
+    const exchangeId = randomUUID();
+    const entries = Array.from({length: 125}, (_, index) => ({
+      workspaceId: f.workspaceId, entryId: randomUUID(), messageId: randomUUID(), position: index + 1, revision: index + 1,
+      exchangeId, time: index + 1, kind: 'user' as const, text: `Message ${index + 1}`,
+    }));
+    await store.pool.query('INSERT INTO chat_entries (workspace_id,id,position,run_id,data) VALUES ?', [entries.map(entry => [f.workspaceId, entry.entryId, entry.position, null, encode(entry)])]);
+    await store.pool.query('INSERT INTO chat_changes (workspace_id,seq,data) VALUES ?', [entries.map(entry => [f.workspaceId, entry.revision, encode(entry)])]);
+    await store.pool.execute('INSERT INTO chat_clock (workspace_id,position,seq) VALUES (?,125,125)', [f.workspaceId]);
+    const latest = await store.team.chatHistory(f.workspaceId);
+    assert.equal(latest.cursor, 125); assert.equal(latest.entries.length, 50);
+    assert.equal(latest.entries[0]!.position, 76); assert.equal(latest.entries.at(-1)!.position, 125);
+    assert.equal(latest.nextBefore, 76); assert.equal(latest.hasOlder, true);
+    const middle = await store.team.chatHistory(f.workspaceId, {before: latest.nextBefore!, resetCursor: latest.resetCursor});
+    assert.deepEqual(middle.entries.map(entry => entry.position), Array.from({length: 50}, (_, i) => i + 26));
+    const oldest = await store.team.chatHistory(f.workspaceId, {before: middle.nextBefore!, resetCursor: middle.resetCursor});
+    assert.equal(oldest.entries.length, 25); assert.equal(oldest.hasOlder, false); assert.equal(oldest.nextBefore, null);
+    const changed = {...entries[0]!, text: 'Changed old entry', revision: 126};
+    await store.pool.execute('UPDATE chat_entries SET data=? WHERE workspace_id=? AND id=?', [encode(changed), f.workspaceId, changed.entryId]);
+    await store.pool.execute('INSERT INTO chat_changes (workspace_id,seq,data) VALUES (?,126,?)', [f.workspaceId, encode(changed)]);
+    await store.pool.execute('UPDATE chat_clock SET seq=126 WHERE workspace_id=?', [f.workspaceId]);
+    const update = await store.team.chatTimeline(f.workspaceId, latest.cursor);
+    assert.equal(update.changes.length, 1); assert.equal(update.changes[0]!.entry.position, 1);
+    assert.equal((await store.team.chatHistory(f.workspaceId)).entries.length, 50);
+    const [count] = await store.pool.execute<any[]>('SELECT COUNT(*) count FROM chat_entries WHERE workspace_id=?', [f.workspaceId]);
+    assert.equal(count[0].count, 125, 'logical archive never removes original entries');
+    const [plan] = await store.pool.execute<any[]>('EXPLAIN SELECT data FROM chat_entries FORCE INDEX (workspace_id) WHERE workspace_id=? AND position<? ORDER BY position DESC LIMIT 51', [f.workspaceId, 76]);
+    assert.equal(plan[0].key, 'workspace_id'); assert.doesNotMatch(plan[0].Extra ?? '', /filesort/i);
+  } finally {await f.close();}
 });
 
 test('group timeline refusal creates no reservation, and cancellation/restart finalize retained entries without a final', { timeout: 30_000 }, async () => {

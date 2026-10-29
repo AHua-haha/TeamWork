@@ -140,3 +140,17 @@ The accepted Team design and current implementation agree on ownership: Team own
 Current verification: `npm run check` passed; the full backend unit suite passed with 266 tests and 0 skipped; `git diff --check` passed. The disposable-MySQL integration suite was not rerun in this reconciliation.
 
 Group context inspection and restoration likewise use the `(workspace_id, position)` primary index to avoid sorting large message JSON through the identity index. Summary inclusion, read boundaries and pinned page revisions are unchanged.
+
+### Bounded presentation history
+
+**Input:** `TeamData.chatHistory(workspaceId, {limit?, before?, resetCursor?})` / `TeamRunner.history`. Limit defaults to 50 and allows 1–100. An older-page read requires positive `before` and the initial page's `resetCursor`; a reset cursor without before is invalid.
+
+**Output:** `{workspaceId, cursor, resetCursor, entries, nextBefore, hasOlder}`. Entries are current user/member timeline values in ascending display position, with resolved public final text and working-history references, not private traces. `nextBefore` is the oldest returned position when more entries exist, otherwise null. `cursor` is the change watermark from the same repeatable-read transaction as the page and final-reference reads.
+
+**Effect/failure:** read-only. `chat_entries` uses the `(workspace_id,position)` unique index (`FORCE INDEX (workspace_id)`), reads at most limit+1 descriptors descending, then resolves only the returned entries. It never replays `chat_changes` to construct a page. Original messages, context, references, positions and all change records remain unchanged. A reset-generation mismatch returns `history_reset`/409; invalid limits/cursor combinations return `invalid_input`/400. Existing timeline change reads/follows remain incremental and compatible.
+
+**Usage:** load `history(w)` once; follow `timeline-follow?after=page.cursor`; explicitly load `history(w,{before:page.nextBefore,resetCursor:page.resetCursor})`. History position and update sequence are independent.
+
+Verification: 270 backend unit tests and 96 disposable-MySQL integration tests passed. The SQL test covers 125 retained entries, 50/50/25 paging, incremental updates to an older position, resolved final references, unchanged row counts and an index plan without filesort. No application database migration or archive/delete operation is introduced.
+
+A read-only check against the deployed `team work` data returned 50 entries (50,625 encoded bytes) with cursor 841 and nextBefore 510, while all 559 timeline rows remained retained. The observed single read took 24.5 ms; this is a local observation, not a latency guarantee. Temporary browser fixtures, browser session and disposable SQL container were cleaned up after verification.

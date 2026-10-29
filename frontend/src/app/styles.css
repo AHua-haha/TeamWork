@@ -499,6 +499,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-conversation { --group-reading-width: 800px; --group-user-font-size: 14px; --group-user-line-height: 1.65; --group-user-padding-y: 12px; --group-avatar-size: calc(var(--group-user-font-size) * var(--group-user-line-height) + 2 * var(--group-user-padding-y)); --group-avatar-scale: .8; --group-avatar-gap: 12px; --group-avatar-gutter: calc(var(--group-avatar-size) + var(--group-avatar-gap)); --group-edge-space: 20px; --group-run-padding: 20px; }
 .group-viewport { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 28px var(--group-edge-space) 8px; }
 .group-timeline { width: 100%; max-width: calc(var(--group-reading-width) + 2 * var(--group-run-padding) + 2 * var(--group-avatar-gutter)); margin-inline: auto; }
+.group-history-controls { display: flex; justify-content: center; margin-bottom: 24px; }
 .group-member, .group-user { display: grid; grid-template-columns: var(--group-avatar-gutter) minmax(0, 1fr) var(--group-avatar-gutter); align-items: start; }
 .group-run-card { grid-column: 2; grid-row: 2; min-width: 0; min-height: var(--group-avatar-size); padding: 18px var(--group-run-padding) var(--group-run-padding); border: 0; border-top: 1px solid #e9ede8; background: transparent; }
 /* Match the first text line to the fixed avatar center, using its own typography. */

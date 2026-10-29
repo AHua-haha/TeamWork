@@ -148,3 +148,15 @@ SequenceInspector examples and Workspace Context rows now use compact metadata-o
 Input: ContextEntry and chronological index. Output: accessible metadata-only badge row. Effect: presentation only. Usage: select a row to inspect its complete stored message in the existing detail pane.
 
 Verification: frontend check, 79 tests, production build and diff whitespace check pass; existing build chunk-size advisory remains.
+
+### Bounded group history and incremental recovery
+
+`shared/backend-client/group-client.ts` initializes from `/workspaces/:id/chat/history?limit=50`, then follows timeline changes after the snapshot cursor. `GroupSnapshot` exposes initialized, hasOlder, nextBefore, loadingOlder and historyError independently of live connection state. `loadOlder()` reads a reset-guarded before-position page; no implicit older reads occur. Results merge by stable identity/revision. A temporary per-entry update map covers an older request in flight, preserving newer changes skipped while those entries were unloaded. Older pages never advance or replace the live update cursor.
+
+Refresh/reconnect retain loaded entries/pages and use the last successfully applied cursor. Duplicate changes are ignored; malformed/gapped changes leave the applied cursor intact for retry. Updates to unloaded older entries advance the cursor without loading them. Initial snapshot, explicit reset and backend-declared invalid/expired cursor are the only bounded-snapshot paths. Stale requests after refresh/reset/disposal cannot replace current state. No original database history is archived or deleted.
+
+`features/chat/GroupChat.tsx` shows Load older messages plus separate page retry errors and preserves the visible message anchor while prepending. All terminal responses initially fold private work, including unsuccessful runs; their public status/error/final content stays visible. Expansion separately follows the selected Agent run; running responses continue streaming. Loaded working history remains cached while folded. Refresh preserves older pages and does not trigger private-history reads.
+
+Usage: open a workspace to load 50 entries; explicitly load an older page; use Refresh to reconnect incrementally; expand Work to retrieve that response's private history.
+
+Verification: 84 frontend tests, 270 backend tests and 96 MySQL integrations passed. Browser checks with a mock-only 120-entry history verify the initial 50, zero eager private reads even for a failed response, 50 additional entries on explicit load, refresh/reconnect from the same saved cursor with loaded entries preserved, and exhaustion at 120 entries. Prepending the last page preserved the selected message top within 0.16 CSS pixels. Production builds pass; the existing bundle-size advisory remains.

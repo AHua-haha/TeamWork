@@ -71,6 +71,16 @@ All members use the same shared summary; there is no member-specific topic selec
 
 Expose a read-only summary inspection resource with summary text, revision, covered prefix and analyzed snapshot positions, plus the fixed retained count. Reads do not generate summaries. The old semantic tree API, schema, runtime projection and tree inspector are retired. Existing semantic-index rows are not converted into accepted summaries; an eligible workspace generates a fresh summary from original source on the next startup/publication check.
 
+### Bounded presentation history and incremental updates
+
+Stable history uses a logical archive only: retain original Agent messages, Team publications, response references, working ranges and update records in SQL. Presentation loading does not change model context, compaction, scheduling or reset semantics.
+
+Provide a bounded current-entry read separate from change-log replay. The initial read returns the latest 50 timeline entries in display order, resolved public final text, an older-history cursor and the current live-update cursor. Obtain entries, reset generation and update cursor in one consistent database view. Older history is explicitly loaded before a display position, with a reset-generation guard so pages from a reset conversation cannot mix with current history. Read private working messages separately, only on expansion or while a response runs.
+
+History position and change sequence are distinct cursors. After the initial snapshot, live delivery, manual refresh and reconnect resume after the last update the frontend successfully applied. Never replay from zero or reload loaded pages on ordinary refresh/errors. An update to an older unloaded entry advances the live cursor without loading that entry; loaded entries reconcile by stable identity and revision. Older-page reads racing with live updates must retain the newer version. POST acknowledgements never advance the live cursor.
+
+An explicit reset or a backend-declared invalid/expired update cursor permits a new latest-50 snapshot, not a full-history replay. Preserve already loaded content during ordinary reconnect/error recovery. Completed, failed, cancelled and interrupted working sections start folded; status and failure information remain visible without private-history reads. Running responses retain their existing streaming behavior. Changes to presentation loading must not rewrite or archive original database rows.
+
 ### Read-only group and member context inspection
 
 Expose the current effective shared group context: the accepted shared summary, when present, followed by original messages after its covered prefix in publication order. Preserve native message content and sender/mention/origin metadata for that original tail. The summary identifies its coverage and Team ownership explicitly. Private working messages and pending response reservations do not enter shared context. Inspection does not alter group consumption state, warm runtime context, schedule work or perform maintenance.

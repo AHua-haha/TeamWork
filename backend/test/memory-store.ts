@@ -8,7 +8,7 @@ import type { WorkspaceBootstrap } from '../src/core/workspace-bootstrap.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../src/core/team/data/members.js';
 import { randomUUID } from 'node:crypto';
 import { AgentMessageContext, type GroupContextMessage } from '../src/core/agent/data/context.js';
-import { groupEntry, groupSender, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/core/team/data/group-chat.js';
+import { chatHistoryInput, groupEntry, groupSender, type ChatHistoryInput, type ChatHistoryPage, type ChatStore, type ChatMessage, type ChatPublication, type ChatSnapshot, type TimelineEntry, type TimelineSnapshot } from '../src/core/team/data/group-chat.js';
 import type { ContextEntry, RunState } from '../src/core/agent/data/model.js';
 import { AppError } from '../src/core/agent/data/model.js';
 import { defaultRunSettings, type WorkspaceModels, type StoredWorkspaceModels } from '../src/core/workspace/data/models.js';
@@ -59,6 +59,14 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     const all = this.timelineChanges.get(workspaceId) ?? [];
     const changes = all.filter(item => item.cursor > after).slice(0, limit);
     return { workspaceId, resetCursor: this.resets.get(workspaceId)?.resetCursor ?? 0, cursor: all.at(-1)?.cursor ?? this.resets.get(workspaceId)?.resetCursor ?? 0, changes: structuredClone(changes), more: all.some(item => item.cursor > (changes.at(-1)?.cursor ?? after)), mentionLimit: this.limits.get(workspaceId) ?? 32 };
+  }
+  async chatHistory(workspaceId: string, options: ChatHistoryInput = {}): Promise<ChatHistoryPage> {
+    this.stored(workspaceId);
+    const input = chatHistoryInput(options), resetCursor = this.resets.get(workspaceId)?.resetCursor ?? 0;
+    if (input.resetCursor !== undefined && input.resetCursor !== resetCursor) throw new AppError('history_reset', 'Chat was reset; reload the latest history', 409);
+    const all = [...this.timelineEntries.values()].filter(entry => entry.workspaceId === workspaceId && (input.before === undefined || entry.position < input.before)).sort((a,b) => a.position - b.position);
+    const entries = structuredClone(all.slice(-input.limit)), hasOlder = all.length > input.limit;
+    return {workspaceId, cursor: this.timelineChanges.get(workspaceId)?.at(-1)?.cursor ?? resetCursor, resetCursor, entries, hasOlder, nextBefore: hasOlder ? entries[0]!.position : null};
   }
   readonly chatImages = new Map<string, PreparedChatImage>();
   async chatImage(workspaceId: string, id: string) {

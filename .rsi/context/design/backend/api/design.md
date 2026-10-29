@@ -34,3 +34,7 @@ Provide a workspace-scoped read-only roster endpoint for chat presentation. Retu
 ### Group summary inspection
 
 Provide a read-only workspace-scoped group-summary resource returning the saved summary and its backend-owned coverage/revision metadata, or a successful empty result. The model-facing group context endpoint returns the effective summary plus original tail with revision-pinned pagination. No semantic range endpoint remains. Reads never schedule maintenance and are not cached.
+
+### Bounded chat history
+
+Expose a latest-entry/history-page resource with a default page of 50, bounded limit, optional before-position and matching reset cursor. Return current public timeline entries, next older cursor and current update cursor from one consistent view. Keep the existing incremental timeline change feed separate. Stable public final text is resolved from immutable Agent references; private working history is a separate resource. Refresh/reconnect continue after the applied change cursor. Reset-generation conflicts or backend-declared invalid/expired cursors are explicit, allowing a new latest-50 snapshot. No original history is removed.

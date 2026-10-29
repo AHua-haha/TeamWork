@@ -9,13 +9,15 @@ const user: GroupEntry = { workspaceId, entryId: 'u1', position: 1, revision: 1,
 const member: Extract<GroupEntry, { kind: 'member' }> = { workspaceId, entryId: runId, position: 2, revision: 2, exchangeId: 'e1', time: 1, kind: 'member', memberId: agentId, name: 'Backend', run: run(), working: { after: 0, through: null }, finalRef: null, text: null };
 const frame = (type: string, data: object) => `event: ${type}\ndata: ${JSON.stringify({ version: 1, workspaceId, type, ...data })}\n\n`;
 const change = (cursor: number, entry: GroupEntry) => frame('entry', { change: { cursor, entry } });
+const historyPage = (entries: GroupEntry[] = [], cursor = 0, resetCursor = 0, nextBefore: number | null = null) => ({workspaceId, entries, cursor, resetCursor, nextBefore, hasOlder: nextBefore !== null});
+const mockHistory = (fetcher: typeof fetch, page = () => historyPage()): typeof fetch => async (url, init) => String(url).includes('/history?') ? new Response(JSON.stringify(page())) : fetcher(url, init);
 
 test('POST reserves immediately without skipping unseen changes; stale acknowledgement cannot replace a final', async () => {
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
   let accept!: (response: Response) => void;
   const ack = new Promise<Response>(resolve => { accept = resolve; });
-  const client = new GroupClient(workspaceId, { fetcher: async (_url, init) => init?.method === 'POST' ? ack : streamResponse(body) });
+  const client = new GroupClient(workspaceId, { fetcher: mockHistory(async (_url, init) => init?.method === 'POST' ? ack : streamResponse(body)) });
   client.follow();
   const pending = client.send('work');
   controller.enqueue(new TextEncoder().encode(change(1, user) + change(2, member) + frame('sync', { cursor: 2 })));
@@ -38,11 +40,11 @@ test('acknowledgement ahead of feed does not advance cursor; reconnect fills gap
   const later: GroupEntry = { ...user, entryId: 'u2', messageId: 'u2', position: 3, revision: 3, text: 'later' };
   const done: GroupEntry = { ...member, revision: 4, run: run('cancelled'), working: { after: 0, through: 1 } };
   let follows = 0;
-  const client = new GroupClient(workspaceId, { retryDelayMs: () => 0, fetcher: async (url, init) => {
+  const client = new GroupClient(workspaceId, { retryDelayMs: () => 0, fetcher: mockHistory(async (url, init) => {
     if (init?.method === 'POST') return new Response(JSON.stringify({ entries: [later] }), { status: 202 });
     requests.push(String(url)); follows++;
     return follows === 1 ? streamResponse(change(1, user) + change(2, member) + frame('sync', { cursor: 2 })) : streamResponse(retained);
-  } });
+  }) });
   await client.send('later'); assert.equal(client.getSnapshot().cursor, 0);
   client.follow();
   await until(() => requests.length === 2);
@@ -55,9 +57,9 @@ test('acknowledgement ahead of feed does not advance cursor; reconnect fills gap
 });
 
 test('refusal leaves no optimistic entry; malformed/gapped updates stop without advancing cursor', async () => {
-  const client = new GroupClient(workspaceId, { fetcher: async (_url, init) => init?.method === 'POST'
+  const client = new GroupClient(workspaceId, { fetcher: mockHistory(async (_url, init) => init?.method === 'POST'
     ? new Response(JSON.stringify({ error: { code: 'member_busy', message: 'Backend is working' } }), { status: 409 })
-    : streamResponse(change(2, member)) });
+    : streamResponse(change(2, member))) });
   await assert.rejects(client.send('work'), /Backend is working/);
   assert.equal(client.getSnapshot().entries.length, 0);
   assert.match(client.getSnapshot().commandError!, /working/);
@@ -239,48 +241,55 @@ test('mention insertion and compact tool summaries retain their existing behavio
 });
 
 test('reset feed clears old entries, ignores delayed acknowledgements and follows a fresh conversation', async () => {
+  let resetCursor = 0;
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({ start(value) { stream = value; } });
+  let freshStream!: ReadableStreamDefaultController<Uint8Array>;
+  const freshBody = new ReadableStream<Uint8Array>({ start(value) { freshStream = value; } });
   let accept!: (response: Response) => void;
   const ack = new Promise<Response>(resolve => { accept = resolve; });
-  const client = new GroupClient(workspaceId, { fetcher: async (_url, init) => init?.method === 'POST' ? ack : streamResponse(body) });
+  const client = new GroupClient(workspaceId, { fetcher: mockHistory(async (_url, init) => init?.method === 'POST' ? ack : streamResponse(resetCursor ? freshBody : body), () => historyPage([], resetCursor, resetCursor)) });
   client.follow(); const pending = client.send('old');
   stream.enqueue(new TextEncoder().encode(change(1, user) + change(2, member) + frame('sync', { cursor: 2 })));
   await until(() => client.getSnapshot().synchronized);
-  stream.enqueue(new TextEncoder().encode(frame('reset', { cursor: 3 })));
+  resetCursor = 3; stream.enqueue(new TextEncoder().encode(frame('reset', { cursor: 3 })));
   await until(() => client.getSnapshot().resetCursor === 3);
   assert.deepEqual(client.getSnapshot().entries, []);
   accept(new Response(JSON.stringify({ entries: [user, member] }), { status: 202 })); await pending;
   assert.deepEqual(client.getSnapshot().entries, [], 'old POST acknowledgement cannot resurrect deleted history');
   const fresh = { ...user, entryId: 'fresh', messageId: 'fresh', revision: 4, position: 3, text: 'Fresh input' };
-  stream.enqueue(new TextEncoder().encode(change(4, fresh)));
+  freshStream.enqueue(new TextEncoder().encode(change(4, fresh)));
   await until(() => client.getSnapshot().cursor === 4);
   assert.deepEqual(client.getSnapshot().entries, [fresh]);
-  client.dispose(); stream.close();
+  client.dispose(); stream.close(); freshStream.close();
 });
 
 test('reset acknowledgement preserves newer entries and old feed synchronization cannot undo a reset', async () => {
+  let resetCursor = 0;
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({ start(value) { stream = value; } });
+  let freshStream!: ReadableStreamDefaultController<Uint8Array>;
+  const freshBody = new ReadableStream<Uint8Array>({ start(value) { freshStream = value; } });
   let accept!: (response: Response) => void;
   const ack = new Promise<Response>(resolve => { accept = resolve; });
-  const client = new GroupClient(workspaceId, { fetcher: async (url, init) => init?.method === 'POST' ? (assert.match(String(url), /\/reset$/), ack) : streamResponse(body) });
+  const client = new GroupClient(workspaceId, { fetcher: mockHistory(async (url, init) => init?.method === 'POST' ? (assert.match(String(url), /\/reset$/), ack) : streamResponse(resetCursor ? freshBody : body), () => historyPage([], resetCursor, resetCursor)) });
   client.follow();
   stream.enqueue(new TextEncoder().encode(change(1, user) + frame('sync', { cursor: 1 })));
   await until(() => client.getSnapshot().synchronized);
   const pending = client.reset(); assert.equal(client.getSnapshot().resetting, true);
   assert.equal(client.getSnapshot().entries.length, 1, 'no optimistic deletion');
   const fresh = { ...user, entryId: 'fresh', messageId: 'fresh', revision: 3, position: 2, text: 'Fresh input' };
-  stream.enqueue(new TextEncoder().encode(frame('reset', { cursor: 2 }) + change(3, fresh)));
+  resetCursor = 2; stream.enqueue(new TextEncoder().encode(frame('reset', { cursor: 2 })));
+  freshStream.enqueue(new TextEncoder().encode(change(3, fresh) + frame('sync', {cursor: 3})));
   await until(() => client.getSnapshot().cursor === 3);
   accept(new Response(JSON.stringify({ workspaceId, resetCursor: 2, resetPosition: 2 })));
   await pending;
   assert.deepEqual(client.getSnapshot().entries, [fresh]);
   assert.equal(client.getSnapshot().resetting, false);
-  stream.enqueue(new TextEncoder().encode(frame('sync', { cursor: 1 })));
+  freshStream.enqueue(new TextEncoder().encode(frame('sync', { cursor: 1 })));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(client.getSnapshot().connection, 'following');
-  client.dispose(); stream.close();
+  client.dispose(); stream.close(); freshStream.close();
 });
 
 test('reset refusal preserves history, reports the reason and clears busy state', async () => {
@@ -305,4 +314,121 @@ test('mixed tool results mark only their failed call and remain visible after a 
   const calls = tools(runActivity(state, accepted));
   assert.deepEqual(calls.map(tool => [tool.result, tool.failed]), [['Source one', false], ['web_timeout: request exceeded deadline', true], ['Source two', false]]);
   assert.equal(accepted.run.status, 'completed');
+});
+
+test('latest snapshot and older pages are separate from live cursor refresh and reconnect', async t => {
+  const entry = (position: number): GroupEntry => ({...user, entryId: `u${position}`, messageId: `u${position}`, position, revision: position});
+  const requests: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  let older!: (response: Response) => void;
+  const pendingOlder = new Promise<Response>(resolve => {older = resolve;});
+  const client = new GroupClient(workspaceId, {retryDelayMs: () => 0, fetcher: async url => {
+    const path = String(url); requests.push(path);
+    if (path.includes('/history?before=')) return pendingOlder;
+    if (path.includes('/history?')) return new Response(JSON.stringify(historyPage(Array.from({length: 50}, (_, i) => entry(i + 51)), 200, 0, 51)));
+    const body = new ReadableStream<Uint8Array>({start(controller) {streams.push(controller);}});
+    return streamResponse(body);
+  }});
+  t.after(() => {client.dispose(); for (const stream of streams) try {stream.close();} catch {}});
+  client.follow();
+  await until(() => streams.length === 1);
+  assert.deepEqual(requests, ['/workspaces/w1/chat/history?limit=50', '/workspaces/w1/chat/timeline-follow?after=200']);
+  assert.equal(client.getSnapshot().entries.length, 50);
+  const send = (value: string) => streams.at(-1)!.enqueue(new TextEncoder().encode(value));
+  send(frame('sync', {cursor: 200}) + change(201, {...entry(20), revision: 201, text: 'Archived update'}));
+  await until(() => client.getSnapshot().cursor === 201);
+  assert.equal(client.getSnapshot().entries.length, 50, 'unloaded old entries stay unloaded');
+  const loading = client.loadOlder();
+  send(change(202, {...entry(20), revision: 202, text: 'Updated while loading'}) + change(203, {...entry(60), revision: 203, text: 'Loaded update'}));
+  await until(() => client.getSnapshot().cursor === 203);
+  older(new Response(JSON.stringify(historyPage(Array.from({length: 50}, (_, i) => entry(i + 1)), 201))));
+  await loading;
+  assert.equal(client.getSnapshot().entries.length, 100);
+  assert.equal(client.getSnapshot().entries.find(e => e.entryId === 'u20')!.text, 'Updated while loading');
+  assert.equal(client.getSnapshot().entries.find(e => e.entryId === 'u60')!.text, 'Loaded update');
+  assert.equal(client.getSnapshot().cursor, 203, 'older snapshot never overwrites the live cursor');
+  client.refresh(); streams[0]!.close();
+  await until(() => streams.length === 2);
+  assert.match(requests.at(-1)!, /after=203$/);
+  assert.equal(requests.filter(path => path === '/workspaces/w1/chat/history?limit=50').length, 1);
+  send(change(203, {...entry(60), revision: 203}) + frame('sync', {cursor: 203}));
+  await until(() => client.getSnapshot().synchronized);
+  assert.equal(client.getSnapshot().entries.length, 100, 'manual refresh retains loaded older pages');
+  streams[1]!.error(new Error('connection lost'));
+  await until(() => streams.length === 3);
+  assert.match(requests.at(-1)!, /after=203$/);
+  assert.equal(requests.filter(path => path.includes('/history?')).length, 2, 'reconnect never reloads snapshots/pages');
+  assert.equal(client.getSnapshot().entries.length, 100);
+});
+
+test('older-page failure retries only that page and never changes the applied update cursor', async t => {
+  const entries: GroupEntry[] = Array.from({length: 50}, (_, i) => ({...user, entryId: `u${i + 51}`, messageId: `u${i + 51}`, position: i + 51, revision: i + 51}));
+  let reads = 0, olderReads = 0, stream!: ReadableStreamDefaultController<Uint8Array>;
+  const client = new GroupClient(workspaceId, {fetcher: async url => {
+    if (String(url).includes('before=')) {
+      olderReads++;
+      if (olderReads === 1) return new Response(JSON.stringify({error: {code: 'backend_error', message: 'Temporary read failure'}}), {status: 503});
+      return new Response(JSON.stringify(historyPage([user], 100)));
+    }
+    if (String(url).includes('/history?')) {reads++; return new Response(JSON.stringify(historyPage(entries, 100, 0, 51)));}
+    return streamResponse(new ReadableStream({start(controller) {stream = controller;}}));
+  }});
+  t.after(() => {client.dispose(); stream?.close();});
+  client.follow(); await until(() => client.getSnapshot().initialized);
+  await client.loadOlder();
+  assert.match(client.getSnapshot().historyError!, /Temporary/);
+  assert.equal(client.getSnapshot().cursor, 100); assert.equal(client.getSnapshot().entries.length, 50);
+  await client.loadOlder();
+  assert.equal(reads, 1); assert.equal(olderReads, 2); assert.equal(client.getSnapshot().historyError, null);
+  assert.equal(client.getSnapshot().cursor, 100); assert.equal(client.getSnapshot().entries.length, 51);
+});
+
+test('malformed updates retain the applied cursor and manual retry resumes from it', async t => {
+  const requests: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const client = new GroupClient(workspaceId, {fetcher: async url => {
+    requests.push(String(url));
+    if (String(url).includes('/history?')) return new Response(JSON.stringify(historyPage([user], 10)));
+    return streamResponse(new ReadableStream({start(controller) {streams.push(controller);}}));
+  }});
+  t.after(() => {client.dispose(); for (const stream of streams) try {stream.close();} catch {}});
+  client.follow(); await until(() => streams.length === 1);
+  streams[0]!.enqueue(new TextEncoder().encode(change(11, {...user, workspaceId: 'wrong', revision: 11})));
+  await until(() => client.getSnapshot().connection === 'error');
+  assert.equal(client.getSnapshot().cursor, 10); assert.deepEqual(client.getSnapshot().entries, [user]);
+  client.refresh(); await until(() => streams.length === 2);
+  assert.match(requests.at(-1)!, /after=10$/); assert.equal(requests.length, 3);
+});
+
+test('a backend-declared unavailable cursor recovers with another bounded latest snapshot', async t => {
+  let reads = 0, stream!: ReadableStreamDefaultController<Uint8Array>;
+  const requests: string[] = [];
+  const fresh = {...user, entryId: 'fresh', messageId: 'fresh', position: 20, revision: 20};
+  const client = new GroupClient(workspaceId, {retryDelayMs: () => 0, fetcher: async url => {
+    const path = String(url); requests.push(path);
+    if (path.includes('/history?')) {reads++; return new Response(JSON.stringify(historyPage(reads === 1 ? [user] : [fresh], reads === 1 ? 10 : 20)));}
+    if (path.endsWith('after=10')) return new Response(JSON.stringify({error: {code: 'cursor_expired', message: 'Cursor expired'}}), {status: 409});
+    return streamResponse(new ReadableStream({start(controller) {stream = controller;}}));
+  }});
+  t.after(() => {client.dispose(); stream?.close();});
+  client.follow(); await until(() => client.getSnapshot().cursor === 20);
+  assert.equal(reads, 2); assert.deepEqual(client.getSnapshot().entries, [fresh]);
+  assert.ok(requests.every(path => !path.includes('after=0')));
+  await until(() => requests.at(-1)?.endsWith('after=20') === true);
+});
+
+test('a delayed POST acknowledgement cannot pull an unloaded archived entry into the current window', async t => {
+  const recent: GroupEntry[] = Array.from({length: 50}, (_, i) => ({...user, entryId: `u${i+51}`, messageId: `u${i+51}`, position: i+51, revision: i+51}));
+  let accept!: (response: Response) => void, stream!: ReadableStreamDefaultController<Uint8Array>;
+  const ack = new Promise<Response>(resolve => {accept = resolve;});
+  const client = new GroupClient(workspaceId, {fetcher: async (url, init) => {
+    if (init?.method === 'POST') return ack;
+    if (String(url).includes('/history?')) return new Response(JSON.stringify(historyPage(recent, 100, 0, 51)));
+    return streamResponse(new ReadableStream({start(controller) {stream = controller;}}));
+  }});
+  t.after(() => {client.dispose(); stream?.close();});
+  const pending = client.send('old'); client.follow();
+  await until(() => client.getSnapshot().initialized);
+  accept(new Response(JSON.stringify({entries: [user]}), {status: 202})); await pending;
+  assert.equal(client.getSnapshot().entries.length, 50);
+  assert.equal(client.getSnapshot().cursor, 100);
+  assert.equal(client.getSnapshot().entries.some(entry => entry.entryId === user.entryId), false);
 });

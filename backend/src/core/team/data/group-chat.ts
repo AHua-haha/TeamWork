@@ -24,6 +24,21 @@ export type TimelineEntry = TimelineBase & (
 export interface TimelineChange { cursor: number; entry: TimelineEntry }
 export interface ChatReset { workspaceId: string; resetCursor: number; resetPosition: number }
 export interface TimelineSnapshot { resetCursor: number; workspaceId: string; cursor: number; changes: TimelineChange[]; more: boolean; mentionLimit: number }
+export interface ChatHistoryInput { before?: number; limit?: number; resetCursor?: number }
+export interface ChatHistoryPage {
+  workspaceId: string; cursor: number; resetCursor: number; entries: TimelineEntry[];
+  nextBefore: number | null; hasOlder: boolean;
+}
+export function chatHistoryInput(input: ChatHistoryInput = {}): ChatHistoryInput & { limit: number } {
+  const limit = input.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AppError('invalid_input', 'History limit is 1–100');
+  if (input.before !== undefined) {
+    position(input.before);
+    if (!input.before || input.resetCursor === undefined) throw new AppError('invalid_input', 'Older history requires a positive before position and resetCursor');
+    position(input.resetCursor);
+  } else if (input.resetCursor !== undefined) throw new AppError('invalid_input', 'resetCursor requires a before position');
+  return {...input, limit};
+}
 export interface ChatAcceptance { message: ChatMessage; runs: RunState[]; entries: TimelineEntry[] }
 /** Stored member publications contain a reference, never a duplicate final body. */
 export type StoredChatMessage = Omit<ChatMessage, 'text'> & { text?: string; finalRef?: FinalReference };
@@ -67,6 +82,7 @@ export interface ChatStore extends ChatImageStore {
   publishChat(input: ChatPublication): Promise<ChatAcceptance>;
   chatSnapshot(workspaceId: string, after?: number, limit?: number): Promise<ChatSnapshot>;
   chatTimeline(workspaceId: string, after?: number, limit?: number): Promise<TimelineSnapshot>;
+  chatHistory(workspaceId: string, input?: ChatHistoryInput): Promise<ChatHistoryPage>;
   configureChat(workspaceId: string, mentionLimit: number): Promise<void>;
   stopChat(workspaceId: string): Promise<RunState[]>;
   resetChat(workspaceId: string): Promise<ChatReset>;
