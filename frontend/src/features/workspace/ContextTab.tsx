@@ -1,8 +1,9 @@
+import { ContextEntryRow } from './ContextEntryRow.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContextClient, ContextEntry, GroupContextEntry, RosterMember } from '../../shared/backend-client/index.js';
 import { BackendError } from '../../shared/backend-client/index.js';
 import { SequenceInspector } from '../../shared/ui/index.js';
-import { ContextMessageDetail, contextMessageLabel, contextMessageRole } from './context-message.js';
+import { ContextMessageDetail } from './context-message.js';
 import { GroupSummaryView } from './GroupSummaryView.js';
 
 const PAGE_SIZE = 100;
@@ -67,7 +68,7 @@ export function ContextTab({ workspaceId, members, client }: { workspaceId: stri
       {state.error && <div className="context-error" role="alert">{state.error}{state.stale && <button type="button" className="text-button" onClick={refresh}>Reload from start</button>}</div>}
       {state.loading && !state.entries.length ? <p className="context-loading" role="status">Loading {sourceLabel.toLowerCase()}…</p> : state.entries.length ? <>
         <SequenceInspector items={state.entries} getKey={key} selectedKey={selectedKey} onSelect={(entry, index) => setSelectedKey(key(entry, index))}
-          renderRow={(entry, index) => <><strong>{String(index + 1).padStart(3, '0')} · {contextMessageRole(entry.message)}</strong><span>{contextMessageLabel(entry.message)}</span></>}
+          renderRow={(entry, index) => <ContextEntryRow entry={entry} index={index} />}
           renderDetail={(entry, index) => <ContextMessageDetail entry={entry} index={index} />} empty={<p>Select a context message.</p>} />
 
       </> : !state.error ? <p className="context-loading">No context messages are available.</p> : null}

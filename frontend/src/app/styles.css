@@ -765,6 +765,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .sequence-inspector { display: grid; grid-template-columns: minmax(220px, 34%) 1fr; min-height: 320px; border: 1px solid var(--line, #27303a); border-radius: 10px; overflow: hidden; background: var(--surface, #11161c); }
 .sequence-inspector-list { overflow: auto; border-right: 1px solid var(--line, #27303a); padding: 6px; }
+.sequence-inspector-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.sequence-inspector-order { flex: 0 0 2ch; color: #9aa6b2; font: 11px 'IBM Plex Mono', monospace; text-align: right; }
+.sequence-inspector-badge { display: inline-flex; align-items: center; min-height: 20px; width: fit-content; max-width: 100%; padding: 2px 7px; border-radius: 999px; color: #405064; background: #e7edf3; font-size: 11px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sequence-inspector-badge.is-assistant { color: #24598c; background: #dcecff; }
+.sequence-inspector-badge.is-system { color: #66508c; background: #eee7fb; }
+.sequence-inspector-badge.is-user { color: #346548; background: #e2f3e7; }
+.sequence-inspector-badge.is-group { color: #226b70; background: #def1f1; }
+.sequence-inspector-badge.is-tool { color: #684c86; background: #eee5f7; }
+.sequence-inspector-badge.is-success { color: #2e6a43; background: #dff2e4; }
+.sequence-inspector-badge.is-failed { color: #9a3d3d; background: #fbe3e3; }
+.sequence-inspector-badge.is-hidden { color: #65717d; background: #e8ebee; }
 .sequence-inspector-row { display: block; width: 100%; border: 0; border-radius: 7px; padding: 10px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .sequence-inspector-row:hover, .sequence-inspector-row.is-selected { background: var(--surface-raised, #202832); }
 .sequence-inspector-row:focus-visible { outline: 2px solid var(--accent, #7cb8ff); outline-offset: -2px; }
@@ -809,9 +820,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .context-revision { color: #829087; font: 11px 'IBM Plex Mono', monospace; }
 .context-tab .sequence-inspector { display: grid; grid-template-columns: minmax(96px, 30%) minmax(0, 1fr); flex: 1; min-height: 0; height: auto; color: #263442; background: #fff; border-color: #d7dee7; }
 .context-tab .sequence-inspector-list { min-width: 0; min-height: 0; max-height: none; border-right: 1px solid #e0e7ed; border-bottom: 0; }
-.context-tab .sequence-inspector-row { min-width: 0; display: grid; gap: 5px; color: #34443a; }
-.context-tab .sequence-inspector-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; text-transform: capitalize; }
-.context-tab .sequence-inspector-row span { overflow: hidden; color: #77857d; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.context-tab .sequence-inspector-row { min-width: 0; display: block; color: #34443a; }
+.context-tab .sequence-inspector-meta { min-width: 0; }
+.context-tab .sequence-inspector-badge { font-size: 10px; }
 .context-tab .sequence-inspector-row:hover, .context-tab .sequence-inspector-row.is-selected { background: #eaf2e9; }
 .context-tab .sequence-inspector-detail { min-width: 0; min-height: 0; color: #2d3a32; }
 .context-message-detail h3 { margin: 7px 0; overflow-wrap: anywhere; }

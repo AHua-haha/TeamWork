@@ -132,3 +132,19 @@ Tool result `<pre>` blocks now preserve long backend lines without wrapping and 
 `ContextTab` retains backend `total`, displays loaded/total counts, and distinguishes an initial request failure from an empty context. `ContextPagination` is a fixed flex footer outside the independently scrollable list/detail panes; Load more remains reachable while scrolling either pane, and is disabled on stale revisions until refresh. Exhausted contexts explicitly show that every current-context message is loaded (for example, 73 of 73 after compaction). This does not substitute immutable execution history for the current context. Existing horizontal output scrolling remains intact.
 
 Verification: 79 frontend tests and 95 disposable-MySQL integration tests passed; both builds passed. Read-only verification paged every member in the deployed team-work database through the patched data reader. Browser checks confirmed Lead opening, 100-to-200 message pagination, the footer inside a 1280×720 viewport, and the exhausted Backend context state.
+
+### Context entry metadata rows
+
+SequenceInspector examples and Workspace Context rows now use compact metadata-only entries. The list shows a subdued sequence number, role badge, optional tool badge, and success/failed status badge; message content remains in the selected detail pane. The Storybook fixture includes system, group, assistant, successful read, and failed hidden edit examples. Labels include accessible row descriptions and color is supplementary to text.
+
+**Changed:** `frontend/src/shared/ui/SequenceInspector.stories.tsx`, `frontend/src/features/workspace/ContextTab.tsx`, `frontend/src/app/styles.css`.
+
+**Verification:** `npm run check`, `npm test` (79 passed), `npm run build`, and `git diff --check` pass. Storybook is available at `http://127.0.0.1:6006/` with the `Shared/SequenceInspector` story.
+
+### Context metadata row integration
+
+`features/workspace/ContextEntryRow.tsx` maps persisted context entries to the accepted compact flowing badges: quiet sequence, native role, deduplicated assistant tool names or result tool name, success/failed for results, and visibility metadata. `modelContextHidden` displays Hidden; partial assistant-call suppression displays Arguments hidden to avoid implying the entire entry is hidden. No content preview or fixed alignment columns are added. Stored content and detail inspection remain unchanged. `ContextTab` delegates row presentation to this feature component.
+
+Input: ContextEntry and chronological index. Output: accessible metadata-only badge row. Effect: presentation only. Usage: select a row to inspect its complete stored message in the existing detail pane.
+
+Verification: frontend check, 79 tests, production build and diff whitespace check pass; existing build chunk-size advisory remains.
