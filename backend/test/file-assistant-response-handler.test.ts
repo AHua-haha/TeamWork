@@ -113,6 +113,23 @@ test('successful write returns the full file and suppresses its long input; fail
   assert.deepEqual(setup.suppressed, [['write-ok']]);
 });
 
+test('180-line read, edit and write results use a six-character line-number field', async () => {
+  const lines = Array.from({ length: 180 }, (_, index) => `  line-${index + 1}`);
+  const content = lines.join('\n') + '\n';
+  for (const operation of ['read', 'edit', 'write'] as const) {
+    const setup = fixture({ 'file.txt': content });
+    const arguments_: JsonObject = { path: 'file.txt' };
+    if (operation === 'write') arguments_.content = content;
+    if (operation === 'edit') arguments_.edits = [{ oldText: '  line-1\n', newText: '  changed-line-1\n' }];
+    const calls = [call(`${operation}-180`, operation, arguments_)];
+    await setup.handler.handle(fauxAssistantMessage(calls.map(item => item.value), { stopReason: 'toolUse' }), setup.context(calls));
+    assert.equal(setup.results[0]!.isError, false, operation);
+    const numberedLines = setup.results[0]!.text.split('\n').filter(line => /^ *\d+\t/.test(line));
+    const expectedLines = operation === 'edit' ? ['  changed-line-1', lines[1]!] : lines;
+    assert.deepEqual(numberedLines, expectedLines.map((line, index) => `${String(index + 1).padStart(6)}\t${line}`), operation);
+  }
+});
+
 test('handler-state persistence failure is fatal and never becomes a misleading ordinary tool error', async () => {
   const root = '/workspace';
   const files = new Map([[resolve(root, 'src/file.ts'), 'content']]);

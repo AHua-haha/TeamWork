@@ -78,6 +78,8 @@ adoptLegacyContext and finishLegacyMigration keep the existing once-only context
 Focused verification: `backend/test/file-assistant-response-handler.test.ts` covers same-response read aggregation and suppression, edit line shifts and multiple replacements, full successful writes and failed-write argument retention, and fatal handler-state persistence failure. Backend TypeScript check passed; the full backend suite passed with **256 tests**; `git diff --check` passed.
 
 
+**Line-number padding fix:** `lineNumber(value,totalLines)` computes its field width as `Math.max(6, String(totalLines).length)`, rather than treating the total line count as a character width. Read/edit aggregates and full write views now use a six-character number field for a 180-line file while preserving the tab and source indentation. The focused test checks exact numbered lines for all three operations, preventing the old unanchored whitespace assertions from overlooking excessive padding. Verification: 5 focused tests passed; backend TypeScript check passed; full backend suite reported 257 tests, 256 passed and 1 skipped, with no failures; `git diff --check` passed. No deployment action was performed.
+
 `backend/test/group-summary.test.ts` verifies summary/tail reads at the Agent's consumed boundary without introducing future messages or changing normal incremental incorporation. `backend/test/team-summary.test.ts` exercises the real public maintenance runtime and full model/tool correction loop. Group summary persistence remains Team-owned.
 
 ## File lookup

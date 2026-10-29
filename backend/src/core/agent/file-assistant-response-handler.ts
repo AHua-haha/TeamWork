@@ -42,7 +42,10 @@ function fileKey(root: string, absolute: string): string {
 }
 function safePath(path: string): string { return path.replace(/[\r\n\t]/g, ' '); }
 function lineAt(content: string, offset: number): number { return newlineCount(content.slice(0, offset)) + 1; }
-function lineNumber(value: number, width: number): string { return `${String(value).padStart(Math.max(6, width))}\t`; }
+function lineNumber(value: number, totalLines: number): string {
+  const width = Math.max(6, String(totalLines).length);
+  return `${String(value).padStart(width)}\t`;
+}
 
 function metadata(path: string, totalLines: number, operation: 'read' | 'write' | 'edit', editResult?: string): string {
   return `<metadata>\npath: ${safePath(path)}\ntotal_lines: ${totalLines}\noperation: ${operation}\nstatus: success${editResult ? `\nedit_result: ${editResult}` : ''}\n</metadata>`;
