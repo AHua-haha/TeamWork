@@ -560,6 +560,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .work-disclosure svg { width: 12px; height: 12px; }
 .work-tool[open] > summary > .work-disclosure, .work-tool-set[open] > summary > .work-disclosure { transform: rotate(90deg); }
 .work-tool pre { background: transparent; border: 0; border-radius: 0; margin: 4px 0 8px 23px; padding: 3px 0; overflow: auto; max-height: 350px; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-tool pre[aria-label="Result"] { white-space: pre; overflow-x: auto; overflow-wrap: normal; }
 .work-tool.failed > summary, .group-command-error, .group-work-error { color: #a14e40; }
 .group-work-error button { margin-left: 8px; }
 .group-terminal { margin-top: 0; color: #967261; font-size: 13px; }
@@ -825,7 +826,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-summary-fields dt { color: #77857b; }
 .group-summary-fields dd { margin: 0; overflow-wrap: anywhere; }
 .context-raw { max-height: 60vh; padding: 12px; border: 1px solid #dce5dc; border-radius: 8px; background: #f7f9f7; }
-.context-rendered-text { line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.context-rendered-text { line-height: 1.6; white-space: pre; overflow-x: auto; overflow-y: visible; overflow-wrap: normal; }
 .context-thinking { border-color: #f1d9a4; background: #fffaf0; }
 .context-tool { border-color: #b9dcc8; background: #f2f8f5; }
 .context-tool.is-error { border-color: #e4abab; background: #fff6f6; }

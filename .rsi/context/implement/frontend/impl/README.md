@@ -118,3 +118,11 @@ The app shell now establishes an explicit viewport boundary with `html`, `body`,
 **Changed:** `frontend/src/app/styles.css`.
 
 **Verification:** `npm run check --prefix frontend`, `npm test --prefix frontend` (76 passed), `npm run build --prefix frontend`, and `git diff --check` pass. Browser reproduction remains useful for confirming the intermittent behavior across desktop and overlay breakpoints.
+
+## Tool and Context horizontal overflow
+
+Tool result `<pre>` blocks now preserve long backend lines without wrapping and scroll horizontally; tool argument blocks retain their existing wrapping behavior. Plain text in the Workspace Context inspector likewise preserves line layout and exposes horizontal overflow for long lines.
+
+**Changed:** `frontend/src/app/styles.css`.
+
+**Verification:** `npm run check --prefix frontend`, `npm test --prefix frontend` (76 passed), and `git diff --check` pass.
