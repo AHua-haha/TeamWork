@@ -91,7 +91,7 @@ Member context is owned and read by Agent. Team validates that the requested act
 
 - Preserve existing HTTP/SSE message presentation, durable final references, reservation ordering and delta-stream recovery.
 - Preserve user-default Lead routing, mention header parsing/limits, whole-publication refusal and shared-workspace execution scheduling.
-- Preserve member config review/activation, Harness authority and explicit reset behavior.
+- Preserve member config review/activation and explicit reset behavior. Tool capabilities and the unrestricted development permission policy belong to Agent React Harnesses, not the superseded Harness system.
 - Agent retains no dependency on Team's SQL format or concrete implementation.
 - Replace old per-activation reconstruction/terminal clearing at their ownership boundary; do not retain them underneath a new append layer.
 - Do not reset real user data implicitly to implement this transition. Decide any durable schema/data migration during implementation planning.
@@ -107,16 +107,16 @@ Member context is owned and read by Agent. Team validates that the requested act
 
 ### REST resource metadata and retained public inspection
 
-The public HTTP surface uses workspace resources rather than exposing Team's internal inspection hierarchy. `GET /workspaces/:workspaceId` returns only the registered workspace metadata (`workspaceId`, `name`, `directory`, `createdAt`) and never loads the managed context overview. Active member metadata is exposed by `GET /workspaces/:workspaceId/members`; one active member is exposed by `GET /workspaces/:workspaceId/members/:memberId`. These responses contain identity, role, responsibility, lead, revision and running state only. They do not resolve designs, Harnesses, provider availability, private context or group messages.
+The public HTTP surface uses workspace resources rather than exposing Team's internal inspection hierarchy. `GET /workspaces/:workspaceId` returns only the registered workspace metadata (`workspaceId`, `name`, `directory`, `createdAt`) and never loads the managed context overview. Active member metadata is exposed by `GET /workspaces/:workspaceId/members`; one active member is exposed by `GET /workspaces/:workspaceId/members/:memberId`. These responses contain identity, role, responsibility, lead, revision and running state only. They do not resolve designs, React Harnesses, provider availability, private context or group messages.
 
 The old public roster and detailed member-inspection routes are retired. The Team-owned member metadata operation remains internal and is the source for the REST resources. Configuration review/activation and model-settings operations remain separate Team capabilities because they are user-controlled configuration workflows, not metadata reads.
 
 Agent context is a member subresource at `GET /workspaces/:workspaceId/members/:memberId/context`, preserving bounded Pi-message pagination, revision checks, `context_changed`, no-store behavior and read-only execution semantics. Group chat is a workspace resource at `/workspaces/:workspaceId/chat`; its snapshot, timeline, follow, message, stop, reset and settings operations retain their existing payloads and effects. Group summary and effective group context are read-only chat subresources at `/chat/summary` and `/chat/context`.
 
-Legacy public design, project-file, managed-context browsing and detailed Team inspection endpoints are not part of this surface. Their internal Workspace/Design/ContextBase and Harness mechanisms remain available to initialization, persistence, permissions and Agent tools. API composition may call Workspace and Team owner operations, but neither owner reads the other's persistence directly.
+Legacy public design, project-file, managed-context browsing and detailed Team inspection endpoints are not part of this surface. Workspace/Design/ContextBase remain available through owner interfaces. Agent React Harnesses provide tool capabilities; the separate legacy Harness and its permission mechanisms are superseded by the accepted Agent design. API composition may call Workspace and Team owner operations, but neither owner reads the other's persistence directly.
 
-### Member file response handler integration
+### Member React Harness integration
 
-Install Agent's independent file response handler for each member using its workspace root for relative-path resolution only. Agent owns read/write/edit declarations, direct filesystem effects and file-view context maintenance; Team does not route these calls through Harness file permissions. Member instructions explain the effective file capability and preserve assigned design responsibilities as guidance. Initialize resident handlers only after the member acquires its serial execution slot, so asynchronous configuration/state loading cannot reorder admitted runs.
+Assemble Agent React Harnesses for each member. The File React Harness uses its workspace root for relative-path resolution only. Agent owns read/write/edit declarations, direct filesystem effects and file-view context maintenance; Team does not route these calls through legacy Harness file permissions. Default React Harness supplies other tools under the same unrestricted development policy. Team supplies member management tools and accepted assignment guidance without controlling tool access. Member instructions explain the effective file capability and preserve assigned design responsibilities as guidance. Initialize resident React Harness state only after the member acquires its serial execution slot, so asynchronous configuration/state loading cannot reorder admitted runs.
 
 Ordered shared-context reads follow their position-key range without sorting native message payloads. Large message content must not require a larger database sort buffer for inspection or restoration.

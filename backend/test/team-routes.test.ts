@@ -1,5 +1,6 @@
+import { memberBash } from './team-fixture.js';
 import { contextPageInput } from '../src/core/context-page.js';
-import { acceptFiles,initGit,waitApproval } from './git-fixture.js';
+import { acceptFiles,initGit } from './git-fixture.js';
 import assert from 'node:assert/strict';
 import { request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { duplexPair } from 'node:stream';
@@ -9,7 +10,7 @@ import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { createAgentServer } from '../src/api/http.js';
 import type { AgentRuntime } from '../src/core/agent/runtime.js';
-import { emptyHarness } from '../src/core/harness/data/config.js';
+import { emptyAssignment } from '../src/core/team/data/assignment.js';
 import { stubConfig, withTeam, worker, configureHarness, type Fixture } from './team-fixture.js';
 
 type Body = Record<string, any>;
@@ -117,7 +118,7 @@ test('group history pages current entries separately from changes and guard olde
 
 test('configuration review and separate user activation enforce exact input and whole-workspace idle state', () => withServer(async (call, f) => {
   const member = await worker(f, 'Backend', ['src']);
-  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId), files = await f.team.harness.files(f.lead.memberId);
+  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId), files = await f.team.memberWorkspace.files(f.lead.memberId);
   const { writeFile } = await import('node:fs/promises');
   await writeFile(join(files.root, source.path), JSON.stringify({ ...JSON.parse(source.files['member.json']!), responsibility: 'Validated update' }));
   const base = `/workspaces/${f.workspaceId}/team/configuration`;
@@ -235,18 +236,6 @@ test('multipart HTTP publication stores scoped pictures, preserves image-only in
   } finally { server.closeAllConnections(); }
 }));
 
-test('commit approval endpoints expose pending command and right-panel diff; decisions are workspace-bound and old scope APIs are absent',()=>withServer(async(call,f)=>{
- await initGit(f);const {gitText}=await import('../src/core/workspace/workspace-git.js');await gitText(f.directory,['add','-f','.rsi/members']);
- const running=f.team.harness.bash(f.lead.memberId,{command:'git commit -m "Review members"'},new AbortController().signal);const request=await waitApproval(f);
- const base=`/workspaces/${f.workspaceId}/team/commit-approvals`;
- f.team.team=async()=>{throw new Error('Approval polling must not inspect the entire team');};
- const list=await call(base);assert.equal(list.approvals[0].id,request.id);assert.equal(list.approvals[0].changes,undefined);
- const review=await call(`${base}/${request.id}`);assert.ok(review.changes.length);assert.match(review.command,/Review members/);
- await call(`${base}/${request.id}`,{method:'POST',data:{action:'feedback',message:'Revise the prompt'}});assert.match((await running).output,/Revise the prompt/);
- await call(`${base}/${request.id}`,{status:404});await call(`/workspaces/${f.workspaceId}/members/${f.lead.memberId}/harness`,{status:404});
- await call(`/workspaces/${f.workspaceId}/team/configuration/commit`,{method:'POST',data:{},status:404});
-}));
-
 
 test('context inspection routes are read-only, scoped, paged and independent of execution state', () => withServer(async (call, fixture) => {
   const base = `/workspaces/${fixture.workspaceId}`;
@@ -326,4 +315,9 @@ test('REST workspace resources expose lightweight member metadata and keep chat/
   await call(`/workspaces/${fixture.workspaceId}/team/members/${workerView.memberId}`,{status:404});
   await call(`/workspaces/${fixture.workspaceId}/team/chat`,{status:404});
   assert.equal(fixture.runtime.runs.length,0);
+}));
+
+test('retired Git approval endpoints are unavailable',()=>withServer(async(call,f)=>{
+ const base=`/workspaces/${f.workspaceId}/team/commit-approvals`;
+ await call(base,{status:404}); await call(`${base}/anything`,{status:404});
 }));

@@ -97,10 +97,10 @@ test('assistant response handlers wrap tool execution, metadata updates and defe
   const calls: string[] = [];
   const handler = {
     canHandle: (response: import('@earendil-works/pi-ai').AssistantMessage) => response.content.some(part => part.type === 'toolCall'),
-    handle: async (_response: import('@earendil-works/pi-ai').AssistantMessage, context: import('../src/core/agent/contracts.js').AssistantResponseHandlerContext) => {
+    handle: async (_response: import('@earendil-works/pi-ai').AssistantMessage, context: import('../src/core/agent/contracts.js').ReactHarnessContext) => {
       await context.updateMetadata([{messageId:'old-read',metadata:{modelContext:'superseded',other:'kept'}}]);
       await context.execute(context.toolCalls[0]!);
-      await context.appendHint({role:'user',content:'Private handler hint',timestamp:3},{source:'assistant-response-handler'});
+      await context.appendHint({role:'user',content:'Runtime-generated private instruction',timestamp:3},{source:'react-harness'});
     },
   };
   const response = fauxAssistantMessage([{type:'toolCall',id:'tool-1',name:'check',arguments:{}}],{stopReason:'toolUse'});
@@ -113,7 +113,7 @@ test('assistant response handlers wrap tool execution, metadata updates and defe
   };
   const prior = {messageId:'old-read',message:{role:'user' as const,content:'original file contents',timestamp:1},metadata:{source:'read'}};
   const agent = new AgentExecution(initial,{revision:0,entries:[prior]},0,{...config,tools:[tool]},
-    {...fixedPolicy(model,[tool]),createAssistantResponseHandlers:()=>[handler]},stream,{
+    {...fixedPolicy(model,[tool]),createReactHarnesses:()=>[handler]},stream,{
       contextPatched:async(_revision,patch)=>{calls.push(`patch:${(patch.metadata?.[0] ?? patch.update[0])?.messageId}`);},
     });
   assert.equal((await agent.run(new AbortController().signal)).status,'completed');
@@ -122,15 +122,15 @@ test('assistant response handlers wrap tool execution, metadata updates and defe
   assert.equal(entries[0]!.message.content,'original file contents');
   assert.deepEqual(entries[0]!.metadata,{modelContext:'superseded',other:'kept'});
   assert.deepEqual(entries.map(entry=>entry.message.role),['user','assistant','toolResult','user','assistant']);
-  assert.equal(entries[3]!.message.content,'Private handler hint');
-  assert.equal(entries[3]!.metadata.source,'assistant-response-handler');
+  assert.equal(entries[3]!.message.content,'Runtime-generated private instruction');
+  assert.equal(entries[3]!.metadata.source,'react-harness');
 });
 
 test('assistant response handlers can react to a response without executing a tool', async () => {
   const response = fauxAssistantMessage('inspection checkpoint');
   const handler = {
     canHandle: () => true,
-    handle: async (_message: import('@earendil-works/pi-ai').AssistantMessage, context: import('../src/core/agent/contracts.js').AssistantResponseHandlerContext) => {
+    handle: async (_message: import('@earendil-works/pi-ai').AssistantMessage, context: import('../src/core/agent/contracts.js').ReactHarnessContext) => {
       await context.appendHint({role:'user',content:'A private hint derived from handler state',timestamp:4});
     },
   };
@@ -139,7 +139,7 @@ test('assistant response handlers can react to a response without executing a to
     yield {type:'done',reason:'stop',message:response};
   };
   const agent = new AgentExecution(initial,{revision:0,entries:[]},0,config,
-    {...fixedPolicy(model),createAssistantResponseHandlers:()=>[handler]},stream);
+    {...fixedPolicy(model),createReactHarnesses:()=>[handler]},stream);
   assert.equal((await agent.run(new AbortController().signal)).status,'completed');
   const entries = agent.snapshot().context.entries;
   assert.deepEqual(entries[0]!.message.content, [{type:'text',text:'inspection checkpoint'}]);

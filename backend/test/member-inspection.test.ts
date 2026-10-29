@@ -15,7 +15,7 @@ async function activate(f: Fixture) {
 test('current inspection compares files with active snapshot and independently reports pending and committed states', () => withTeam(async f => {
   const workerView = await worker(f, 'Backend', ['src']);
   await accept(f); await activate(f);
-  const source = await f.team.configuration.accepted(f.workspaceId, workerView.memberId), files = await f.team.harness.files(f.lead.memberId);
+  const source = await f.team.configuration.accepted(f.workspaceId, workerView.memberId), files = await f.team.memberWorkspace.files(f.lead.memberId);
   const manifest = JSON.parse(source.files['member.json']!);
   await files.write.writeFile(join(files.root, source.path), JSON.stringify({ ...manifest, responsibility: 'Accepted responsibility' }));
   await accept(f, 'Update responsibility');
@@ -40,7 +40,7 @@ test('current inspection compares files with active snapshot and independently r
 
 test('malformed pending files remain inspectable and do not block activation of valid committed content', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']); await accept(f); await activate(f);
-  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId), files = await f.team.harness.files(f.lead.memberId);
+  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId), files = await f.team.memberWorkspace.files(f.lead.memberId);
   await files.write.writeFile(join(files.root, source.path), JSON.stringify({ ...JSON.parse(source.files['member.json']!), responsibility: 'Committed only' }));
   await accept(f);
   await files.write.writeFile(join(files.root, source.path), '{ invalid');

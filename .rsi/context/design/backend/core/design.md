@@ -2,9 +2,13 @@
 
 ## Purpose, responsibilities and boundaries
 
-Compose Agent, Harness, Workspace and Team through their public contracts. Coordinate cross-system workflows without moving a child's business state or policy into the parent. Each business aggregates and owns its core in-memory schema, persistence schema/mapping/migrations and related data operations in its data-model part. No central business-data store duplicates those models.
+Compose Agent, Workspace and Team through their public contracts. Coordinate cross-system workflows without moving a child's business state or policy into the parent. Each business aggregates and owns its core in-memory schema, persistence schema/mapping/migrations and related data operations in its data-model part. No central business-data store duplicates those models.
 
-For member conversations, Team owns authoritative shared group context; Agent owns its assembled message context and the state needed to consume group messages. Harness supplies capabilities and context-maintenance instructions. Agent owns its durable context, private history, execution and compaction state. Team uses Agent’s public interfaces and does not implement Agent persistence.
+For member conversations, Team owns authoritative shared group context; Agent owns its assembled message context and the state needed to consume group messages. Agent assembles purpose-specific React Harnesses that provide capabilities, instructions and rules and manage related private context and durable state. React Harness replaces the separate legacy Harness system and the Assistant Response Handler concept; it is not a new wrapper layer. Agent owns its durable context, private history, execution and compaction state. Team uses Agent’s public interfaces and does not implement Agent persistence.
+
+### React Harness transition
+
+The React Harness responsibility and unrestricted development policy are settled in [Agent design](agent/design.md#react-harness). The legacy Harness design is superseded. Agent implements File and Default React Harnesses. Team owns assignment guidance and member review/activation; Workspace owns initialization templates. The separate Harness source tree and permission mechanisms are removed. Member-facing harness configuration and future permission enforcement remain deferred.
 
 ## Interface contract
 
@@ -12,7 +16,7 @@ Team admits/schedules a member and provides a group-context read reference. Agen
 
 Shared group inputs and private execution messages extend the Agent context chronologically. Every incorporated group message retains sender-visible content and source identity. Incoming shared messages are incorporated at safe boundaries after current work finishes, not between an in-flight tool call and its result. Agent persists its consumption state and context together through its own acknowledged data-model operations. It reuses a resident context model across runs, appends new durable message rows during normal work and replaces active rows for compaction or explicit replacement/reset.
 
-Team owns its resident shared context as Pi messages plus metadata, persists one new context row per accepted publication and includes authoritative sender attribution in content. Existing shared frontend history/final references remain separate. Team continues to own mention routing, scheduling, publication, response reservations and shared stable history/presentation. Agent context changes do not rewrite shared or private stable message history. Workspace documents remain independently maintained project information. Harness authority and external tool effects retain their existing responsibilities.
+Team owns its resident shared context as Pi messages plus metadata, persists one new context row per accepted publication and includes authoritative sender attribution in content. Existing shared frontend history/final references remain separate. Team continues to own mention routing, scheduling, publication, response reservations and shared stable history/presentation. Agent context changes do not rewrite shared or private stable message history. Workspace documents remain independently maintained project information. React Harnesses own purpose-specific reaction and operation rules; Agent runtime coordinates their execution and acknowledged state. The initial development policy has no tool-permission gating, while external effects and failures retain explicit lifecycle semantics.
 
 ### Cross-system atomicity
 

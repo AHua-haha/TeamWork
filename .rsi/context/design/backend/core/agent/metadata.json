@@ -1,5 +1,6 @@
 {
   "implementation": [
-    "backend/src/core/agent"
+    "backend/src/core/agent",
+    "backend/prompts/agent"
   ]
 }

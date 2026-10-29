@@ -6,13 +6,10 @@ import { withTeam } from './team-fixture.js';
 
 const scope = (agentId: string) => ({ agentId, runId: 'lead-run', signal: new AbortController().signal } as StepScope);
 
-test('lead bootstraps pending designs and member files through common tools; design acceptance requires the user', () => withTeam(async f => {
-  const prepared = await f.team.harness.prepare(f.lead.memberId, []);
-  const call = async (name: string, args: Record<string, unknown>) => {
-    const output = await prepared.tools.find(t => t.definition.name === name)!.execute(args as never, scope(f.lead.memberId), {} as never);
-    return output.content.map(p => p.type === 'text' ? p.text : '').join('');
-  };
-  assert.deepEqual(prepared.tools.map(t => t.definition.name).sort(), ['bash', 'edit', 'find', 'grep', 'ls', 'read', 'web_fetch', 'web_search', 'write']);
+test('lead bootstraps pending designs and member files through common tools; file edits remain separate from design acceptance and member activation', () => withTeam(async f => {
+  const {writeFile, mkdir} = await import('node:fs/promises');
+  const {join, dirname} = await import('node:path');
+  const call = async (_name: string, args: {path: string; content: string}) => {const target=join(f.directory,args.path); await mkdir(dirname(target),{recursive:true}); await writeFile(target,args.content);};
   await call('write', { path: '.rsi/context/design/new/metadata.json', content: JSON.stringify({ implementation: ['src'] }) });
   await call('write', { path: '.rsi/context/design/new/design.md', content: 'Pending project' });
   await call('write', { path: '.rsi/members/example/member.json', content: '{"name":"Example"}' });

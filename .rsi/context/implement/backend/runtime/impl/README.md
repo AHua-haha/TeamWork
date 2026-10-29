@@ -24,7 +24,7 @@ Read child-process settings; construct MySqlStorage and CoreData; construct Core
 
 ### Compaction configuration
 
-main.ts resolves Number(RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000) and harnessPrompt('context-compaction'), then passes {compaction:{thresholdTokens,prompt}} to AgentRuntime. Invalid thresholds or missing prompt assets fail startup explicitly. The same threshold covers both checkpoints. Agent owns estimation/triggers and durable hosting; no token policy is implemented here.
+main.ts resolves Number(RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000) and agentPrompt('context-compaction'), then passes {compaction:{thresholdTokens,prompt}} to AgentRuntime. Invalid thresholds or missing prompt assets fail startup explicitly. The same threshold covers both checkpoints. Agent owns estimation/triggers and durable hosting; no token policy is implemented here.
 
 ## File lookup
 
@@ -36,3 +36,7 @@ main.ts resolves Number(RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000) and ha
 ```json
 {"commands": []}
 ```
+
+### React Harness hosting
+
+Runtime constructs Team without a permission-mode argument and wires Agent's File/Default React Harness assembly through Team policy. Web executors, Bash runtime cleanup and compaction prompt loading are Agent-owned imports. No sandbox initialization, Git approval service or RSI_HARNESS_PERMISSIONS_ENABLED setting is used. Required Agent, Team and Workspace prompt assets are copied into dist by `copy-prompts.mjs`. Missing assets still fail explicitly. Shutdown drains work and closes Bash resources without requiring Workspace enumeration.

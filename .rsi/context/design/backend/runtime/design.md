@@ -6,7 +6,7 @@ Runtime is backend process hosting and dependency wiring. It constructs Storage 
 
 ## Interface contract
 
-Operations supplies child-process launch settings from project rsi.config.json: database connection, encryption key, bind settings, optional web key, harness mode and compaction token threshold. Supply the validated threshold (default 64,000 tokens) and Harness-owned instruction to AgentRuntime; do not implement another token estimator or trigger policy. Runtime constructs Storage and Core’s owner data graph, injects AgentData into AgentRuntime, WorkspaceData into WorkspaceService and Team data/configuration into Team services, then initializes owner schemas/recovery and starts API. It does not define application models or issue business SQL.
+Operations supplies child-process launch settings from project rsi.config.json: database connection, encryption key, bind settings, optional web key and compaction token threshold. The retired harness-mode switch is accepted and ignored in existing private configuration files; new configurations omit it and no permission-mode environment setting is forwarded. Supply the validated threshold (default 64,000 tokens) and the file-maintained Agent context-preservation instruction to AgentRuntime; do not implement another token estimator or trigger policy. Runtime constructs Storage and Core’s owner data graph, injects AgentData into AgentRuntime, WorkspaceData into WorkspaceService and Team data/configuration into Team services, then initializes owner schemas/recovery and starts API. It does not define application models or issue business SQL.
 
 Startup failure reports an error and closes constructed resources. SIGINT/SIGTERM closes admission/runs, HTTP connections, shells, workspace resources and storage in dependency order. Runtime adds no hidden configuration source, business policy or automatic run replay.
 
@@ -15,3 +15,7 @@ Startup failure reports an error and closes constructed resources. SIGINT/SIGTER
 - Preserve existing accepted observable behavior, record formats, revisions/cursors, API payloads and lifecycle guarantees during this migration.
 - Refusals and failures remain explicit. Database transactions provide their agreed atomicity; executed tools/filesystem operations may leave earlier effects on failure.
 - This document is the design; matching implementation context documents exact inputs, outputs, effects and usage.
+
+### React Harness design transition
+
+Agent runtime assembles purpose-specific React Harnesses that provide capabilities, instructions, rules and related private context/durable state. Process Runtime wires their required dependencies and lifecycle resources; it does not reintroduce a separate Harness permission system. Initial development executes valid tool requests without design-scope, path, command, sandbox or Git approval gates. The initial assembly uses File and Default React Harness factories. Member-specific configuration and future permission enforcement remain deferred.

@@ -1,5 +1,7 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 # Team
 
 Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
@@ -56,7 +58,7 @@ Each user-initiated exchange has a mention budget, initially 32 activations. Def
 
 `POST /workspaces/:workspaceId/team/chat/stop` stops existing exchanges and requests cancellation of active members. Later user messages may start new exchanges. Direct `POST /agents/:memberId/runs` refuses all team members; solo agents retain their own input API. Private member history/state/follow remains available for inspection. The [group chat contract](group-chat/design.md) provides the complete cooperation boundary.
 
-Every model call receives current role, roster/readiness/running information, stable active member instructions and assembled harness context. Shared design knowledge remains independent of member identity. Harness tool details and execution limits are defined by the [harness contract](../../../../../harness/impl/reference/workspace-agent/harness/design.md).
+Every model call receives current role, roster/readiness/running information, stable active member instructions and assembled harness context. Shared design knowledge remains independent of member identity. Harness tool details and execution limits are defined by the [harness contract](../../../../../harness/impl/README.md).
 
 ## Outputs and observable effects
 

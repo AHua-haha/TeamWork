@@ -14,9 +14,9 @@ export type * from './contracts.js';
 import { validateCompactionSettings, type CompactionSettings } from './data/compaction.js';
 import { AgentMessageContext } from './data/context.js';
 import { AgentExecution, type AgentObserver } from './agent.js';
-import type { RuntimePolicy, ModelStream, AssistantResponseHandler, AssistantResponseHandlerFactory } from './contracts.js';
+import type { RuntimePolicy, ModelStream, ReactHarness, ReactHarnessFactory } from './contracts.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
-import { ResidentHandlers } from './data/resident-handlers.js';
+import { ResidentHarnesses } from './data/resident-harnesses.js';
 
 interface Job { execution?: AgentExecution; agentId: string; controller: AbortController; done: Promise<void> }
 
@@ -30,7 +30,7 @@ export class AgentRuntime {
   private readonly contextFailures = new Map<string, unknown>();
   private readonly maxSteps: number;
   private readonly pendingStarts = new Set<Promise<RunState>>();
-  private readonly residentHandlers = new ResidentHandlers();
+  private readonly residentHarnesses = new ResidentHarnesses();
 
   constructor(readonly store: AgentData, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, private readonly options: { progressCapacity?: number; maxSteps?: number; compaction?: CompactionSettings } = {}) {
     if (options.compaction) validateCompactionSettings(options.compaction);
@@ -49,7 +49,7 @@ export class AgentRuntime {
       await this.store.recoverCompactions();
       await this.store.recoverInterruptedRuns(async run => this.policy.afterRun?.({ ...run, status: 'interrupted' }));
       this.finalizationFailures.clear();
-      this.residentHandlers.clear();
+      this.residentHarnesses.clear();
       this.accepting = true;
     } catch (error) {
       await this.store.releaseRuntime();
@@ -57,37 +57,37 @@ export class AgentRuntime {
     }
   }
 
-  private async handlersFor(agentId: string): Promise<AssistantResponseHandler[]> {
-    return this.residentHandlers.get(agentId, async () => {
-      const factories = await this.policy.createAssistantResponseHandlerFactories?.(agentId) ?? [];
+  private async harnessesFor(agentId: string): Promise<ReactHarness[]> {
+    return this.residentHarnesses.get(agentId, async () => {
+      const factories = await this.policy.createReactHarnessFactories?.(agentId) ?? [];
       const ids = new Set<string>();
-      const handlers: AssistantResponseHandler[] = [];
+      const harnesses: ReactHarness[] = [];
 
       for (const factory of factories) {
-        if (!factory.handlerId || ids.has(factory.handlerId)) {
-          throw new AppError('invalid_config', `Duplicate or empty assistant response handler id: ${factory.handlerId}`);
+        if (!factory.harnessId || ids.has(factory.harnessId)) {
+          throw new AppError('invalid_config', `Duplicate or empty React Harness id: ${factory.harnessId}`);
         }
-        ids.add(factory.handlerId);
+        ids.add(factory.harnessId);
 
-        const state = await this.store.getAssistantResponseHandlerData(agentId, factory.handlerId);
+        const state = await this.store.getReactHarnessData(agentId, factory.harnessId);
         let acknowledged = state;
         let saving = Promise.resolve();
 
         const persist = (revision: number, data: JsonObject) => {
           const operation = saving.then(async () => {
             try {
-              const next = await this.store.saveAssistantResponseHandlerData(agentId, factory.handlerId, revision, data);
+              const next = await this.store.saveReactHarnessData(agentId, factory.harnessId, revision, data);
               acknowledged = next;
-              // Notify resident that handler state has been persisted
-              this.residentHandlers.changed(agentId, {
+              // Notify resident that harness state has been persisted
+              this.residentHarnesses.changed(agentId, {
                 baseRevision: revision,
-                revision: (next as any).revision ?? ((state as any).revision ?? 0) + 1,
-                handlerId: factory.handlerId,
-                data: (next as any).data ?? next,
+                revision: next.revision,
+                harnessId: factory.harnessId,
+                data: next.data,
               });
               return structuredClone(next);
             } catch (error) {
-              this.residentHandlers.invalidate(agentId);
+              this.residentHarnesses.invalidate(agentId);
               throw error;
             }
           });
@@ -95,18 +95,18 @@ export class AgentRuntime {
           return operation;
         };
 
-        const handler = factory.create(acknowledged as any, persist);
-        if (!handler || typeof handler.handle !== 'function' || typeof handler.canHandle !== 'function') {
-          throw new AppError('invalid_config', `Invalid assistant response handler: ${factory.handlerId}`);
+        const harness = factory.create(acknowledged, persist);
+        if (!harness || typeof harness.handle !== 'function' || typeof harness.canHandle !== 'function') {
+          throw new AppError('invalid_config', `Invalid React Harness: ${factory.harnessId}`);
         }
-        handlers.push(handler);
+        harnesses.push(harness);
       }
 
       if (!factories.length) {
-        handlers.push(...(this.policy.createAssistantResponseHandlers?.(agentId) ?? []));
+        harnesses.push(...(this.policy.createReactHarnesses?.(agentId) ?? []));
       }
 
-      return handlers;
+      return harnesses;
     });
   }
 
@@ -122,7 +122,7 @@ export class AgentRuntime {
     for (const job of this.jobs.values()) job.controller.abort();
     this.progress.close();
     await Promise.allSettled([...this.jobs.values()].map(job => job.done));
-    this.residentHandlers.clear();
+    this.residentHarnesses.clear();
     await this.store.releaseRuntime();
   }
 
@@ -217,7 +217,7 @@ export class AgentRuntime {
     return '';
   }
 
-  clearProgress(agentId: string): void { this.residentHandlers.invalidate(agentId); this.progress.clear(agentId); this.contextFailures.delete(agentId); }
+  clearProgress(agentId: string): void { this.residentHarnesses.invalidate(agentId); this.progress.clear(agentId); this.contextFailures.delete(agentId); }
 
   /** Inspection reads durable context even when the execution runtime is unavailable. */
   inspectContext(agentId: string, input: ContextPageInput = {}) { return this.store.inspectContext(agentId, input); }
@@ -266,7 +266,7 @@ export class AgentRuntime {
   private async runLoop(run: RunState, config: ResolvedRunConfig, signal: AbortSignal): Promise<void> {
     try {
       let execution: AgentExecution;
-      const handlers: AssistantResponseHandler[] = [];
+      const harnesses: ReactHarness[] = [];
       const policy: RuntimePolicy = {
         ...this.policy,
         acquireRun: async (state, activeSignal) => {
@@ -274,7 +274,7 @@ export class AgentRuntime {
           try {
             await this.contextUpdates.get(run.agentId);
             execution.attachContext(await this.store.residentContext(run.agentId));
-            handlers.push(...await this.handlersFor(run.agentId));
+            harnesses.push(...await this.harnessesFor(run.agentId));
             this.contextFailures.delete(run.agentId);
             return release ?? (() => {});
           } catch (error) { release?.(); throw error; }
@@ -284,9 +284,9 @@ export class AgentRuntime {
         assertActive: () => this.store.assertRuntime(),
         messageStart: state => this.store.beginMessage(state.agentId, state.runId, state.activeMessageId!, state.step),
         message: record => this.store.commitMessage(record.agentId, record.runId, { messageId: record.messageId, message: record.message, metadata: record.metadata }),
-        handlerMessage: async (record, effects) => {
-          try { return await this.store.commitHandlerMessage(record, effects); }
-          catch (error) { this.residentHandlers.invalidate(run.agentId); throw error; }
+        reactHarnessMessage: async (record, effects) => {
+          try { return await this.store.commitReactHarnessMessage(record, effects); }
+          catch (error) { this.residentHarnesses.invalidate(run.agentId); throw error; }
         },
         contextChanged: (revision, entries) => this.replaceContext(run.agentId, revision, entries),
         contextPatched: (revision, patch) => this.store.patchContext(run.agentId, revision, patch),
@@ -294,7 +294,7 @@ export class AgentRuntime {
         compactionMessage: record => this.store.commitCompactionMessage(record),
         compactionFinished: (state, revision, entries) => this.store.finishCompaction(state, revision, entries),
         finished: state => this.store.finishRun(state.agentId, state.runId, state.status as Exclude<RunState['status'], 'running'>, state.error),
-      }, this.progress, this.maxSteps, handlers);
+      }, this.progress, this.maxSteps, harnesses);
       const job = this.jobs.get(run.runId); if (job) job.execution = execution;
       await execution.run(signal);
     } catch (error) { this.finalizationFailures.set(run.runId, error); }

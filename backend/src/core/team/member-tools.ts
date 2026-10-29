@@ -4,13 +4,13 @@ import type { RuntimeTool } from '../agent/contracts.js';
 import type { TeamService } from './data/members.js';
 import { AppError } from '../agent/data/model.js';
 
-/** Reusable services; harness assembly grants management capability to the lead. */
-export function teamTools(team: TeamService, configuration: MemberConfigService, permissionsEnabled = true): { management: RuntimeTool[] } {
+/** Reusable services; Default React Harness exposes these operations to all active members. */
+export function teamTools(team: TeamService, configuration: MemberConfigService): { management: RuntimeTool[] } {
   return { management: [{
     definition: { name: 'list_models', description: 'List this workspace’s configured model choices, options and default.', parameters: Type.Object({}) },
     execute: async (_args, scope) => {
       const member = await team.find(scope.agentId);
-      if (!member || member.value.retiredAt !== null || (permissionsEnabled && !member.value.lead)) throw new AppError('access_denied', 'Only the lead discovers team model choices', 403);
+      if (!member || member.value.retiredAt !== null) throw new AppError('access_denied', 'An active member is required to inspect workspace model choices', 403);
       const result = await team.models(member.workspaceId);
       const lines = result.value.models.map((model, index) => {
         const isDefault = model.connectionId === result.value.defaultModel?.connectionId && model.modelId === result.value.defaultModel.modelId;

@@ -29,7 +29,6 @@
     "environment": {
       "DEEPSEEK_WEB_API_KEY": ""
     },
-    "harnessPermissionsEnabled": true,
     "contextCompactionThresholdTokens": 256000
   },
   "deployment": {
@@ -44,7 +43,6 @@
     "environment": {
       "DEEPSEEK_WEB_API_KEY": ""
     },
-    "harnessPermissionsEnabled": true,
     "contextCompactionThresholdTokens": 256000
   }
 }

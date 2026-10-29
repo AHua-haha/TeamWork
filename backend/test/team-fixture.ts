@@ -1,6 +1,6 @@
 import { seedDesign } from './design-fixture.js';
 import { after } from 'node:test';
-import { closeBashRuntime } from '../src/core/harness/harness-command.js';
+import { executeBash, type BashInput, closeBashRuntime } from '../src/core/agent/tools/bash.js';
 import { realpath, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ResolvedRunConfig } from '../src/core/team/data/config.js';
@@ -137,11 +137,11 @@ export interface Fixture {
 }
 
 /** A workspace with its team, over a fresh store and a fake runtime. The lead is given a model, so it can run. */
-export function withTeam(run: (fixture: Fixture) => Promise<void>, permissionsEnabled = true): Promise<void> {
+export function withTeam(run: (fixture: Fixture) => Promise<void>, ): Promise<void> {
   return withFolder(async folder => {
     const store = new MemoryStore();
     const workspaces = new WorkspaceService(store, testModelValidator);
-    const team = new TeamSystem(store, workspaces, stubConfig, undefined, permissionsEnabled);
+    const team = new TeamSystem(store, workspaces, stubConfig);
     const runtime = new FakeRuntime(store);
     team.attach(runtime);
     try {
@@ -174,4 +174,8 @@ export async function configureHarness(fixture: Fixture, name: string, harness: 
   const { implementationScope: _effective, ...assignment } = harness as Record<string, unknown>;
   harness = assignment;
   return fixture.team.service.update(fixture.workspaceId, member.id, member.revision, { name: member.value.name, role: member.value.role, responsibility: member.value.responsibility, settings: member.value.settings, harness });
+}
+
+export async function memberBash(team: TeamSystem, memberId: string, request: BashInput, signal: AbortSignal) {
+ return executeBash({root: await team.memberWorkspace.root(memberId), memberId, request, signal});
 }

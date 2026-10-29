@@ -129,17 +129,15 @@ TeamData owns the resident shared source transcript and accepted group summary. 
 
 **Remaining:** Detailed Workspace/Team feature components and client methods still exist in frontend but target now-retired inspection routes. Temporary workspace mode hides most of these tabs; remove or migrate those consumers before re-enabling them. `WorkspaceService.get()` and workspace creation can still include context overview for internal/creation callers; public GET calls `record()` and avoids the overview. Pre-existing `.rsi/members` deletions were not modified.
 
-### Independent file handler installation
+### Member React Harness assembly and configuration review
 
-`TeamSystem.policy` resolves the member's workspace directory and registers `fileAssistantResponseHandlerFactory(directory)` asynchronously after the Agent acquires its serial execution slot. The factory receives no Harness file capability. Agent initializes and reuses the handler resident across runs, while Agent persists its handler state and context metadata atomically. The required `backend/prompts/team/file-tools.md` asset is appended after Harness context to describe the effective unscoped read/write/edit capabilities while keeping Bash rules and assigned responsibilities.
+**Input:** `TeamSystem.policy(base)` registers `fileReactHarnessFactory(root)` and `defaultReactHarnessFactory(root, tools, guidance)` for active members. `MemberWorkspace` supplies root, assignment guidance, current/committed control files and review diffs. `resolveAssignment` derives accepted recursive working designs and explicit dependencies.
 
-### Current reconciliation at `c8839d2`
+**Output/effect:** Agent owns tool declarations/executors, instructions and durable React Harness state. Team's assignment mappings describe responsibility, never tool permission. Management `list_models` and `validate_member_config` remain the same business tools but are available to every active member. Validation/committed-file review/user activation remain separate, with existing semantic field restrictions, atomic reviewed change sets and whole-workspace idle checks. Git commits execute normally and do not activate members. The old Git approval HTTP routes are removed.
 
-The accepted Team design and current implementation agree on ownership: Team owns members, shared ordered chat, attribution, mentions, admission, sequential execution, final publication, summary maintenance and public group inspection; Agent owns private context, consumption state, execution history, compaction and handler state; Harness owns reusable tools, authority, approvals, Bash and shell lifecycle. Team passes Agent only a `GroupContextReference` and does not select private retention boundaries or query Agent SQL. Group and Agent inspection/restoration use their `(workspace_id, position)` / `(agent_id, position)` primary-key ranges with bounded revision-checked pages, avoiding filesorts over large native JSON payloads.
+**Lifecycle:** Team reset/retirement/activation requests Agent-tool shell cleanup. Global cleanup operates on resident shell resources without enumerating Workspace/SQL records, so it remains valid during shutdown.
 
-Current verification: `npm run check` passed; the full backend unit suite passed with 266 tests and 0 skipped; `git diff --check` passed. The disposable-MySQL integration suite was not rerun in this reconciliation.
-
-Group context inspection and restoration likewise use the `(workspace_id, position)` primary index to avoid sorting large message JSON through the identity index. Summary inclusion, read boundaries and pinned page revisions are unchanged.
+**Compatibility:** existing member file format, accepted SQL snapshots, group history and stable Agent final references are retained. No application data is reset. The legacy design assignment node for Harness remains resolvable with empty implementation mappings; it owns no behavior.
 
 ### Bounded presentation history
 

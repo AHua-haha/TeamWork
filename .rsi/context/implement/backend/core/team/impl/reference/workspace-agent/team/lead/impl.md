@@ -1,5 +1,7 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 # Lead agent implementation
 
 Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
@@ -10,7 +12,7 @@ Permission and approval enforcement below describes the default enabled mode. Th
 
 ## Responsibilities and decomposition
 
-[Team](../design.md) owns validation/change planning and atomic idle activation. [Harness](../../../../../../harness/impl/reference/workspace-agent/harness/design.md) owns scoped file/Git authority and maintenance prompts. Group chat/runtime retain publication and execution. No lead-specific execution loop or structured lifecycle mutation tool is introduced.
+[Team](../design.md) owns validation/change planning and atomic idle activation. [Harness](../../../../../../harness/impl/README.md) owns scoped file/Git authority and maintenance prompts. Group chat/runtime retain publication and execution. No lead-specific execution loop or structured lifecycle mutation tool is introduced.
 
 ## Coordination and data flow
 
@@ -22,8 +24,8 @@ No agent activation or implicit acceptance from conversation/run completion. Exi
 
 ## Code map
 
-- [Member instructions](../../../../../../../../../../../backend/src/core/team/member-instructions.ts), [management base](../../../../../../../../../../../backend/prompts/harness/management.md), [member maintenance rules](../../../../../../../../../../../backend/prompts/harness/management-members.md).
-- [Team composition](../../../../../../../../../../../backend/src/core/team/team-system.ts), [member service](../../../../../../../../../../../backend/src/core/team/member-config.ts), [harness assembly](../../../../../../../../../../../backend/src/core/harness/harness.ts).
+- [Member instructions](../../../../../../../../../../../backend/src/core/team/member-instructions.ts), [management base](../../../../../../../../../../../backend/prompts/agent/default-react-harness.md), [member maintenance rules](../../../../../../../../../../../backend/prompts/agent/default-react-harness.md).
+- [Team composition](../../../../../../../../../../../backend/src/core/team/team-system.ts), [member service](../../../../../../../../../../../backend/src/core/team/member-config.ts), [harness assembly](../../../../../../../../../../../backend/src/core/agent/react-harness.ts).
 
 ## Verification
 

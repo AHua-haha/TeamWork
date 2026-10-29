@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { emptyRunSettings, keys, obj, validateRunSettings, type ConfigService, type ResolvedRunConfig, type RunSettings } from './config.js';
 import type { DesignService } from '../../workspace/design.js';
-import { emptyHarness, harnessConfig, type HarnessConfig, type EffectiveHarnessConfig } from '../../harness/data/config.js';
-import { resolveHarness } from '../../harness/harness.js';
+import { emptyAssignment, memberAssignment, type MemberAssignment, type EffectiveMemberAssignment } from './assignment.js';
+import { resolveAssignment } from '../member-workspace.js';
 import { AppError } from '../../agent/data/model.js';
 import { generatedSource, migrateMemberSource, relocateMemberSource, type MemberConfigSource } from './member-config.js';
 import type { RunConfigSource } from './config.js';
@@ -15,7 +15,7 @@ const controlCharacter = /[\u0000-\u001f\u007f-\u009f]/;
 
 /** The team's record of one member. Its conversation has the member's ID. */
 export interface MemberRecord {
-  workspaceId: string; name: string; role: string; responsibility: string; harness: HarnessConfig;
+  workspaceId: string; name: string; role: string; responsibility: string; harness: MemberAssignment;
   lead: boolean; settings: RunSettings; createdAt: number; retiredAt: number | null;
   configuration?: MemberConfigSource;
   /** User-owned model preferences, independent of the activated member files. */
@@ -32,9 +32,9 @@ export function effectiveMemberSettings(member: StoredMember): RunSettings {
   return { ...member.value.settings, ...member.value.modelSettings };
 }
 /** The fields a caller may set. */
-export interface MemberFields { name: string; role: string; responsibility: string; harness: HarnessConfig; settings: RunSettings }
+export interface MemberFields { name: string; role: string; responsibility: string; harness: MemberAssignment; settings: RunSettings }
 export interface StoredMember { id: string; workspaceId: string; revision: number; value: MemberRecord }
-export interface MemberView extends Omit<MemberFields, 'harness'> { harness: EffectiveHarnessConfig; memberId: string; workspaceId: string; revision: number; lead: boolean; issues: string[]; ready: boolean }
+export interface MemberView extends Omit<MemberFields, 'harness'> { harness: EffectiveMemberAssignment; memberId: string; workspaceId: string; revision: number; lead: boolean; issues: string[]; ready: boolean }
 export interface TeamView { workspaceId: string; members: MemberView[] }
 /** Identity/presentation only; no readiness or effective harness assessment. */
 export type RosterMember = Pick<MemberView, 'memberId' | 'workspaceId' | 'revision' | 'name' | 'role' | 'responsibility' | 'lead'>;
@@ -71,7 +71,7 @@ export const leadResponsibility = 'Works with the user on this project: helps ma
 /** A workspace lead initialized with supplied default settings; empty settings support legacy imports. */
 export function newLead(workspaceId: string, settings: RunSettings = emptyRunSettings, working: string[] = []): NewMember {
   const id = randomUUID();
-  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: { ...emptyHarness(), designScope: { working, dependencies: [] } }, settings };
+  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, harness: { ...emptyAssignment(), designScope: { working, dependencies: [] } }, settings };
   return {
     id, workspaceId, lead: true, nameKey: 'lead',
     value: { workspaceId, ...fields, configuration: generatedSource(fields), lead: true, createdAt: Date.now(), retiredAt: null },
@@ -94,7 +94,7 @@ export function memberName(value: unknown): string {
 export function memberFields(value: unknown): MemberFields {
   const data = obj(value, 'Member');
   keys(data, ['name', 'role', 'responsibility', 'harness', 'settings']);
-  return { name: memberName(data.name), role: text(data.role, 'role', 80, true), responsibility: text(data.responsibility, 'responsibility', 4000, false, true), harness: harnessConfig(data.harness), settings: validateRunSettings(data.settings, 'Settings') };
+  return { name: memberName(data.name), role: text(data.role, 'role', 80, true), responsibility: text(data.responsibility, 'responsibility', 4000, false, true), harness: memberAssignment(data.harness), settings: validateRunSettings(data.settings, 'Settings') };
 }
 
 function stored(member: StoredMember): StoredMember {
@@ -125,9 +125,9 @@ export class TeamService {
     for (const workspace of await this.workspaces.list()) {
       for (const raw of await this.store.listMembers(workspace.workspaceId)) {
         if (raw.value.retiredAt !== null) continue;
-        const data = raw.value as MemberRecord & { scope?: unknown; harness: HarnessConfig & { implementationScope?: unknown } };
-        const { implementationScope: legacyPaths, ...assignment } = data.harness ?? emptyHarness();
-        const harness = harnessConfig({ ...emptyHarness(), ...assignment });
+        const data = raw.value as MemberRecord & { scope?: unknown; harness: MemberAssignment & { implementationScope?: unknown } };
+        const { implementationScope: legacyPaths, ...assignment } = data.harness ?? emptyAssignment();
+        const harness = memberAssignment({ ...emptyAssignment(), ...assignment });
         const member = { ...data, harness } as MemberRecord;
         let converted = data.configuration ? migrateMemberSource(data.configuration, harness.allowedCommands) : generatedSource(member);
         const relocated = await relocateMemberSource((await this.workspaces.record(workspace.workspaceId)).directory, converted ?? member.configuration!, memberName(member.name));
@@ -221,7 +221,7 @@ export class TeamService {
     const data = obj(input, 'Member');
     keys(data, ['name', 'role', 'responsibility', 'harness', 'settings']);
     if (data.settings !== undefined && (typeof data.settings !== 'object' || data.settings === null || Array.isArray(data.settings))) throw new AppError('invalid_input', 'settings is an object');
-    const fields = memberFields({ responsibility: '', harness: emptyHarness(), ...data, settings: { ...(await this.defaultSettings(workspaceId)), ...(data.settings as object | undefined) } });
+    const fields = memberFields({ responsibility: '', harness: emptyAssignment(), ...data, settings: { ...(await this.defaultSettings(workspaceId)), ...(data.settings as object | undefined) } });
     if ((await this.active(workspaceId)).length >= maxMembers) throw new AppError('team_full', `A team has at most ${maxMembers} members`, 409);
     return this.view(await this.insert(workspaceId, fields, source));
   }
@@ -250,7 +250,7 @@ export class TeamService {
       if (member.value.settings.toolOptionIds.length) issues[index]!.push('Workspace member tools are supplied by the harness; clear catalog tool selections');
       const scope = member.value.harness.designScope;
       if (!member.value.lead && !scope.working.length && !scope.dependencies.length) issues[index]!.push('Configure a design scope for this member');
-      try { await resolveHarness(this.designs, member.workspaceId, member.value.harness); }
+      try { await resolveAssignment(this.designs, member.workspaceId, member.value.harness); }
       catch (error) {
         if (!(error instanceof AppError) || error.status >= 500) throw error;
         issues[index]!.push(`Harness design is unavailable: ${error.message}`);
@@ -286,7 +286,7 @@ export class TeamService {
     return Promise.all(members.map(async (member, index) => {
       const { name, role, responsibility, harness, lead } = member.value;
       let implementationScope = { paths: [] as string[], usePaths: [] as string[] };
-      try { const resolved = await resolveHarness(this.designs, member.workspaceId, harness); implementationScope = { paths: resolved.writable, usePaths: resolved.readonly }; }
+      try { const resolved = await resolveAssignment(this.designs, member.workspaceId, harness); implementationScope = { paths: resolved.writable, usePaths: resolved.readonly }; }
       catch (error) { if (!(error instanceof AppError) || error.status >= 500) throw error; }
       return { memberId: member.id, workspaceId: member.workspaceId, revision: member.revision, name, role, responsibility, harness: { ...harness, implementationScope }, lead, settings: effectiveMemberSettings(member), issues: issues[index]!, ready: issues[index]!.length === 0 };
     }));

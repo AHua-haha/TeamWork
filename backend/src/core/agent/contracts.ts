@@ -1,7 +1,7 @@
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, JsonObject, Message, Model, Models, SimpleStreamOptions, Tool, ToolCall, ToolResultMessage } from '@earendil-works/pi-ai';
 import type { CompactionSettings } from './data/compaction.js';
 import type { GroupContextReference } from './data/context.js';
-import type { CompletedMessage, ContextEntry, ContextHistory, RunState, AssistantResponseHandlerData } from './data/model.js';
+import type { CompletedMessage, ContextEntry, ContextHistory, RunState, ReactHarnessData } from './data/model.js';
 
 export interface AgentConfiguration {
   model: Model<Api>; models?: Models; tools: RuntimeTool[]; systemPrompt: string;
@@ -31,17 +31,17 @@ export interface RuntimeTool {
   execute(args: JsonObject, scope: StepScope, call: ToolCall): Promise<Pick<ToolResultMessage, 'content' | 'isError' | 'details'>>;
 }
 
-export interface HandlerTool { definition: Tool; execute?: never }
+export interface ReactHarnessTool { definition: Tool; execute?: never }
 
 export interface ModelRequest {
   model: Model<Api>;
   models?: Models;
   context: Context;
-  tools: Array<RuntimeTool | HandlerTool>;
+  tools: Array<RuntimeTool | ReactHarnessTool>;
   options?: SimpleStreamOptions;
 }
 
-export interface AssistantResponseHandlerContext {
+export interface ReactHarnessContext {
   scope: StepScope;
   toolCalls: ToolCall[];
   /** Executes one configured tool and records its protocol-paired result. Optional metadata is attached to that retained result. */
@@ -50,8 +50,8 @@ export interface AssistantResponseHandlerContext {
   validateToolCall(call: ToolCall): JsonObject;
   /** Completes earlier calls in this assistant turn, except explicitly deferred call identities. */
   beforeToolCall(call: ToolCall, deferCallIds?: string[]): Promise<void>;
-  /** Records a handler-constructed native result without invoking the configured tool implementation. */
-  recordToolResult(call: ToolCall, output: Pick<ToolResultMessage, 'content'|'isError'|'details'>, metadata?: JsonObject, commit?: {messageId: string; handlerId: string; revision: number; data: JsonObject; hideMessageId?: string; suppressArguments?: boolean}): Promise<ToolResultMessage>;
+  /** Records a React Harness-constructed native result without invoking the configured tool implementation. */
+  recordToolResult(call: ToolCall, output: Pick<ToolResultMessage, 'content'|'isError'|'details'>, metadata?: JsonObject, commit?: {messageId: string; harnessId: string; revision: number; data: JsonObject; hideMessageId?: string; suppressArguments?: boolean}): Promise<ToolResultMessage>;
   /** Direct resident lookup, including the preparation context during compaction. */
   contextEntry(messageId: string): ContextEntry | undefined;
   /** Append an Agent-owned private message after outstanding tool results have been recorded. */
@@ -62,31 +62,34 @@ export interface AssistantResponseHandlerContext {
   suppressToolCallArguments(callIds: string[]): Promise<void>;
 }
 
-/** Agent-owned reaction to an assistant response; handlers may own scoped model tool definitions. */
-export interface AssistantResponseHandler {
+/** Agent-owned reaction to an assistant response; harnesses may own purpose-specific model tool definitions. */
+export interface ReactHarness {
+  readonly harnessId?: string;
+  /** Receive an acknowledged purpose-owned durable-state update. */
+  applyUpdate?(revision: number, data: JsonObject): void;
   canHandle(response: AssistantMessage): boolean;
-  handle(response: AssistantMessage, context: AssistantResponseHandlerContext): Promise<void>;
+  handle(response: AssistantMessage, context: ReactHarnessContext): Promise<void>;
   /** Reconcile legacy state once from the already-loaded context when needed. */
   restoreContext?(context: ContextHistory): void;
-  /** Declarations owned and executed by this handler, independently of Harness tools. */
-  tools?(scope: StepScope): Array<RuntimeTool | HandlerTool>;
+  /** Declarations owned and executed by this harness, without a separate permission layer. */
+  tools?(scope: StepScope): Array<RuntimeTool | ReactHarnessTool>;
   /** Component-owned instructions appended to each model request, including compaction. */
-  systemPrompt?(scope: StepScope): string;
-  /** Names whose configured implementations are replaced by this handler. */
+  systemPrompt?(scope: StepScope): string | Promise<string>;
+  /** Names whose configured implementations are replaced by this harness. */
   overrideToolNames?(scope: StepScope): string[];
 }
 
-/** Creates one durable handler instance for an Agent. The instance is reused across runs. */
-export interface AssistantResponseHandlerFactory {
-  handlerId: string;
-  create(data: AssistantResponseHandlerData, persist: (revision: number, data: JsonObject) => Promise<AssistantResponseHandlerData>): AssistantResponseHandler;
+/** Creates one durable harness instance for an Agent. The instance is reused across runs. */
+export interface ReactHarnessFactory {
+  harnessId: string;
+  create(data: ReactHarnessData, persist: (revision: number, data: JsonObject) => Promise<ReactHarnessData>): ReactHarness;
 }
 
 export interface RuntimePolicy {
-  /** Creates durable handler factories. AgentRuntime initializes each factory once per Agent and reuses the instances across runs. */
-  createAssistantResponseHandlerFactories?(agentId: string): AssistantResponseHandlerFactory[] | Promise<AssistantResponseHandlerFactory[]>;
-  /** Legacy compatibility: instances are cached per Agent, not created per run. */
-  createAssistantResponseHandlers?(agentId: string): AssistantResponseHandler[];
+  /** Creates durable harness factories. AgentRuntime initializes each factory once per Agent and reuses the instances across runs. */
+  createReactHarnessFactories?(agentId: string): ReactHarnessFactory[] | Promise<ReactHarnessFactory[]>;
+  /** Optional in-memory instance provider for callers without durable factories; cached per Agent. */
+  createReactHarnesses?(agentId: string): ReactHarness[];
   /** Read reference only; Agent selects incoming messages using its own state. */
   groupContext?(agentId: string): Promise<GroupContextReference | undefined>;
   /** Acquire execution authority before any model/tool work; release after terminal finalization. */

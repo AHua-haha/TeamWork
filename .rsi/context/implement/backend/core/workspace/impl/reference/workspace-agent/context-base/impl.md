@@ -1,5 +1,7 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 # Context base implementation
 
 ## Contract
@@ -101,8 +103,8 @@ Content guidance is carried by management-design.md, implementation.md and the b
 - [MySQL store](../../../../../../../../../../backend/src/core/data.ts) and [codec](../../../../../../../../../../backend/src/core/codec.ts): storage and record validation (see the [database implementation](../../../../../team/impl/reference/database/impl.md)).
 - [Context base tests](../../../../../../../../../../backend/test/context-base.test.ts) and [in-memory store](../../../../../../../../../../backend/test/memory-store.ts): behavior on real temporary folders.
 
-- [Path rules](../../../../../../../../../../backend/src/core/workspace/data/paths.ts), [document format](../../../../../../../../../../backend/src/core/workspace/data/documents.ts), [Layout](../../../../../../../../../../backend/src/core/workspace/workspace-layout.ts), [bootstrap](../../../../../../../../../../backend/src/core/workspace-bootstrap.ts), [implementation-context scope definitions](../../../../../../../../../../backend/src/core/harness/data/bases.ts) and [harness](../../../../../harness/impl/reference/workspace-agent/harness/impl.md): metadata/Markdown initialization, authority and shared history.
-- [Design rules](../../../../../../../../../../backend/prompts/harness/management-design.md), [implementation rules](../../../../../../../../../../backend/prompts/harness/implementation.md), [design template](../../../../../../../../../../backend/prompts/harness/design-template.md) and [context template](../../../../../../../../../../backend/prompts/harness/implementation-context-template.md): file-maintained content rules.
+- [Path rules](../../../../../../../../../../backend/src/core/workspace/data/paths.ts), [document format](../../../../../../../../../../backend/src/core/workspace/data/documents.ts), [Layout](../../../../../../../../../../backend/src/core/workspace/workspace-layout.ts), [bootstrap](../../../../../../../../../../backend/src/core/workspace-bootstrap.ts), [implementation-context scope definitions](../../../../../../../../../../backend/src/core/team/member-workspace.ts) and [harness](../../../../../harness/impl/README.md): metadata/Markdown initialization, authority and shared history.
+- [Design rules](../../../../../../../../../../backend/prompts/agent/default-react-harness.md), [implementation rules](../../../../../../../../../../backend/prompts/agent/default-react-harness.md), [design template](../../../../../../../../../../backend/prompts/workspace/design-template.md) and [context template](../../../../../../../../../../backend/prompts/workspace/implementation-context-template.md): file-maintained content rules.
 
 ## Verification
 

@@ -1,6 +1,6 @@
 import { contextPageInput, checkContextPage, type ContextPageInput, type ContextPage } from '../../context-page.js';
 import type { AgentRecord, AgentExecutionState } from './model.js';
-import { validateEntries, validateRun, validateAssistantResponseHandlerData } from './validation.js';
+import { validateEntries, validateRun, validateReactHarnessData } from './validation.js';
 import { interruptedCompactionContext, validateCompactionState, type CompactionState } from './compaction.js';
 import { adoptRecordedContext, sharedAttributionUpdates, type GroupContextMessage } from './context.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -8,11 +8,11 @@ import type { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/prom
 import type { MySqlStorage } from '../../../storage/mysql.js';
 import type { UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode } from '../../codec.js';
-import { AppError, identity, position, type AssistantResponseHandlerData, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type RunState, type RunStatus } from './model.js';
+import { AppError, identity, position, type ReactHarnessData, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type RunState, type RunStatus } from './model.js';
 import { clearTables, dataTransaction, insertRows, rows, type DataConnection as Db } from '../../data-transaction.js';
 import { schema } from './schema.js';
 import { ResidentContexts, type ContextChange } from './resident-context.js';
-import type { ContextPatch, ContextMetadataUpdate, HandlerMessageEffects } from './model.js';
+import type { ContextPatch, ContextMetadataUpdate, ReactHarnessMessageEffects } from './model.js';
 export interface AgentDataHooks {
     created?(db: PoolConnection, agentId: string): Promise<void>;
     finished?(db: PoolConnection, run: RunState): Promise<void>;
@@ -150,31 +150,31 @@ export class AgentData {
         validateEntries(entries);
         return {revision: agent.contextRevision, entries};
     }
-    async getAssistantResponseHandlerData(agentId: string, handlerId: string): Promise<AssistantResponseHandlerData> {
-        identity(agentId, 'agentId'); identity(handlerId, 'handlerId');
+    async getReactHarnessData(agentId: string, harnessId: string): Promise<ReactHarnessData> {
+        identity(agentId, 'agentId'); identity(harnessId, 'harnessId');
         return this.transaction(async db => {
             await this.agent(db, agentId);
-            const [row] = await rows(db, 'SELECT revision,data FROM agent_assistant_response_handler_state WHERE agent_id = ? AND handler_id = ?', [agentId, handlerId]);
+            const [row] = await rows(db, 'SELECT revision,data FROM agent_assistant_response_handler_state WHERE agent_id = ? AND handler_id = ?', [agentId, harnessId]);
             if (!row) return {revision: 0, data: {}};
-            const value = {revision: row.revision, data: decode<Record<string, unknown>>(row.data, data => validateAssistantResponseHandlerData({revision: row.revision, data}))};
-            validateAssistantResponseHandlerData(value);
+            const value = {revision: row.revision, data: decode<Record<string, unknown>>(row.data, data => validateReactHarnessData({revision: row.revision, data}))};
+            validateReactHarnessData(value);
             return structuredClone(value);
         });
     }
-    async saveAssistantResponseHandlerData(agentId: string, handlerId: string, revision: number, data: Record<string, unknown>): Promise<AssistantResponseHandlerData> {
-        identity(agentId, 'agentId'); identity(handlerId, 'handlerId'); position(revision);
+    async saveReactHarnessData(agentId: string, harnessId: string, revision: number, data: Record<string, unknown>): Promise<ReactHarnessData> {
+        identity(agentId, 'agentId'); identity(harnessId, 'harnessId'); position(revision);
         const next = {revision: revision + 1, data: structuredClone(data)};
-        validateAssistantResponseHandlerData(next);
+        validateReactHarnessData(next);
         return this.transaction(async db => {
             await this.agent(db, agentId, true);
-            const [row] = await rows(db, 'SELECT revision FROM agent_assistant_response_handler_state WHERE agent_id = ? AND handler_id = ? FOR UPDATE', [agentId, handlerId]);
+            const [row] = await rows(db, 'SELECT revision FROM agent_assistant_response_handler_state WHERE agent_id = ? AND handler_id = ? FOR UPDATE', [agentId, harnessId]);
             if (!row) {
-                if (revision !== 0) throw new AppError('context_conflict', 'Assistant response handler state revision changed', 409);
-                await db.execute('INSERT INTO agent_assistant_response_handler_state (agent_id,handler_id,revision,data) VALUES (?,?,?,?)', [agentId, handlerId, next.revision, encode(next.data)]);
+                if (revision !== 0) throw new AppError('context_conflict', 'React Harness state revision changed', 409);
+                await db.execute('INSERT INTO agent_assistant_response_handler_state (agent_id,handler_id,revision,data) VALUES (?,?,?,?)', [agentId, harnessId, next.revision, encode(next.data)]);
             } else {
-                if (row.revision !== revision) throw new AppError('context_conflict', 'Assistant response handler state revision changed', 409);
-                const [result] = await db.execute<ResultSetHeader>('UPDATE agent_assistant_response_handler_state SET revision = ?, data = ? WHERE agent_id = ? AND handler_id = ? AND revision = ?', [next.revision, encode(next.data), agentId, handlerId, revision]);
-                if (result.affectedRows !== 1) throw new AppError('context_conflict', 'Assistant response handler state revision changed', 409);
+                if (row.revision !== revision) throw new AppError('context_conflict', 'React Harness state revision changed', 409);
+                const [result] = await db.execute<ResultSetHeader>('UPDATE agent_assistant_response_handler_state SET revision = ?, data = ? WHERE agent_id = ? AND handler_id = ? AND revision = ?', [next.revision, encode(next.data), agentId, harnessId, revision]);
+                if (result.affectedRows !== 1) throw new AppError('context_conflict', 'React Harness state revision changed', 409);
             }
             return structuredClone(next);
         });
@@ -319,7 +319,7 @@ export class AgentData {
         });
     }
     /** New result, targeted visibility/argument metadata and small handler state acknowledge together. */
-    async commitHandlerMessage(record: CompletedMessage, effects: HandlerMessageEffects): Promise<CompletedMessage> {
+    async commitReactHarnessMessage(record: CompletedMessage, effects: ReactHarnessMessageEffects): Promise<CompletedMessage> {
         return this.transaction(async db => {
             const session = this.inTransaction(db);
             let saved: CompletedMessage;
@@ -331,7 +331,7 @@ export class AgentData {
                 for (const update of effects.metadataUpdates) updates.set(update.messageId, update);
                 await db.execute('UPDATE context_compactions SET state = ? WHERE id = ?', [encode({...state, contextMetadata: [...updates.values()]}), String(record.metadata.compactionId)]);
             } else saved = await session.commitMessage(record.agentId, record.runId, {messageId: record.messageId, message: record.message, metadata: record.metadata}, effects.metadataUpdates);
-            await session.saveAssistantResponseHandlerData(record.agentId, effects.handlerId, effects.revision, effects.data);
+            await session.saveReactHarnessData(record.agentId, effects.harnessId, effects.revision, effects.data);
             return saved;
         });
     }

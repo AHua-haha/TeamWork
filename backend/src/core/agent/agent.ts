@@ -6,10 +6,10 @@ import { randomUUID } from 'node:crypto';
 import { AssistantMessageFrameEncoder, validateToolArguments, type Api, type AssistantMessage, type Model, type Models, type SimpleStreamOptions, type ToolResultMessage, type JsonObject, type Message } from '@earendil-works/pi-ai';
 import { validateEntries } from './data/validation.js';
 import { ProgressStore } from './data/progress.js';
-import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type ContextPatch, type HandlerMessageEffects, type ContextMetadataUpdate, type RunState } from './data/model.js';
-import type { ModelStream, ModelRequest, AgentConfiguration, RuntimePolicy, RuntimeTool, StepScope, AssistantResponseHandler, AssistantResponseHandlerContext } from './contracts.js';
-import { DefaultAssistantResponseHandler } from './assistant-response-handler.js';
-export { DefaultAssistantResponseHandler } from './assistant-response-handler.js';
+import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type ContextPatch, type ReactHarnessMessageEffects, type ContextMetadataUpdate, type RunState } from './data/model.js';
+import type { ModelStream, ModelRequest, AgentConfiguration, RuntimePolicy, RuntimeTool, StepScope, ReactHarness, ReactHarnessContext } from './contracts.js';
+import { DefaultReactHarness } from './react-harness.js';
+export { DefaultReactHarness } from './react-harness.js';
 export type * from './contracts.js';
 
 /** Optional caller acknowledgements. No database, record codec or hosting dependency is required. */
@@ -17,7 +17,7 @@ export interface AgentObserver {
   assertActive?(): void;
   messageStart?(state: RunState, historyPosition: number): Promise<number | void>;
   message?(record: CompletedMessage): Promise<CompletedMessage | void>;
-  handlerMessage?(record: CompletedMessage, effects: HandlerMessageEffects): Promise<CompletedMessage>;
+  reactHarnessMessage?(record: CompletedMessage, effects: ReactHarnessMessageEffects): Promise<CompletedMessage>;
   contextChanged?(revision: number, entries: ContextEntry[]): Promise<ContextHistory | void>;
   contextPatched?(revision: number, patch: ContextPatch): Promise<void>;
   compactionStarted?(state: CompactionState): Promise<void>;
@@ -40,7 +40,7 @@ function projectContextEntry(entry: ContextEntry): ContextEntry {
 
 export class AgentExecution {
   private readonly state:AgentState;
-  private readonly responseHandlers: AssistantResponseHandler[];
+  private readonly reactHarnesses: ReactHarness[];
   private get context(){return this.state.context;}
   private set context(value:ContextHistory){this.state.acceptContext(value);}
   private get runState(){return this.state.run;}
@@ -52,9 +52,9 @@ export class AgentExecution {
     private readonly config: AgentConfiguration, private readonly policy: RuntimePolicy,
     private readonly stream: ModelStream, private readonly observer: AgentObserver = {},
     readonly progress = new ProgressStore(), private readonly maxSteps = 64,
-    responseHandlers?: AssistantResponseHandler[]) {
+    reactHarnesses?: ReactHarness[]) {
     this.state=new AgentState(run,context,historyPosition);
-    this.responseHandlers = responseHandlers ?? policy.createAssistantResponseHandlers?.(run.agentId) ?? [];
+    this.reactHarnesses = reactHarnesses ?? policy.createReactHarnesses?.(run.agentId) ?? [];
     if (config.compaction) validateCompactionSettings(config.compaction);
     if (!Number.isSafeInteger(maxSteps) || maxSteps < 1) throw new AppError('invalid_config', 'Invalid model call limit');
   }
@@ -62,11 +62,11 @@ export class AgentExecution {
   restoreContext(context:ContextHistory):void{this.state.acceptContext(context);}
   attachContext(context:AgentContextState):void{this.state.attachContext(context);}
   receive(record:CompletedMessage):void{this.state.receive(record);}
-  private async record(entry: ContextEntry, effects?: HandlerMessageEffects): Promise<CompletedMessage> {
+  private async record(entry: ContextEntry, effects?: ReactHarnessMessageEffects): Promise<CompletedMessage> {
     validateEntries([entry]);
     const proposed = { ...entry, agentId: this.runState.agentId, runId: this.runState.runId, position: this.historyPosition + 1 };
-    if (effects && this.observer.message && !this.observer.handlerMessage) throw new AppError('invalid_config', 'Durable handler results require atomic persistence');
-    const record = (effects ? await this.observer.handlerMessage?.(structuredClone(proposed), effects) : await this.observer.message?.(structuredClone(proposed))) ?? proposed;
+    if (effects && this.observer.message && !this.observer.reactHarnessMessage) throw new AppError('invalid_config', 'Durable harness results require atomic persistence');
+    const record = (effects ? await this.observer.reactHarnessMessage?.(structuredClone(proposed), effects) : await this.observer.message?.(structuredClone(proposed))) ?? proposed;
     this.receive(record);
     if (effects) this.state.contextModel.updateMetadata(effects.metadataUpdates);
     return structuredClone(record);
@@ -85,10 +85,10 @@ export class AgentExecution {
   private async buildModelRequest(scope: StepScope, history: ContextHistory): Promise<ModelRequest> {
     const projected = {revision: history.revision, entries: history.entries.map(projectContextEntry)};
     const request = await this.policy.buildRequest(scope, projected);
-    for (const handler of this.responseHandlers) handler.restoreContext?.(history);
-    const owned = this.responseHandlers.flatMap(handler => handler.tools?.(scope) ?? []);
-    const overridden = new Set(this.responseHandlers.flatMap(handler => handler.overrideToolNames?.(scope) ?? []));
-    const prompts = this.responseHandlers.map(handler => handler.systemPrompt?.(scope).trim()).filter((prompt): prompt is string => !!prompt);
+    for (const harness of this.reactHarnesses) harness.restoreContext?.(history);
+    const owned = this.reactHarnesses.flatMap(harness => harness.tools?.(scope) ?? []);
+    const overridden = new Set(this.reactHarnesses.flatMap(harness => harness.overrideToolNames?.(scope) ?? []));
+    const prompts = (await Promise.all(this.reactHarnesses.map(harness => harness.systemPrompt?.(scope)))).map(prompt => prompt?.trim()).filter((prompt): prompt is string => !!prompt);
     if (!owned.length && !overridden.size && !prompts.length) return request;
     const ownedNames = new Set(owned.map(tool => tool.definition.name));
     const tools = [...request.tools.filter(tool => !overridden.has(tool.definition.name) && !ownedNames.has(tool.definition.name)), ...owned];
@@ -233,11 +233,11 @@ export class AgentExecution {
     const trace: ContextEntry[] = [], traceById = new Map<string, ContextEntry>();
     const draftModel = new AgentContextState(original), draft = draftModel.history;
     await compactionAcknowledgement(() => this.observer.compactionStarted?.(structuredClone(state)));
-    const record = async (entry: ContextEntry, effects?: HandlerMessageEffects): Promise<CompletedMessage> => {
+    const record = async (entry: ContextEntry, effects?: ReactHarnessMessageEffects): Promise<CompletedMessage> => {
       const value = {...structuredClone(entry), metadata: {...entry.metadata, source: 'context-compaction', compactionId: state.id, trigger}};
       const proposed = {...value, agentId: state.agentId, runId: state.runId, position: this.historyPosition + 1};
-      if (effects && this.observer.compactionMessage && !this.observer.handlerMessage) throw new AppError('invalid_config', 'Durable handler results require atomic persistence');
-      const saved = await compactionAcknowledgement(() => effects ? this.observer.handlerMessage?.(structuredClone(proposed), effects) : this.observer.compactionMessage?.(structuredClone(proposed))) ?? proposed;
+      if (effects && this.observer.compactionMessage && !this.observer.reactHarnessMessage) throw new AppError('invalid_config', 'Durable harness results require atomic persistence');
+      const saved = await compactionAcknowledgement(() => effects ? this.observer.reactHarnessMessage?.(structuredClone(proposed), effects) : this.observer.compactionMessage?.(structuredClone(proposed))) ?? proposed;
       const retained = {messageId: saved.messageId, message: saved.message, metadata: saved.metadata};
       trace.push(retained); traceById.set(retained.messageId, retained);
       draftModel.append(retained);
@@ -292,7 +292,7 @@ export class AgentExecution {
     }
   }
 
-  private async turn(scope: StepScope, request: ModelRequest, recordMessage: (entry: ContextEntry, effects?: HandlerMessageEffects) => Promise<CompletedMessage>,
+  private async turn(scope: StepScope, request: ModelRequest, recordMessage: (entry: ContextEntry, effects?: ReactHarnessMessageEffects) => Promise<CompletedMessage>,
     track: <T>(promise: Promise<T>) => Promise<T>, contextModel = this.state.contextModel): Promise<{response: AssistantMessage; results: ToolResultMessage[]; record: CompletedMessage}> {
     const run = this.runState, signal = scope.signal;
     const declared = request.tools.map(tool => tool.definition);
@@ -347,7 +347,7 @@ export class AgentExecution {
     const ensurePrior = async (call: typeof calls[number], deferCallIds: string[] = []): Promise<void> => {
       const deferred = new Set(deferCallIds);
       const index = calls.findIndex(candidate => candidate.id === call.id);
-      if (index < 0) throw new AppError('invalid_tool_calls', `Assistant handler requested unknown tool call: ${call.id}`);
+      if (index < 0) throw new AppError('invalid_tool_calls', `React Harness requested unknown tool call: ${call.id}`);
       for (let prior = 0; prior < index; prior++) {
         const pending = calls[prior]!;
         if (!executed.has(pending.id) && !deferred.has(pending.id)) await executeOne(pending);
@@ -369,7 +369,7 @@ export class AgentExecution {
         const tool = tools.get(call.name);
         if (!definition || !tool) throw new AppError('unknown_tool', `Tool is unavailable: ${call.name}`);
         const args = validateToolArguments(definition, call) as JsonObject;
-        if (!tool.execute) throw new AppError('handler_tool_only', `Tool must be executed by its response handler: ${call.name}`);
+        if (!tool.execute) throw new AppError('react_harness_tool_only', `Tool must be executed by its React Harness: ${call.name}`);
         const output = await abortable(track(this.policy.executeTool ? this.policy.executeTool(tool as RuntimeTool, args, scope, call) : tool.execute(args, scope, call)), signal);
         result = {...output, role: 'toolResult', toolCallId: call.id, toolName: call.name, timestamp: Date.now()};
       } catch (error) {
@@ -383,7 +383,7 @@ export class AgentExecution {
       executed.set(call.id, result);
       return structuredClone(result);
     };
-    const handlerContext: AssistantResponseHandlerContext = {
+    const harnessContext: ReactHarnessContext = {
       scope, toolCalls: calls,
       execute: async (call, metadata = {}) => execute(call, metadata),
       beforeToolCall: (call, deferCallIds = []) => ensurePrior(call, deferCallIds),
@@ -395,10 +395,10 @@ export class AgentExecution {
       contextEntry: id => { const entry = contextModel.entry(id); return entry ? structuredClone(entry) : undefined; },
       recordToolResult: async (call, output, metadata = {}, commit) => {
         const known = calls.find(candidate => candidate.id === call.id);
-        if (!known || known.name !== call.name) throw new AppError('invalid_tool_calls', `Assistant handler requested unknown tool call: ${call.id}`);
+        if (!known || known.name !== call.name) throw new AppError('invalid_tool_calls', `React Harness requested unknown tool call: ${call.id}`);
         signal.throwIfAborted();
         const result: ToolResultMessage = {...output, role:'toolResult', toolCallId:call.id, toolName:call.name, timestamp:Date.now()};
-        let effects: HandlerMessageEffects | undefined;
+        let effects: ReactHarnessMessageEffects | undefined;
         if (commit) {
           const updates: ContextMetadataUpdate[] = [];
           const previous = commit.hideMessageId ? contextModel.entry(commit.hideMessageId) : undefined;
@@ -409,7 +409,7 @@ export class AgentExecution {
             const previousIds = Array.isArray(assistant.metadata.suppressedToolCallArguments) ? assistant.metadata.suppressedToolCallArguments as string[] : [];
             updates.push({messageId: assistant.messageId, metadata: {...assistant.metadata, suppressedToolCallArguments: [...new Set([...previousIds, call.id])]}});
           }
-          effects = {handlerId: commit.handlerId, revision: commit.revision, data: commit.data, metadataUpdates: updates};
+          effects = {harnessId: commit.harnessId, revision: commit.revision, data: commit.data, metadataUpdates: updates};
         }
         await recordMessage({messageId:commit?.messageId ?? randomUUID(),message:result,metadata:{...(this.policy.messageMetadata?.(scope,result)??{}),...metadata}}, effects);
         executed.set(call.id,result);
@@ -426,12 +426,14 @@ export class AgentExecution {
         await this.updateContextMetadata([{messageId: entry.messageId, metadata: {...entry.metadata, suppressedToolCallArguments: [...new Set([...existingIds, ...callIds])]}}]);
       },
     };
-    const handlers = this.responseHandlers;
-    for (const handler of handlers) if (handler.canHandle(response)) await handler.handle(response, handlerContext);
-    const fallback = new DefaultAssistantResponseHandler();
-    await fallback.handle(response, {...handlerContext, toolCalls: calls.filter(call => !executed.has(call.id))});
+    // Purpose-owned reactions claim their calls before the Default fallback, regardless of registration order.
+    for (const harness of this.reactHarnesses) {
+      if (!(harness instanceof DefaultReactHarness) && harness.canHandle(response)) await harness.handle(response, harnessContext);
+    }
+    const fallback = this.reactHarnesses.find(harness => harness instanceof DefaultReactHarness) ?? new DefaultReactHarness();
+    await fallback.handle(response, {...harnessContext, toolCalls: calls.filter(call => !executed.has(call.id))});
     const results = calls.flatMap(call => executed.has(call.id) ? [structuredClone(executed.get(call.id)!)] : []);
-    if (results.length !== calls.length) throw new AppError('invalid_tool_calls', 'Assistant response handler did not produce a result for every tool call');
+    if (results.length !== calls.length) throw new AppError('invalid_tool_calls', 'React Harness did not produce a result for every tool call');
     for (const hint of hints) await this.appendHint(hint.message, hint.metadata);
     return {response, results, record};
   }

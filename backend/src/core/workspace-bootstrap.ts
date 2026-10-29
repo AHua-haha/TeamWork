@@ -1,5 +1,5 @@
 import { newLead } from './team/data/members.js';
-import { harnessPrompt } from './harness/harness-prompts.js';
+import { workspacePrompt } from './workspace/workspace-prompts.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { ContextCommit, WorkspaceRecord } from './workspace/data/context-base.js';
@@ -17,11 +17,11 @@ async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMember, f
   const [designFile, designDirectory] = contextPaths(rootDesignPath, 'design');
   if (!await files.exists(`${contextRoot}/${designFile}`, 'file')) {
     const path = await files.exists(`${contextRoot}/${designDirectory}`, 'directory') ? `${designDirectory}/README.md` : designFile;
-    await files.create(`${contextRoot}/${path}`, harnessPrompt('design-template', { project: workspace.name }) + '\n');
+    await files.create(`${contextRoot}/${path}`, workspacePrompt('design-template', { project: workspace.name }) + '\n');
   }
   const [implFile] = contextPaths(rootDesignPath, 'impl');
   if (!await files.exists(`${contextRoot}/${implFile}`, 'file'))
-    await files.create(memberContextPath(rootDesignPath), harnessPrompt('implementation-context-template', { design: rootDesignPath }) + '\n');
+    await files.create(memberContextPath(rootDesignPath), workspacePrompt('implementation-context-template', { design: rootDesignPath }) + '\n');
   for (const [path, content] of Object.entries(lead.value.configuration!.files))
     await files.create(join(dirname(lead.value.configuration!.path), path), content);
   const initial = await files.contextFiles();

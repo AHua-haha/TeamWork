@@ -6,10 +6,9 @@ import { AgentRuntime, configuredPolicy, piModelStream } from '../core/agent/run
 import { createAgentServer } from '../api/http.js';
 import { TeamSystem } from '../core/team/team-system.js';
 import { WorkspaceService } from '../core/workspace/workspace.js';
-import { webTools } from '../core/harness/web-tools.js';
-import { harnessPermissionsEnabled } from '../core/harness/harness-policy.js';
-import { harnessPrompt } from '../core/harness/harness-prompts.js';
-import { closeBashRuntime } from '../core/harness/harness-command.js';
+import { webTools } from '../core/agent/tools/web-tools.js';
+import { agentPrompt } from '../core/agent/prompts.js';
+import { closeBashRuntime } from '../core/agent/tools/bash.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');
@@ -18,8 +17,8 @@ const storage = new MySqlStorage(databaseUrl);
 const store = new CoreData(storage);
 const config = new ConfigService(store.config, models, [], process.env.CONFIG_ENCRYPTION_KEY);
 const workspaces = new WorkspaceService(store.workspaces, config);
-const team = new TeamSystem(store.team, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY), harnessPermissionsEnabled(process.env.RSI_HARNESS_PERMISSIONS_ENABLED));
-const runtime = new AgentRuntime(store.agents, team.runConfig, team.policy(configuredPolicy()), piModelStream(models), {compaction: {thresholdTokens: Number(process.env.RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000), prompt: harnessPrompt('context-compaction')}});
+const team = new TeamSystem(store.team, workspaces, config, webTools(process.env.DEEPSEEK_WEB_API_KEY));
+const runtime = new AgentRuntime(store.agents, team.runConfig, team.policy(configuredPolicy()), piModelStream(models), {compaction: {thresholdTokens: Number(process.env.RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS ?? 64000), prompt: agentPrompt('context-compaction')}});
 team.attach(runtime);
 const server = createAgentServer(runtime, config, workspaces, team);
 try {

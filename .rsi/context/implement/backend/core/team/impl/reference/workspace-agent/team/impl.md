@@ -1,5 +1,7 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 # Team implementation
 
 Permission and approval enforcement below describes the default enabled mode. The operator's optional startup setting `harnessPermissionsEnabled: false` bypasses harness permission gates; semantic validation, user activation and runtime lifecycle rules remain in force.
@@ -10,7 +12,7 @@ Permission and approval enforcement below describes the default enabled mode. Th
 
 ## Responsibilities and decomposition
 
-TeamService owns active source/projections, workspace models, readiness and lifecycle. MemberConfigService compares current/committed files with active bundles, validates create/update/delete and constructs activation plans. [Harness](../../../../../harness/impl/reference/workspace-agent/harness/design.md) supplies file authority, ordinary control-file reads and explicit commit approval. [Lead](lead/design.md) supplies management instructions; [group chat](group-chat/design.md) and [conversation context](conversation-context/design.md) own shared/private messages. SQL owns atomic activation and durable contexts.
+TeamService owns active source/projections, workspace models, readiness and lifecycle. MemberConfigService compares current/committed files with active bundles, validates create/update/delete and constructs activation plans. [Harness](../../../../../harness/impl/README.md) supplies file authority, ordinary control-file reads and explicit commit approval. [Lead](lead/design.md) supplies management instructions; [group chat](group-chat/design.md) and [conversation context](conversation-context/design.md) own shared/private messages. SQL owns atomic activation and durable contexts.
 
 ## Coordination and data flow
 
@@ -28,7 +30,7 @@ Pending approval endpoints operate directly on the pending request store, outsid
 
 - [Team](../../../../../../../../../../backend/src/core/team/data/members.ts), [composition/policy](../../../../../../../../../../backend/src/core/team/team-system.ts), [runner](../../../../../../../../../../backend/src/core/team/team-runner.ts).
 - [Member files/activation](../../../../../../../../../../backend/src/core/team/member-config.ts), [source format](../../../../../../../../../../backend/src/core/team/data/member-config.ts), [instructions](../../../../../../../../../../backend/src/core/team/member-instructions.ts).
-- [Git reads/initial import](../../../../../../../../../../backend/src/core/workspace/workspace-git.ts), [approval](../../../../../../../../../../backend/src/core/harness/git-approval.ts), [routes](../../../../../../../../../../backend/src/api/team-routes.ts), [SQL](../../../../../../../../../../backend/src/core/data.ts).
+- [Git reads/initial import](../../../../../../../../../../backend/src/core/workspace/workspace-git.ts), [approval](../../../../../../../../../../backend/src/core/agent/tools/bash.ts), [routes](../../../../../../../../../../backend/src/api/team-routes.ts), [SQL](../../../../../../../../../../backend/src/core/data.ts).
 
 ## Verification
 

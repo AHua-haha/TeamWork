@@ -1,5 +1,7 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 # Workspace implementation
 
 ## Contract
@@ -15,7 +17,7 @@
   - a project-file view for each request.
 - `ProjectFiles` serves one workspace folder: path rules, list, read, save, find, and internal kind inspection for mapped implementation paths. It holds no state between requests.
 - The workspace routes map `/workspaces` requests to the service, the project files, the context base, and DesignService current catalog/inspect operations. Semantic design validation belongs to the [design parts implementation](../context-base/design-parts/impl.md); routes expose only current reads. The agent server sends every `/workspaces` request to them, except team requests.
-- The neighboring [harness](../../../../../harness/impl/reference/workspace-agent/harness/design.md) owns MemberFiles and agent file tools; it authorizes write/edit input paths from accepted working/dependency mappings while allowing broad read-only workspace discovery. Pi default operations remain unchanged. Bash independently provides whole-workspace/system-read authority. Workspace supplies project-file reads/listings for user inspection and on-demand agent tools.
+- The neighboring [harness](../../../../../harness/impl/README.md) owns MemberFiles and agent file tools; it authorizes write/edit input paths from accepted working/dependency mappings while allowing broad read-only workspace discovery. Pi default operations remain unchanged. Bash independently provides whole-workspace/system-read authority. Workspace supplies project-file reads/listings for user inspection and on-demand agent tools.
 - The shared HTTP helpers are used by every route: agent, config, and workspace. They read bounded JSON bodies, reject unknown fields and query parameters, parse counts, write JSON, map errors to responses, abort work when the client disconnects, and send SSE streams.
 - The text helpers apply the same text rules and hashing to project files and context files.
 - The backend entry point creates the workspace service with the MySQL store, passes it to the agent server, and closes it on shutdown or a failed start.
@@ -56,7 +58,7 @@ Model choices/default and provider parameters are validated before any directory
 
 - [Workspace service](../../../../../../../../../../backend/src/core/workspace/workspace.ts): registry, create and adopt, and context bases.
 - [Project files](../../../../../../../../../../backend/src/core/workspace/project-files.ts): project path rules, list, read, save, find, and internal kind inspection for mapped implementation paths.
-- [Harness implementation](../../../../../harness/impl/reference/workspace-agent/harness/impl.md): scoped agent file operations and their access rules.
+- [Harness implementation](../../../../../harness/impl/README.md): scoped agent file operations and their access rules.
 - [Workspace routes](../../../../../../../../../../backend/src/api/workspace-routes.ts): `/workspaces` endpoints.
 - [HTTP helpers](../../../../../../../../../../backend/src/api/http-helpers.ts) and [agent server](../../../../../../../../../../backend/src/api/http.ts): shared transport, and routing to agents, config, and workspaces.
 - [Text rules](../../../../../../../../../../backend/src/core/text.ts): shared text decoding, encoding, and hashing.

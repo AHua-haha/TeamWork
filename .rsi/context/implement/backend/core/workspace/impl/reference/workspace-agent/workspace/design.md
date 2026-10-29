@@ -1,12 +1,14 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 # Workspace
 
 ## Purpose and boundary
 
 A workspace is one project: a directory on the backend's machine, its [context base](../context-base/design.md), and its [team](../../../../../team/impl/reference/workspace-agent/team/design.md). The Workspace module registers workspaces and serves the frontend's HTTP API for listing them and for browsing and editing the project's own files. It also gives the workspace's agents file actions inside the directory. It opens each workspace's context base on first use and closes them when the backend stops.
 
-The project-file API lists, reads, saves, and finds files. It does not move or delete project files, keep their history, or deliver live updates; the project's own version control does that. The agent file actions read and write the same folder, with an access rule that the caller supplies; the [harness](../../../../../harness/impl/reference/workspace-agent/harness/design.md) supplies the rule for each member. Command execution and scoped agent history belong to the harness.
+The project-file API lists, reads, saves, and finds files. It does not move or delete project files, keep their history, or deliver live updates; the project's own version control does that. The agent file actions read and write the same folder, with an access rule that the caller supplies; the [harness](../../../../../harness/impl/README.md) supplies the rule for each member. Command execution and scoped agent history belong to the harness.
 
 ## Inputs and preconditions
 

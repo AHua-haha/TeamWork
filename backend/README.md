@@ -61,7 +61,7 @@ Progress lives only in a per-member FIFO of 1,024 events across recent messages.
 
 ## Web search and fetch
 
-Set `DEEPSEEK_WEB_API_KEY` in the chosen development/deployment `environment` object in project-root `rsi.config.json`, then restart the backend. It is a backend-only credential, separate from model connection configuration; members can use any model provider. No UI or member configuration is required. All workspace members receive both capabilities through their fixed execute harness independently of historical command-rule fields. Bash uses the broad execution policy below.
+Set `DEEPSEEK_WEB_API_KEY` in the chosen development/deployment `environment` object in project-root `rsi.config.json`, then restart the backend. It is a backend-only credential, separate from model connection configuration; members can use any model provider. No UI or member configuration is required. All workspace members receive both capabilities through Default React Harness independently of historical command-rule fields. Bash uses the direct host execution behavior below.
 
 - `web_search({query, count?, original_question?})`: count defaults to 5 (1–50); query and optional original_question are 1–128 Unicode characters and cannot be whitespace-only. Put filters in query, for example `agent harness site:github.com lang:en after:2026-01-01`. DeepSeek receives `ori_question` and `need_content: false`; full page reading uses fetch.
 - `web_fetch({url})`: HTTP/HTTPS URL with a host, no embedded credentials, at most 8192 characters. Returns the provider's Markdown page content.
@@ -70,7 +70,7 @@ Both return a single text block containing Markdown core information followed by
 
 Requests have a 30-second deadline and a 4 MiB response-body limit. Core Markdown is capped at 64 KiB of UTF-8 text with visible truncation. No matches is successful; missing credentials, invalid input and provider failures return recoverable error tool results for the agent to handle without stopping its loop. No automatic retry is performed. Cancellation aborts HTTP. Credentials and raw provider error bodies are excluded from results.
 
-[Web tool contract](../.rsi/context/implement/backend/core/harness/impl/reference/web-tools/design.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
+[Web tool contract](../.rsi/context/implement/backend/core/agent/impl/README.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
 
 ## Workspace models
 
@@ -97,35 +97,30 @@ Hover, focus or click a group-chat member avatar to choose its model, reasoning 
 
 ## Workspace group chat and agent-managed Git
 
-User input uses `POST /workspaces/:id/team/chat/messages` with `{text}` or the documented picture multipart input. No mention triggers Lead; user @ mentions route to active members. Agent finals use an optional leading `<mentions>["Member"]</mentions>` block and may name at most one member. Other @ text is ordinary content. Members share project files and execute sequentially; only final reports enter shared chat. Completed history is SQL-backed, progress is a bounded in-memory delta stream.
+User input uses `POST /workspaces/:id/chat/messages` with `{text}` or the documented picture multipart input. No mention triggers Lead; user @ mentions route to active members. Agent finals use an optional leading `<mentions>["Member"]</mentions>` block and may name at most one member. Other @ text is ordinary content. Members share project files and execute sequentially; only final reports enter shared chat. Completed history is SQL-backed, progress is a bounded in-memory delta stream.
 
-`GET /workspaces/:id/team` lists active members. `GET /workspaces/:id/team/members/:memberId` returns active configuration and management/implementation/execute harness resources. These endpoints do not write member files. Agents edit `.rsi/members/<name>/member.json` (the directory exactly matches the unified member name) and referenced Markdown prompts through common tools; `validate_member_config` checks the whole directory. Existing-member updates allow responsibility, supplementary prompts and historical execution settings; identity/models/design assignments remain fixed. User model preferences use the separate model-settings API.
+`GET /workspaces/:id/members` lists active member metadata; `/members/:memberId` reads one member. Detailed legacy Team/Harness inspection endpoints are retired. Agents edit `.rsi/members/<name>/member.json` and referenced Markdown prompts through File React Harness; `validate_member_config` checks the whole directory. Existing-member updates allow responsibility, supplementary prompts and historical execution settings; identity/models/design assignments remain fixed. User model preferences use the separate model-settings API.
 
-### Git commits and user approval
+### Native Git and separate member activation
 
-Agents initialize/manage the ordinary project Git repository. There are no scoped Git references/indexes, private history, automatic run checkpoints or scope commit/restore/history endpoints. Bash metadata currently accepts only `{}`; the old git.scope selector is retired.
+Agents initialize/manage ordinary project Git history through Bash. There are no scoped Git references/indexes, automatic checkpoints, command interception, sandbox or Git commit approval. Native Git flags, hooks, repository paths and background execution work normally under the backend account. Stage intended changes and preserve unrelated work. Bash metadata currently accepts only `{}`.
 
-Use `git add` for intended paths, then `git commit [-a] -m "meaningful message"`. Implementation-context and mapped project implementation changes commit directly. A candidate mixing design/member files with implementation refuses with split instructions. Design/member-only candidates wait for user approval. Unknown paths refuse; renames count both old/new paths. Ordinary dirty files outside the candidate do not affect the decision. Supported commit flags include repeated/attached messages, `-a/--all`, `--allow-empty`, `--signoff/-s`, `--quiet/-q`, `--no-verify`, and literal `git -C` paths. Other modes (path-only/amend/interactive/signing/repository overrides) return staging guidance. Commit hooks are disabled for mediated commits. Git requires a directory repository at the registered workspace root.
-
-The compact approval input appears above the chat composer. Accept executes the reviewed candidate. Deny skips it; Send feedback skips it and returns the user's text to the agent. Review opens commit details/diffs in the right panel; no diff is embedded in the input. Contents/HEAD changing after review invalidate acceptance. Waiting pauses the foreground timeout. Run cancellation, reset/shutdown and restart do not replay a commit. This checks explicit commands only; indirect scripts/manual Git are outside this workflow guard.
+Git commits do not activate member files. Configuration validation/review and user activation remain independent business operations:
 
 | Endpoint | Result |
 | --- | --- |
-| GET `/workspaces/:id/team/commit-approvals` | Pending summaries, no diffs |
-| GET `/workspaces/:id/team/commit-approvals/:approvalId` | Exact proposed command/message/diff |
-| POST same request URL with `{action:"accept"|"deny"|"feedback",message?:string}` | Resolve pending input; original tool returns execution/refusal |
-| GET `/workspaces/:id/team/changes` | Read-only committed-to-current design/member file groups |
+| GET `/workspaces/:id/team/changes` | Committed-to-current design/member file groups |
 | GET `/workspaces/:id/team/configuration/current` | Current configuration/status and active-to-current diff |
 | GET `/workspaces/:id/team/configuration?source=pending|committed` | Validation/change plan |
-| POST `/workspaces/:id/team/configuration/activate` with `{revision,digest}` | Atomic valid committed-member activation while whole team idle |
+| POST `/workspaces/:id/team/configuration/activate` with `{revision,digest}` | Atomic valid committed-member activation while the whole team is idle |
 
-Commit and activation remain separate. Newer pending files are excluded from activation. Old `/team/configuration/commit` and `/team/members/:id/harness/...` routes are removed.
+Newer pending files are excluded from activation. The old commit-approvals routes and scope commit/restore/history operations are unavailable.
 
 ### Bash execution
 
 Bash accepts command, optional cwd, timeout seconds, background and empty metadata. One shell per member preserves cwd/variables/functions/jobs across calls/runs. Output combines stdout/stderr with plain-text execution metadata, bounded to the last 50 KiB. Foreground timeout defaults to 60 seconds, background unlimited unless specified. Background returns native job_id and defaults inherited output to /dev/null; explicit redirects work normally. Manage jobs with jobs/wait/kill. No output file is created automatically. Foreground timeout/cancellation resets the shell and jobs; member reset/retirement/activated changes/shutdown also stop them.
 
-The sandbox permits system reads, workspace/owned-temp writes, networking/local binding and no executable allowlist. It does not enforce working-design write boundaries. Pi write/edit retain assignment checks; read-only native tools inspect the workspace. Temporary homes/caches stay outside `.rsi`. No CPU/memory quota is added. Linux runtime enforcement remains unverified on the macOS host.
+Commands execute directly without a sandbox, path/design/command checks or network restrictions from React Harness. Host OS behavior still applies. Shells retain host HOME/toolchains and filter backend environment credentials. No artificial home, workspace cache sandbox or CPU/memory quota is created.
 
 ## Predefined Modelflare provider
 
@@ -148,7 +143,7 @@ Existing connections are preserved: a connection whose provider is still `anthro
 | `afterRun(run)` | Finalize harness/file effects after pending operations settle; also invoked before interrupted-run recovery |
 | `messageMetadata(scope, message)` | Attach JSON metadata to completed model/tool records |
 
-`configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the Agent working context for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. Solo agents have no built-in catalog tools; register them in a custom entry point. Workspace members receive their tools from the harness, including lead design and team operations.
+`configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the Agent working context for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. Solo agents have no built-in catalog tools; register them in a custom entry point. Workspace members receive File and Default React Harness tools, including Team-supplied model discovery and member validation.
 
 `AgentExecution` is also usable without persistence: supply run/context/settings, policy and model stream, then call `run(signal)` and inspect `snapshot()`. Its optional `AgentObserver` lets a caller acknowledge message start, completed messages, context changes and completion. AgentRuntime uses that interface with AgentData for Agent-owned persistence; the reusable execution mechanism remains usable without a database. See the [Agent implemented contract](../.rsi/context/implement/backend/core/agent/impl/README.md).
 
@@ -224,7 +219,7 @@ Integration tests create agents, write data, and intentionally corrupt one test 
 ## Contracts and implementation
 
 - [Backend design](../.rsi/context/design/backend/design.md) and [implementation context](../.rsi/context/implement/backend/impl/README.md).
-- [Core](../.rsi/context/design/backend/core/design.md) owns business behavior, data models, SQL and migrations. Its child systems are Agent, Harness, Workspace and Team; persistence is optional per system and currently assigned to Team.
+- [Core](../.rsi/context/design/backend/core/design.md) owns business behavior, data models, SQL and migrations. Its child systems are Agent, Workspace and Team. Each business owns its related memory and durable models; Agent also owns React Harness capabilities/state.
 - [API](../.rsi/context/design/backend/api/design.md) owns HTTP/SSE/multipart transport.
 - [Storage](../.rsi/context/design/backend/storage/design.md) supplies MySQL resources and generic transactions, with no business schema.
 - [Runtime](../.rsi/context/design/backend/runtime/design.md) hosts and wires the backend; the agent loop is inside Core.
@@ -249,7 +244,7 @@ Private `/agents/:id/follow` synchronizes SQL completed history and version-2 co
 
 ### Fresh workspace initialization and local reset
 
-Create/adopt prepares .rsi/context/design/metadata.json, .rsi/context/design/design.md and .rsi/context/implement/impl/README.md, exact lead JSON/Markdown under .rsi/members/<lead-id>/, and a static SQL bootstrap control baseline. The lead works on root metadata.json, uses the workspace model default and starts without dependencies or project-code mappings, with the fixed broad execute base. All three initial context files share sequence 1. Source/history is clean and active; later design/member changes still require normal user commit/activation. Existing .rsi entries are refused and project implementation/Git is preserved. Old layout is not silently migrated; safe unresolved active references remain inspectable but cannot run.
+Create/adopt prepares .rsi/context/design/metadata.json, .rsi/context/design/design.md and .rsi/context/implement/impl/README.md, exact lead JSON/Markdown under .rsi/members/<lead-id>/, and a static SQL bootstrap control baseline. The lead works on root metadata.json, uses the workspace model default and starts without dependencies or project-code mappings, with File and Default React Harnesses. All three initial context files share sequence 1. Source/history is clean and active; later design/member changes still require normal user commit/activation. Existing .rsi entries are refused and project implementation/Git is preserved. Old layout is not silently migrated; safe unresolved active references remain inspectable but cannot run.
 
 For a deliberate local clean slate, stop the backend and run `npm --prefix backend run reset:workspace-data -- --apply`. The npm command uses the development section of rsi.config.json and refuses a database owned by a running backend. It removes all workspace/agent/chat/runtime/context records, agent configs and registered-workspace managed directories (new .rsi, legacy .context/.team and exact legacy harness stores). It retains provider connections/encrypted credentials, app settings, catalogs/model caches and project implementation/Git checkouts. It does not unregister provider connections or drop the database. Paths are quarantined during the transaction and restored if deletion fails; committed cleanup removes the quarantines. Start the backend afterward and create/adopt workspaces afresh. Track intended design/member/implementation-context files in project Git (use git add -f if ignored); never track legacy .rsi/harness; initialization does not edit its Git settings or ignore files.
 
@@ -259,9 +254,9 @@ Parallel design/implement roots follow the same project-system hierarchy indepen
 
 Complete design context describes purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. Implementation context documents exact Input, Output, Effect and Usage examples for actual interfaces. Directory documents stay within one system; do not impose a fixed interfaces/requirements file split. Base Markdown rules instruct reading applicable context, updating facts/examples and continuation information, and surfacing mismatches. Reusable knowledge and automatic maintenance remain deferred.
 
-Permissions retain working/dependency design context, implementation context and implementation. Lead edits design/member files; both roles edit exact working implementation/context via native file tools; dependencies remain read-only. Bash is broader. Git history is ordinary project history, with explicit commit approval as described above.
+Working/dependency design assignments remain responsibility and context guidance. Every active member can use the available file, search, Bash, web and business tools without permission gates; design and dependency labels do not constrain filesystem access. Git history is ordinary project history.
 
-Raw user context mutation can edit design/metadata, but refuses implementation context and mutations under implement/. Semantic design inspection returns metadata plus ordered Markdown documents, aggregate content and a revision covering all design bytes. Members see the same implementation context directly. Accepted design snapshots still govern permissions; pending filesystem edits do not grant authority. Prompt changes require restart (and rebuild for compiled deployments). Existing old-layout data needs explicit repair/reset before new node assignments can run.
+Raw user context mutation can edit design/metadata, but refuses implementation context and mutations under implement/. Semantic design inspection returns metadata plus ordered Markdown documents, aggregate content and a revision covering all design bytes. Members see the same implementation context directly. Accepted design snapshots supply assignment guidance; neither accepted nor pending mappings control tool permission. Prompt changes require restart (and rebuild for compiled deployments). Existing old-layout data needs explicit repair/reset before new node assignments can run.
 
 ### Reset a workspace conversation
 
@@ -310,7 +305,7 @@ Working design assignments include the named node and all accepted descendant de
 
 ## Harness permission switch
 
-Set `development.harnessPermissionsEnabled` or `deployment.harnessPermissionsEnabled` in project-root `rsi.config.json`. The version-2 configuration requires an explicit Boolean. false grants all active members the available native file and management tools, permits outside-workspace/link file targets, and starts ordinary host Bash without the OS sandbox or Git commit approval broker. Host HOME and installed toolchains remain available; backend database/provider secrets are not injected into the shell environment. Commands have the backend account's OS authority, not administrator privilege. Input validation, result limits, timeouts, shell/job cleanup and semantic member validation/separate idle user activation remain. Operator config derives a child-only RSI_HARNESS_PERMISSIONS_ENABLED startup value; agents cannot change this setting through their member files. Restart with true to restore existing rules. A deployed release must contain the switch implementation; merely restarting an older release does not add it.
+File and Default React Harnesses execute available tools directly with no design/path guards, command allowlist, sandbox or Git approval broker. Bash retains host HOME/toolchains and filters backend environment credentials. Schemas, result limits, timeout/cancellation, shell/job cleanup and member validation/separate idle user activation remain. The retired harnessPermissionsEnabled field is accepted and ignored in existing project configuration; new examples omit it. Restart the updated backend to load the refactor. No application data reset or history rewrite is needed.
 
 ## Business data ownership
 

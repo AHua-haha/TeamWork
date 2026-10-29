@@ -1,5 +1,7 @@
 > AgentExecution now owns the reusable in-memory loop. AgentRuntime supplies durable hosting, follow/history and restart recovery described in this reference.
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
 # Agent runtime system

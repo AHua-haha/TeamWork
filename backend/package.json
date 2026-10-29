@@ -7,7 +7,8 @@
     "node": ">=22.19.0 <23"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-harness-prompts.mjs",
+    "prebuild": "node scripts/clean-build.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/copy-prompts.mjs",
     "check": "tsc --noEmit -p tsconfig.json",
     "start": "env -u NODE_OPTIONS -u NODE_PATH node ../scripts/backend-command.mjs start",
     "dev": "env -u NODE_OPTIONS -u NODE_PATH node ../scripts/backend-command.mjs dev",
@@ -17,7 +18,6 @@
     "reset:workspace-data": "env -u NODE_OPTIONS -u NODE_PATH node ../scripts/backend-command.mjs reset"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.79",
     "@earendil-works/pi-ai": "0.87.1",
     "@earendil-works/pi-coding-agent": "0.87.1",
     "mysql2": "3.24.4"

@@ -12,7 +12,7 @@ test('structured database credentials round-trip reserved characters without cha
   assert.equal(settings.DEEPSEEK_WEB_API_KEY, 'explicit');
 });
 
-test('project switch is independently selected, uses explicit enforcement and rejects nonboolean values', () => {
+test('retired permission switch is ignored and new configurations do not require it', () => {
   const config = {
     version: 2,
     paths: { stateDirectory: '/tmp/state', developmentStateDirectory: '/tmp/dev', deploymentSourceRoot: '/tmp/source' },
@@ -25,16 +25,12 @@ test('project switch is independently selected, uses explicit enforcement and re
   validateConfiguration(config);
   const sameName = structuredClone(config); sameName.deployment.database.name = sameName.development.database.name;
   assert.throws(() => validateConfiguration(sameName), /distinct database/);
-  assert.equal(backendSettings(config, 'development').RSI_HARNESS_PERMISSIONS_ENABLED, 'true');
-  config.deployment.harnessPermissionsEnabled = false;
-  validateConfiguration(config);
-  assert.equal(backendSettings(config, 'deployment').RSI_HARNESS_PERMISSIONS_ENABLED, 'false');
-  assert.equal(backendSettings(config, 'development').RSI_HARNESS_PERMISSIONS_ENABLED, 'true');
-  for (const value of ['false', null, 0, {}]) {
-    config.deployment.harnessPermissionsEnabled = value;
-    assert.throws(() => validateConfiguration(config), /must be boolean/);
-  }
+  assert.equal(backendSettings(config,'development').RSI_HARNESS_PERMISSIONS_ENABLED,undefined);
   config.deployment.harnessPermissionsEnabled = true;
+  validateConfiguration(config);
+  assert.equal(backendSettings(config,'deployment').RSI_HARNESS_PERMISSIONS_ENABLED,undefined);
+  delete config.deployment.harnessPermissionsEnabled;
+  validateConfiguration(config);
   config.deployment.environment.RSI_HARNESS_PERMISSIONS_ENABLED = 'false';
   assert.throws(() => validateConfiguration(config), /Reserved/);
 });

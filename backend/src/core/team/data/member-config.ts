@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { memberRoot } from '../../workspace/workspace-layout.js';
 import { createHash } from 'node:crypto';
 import type { RunSettings } from './config.js';
-import type { HarnessConfig } from '../../harness/data/config.js';
+import type { MemberAssignment } from './assignment.js';
 import { AppError } from '../../agent/data/model.js';
 
 /** Schema control belongs to the backend envelope, not the editable JSON. */
@@ -16,7 +16,7 @@ export interface MemberConfigSource {
   /** Backend-only aliases for reading commits made before directory relocation. */
   legacyPaths?: string[];
 }
-export interface ConfigFields { name: string; role: string; responsibility: string; settings: RunSettings; harness: HarnessConfig }
+export interface ConfigFields { name: string; role: string; responsibility: string; settings: RunSettings; harness: MemberAssignment }
 export function sourceBundle(path: string, files: Record<string, string>, submittedBy: string): MemberConfigSource {
   const digest = createHash('sha256').update(JSON.stringify(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)))).digest('hex');
   return { formatVersion: memberManifestVersion, path, files, digest, submittedBy, submittedAt: Date.now() };
@@ -27,7 +27,7 @@ export function generatedSource(fields: ConfigFields): MemberConfigSource {
   return sourceBundle(`${memberRoot}/${fields.name}/member.json`, { 'member.json': JSON.stringify(manifest, null, 2) + '\n', 'prompts/member.md': prompt }, 'user');
 }
 /** Startup-only conversion preserves the exact previous source and every prompt byte. */
-export function migrateMemberSource(source: MemberConfigSource, allowedCommands: HarnessConfig['allowedCommands'] = []): MemberConfigSource | null {
+export function migrateMemberSource(source: MemberConfigSource, allowedCommands: MemberAssignment['allowedCommands'] = []): MemberConfigSource | null {
   if (source.formatVersion === memberManifestVersion) return null;
   let old: { name?: unknown; role?: unknown; responsibility?: unknown; settings?: unknown; promptFiles?: unknown; designScope?: unknown; execute?: unknown; harnesses?: { project?: { designScope?: unknown }; design?: unknown } };
   try { old = JSON.parse(source.files['member.json']!); }

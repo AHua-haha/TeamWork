@@ -37,9 +37,10 @@ export function validateConfiguration(value) {
   if (!/^[A-Za-z0-9_.-]+$/.test(value.mysql.dockerContext)) throw new Error('Invalid Docker context name');
   for (const name of ['development', 'deployment']) {
     const section = value[name];
-    const fields = ['backendPort', 'frontendPort', 'database', 'encryptionKey', 'environment', 'harnessPermissionsEnabled', 'contextCompactionThresholdTokens'];
-    object(section, fields, name);
-    if (typeof section.harnessPermissionsEnabled !== 'boolean') throw new Error(`${name}.harnessPermissionsEnabled must be boolean`);
+    const fields = ['backendPort', 'frontendPort', 'database', 'encryptionKey', 'environment', 'contextCompactionThresholdTokens'];
+    // Retired switch is accepted only as a passive field in existing private config files.
+    const {harnessPermissionsEnabled: _retired, ...current} = section ?? {};
+    object(current, fields, name);
     if (!Number.isSafeInteger(section.contextCompactionThresholdTokens) || section.contextCompactionThresholdTokens < 1) throw new Error(`${name}.contextCompactionThresholdTokens must be a positive safe integer`);
     port(section.backendPort); port(section.frontendPort); key(section.encryptionKey);
     object(section.database, ['name', 'username', 'password'], `${name} database`);
@@ -99,7 +100,7 @@ export async function initializeConfiguration() {
 export function backendSettings(config, name) {
   const section = config[name], url = new URL('mysql://127.0.0.1');
   url.hostname = config.mysql.host; url.port = String(config.mysql.port); url.pathname = '/' + section.database.name; url.username = encodeURIComponent(section.database.username); url.password = encodeURIComponent(section.database.password);
-  return { ...section.environment, RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS: String(section.contextCompactionThresholdTokens), RSI_HARNESS_PERMISSIONS_ENABLED: String(section.harnessPermissionsEnabled), DATABASE_URL: url.href, CONFIG_ENCRYPTION_KEY: section.encryptionKey, HOST: '127.0.0.1', PORT: String(section.backendPort), NODE_ENV: name === 'deployment' ? 'production' : 'development' };
+  return { ...section.environment, RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS: String(section.contextCompactionThresholdTokens), DATABASE_URL: url.href, CONFIG_ENCRYPTION_KEY: section.encryptionKey, HOST: '127.0.0.1', PORT: String(section.backendPort), NODE_ENV: name === 'deployment' ? 'production' : 'development' };
 }
 export function composeSettings(config) {
   return { ...hostEnvironment(), RSI_MYSQL_HOST: config.mysql.host, RSI_MYSQL_PORT: String(config.mysql.port), RSI_MYSQL_ROOT_PASSWORD: config.mysql.rootPassword, RSI_MYSQL_DATABASE: config.development.database.name, RSI_MYSQL_USER: config.development.database.username, RSI_MYSQL_PASSWORD: config.development.database.password };

@@ -1,5 +1,0 @@
-The following working/dependency write boundaries are enforced for write/edit tool inputs. Bash separately permits whole-workspace writes; its broader authority does not change your maintenance responsibilities or imply user acceptance. All members can inspect workspace content with read/ls/grep/find.
-
-Permissions are organized into working scope and dependencies, each with design context, implementation context and implementation (project source/files). Read the resolved scopes below. Only the lead may edit the design tree and member configuration. Other members read and follow their working/dependency designs and report proposed design changes to the lead. Working scope does not make their design context writable.
-
-Use ordinary project Git. Explicit git commit checks its actual candidate: implementation-only runs; mixed design/member and implementation refuses; design/member-only waits for user approval. No scope selector or automatic checkpoint exists. Member activation remains a separate user action.

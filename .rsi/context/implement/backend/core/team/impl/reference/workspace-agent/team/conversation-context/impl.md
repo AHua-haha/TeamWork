@@ -1,5 +1,7 @@
 # Continuous conversation context implementation
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 ## Contract
 
 Team provides only GroupContextReference; Agent owns incorporation and continuous context. AgentRuntime and AgentData own durable execution/context; Team supplies shared data and coordination only. See the linked owning contracts and code.
@@ -26,7 +28,7 @@ Context persistence refusal prevents acknowledged consumption advancement. Idle 
 - [Read reference policy](../../../../../../../../../../../backend/src/core/team/team-system.ts)
 - [Restoration and idle synchronization](../../../../../../../../../../../backend/src/core/agent/runtime.ts)
 - [Publication and synchronization notification](../../../../../../../../../../../backend/src/core/team/team-runner.ts)
-- [Implementation maintenance instructions](../../../../../../../../../../../backend/prompts/harness/implementation.md)
+- [Implementation maintenance instructions](../../../../../../../../../../../backend/prompts/agent/default-react-harness.md)
 - [Context ownership tests](../../../../../../../../../../../backend/test/conversation-context.test.ts)
 - [In-memory execution and acknowledgement tests](../../../../../../../../../../../backend/test/agent-execution.test.ts)
 - [Disposable MySQL/restart/migration/reset/image tests](../../../../../../../../../../../backend/test/integration/backend.test.ts)

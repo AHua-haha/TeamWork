@@ -31,8 +31,8 @@ test('backend source follows the four agreed boundaries and imports only permitt
     }
   }
   const core = await readdir(join(source, 'core'), { withFileTypes: true });
-  assert.deepEqual(core.filter(entry => entry.isDirectory()).map(entry => entry.name).sort(), ['agent', 'harness', 'team', 'workspace']);
-  for(const owner of ['agent','team','workspace','harness'])assert.ok((await stat(join(source,`core/${owner}/data`))).isDirectory());
+  assert.deepEqual(core.filter(entry => entry.isDirectory()).map(entry => entry.name).sort(), ['agent', 'team', 'workspace']);
+  for(const owner of ['agent','team','workspace'])assert.ok((await stat(join(source,`core/${owner}/data`))).isDirectory());
   for (const path of await files(join(source, 'core/agent'))) {
     const text = await readFile(path, 'utf8');
     assert.doesNotMatch(text, /from ['"][^'"]*(?:team|harness|workspace)\//, `${path} must not depend on another business's private model`);

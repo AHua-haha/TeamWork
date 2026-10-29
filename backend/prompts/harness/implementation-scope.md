@@ -1,1 +1,0 @@
-Use ordinary project Git to manage implementation and implementation-context history. Commit meaningful changes; never mix design/member files into an implementation commit. The harness creates no automatic checkpoints or separate scope history.

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { closeBashRuntime, executeBash, parseBashInput, resetMemberShell, type BashInput } from '../src/core/harness/harness-command.js';
+import { closeBashRuntime, executeBash, parseBashInput, resetMemberShell, type BashInput } from '../src/core/agent/tools/bash.js';
 import { withFolder } from './memory-store.js';
 
 after(closeBashRuntime);
@@ -47,13 +47,13 @@ test('native background jobs free the shell, discard inherited output, preserve 
   } finally { await resetMemberShell('jobs'); }
 }));
 
-test('Bash resource policy permits whole workspace/system reads and denies outside writes; output is bounded', { timeout: 30000 }, () => withFolder(async folder => {
+test('Bash runs directly on the host, permits outside writes and bounds output', { timeout: 30000 }, () => withFolder(async folder => {
   const root = join(folder, 'project'); await mkdir(root); await writeFile(join(folder, 'outside.txt'), 'system-read');
   try {
-    const value = await run(root, 'policy', { command: 'mkdir -p .rsi/members dependency; printf allowed > .rsi/members/test; printf permitted > dependency/result; cat ../outside.txt; printf cache > "$XDG_CACHE_HOME/test"; cat "$XDG_CACHE_HOME/test"' });
-    assert.equal(value.exitCode, 0, JSON.stringify(value)); assert.equal(value.output, 'system-readcache');
+    const value = await run(root, 'policy', { command: 'mkdir -p .rsi/members dependency; printf allowed > .rsi/members/test; printf permitted > dependency/result; cat ../outside.txt' });
+    assert.equal(value.exitCode, 0, JSON.stringify(value)); assert.equal(value.output, 'system-read');
     const denied = await run(root, 'policy', { command: 'printf denied > ../outside.txt' });
-    assert.notEqual(denied.exitCode, 0); assert.equal(await readFile(join(folder, 'outside.txt'), 'utf8'), 'system-read');
+    assert.equal(denied.exitCode, 0); assert.equal(await readFile(join(folder, 'outside.txt'), 'utf8'), 'denied');
     const output = await run(root, 'policy', { command: `${JSON.stringify(process.execPath)} -e 'process.stdout.write("x".repeat(100000)+"END")'` });
     assert.equal(output.truncated, true); assert.ok(Buffer.byteLength(output.output) <= 50 * 1024); assert.ok(output.output.endsWith('END'));
   } finally { await resetMemberShell('policy'); }

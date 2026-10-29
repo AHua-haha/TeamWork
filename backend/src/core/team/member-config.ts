@@ -1,10 +1,11 @@
+import {resetMemberShell} from '../agent/tools/bash.js';
 import { fileChanges, configurationCommits } from '../workspace/workspace-git.js';
 import { memberRoot } from '../workspace/workspace-layout.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { keys, obj, validateRunSettings } from './data/config.js';
-import { resolveHarness, type HarnessService } from '../harness/harness.js';
-import { harnessConfig } from '../harness/data/config.js';
+import { resolveAssignment, type MemberWorkspace } from './member-workspace.js';
+import { memberAssignment } from './data/assignment.js';
 import { sourceBundle, currentMemberPaths, type MemberConfigSource } from './data/member-config.js';
 import { memberFields, memberName, maxMembers, type MemberFields, type MemberActivationState, type NewMember, type StoredMember, type TeamService } from './data/members.js';
 import { modelRunSettings } from '../workspace/data/models.js';
@@ -26,7 +27,7 @@ const withoutPrompt = (settings: MemberFields['settings']) => { const { prompt: 
 
 /** File validation, user-committed review and activation are distinct from active settings. */
 export class MemberConfigService {
-  constructor(private readonly team: TeamService, private readonly harness: HarnessService) {}
+  constructor(private readonly team: TeamService, private readonly workspace: MemberWorkspace) {}
   async accepted(workspaceId: string, memberId: string): Promise<MemberConfigSource> {
     await this.team.get(workspaceId, memberId);
     const source = (await this.team.find(memberId))!.value.configuration;
@@ -40,24 +41,24 @@ export class MemberConfigService {
   }
   async validate(agentId: string, path: unknown): Promise<MemberConfigReview> {
     const lead = await this.team.find(agentId);
-    if (!lead || lead.value.retiredAt !== null || (this.harness.permissionsEnabled && !lead.value.lead)) throw new AppError('access_denied', 'Only the lead validates member files', 403);
+    if (!lead || lead.value.retiredAt !== null) throw new AppError('access_denied', 'This agent is not an active team member', 403);
     if (path !== memberRoot) throw new AppError('invalid_input', `Validate the complete ${memberRoot} change set`);
-    return this.harness.operation(agentId, async () => (await this.plan(lead.workspaceId, lead.id, 'pending')).review);
+    return this.workspace.operation(agentId, async () => (await this.plan(lead.workspaceId, lead.id, 'pending')).review);
   }
   async review(workspaceId: string): Promise<MemberConfigReview> {
     const lead = await this.lead(workspaceId);
-    return this.harness.operation(lead.id, async () => (await this.plan(workspaceId, lead.id, 'committed')).review);
+    return this.workspace.operation(lead.id, async () => (await this.plan(workspaceId, lead.id, 'committed')).review);
   }
   async current(workspaceId: string) {
     const lead = await this.lead(workspaceId);
-    return this.harness.operation(lead.id, async () => {
+    return this.workspace.operation(lead.id, async () => {
       const pending = await this.plan(workspaceId, lead.id, 'pending');
       const committed = await this.plan(workspaceId, lead.id, 'committed');
       const marker=await this.team.activation(workspaceId);
-      const current=await this.harness.controlFiles(lead.id,'pending',memberRoot), accepted=await this.harness.controlFiles(lead.id,'committed',memberRoot);
+      const current=await this.workspace.controlFiles(lead.id,'pending',memberRoot), accepted=await this.workspace.controlFiles(lead.id,'committed',memberRoot);
       const activeFiles:Record<string,string>={};
       for(const member of pending.active)for(const [path,text]of Object.entries(member.value.configuration!.files))activeFiles[`${dirname(member.value.configuration!.path)}/${path}`]=text;
-      const history=await configurationCommits((await this.harness.environment(lead.id)).root,marker?.revision??null);
+      const history=await configurationCommits(await this.workspace.root(lead.id),marker?.revision??null);
       const changes=await fileChanges(activeFiles,current.files),pendingFiles=await fileChanges(currentMemberPaths(accepted.files,pending.active.map(member=>member.value.configuration!)),current.files);
       const files=Object.entries(current.files).map(([path,content])=>({path,content,problem:null,size:Buffer.byteLength(content)}));
       return {
@@ -73,7 +74,7 @@ export class MemberConfigService {
   /** Only the user HTTP control boundary calls this, inside the workspace idle gate. */
   async activate(workspaceId: string, revision: string, digest: string) {
     const lead = await this.lead(workspaceId);
-    return this.harness.operation(lead.id, async () => {
+    return this.workspace.operation(lead.id, async () => {
       const plan = await this.plan(workspaceId, lead.id, 'committed'), review = plan.review;
       if (revision !== review.revision || digest !== review.digest) throw new AppError('stale_revision', 'Member/configuration/design review changed; review again', 409);
       if (!review.valid) throw new AppError('invalid_config', review.issues.map(i => `${i.path}: ${i.message}`).join('; '));
@@ -88,7 +89,7 @@ export class MemberConfigService {
         }
       }
       await this.team.activate(workspaceId, { expected: plan.active.map(m => ({ id: m.id, revision: m.revision })), modelsRevision: plan.modelsRevision, create, update, expectedActivation: plan.activation, activation: { revision, time: Math.max(Date.now(), (plan.activation?.time ?? -1) + 1) } });
-      await this.harness.closeShells(update.map(member => member.id));
+      await Promise.all(update.map(member => resetMemberShell(member.id)));
       return { revision, changes: review.changes.map(change => ({ type: change.type, path: change.path, name: change.name })), memberIds: [...plan.active.filter(member => !update.some(next => next.id === member.id && next.value.retiredAt !== null)).map(member => member.id), ...create.map(member => member.id)] };
     });
   }
@@ -96,7 +97,7 @@ export class MemberConfigService {
     const all = await this.team.all(workspaceId), active = all.filter(member => member.value.retiredAt === null);
     const activation = await this.team.activation(workspaceId);
     const configurations: Plan['configurations'] = [];
-    const models=await this.team.models(workspaceId),selected=await this.harness.controlFiles(leadId,origin,memberRoot);
+    const models=await this.team.models(workspaceId),selected=await this.workspace.controlFiles(leadId,origin,memberRoot);
     const selectedFiles = origin === 'committed' ? currentMemberPaths(selected.files, active.map(member => member.value.configuration!)) : selected.files;
     const revision=selected.revision, paths=Object.keys(selectedFiles);
     const textAt=async(path:string)=>{const text=selectedFiles[path];if(text===undefined)throw new AppError('invalid_config',`Referenced file is missing: ${path}`);encodeText(text);return text;};
@@ -120,7 +121,7 @@ export class MemberConfigService {
         const settings = obj(data.settings, 'Member settings');
         if ('prompt' in settings) throw new AppError('invalid_config', 'Use referenced Markdown prompt files, not settings.prompt');
         const execute = obj(data.execute, 'Execute assignment'); keys(execute, ['allowedCommands']);
-        const harness = harnessConfig({ designScope: data.designScope, allowedCommands: execute.allowedCommands });
+        const harness = memberAssignment({ designScope: data.designScope, allowedCommands: execute.allowedCommands });
         if (!Array.isArray(data.promptFiles) || data.promptFiles.length > 20 || data.promptFiles.some(p => typeof p !== 'string' || !/^prompts\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.md$/.test(p) || p.split('/').some((s: string) => s === '..' || s.startsWith('.')))) throw new AppError('invalid_config', 'promptFiles lists at most 20 safe bundle-relative prompts/*.md files');
         const refs = data.promptFiles as string[];
         if (new Set(refs.map(p => p.toLowerCase())).size !== refs.length) throw new AppError('invalid_config', 'Duplicate prompt reference');
@@ -142,13 +143,13 @@ export class MemberConfigService {
           fields.harness.designScope = current.value.harness.designScope;
         } else if (!harness.designScope.working.length && !harness.designScope.dependencies.length) throw new AppError('invalid_config', 'A new worker needs a design assignment');
         if (match[1] !== fields.name) throw new AppError('invalid_config', 'Member directory must exactly match its name');
-        const resolved = await resolveHarness(this.harness.designs, workspaceId, fields.harness);
+        const resolved = await resolveAssignment(this.workspace.designs, workspaceId, fields.harness);
         for (const design of [...resolved.working, ...resolved.dependencies]) designs.set(design.path, design.revision);
         const source = { ...sourceBundle(path, files, 'user'), ...(current?.value.configuration?.legacyPaths ? {legacyPaths: current.value.configuration.legacyPaths} : {}), acceptedRevision: origin === 'committed' ? revision : undefined, ...(current?.value.configuration?.previous ? { previous: current.value.configuration.previous } : {}) };
         const changed = !current || source.digest !== current.value.configuration?.digest;
         if (changed) {
           const [issues] = await this.team.settingsIssues([{ ...fields.settings, ...current?.value.modelSettings }]);
-          if (fields.settings.toolOptionIds.length || issues!.length) throw new AppError('invalid_config', issues!.join('; ') || 'Member tools come only from harnesses');
+          if (fields.settings.toolOptionIds.length || issues!.length) throw new AppError('invalid_config', issues!.join('; ') || 'Member tools come from React Harnesses');
           review.changes.push({ type: current ? 'update' : 'create', path, name: fields.name, memberId: current?.id, before: current?.value.configuration, after: source, fields });
         }
         resulting.push(fields);

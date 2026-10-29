@@ -4,22 +4,24 @@ import { mkdir,writeFile } from 'node:fs/promises';
 import { dirname,join } from 'node:path';
 import { filesRevision } from '../workspace/workspace-git.js';
 import { finalAnswer, textPhase } from '../agent/final-answer.js';
-import { fileAssistantResponseHandlerFactory } from '../agent/file-assistant-response-handler.js';
+import {defaultReactHarnessFactory} from '../agent/react-harness.js';
+import {resetMemberShell, closeBashRuntime} from '../agent/tools/bash.js';
+import {groupSummaryTool} from './group-summary-tool.js';
+import { fileReactHarnessFactory } from '../agent/file-react-harness.js';
 import type { ChatStore } from './data/group-chat.js';
 import { AppError } from '../agent/data/model.js';
 import type { ConfigService } from './data/config.js';
 import { currentMemberPaths } from './data/member-config.js';
 import { MemberConfigService } from './member-config.js';
 import { DesignService } from '../workspace/design.js';
-import { HarnessService, resolveHarness } from '../harness/harness.js';
-import { inspectHarnesses } from '../harness/data/bases.js';
+import { MemberWorkspace, resolveAssignment } from './member-workspace.js';
 import { MemberInstructions } from './member-instructions.js';
 import { teamTools } from './member-tools.js';
 import type { RuntimePolicy, RuntimeTool } from '../agent/contracts.js';
 import { groupSummaryEntry, groupSummaryTokenThreshold, retainedGroupMessages } from './data/group-summary.js';
 import { readFileSync } from 'node:fs';
 
-import { webTools } from '../harness/web-tools.js';
+import { webTools } from '../agent/tools/web-tools.js';
 import type { ContextEntry } from '../agent/data/model.js';
 import { TeamRunner, type RunHost } from './team-runner.js';
 import { TeamService, teamRunConfig, type MemberView, type TeamStore, type TeamView } from './data/members.js';
@@ -40,23 +42,25 @@ export class TeamSystem {
   readonly instructions: MemberInstructions;
   readonly configuration: MemberConfigService;
   readonly designs: DesignService;
-  readonly harness: HarnessService;
+  readonly memberWorkspace: MemberWorkspace;
+  private readonly web: RuntimeTool[];
   readonly runConfig: RunConfigSource;
   private runtime?: RunHost;
   private readonly summaryJobs = new Map<string, Promise<void>>();
   private readonly summaryController = new AbortController();
   private summaryStartup?: Promise<void>;
 
-  constructor(private readonly store: TeamStore & ChatStore, private readonly workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools(), permissionsEnabled = true) {
+  constructor(private readonly store: TeamStore & ChatStore, private readonly workspaces: WorkspaceService, private readonly config: ConfigService, web: RuntimeTool[] = webTools()) {
     this.designs = new DesignService(workspaces);
     this.service = new TeamService(store, workspaces, config, this.designs);
-    this.harness = new HarnessService(workspaces, this.designs, id => this.service.find(id), web, permissionsEnabled);
-    this.instructions = new MemberInstructions(this.service, workspaces, id => this.runner.isRunning(id), permissionsEnabled);
+    this.memberWorkspace = new MemberWorkspace(workspaces, this.designs, id => this.service.find(id));
+    this.web = web;
+    this.instructions = new MemberInstructions(this.service, workspaces, id => this.runner.isRunning(id));
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
-    }, ids => this.harness.closeShells(ids), workspaceId => { void this.scheduleSummary(workspaceId); });
-    this.configuration = new MemberConfigService(this.service, this.harness);
+    }, ids => this.closeShells(ids), workspaceId => { void this.scheduleSummary(workspaceId); });
+    this.configuration = new MemberConfigService(this.service, this.memberWorkspace);
     this.runConfig = teamRunConfig(this.service, config);
   }
 
@@ -109,7 +113,7 @@ export class TeamSystem {
     const stale = new AbortController();
     const signal = AbortSignal.any([this.summaryController.signal, stale.signal]);
     let submitted = false;
-    const tool = this.harness.summaryTool(async text => {
+    const tool = groupSummaryTool(async text => {
       try {
         const result = await submitGroupSummary.call(this.store, workspaceId, { ...pinned, text });
         submitted = true;
@@ -192,14 +196,14 @@ export class TeamSystem {
   async inspect(workspaceId: string, memberId: string) {
     const { stored, member } = await this.service.inspect(workspaceId, memberId);
     let working: string[] = [];
-    try { working = (await resolveHarness(this.designs, workspaceId, stored.value.harness)).working.map(design => design.path); }
+    try { working = (await resolveAssignment(this.designs, workspaceId, stored.value.harness)).working.map(design => design.path); }
     catch (error) { if (!(error instanceof AppError) || error.status >= 500) throw error; }
-    return { member: this.status(member), configuration: stored.value.configuration ?? null, harnesses: inspectHarnesses(stored, member.harness.implementationScope, working) };
+    return {member: this.status(member), configuration: stored.value.configuration ?? null, working, capabilities: ['File React Harness', 'Default React Harness']};
   }
 
   async create(workspaceId: string, input: unknown): Promise<MemberStatus> {
     const member=await this.service.create(workspaceId,input);
-    const files=await this.harness.files(member.memberId);
+    const files=await this.memberWorkspace.files(member.memberId);
     const source=(await this.service.find(member.memberId))!.value.configuration;
     if(source)for(const [path,content]of Object.entries(source.files)){const target=join(files.root,dirname(source.path),path);await mkdir(dirname(target),{recursive:true});await writeFile(target,content,{flag:'wx'});}
     return this.status(member);
@@ -208,7 +212,7 @@ export class TeamSystem {
   async update(workspaceId: string, memberId: string, revision: number, value: unknown): Promise<MemberStatus> {
     const current = await this.service.get(workspaceId, memberId);
     if (this.runner.isRunning(memberId) && JSON.stringify((value as { harness?: unknown })?.harness) !== JSON.stringify({ designScope: current.harness.designScope, allowedCommands: current.harness.allowedCommands })) throw new AppError('member_busy', 'Wait for the member before changing harness scope', 409);
-    return this.harness.operation(memberId, async () => { const result = await this.service.update(workspaceId, memberId, revision, value); await this.harness.closeShells([memberId]); return this.status(result); });
+    return this.memberWorkspace.operation(memberId, async () => { const result = await this.service.update(workspaceId, memberId, revision, value); await this.closeShells([memberId]); return this.status(result); });
   }
 
   async reviewConfiguration(workspaceId: string, origin: 'pending' | 'committed' = 'committed') {
@@ -228,11 +232,15 @@ export class TeamSystem {
     return this.runner.workspaceOperation(workspaceId, async () => {
       const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);
       if (!lead) throw new AppError('not_found', 'Workspace lead is unavailable', 404);
-      const scopes = await this.harness.changes(lead.id), active = await this.service.activation(workspaceId);
-      const committed = await this.harness.controlFiles(lead.id,'committed','.rsi/members');
+      const scopes = await this.memberWorkspace.changes(lead.id), active = await this.service.activation(workspaceId);
+      const committed = await this.memberWorkspace.controlFiles(lead.id,'committed','.rsi/members');
       const activeFiles:Record<string,string>={};for(const member of await this.service.active(workspaceId))if(member.value.configuration)for(const [path,text]of Object.entries(member.value.configuration.files))activeFiles[`${member.value.configuration.path.slice(0,-'member.json'.length)}${path}`]=text;
       return { workspaceId, leadId: lead.id, ...scopes, activation: { revision: scopes.members.base, activeRevision: active?.revision ?? null, hasChanges: filesRevision(currentMemberPaths(committed.files, (await this.service.active(workspaceId)).map(member => member.value.configuration!))) !== filesRevision(activeFiles) } };
     });
+  }
+  async closeShells(ids?: string[]): Promise<void> {
+    if (!ids) return closeBashRuntime();
+    await Promise.all(ids.map(id => resetMemberShell(id)));
   }
   private status(member: MemberView): MemberStatus {
     return { ...member, running: this.runner.isRunning(member.memberId) };
@@ -243,15 +251,15 @@ export class TeamSystem {
    * just before the call, and its tools. Every other agent is unchanged.
    */
   policy(base: RuntimePolicy): RuntimePolicy {
-    const { management } = teamTools(this.service, this.configuration, this.harness.permissionsEnabled);
+    const { management } = teamTools(this.service, this.configuration);
     return {
       ...base,
-      createAssistantResponseHandlerFactories: async agentId => {
-        const factories = await base.createAssistantResponseHandlerFactories?.(agentId) ?? [];
+      createReactHarnessFactories: async agentId => {
+        const factories = await base.createReactHarnessFactories?.(agentId) ?? [];
         const member = await this.service.find(agentId);
         if (!member) return factories;
         const workspace = await this.workspaces.record(member.workspaceId);
-        return [...factories, fileAssistantResponseHandlerFactory(workspace.directory)];
+        return [...factories, fileReactHarnessFactory(workspace.directory), defaultReactHarnessFactory(workspace.directory, [...this.web, ...management], () => this.memberWorkspace.guidance(agentId))];
       },
       groupContext: async agentId => {
         const member = await this.service.find(agentId);
@@ -295,9 +303,8 @@ export class TeamSystem {
         if (request.context.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image')) && !request.model.input.includes('image')) {
           throw new AppError('image_not_supported', 'This context contains pictures; select a model with image input', 409);
         }
-        const prepared = await this.harness.prepare(scope.agentId, member.value.lead || !this.harness.permissionsEnabled ? management : []);
-        const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
-        return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };
+        const systemPrompt = await this.instructions.build(scope.agentId, scope.config.systemPrompt);
+        return {...request, context: {...request.context, systemPrompt: systemPrompt ?? ''}};
       },
     };
   }

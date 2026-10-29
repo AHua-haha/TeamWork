@@ -8,15 +8,7 @@ import { decodeText, sha256 } from '../text.js';
 export interface GitBaseline { time?: number; design: Record<string,string>; members: Record<string,string> }
 export interface FileChange { path: string; action: 'add'|'modify'|'delete'; patch: string; truncated: boolean }
 export const coversPath = (scope: string, path: string) => scope === '.' || path === scope || path.startsWith(scope + '/');
-export class OperationQueue {
-  private tails = new Map<string, Promise<unknown>>();
-  run<T>(key: string, action: () => Promise<T>): Promise<T> {
-    const result = (this.tails.get(key) ?? Promise.resolve()).catch(() => {}).then(action);
-    this.tails.set(key,result);
-    void result.finally(() => { if(this.tails.get(key) === result)this.tails.delete(key); }).catch(() => {});
-    return result;
-  }
-}
+export {OperationQueue} from '../operation-queue.js';
 export function git(root: string, args: string[], env: NodeJS.ProcessEnv = {}, input?: string | Buffer): Promise<{output: string; code: number; stdout: Buffer}> {
   const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
   return new Promise((resolveResult,reject) => {

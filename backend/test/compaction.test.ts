@@ -7,9 +7,9 @@ import { compactedContext, estimateRequestTokens, validateCompactionSettings, ty
 import type { AgentConfiguration, ModelRequest, ModelStream, RuntimePolicy, RuntimeTool } from '../src/core/agent/contracts.js';
 import type { ContextEntry, RunState } from '../src/core/agent/data/model.js';
 import { groupEntry, groupSender } from '../src/core/team/data/group-chat.js';
-import { harnessPrompt } from '../src/core/harness/harness-prompts.js';
+import { agentPrompt } from '../src/core/agent/prompts.js';
 
-const model = fauxProvider().getModel(), prompt = harnessPrompt('context-compaction');
+const model = fauxProvider().getModel(), prompt = agentPrompt('context-compaction');
 const initial: RunState = {agentId:'member',runId:'run',status:'running',phase:'model',step:0,startedAt:1,endedAt:null,endPosition:null,activeMessageId:null,error:null};
 const input = (text: string): ContextEntry => ({messageId:'old',message:{role:'user',content:text,timestamp:1},metadata:{}});
 function response(text: string, tokens = 10): AssistantMessage {

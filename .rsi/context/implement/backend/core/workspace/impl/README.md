@@ -16,7 +16,7 @@ Design: [Workspace](../../../../../design/backend/core/workspace/design.md).
 
 **Usage example:** const data = new CoreData(storage); const workspaces = new WorkspaceService(data.workspaces,config); await workspaces.create(input); const context = await workspaces.context(workspaceId). Core’s created callback atomically registers the Team lead alongside Workspace’s registry/models/context/bootstrap. Close workspace watchers before the storage graph.
 
-DesignService keeps accepted recursive working roots, dependencies, pending-design authority and native file access unchanged. Source ownership changes preserve all existing rows/versions and require no metadata reset.
+DesignService keeps accepted recursive working roots and dependencies for assignment guidance. Native file access belongs to Agent React Harnesses and has no design permission checks. Source ownership changes preserve all existing rows/versions and require no metadata reset.
 
 ### Context-preserving workspace initialization
 
@@ -50,3 +50,7 @@ DesignService keeps accepted recursive working roots, dependencies, pending-desi
 ```json
 {"commands": []}
 ```
+
+### Bootstrap template ownership after React Harness migration
+
+Workspace owns the release-maintained design and implementation-context templates under `backend/prompts/workspace`. `workspacePrompt(name,values)` substitutes required placeholders and rejects missing/empty assets. `workspace-bootstrap.ts` creates only missing initial documents and preserves existing context as before; initial lead/member/configuration baseline semantics remain unchanged. These templates do not supply tool permission or execution behavior.

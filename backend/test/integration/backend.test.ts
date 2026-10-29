@@ -1,14 +1,14 @@
-import { harnessPrompt } from '../../src/core/harness/harness-prompts.js';
+import { agentPrompt } from '../../src/core/agent/prompts.js';
 import { compactionInput, validateCompactionState, type CompactionSettings, type CompactionState } from '../../src/core/agent/data/compaction.js';
 import { AgentMessageContext } from '../../src/core/agent/data/context.js';
 import { decode, encode } from '../../src/core/codec.js';
 import { MySqlStorage } from '../../src/storage/mysql.js';
-import { acceptFiles,initGit,waitApproval } from '../git-fixture.js';
+import { acceptFiles,initGit } from '../git-fixture.js';
 import { gitText } from '../../src/core/workspace/workspace-git.js';
 import { seedDesign } from '../design-fixture.js';
 import { testModels, testModelValidator } from '../memory-store.js';
-import { emptyHarness } from '../../src/core/harness/data/config.js';
-import { closeBashRuntime } from '../../src/core/harness/harness-command.js';
+import { emptyAssignment } from '../../src/core/team/data/assignment.js';
+import { closeBashRuntime } from '../../src/core/agent/tools/bash.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -26,7 +26,7 @@ import { createBackendModels } from '../../src/core/agent/providers.js';
 import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/core/agent/runtime.js';
 import { createAgentServer } from '../../src/api/http.js';
 import { TeamSystem } from '../../src/core/team/team-system.js';
-import { webTools } from '../../src/core/harness/web-tools.js';
+import { webTools } from '../../src/core/agent/tools/web-tools.js';
 import { newLead } from '../../src/core/team/data/members.js';
 import { WorkspaceService } from '../../src/core/workspace/workspace.js';
 import type { ContextCommit } from '../../src/core/workspace/data/context-base.js';
@@ -806,7 +806,7 @@ test('team members are stored with their conversation and kept out of the agent 
   const directory = join(await mkdtemp(join(tmpdir(), 'members-')), 'project');
   const { workspaceId } = await workspaces.create({ name: 'Members', directory, models: testModels(), adopt: false });
   try {
-    const record = (name: string, lead = false) => ({ workspaceId, name, role: 'developer', responsibility: '', harness: emptyHarness(), lead, settings: { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, createdAt: 1, retiredAt: null });
+    const record = (name: string, lead = false) => ({ workspaceId, name, role: 'developer', responsibility: '', harness: emptyAssignment(), lead, settings: { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, createdAt: 1, retiredAt: null });
     const add = (name: string, lead = false) => store.team.createMember({ id: randomUUID(), workspaceId, lead, nameKey: name.toLowerCase(), value: record(name, lead) });
     // Creating the workspace created its lead, in the same transaction.
     const [lead] = await store.team.listMembers(workspaceId);
@@ -1104,7 +1104,7 @@ test('persisted context survives reopening the pool; corrupt stored schema fails
 
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 
-test('members edit the shared project, checkpoint runs and separate project commits from user design acceptance', { timeout: 60_000 }, async () => {
+test('React Harnesses execute shared project tools and native commits while member activation stays separate', { timeout: 60_000 }, async () => {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'harness-prototype-')));
   const workspaceService = new WorkspaceService(store.workspaces, { issuesFor: settings => service.issuesFor(settings) });
   const service = new ConfigService(store.config, builtinModels());
@@ -1135,17 +1135,16 @@ test('members edit the shared project, checkpoint runs and separate project comm
     const run = accepted.runs[0]!;
     const firstStep = await requests.next();
     assert.ok(!firstStep.request.tools.some(tool => tool.definition.name === 'save_design'));
-    assert.match(firstStep.request.context.systemPrompt!, /user approval/);
+    assert.match(firstStep.request.context.systemPrompt!, /without design-scope/);
     answer(firstStep.events,fauxAssistantMessage([
       {type:'toolCall',id:randomUUID(),name:'write',arguments:{path:'.rsi/context/design/metadata.json',content:JSON.stringify({implementation:design.implementation})}},
       {type:'toolCall',id:randomUUID(),name:'write',arguments:{path:'.rsi/context/design/design.md',content:'Pending design refinement'}},
     ],{stopReason:'toolUse'}));
     const secondStep = await requests.next();
     await initGit({team,workspaceId,lead});
-    answer(secondStep.events, call('bash', { command: 'git add -f .rsi/context/design && git commit -m "Requires user approval"' }));
-    const approval=await waitApproval({team,workspaceId,lead});team.harness.approvals.decide(workspaceId,approval.id,'deny','Revise first');
+    answer(secondStep.events, call('bash', { command: 'git add -f .rsi/context/design && git commit -m "Design refinement"' }));
     const thirdStep = await requests.next();
-    assert.match(JSON.stringify(thirdStep.request.context.messages), /User denied/);
+    assert.match(JSON.stringify(thirdStep.request.context.messages), /Design refinement/);
     const manifest = { name: 'Pending new member', role: 'developer', responsibility: 'Future member', settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['metadata.json'], dependencies: [] } };
     answer(thirdStep.events, call('write', { path: '.rsi/members/pending/prompts/member.md', content: 'Pending prompt.' }));
     const manifestStep = await requests.next();
@@ -1162,12 +1161,12 @@ test('members edit the shared project, checkpoint runs and separate project comm
     const storedBundle = (await store.team.getMember(activeWorker.id))!.value.configuration!;
     assert.equal(storedBundle.files['prompts/member.md'], 'Keep the result concise.');
     assert.deepEqual(JSON.parse(storedBundle.files['member.json']!).designScope, { working: ['metadata.json'], dependencies: [] });
-    const leadFiles = await team.harness.files(lead.memberId);
+    const leadFiles = await team.memberWorkspace.files(lead.memberId);
     await writeFile(join(leadFiles.root, '.rsi/members/pending/prompts/member.md'), 'UNSUBMITTED prompt');
     assert.equal((await team.configuration.accepted(workspaceId, activeWorker.id)).digest, storedBundle.digest);
     assert.ok(!workerStep.request.tools.some(tool => ['read_design', 'save_design', 'assign_member', 'create_member'].includes(tool.definition.name)));
-    assert.match(workerStep.request.context.systemPrompt!, /Create src\/result.txt with Done/);
-    assert.doesNotMatch(workerStep.request.context.systemPrompt!, /Pending design refinement/);
+    assert.match(workerStep.request.context.systemPrompt!, /Pending design refinement/);
+
     answer(workerStep.events, call('write', { path: 'src/result.txt', content: 'Done' }));
     const workerCommit = await requests.next();
     answer(workerCommit.events, call('bash', { command: 'git reset && git add src && git commit -m "Implement the requested result file"' }));
@@ -1186,11 +1185,11 @@ test('members edit the shared project, checkpoint runs and separate project comm
     answer(leadFinish.events, message('Implementation is committed; design refinement awaits user approval.'));
     assert.equal((await runtime.finished(lead.memberId, secondLeadRun.runId)).status, 'completed');
     const backend = (await team.team(workspaceId)).members.find(m => m.name === 'Backend')!;
-    const env = await team.harness.environment(backend.memberId);
+    const env = {root: await team.memberWorkspace.root(backend.memberId)};
     assert.equal(await readFile(join(env.root, 'src/result.txt'), 'utf8'), 'Done');
     assert.equal(await readFile(join(folder, 'project/src/result.txt'),'utf8'),'Done');
     assert.match(await gitText(env.root,['log','--oneline']),/Implement/);
-    const pending=await team.changes(workspaceId);assert.match(pending.design.changes.map(c=>c.patch).join('\n'),/Pending design refinement/);
+    const pending=await team.changes(workspaceId);assert.deepEqual(pending.design.changes,[]);
     await gitText(env.root,['reset']);await acceptFiles({team,workspaceId,lead},'.rsi/context/design','User accepted refinement');
     const followed = await collect(runtime.follow(lead.memberId, { runId: run.runId }));
     assert.equal(followed.at(-1)?.type, 'end');
@@ -1566,7 +1565,7 @@ test('group runs preserve failed/cancelled edits and publish without Git checkpo
       if (outcome === 'cancelled') await f.runtime.cancel(f.backend.memberId, run.runId);
       else pending.events.push({ type: 'error', reason: 'error', error: { ...message(), stopReason: 'error', errorMessage: 'Provider failed after write' } });
       assert.equal((await f.runtime.finished(f.backend.memberId, run.runId)).status, outcome);
-      const directory=(await f.team.harness.environment(f.backend.memberId)).root;
+      const directory=(await f.team.memberWorkspace.root(f.backend.memberId));
       assert.equal(await readFile(join(directory,'partial.txt'),'utf8'),outcome);
     }
     const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend report');
@@ -1784,7 +1783,7 @@ test('member file activation atomically replaces/updates the team, retains histo
     await f.runtime.finished(f.backend.memberId, accepted.runs[0]!.runId);
     for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve));
     const oldContext = await store.agents.getContext(f.backend.memberId);
-    const files = await f.team.harness.files(f.lead.memberId);
+    const files = await f.team.memberWorkspace.files(f.lead.memberId);
     const backendSource = await f.team.configuration.accepted(f.workspaceId, f.backend.memberId);
     const frontendSource = await f.team.configuration.accepted(f.workspaceId, f.frontend.memberId);
     const { dirname, join: pathJoin } = await import('node:path');
@@ -1953,7 +1952,7 @@ test('workspace chat reset atomically clears member conversation storage and sta
     const members = await store.team.listMembers(f.workspaceId);
     const contextBase = await store.workspaces.loadContext(f.workspaceId);
     const configBefore = await store.config.configBundle(null);
-    const harnessBefore = await f.team.harness.environment(f.lead.memberId);
+    const harnessBefore = {root: await f.team.memberWorkspace.root(f.lead.memberId)};
     const contextBefore = await store.agents.getContext(f.lead.memberId);
     const before = await store.team.chatTimeline(f.workspaceId);
     const oldCursor = before.cursor;
@@ -1977,7 +1976,7 @@ test('workspace chat reset atomically clears member conversation storage and sta
     assert.deepEqual(await store.team.listMembers(f.workspaceId), members);
     assert.deepEqual(await store.workspaces.loadContext(f.workspaceId), contextBase);
     assert.deepEqual(await store.config.configBundle(null), configBefore);
-    assert.deepEqual(await f.team.harness.environment(f.lead.memberId), harnessBefore);
+    assert.deepEqual({root: await f.team.memberWorkspace.root(f.lead.memberId)}, harnessBefore);
     assert.equal(await readFile(file, 'utf8'), 'Keep project implementation');
     assert.deepEqual(await store.agents.followSnapshot(solo.agentId, undefined, 0), soloBefore);
     assert.equal((await store.team.chatSnapshot(otherId)).messages[0]!.messageId, other.message.messageId);
@@ -2183,7 +2182,7 @@ test('stopping shared workspace cancels waiting runs without executing or checkp
     assert.deepEqual(ended.map(run=>run.status),['cancelled','cancelled']);assert.equal(calls,1);
     const waiting=start.runs[1]!;
     assert.deepEqual(await store.agents.runMessages(waiting.agentId,waiting.runId),[]);
-    assert.equal(f.team.harness.approvals.list(f.workspaceId).length,0);
+
     const next=await f.team.runner.postUser(f.workspaceId,'Fresh request');
     answer((await f.requests.next()).events,message('Ready.'));
     assert.equal((await f.runtime.finished(f.lead.memberId,next.runs[0]!.runId)).status,'completed');
@@ -2263,7 +2262,7 @@ test('continuous member context survives failure, success and runtime restart wi
   const f = await groupFixture();
   let restarted: AgentRuntime | undefined;
   try {
-    const root = (await f.team.harness.environment(f.backend.memberId)).root;
+    const root = (await f.team.memberWorkspace.root(f.backend.memberId));
     await writeFile(join(root, '.rsi/context/implement/impl/README.md'), memberDocument('DOCUMENT IS NOT AUTOMATIC INPUT'));
     const first = await f.team.runner.postUser(f.workspaceId, '@Backend first attempt');
     const firstStep = await f.requests.next();
@@ -2349,11 +2348,10 @@ test('shared input arriving after the terminal read is caught up when the member
 test('implementation documents and retrieval commands are ordinary files, never implicit activation effects', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
-    const root = (await f.team.harness.environment(f.backend.memberId)).root;
+    const root = (await f.team.memberWorkspace.root(f.backend.memberId));
     const doc = join(root,'.rsi/context/implement/impl/README.md');
     await writeFile(doc,memberDocument('NOT AUTOMATICALLY LOADED',[{command:'unexpected command'}]));
-    let calls = 0;
-    f.team.harness.bash = async () => { calls++; throw new Error('must only execute requested tools'); };
+
     for (const input of ['@Backend first','@Backend second']) {
       const publication=await f.team.runner.postUser(f.workspaceId,input);
       const step=await f.requests.next();
@@ -2362,7 +2360,7 @@ test('implementation documents and retrieval commands are ordinary files, never 
       await f.runtime.finished(f.backend.memberId,publication.runs[0]!.runId);
       await writeFile(doc,'malformed documentation is not a runtime reconstruction input');
     }
-    assert.equal(calls,0);
+    assert.ok(!(await store.agents.getContext(f.backend.memberId)).entries.some(entry=>entry.message.role==='toolResult'),'no tools run implicitly');
   } finally { await f.close(); }
 });
 
@@ -2476,7 +2474,7 @@ test('constructed image context fails explicitly when a later model request cann
   } finally { await f.close(); }
 });
 
-const compactSettings:CompactionSettings={thresholdTokens:100000,prompt:harnessPrompt('context-compaction')};
+const compactSettings:CompactionSettings={thresholdTokens:100000,prompt:agentPrompt('context-compaction')};
 function largeUsage(text:string) {
   const result=message(text);
   result.usage={...result.usage,input:200000,output:0,cacheRead:0,cacheWrite:0,totalTokens:200000};
@@ -2641,9 +2639,9 @@ test('Agent owns durable execution/context independently of Team or Workspace sc
     assert.deepEqual(Object.keys(await data.executionState(agentId)).sort(),['activeRunId','historyPosition','id']);
     const [tables]=await storage.pool.query<any[]>('SHOW TABLES');
     assert.deepEqual(tables.map(row=>Object.values(row)[0]).sort(),['agent_assistant_response_handler_state','agent_context_entries','agents','context_compactions','messages','runs']);
-    const savedHandlerState=await data.saveAssistantResponseHandlerData(agentId,'file-handler',0,{lastPath:'README.md'});
+    const savedHandlerState=await data.saveReactHarnessData(agentId,'file-handler',0,{lastPath:'README.md'});
     assert.deepEqual(savedHandlerState,{revision:1,data:{lastPath:'README.md'}});
-    await assert.rejects(data.saveAssistantResponseHandlerData(agentId,'file-handler',0,{lastPath:'stale'}),code('context_conflict'));
+    await assert.rejects(data.saveReactHarnessData(agentId,'file-handler',0,{lastPath:'stale'}),code('context_conflict'));
     const rolledBack=randomUUID();
     await assert.rejects(storage.transaction(async db=>{
       const session=data.inTransaction(db);await session.createRecord(rolledBack);await session.admitRun(rolledBack);throw new Error('rollback owner operations');
@@ -2652,7 +2650,7 @@ test('Agent owns durable execution/context independently of Team or Workspace sc
     await runtime.close();await storage.close();
     reopened=new MySqlStorage(url.toString());const restored=new AgentData(reopened);await restored.migrate();
     assert.deepEqual(await restored.getContext(agentId),context);assert.deepEqual(await restored.runMessages(agentId,run.runId),history);
-    assert.deepEqual(await restored.getAssistantResponseHandlerData(agentId,'file-handler'),savedHandlerState);
+    assert.deepEqual(await restored.getReactHarnessData(agentId,'file-handler'),savedHandlerState);
   }finally{await runtime.close();await storage.close();await reopened?.close();await store.pool.query(`DROP DATABASE ${database}`);}
 });
 
@@ -3166,7 +3164,7 @@ test('group envelope migration preserves stable records and identities, refreshe
     await store.team.migrateGroupContext();
     assert.deepEqual(await store.agents.getContext(f.backend.memberId),refreshed,'second startup writes nothing');
     const {dirname}=await import('node:path'),{rename}=await import('node:fs/promises');
-    const root=(await f.team.harness.environment(f.lead.memberId)).root;
+    const root=(await f.team.memberWorkspace.root(f.lead.memberId));
     const stored=(await store.team.getMember(f.backend.memberId))!,source=stored.value.configuration!,legacy=`.rsi/members/${stored.id}/member.json`;
     await rename(join(root,dirname(source.path)),join(root,dirname(legacy)));
     await store.team.updateMember(stored.id,stored.revision,stored.value.name.toLowerCase(),{...stored.value,configuration:{...source,path:legacy}});
@@ -3189,7 +3187,7 @@ test('file aggregates atomically append one result, patch only old metadata and 
   const run = await store.agents.admitRun(agentId);
   const resident = await store.agents.residentContext(agentId);
   const record = {agentId, runId: run.runId, position: 1, messageId: randomUUID(), message: {role: 'toolResult' as const, toolName: 'read', toolCallId: 'new', content: [{type: 'text' as const, text: 'new aggregate'}], isError: false, timestamp: 2}, metadata: {fileViewPath: '/workspace/file.ts'}};
-  const effects = {handlerId: 'file-content', revision: 0, data: {files: {'/workspace/file.ts': {ranges: [{start: 1, end: 2}], visibleMessageId: record.messageId}}}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]};
+  const effects = {harnessId: 'file-content', revision: 0, data: {files: {'/workspace/file.ts': {ranges: [{start: 1, end: 2}], visibleMessageId: record.messageId}}}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]};
   const statements: {sql: string; bytes: number}[] = [];
   const transaction = store.storage.transaction;
   store.storage.transaction = function(operation) {
@@ -3201,7 +3199,7 @@ test('file aggregates atomically append one result, patch only old metadata and 
   };
   try {
     await store.storage.transaction(async db => {
-      await store.agents.inTransaction(db).commitHandlerMessage(record, effects);
+      await store.agents.inTransaction(db).commitReactHarnessMessage(record, effects);
       assert.equal(resident.history.entries.length, 1, 'no speculative append before outer commit');
       assert.equal(resident.entry(previous.messageId)!.metadata.modelContextHidden, undefined);
     });
@@ -3214,16 +3212,16 @@ test('file aggregates atomically append one result, patch only old metadata and 
   assert.equal(resident.entry(previous.messageId)!.metadata.modelContextHidden, true);
   assert.equal(resident.history.entries.length, 2);
   assert.deepEqual(await store.agents.getContext(agentId), resident.history);
-  assert.equal((await store.agents.getAssistantResponseHandlerData(agentId, 'file-content')).revision, 1);
+  assert.equal((await store.agents.getReactHarnessData(agentId, 'file-content')).revision, 1);
   const before = structuredClone(resident.history);
   const failed = {...record, messageId: randomUUID()};
   const stale = {...effects, metadataUpdates: [{messageId: record.messageId, metadata: {modelContextHidden: true}}]};
-  await assert.rejects(store.agents.commitHandlerMessage(failed, stale), code('context_conflict'));
+  await assert.rejects(store.agents.commitReactHarnessMessage(failed, stale), code('context_conflict'));
   assert.deepEqual(await store.agents.getContext(agentId), before, 'state CAS refusal rolls back appended result and visibility');
   assert.deepEqual(resident.history, before);
   assert.equal((await store.agents.runMessages(agentId, run.runId)).length, 1);
   assert.equal((await store.agents.runMessages(agentId, run.runId))[0]!.metadata.modelContextHidden, undefined, 'stable history was not edited');
-  assert.deepEqual((await store.agents.getAssistantResponseHandlerData(agentId, 'file-content')).data, effects.data);
+  assert.deepEqual((await store.agents.getReactHarnessData(agentId, 'file-content')).data, effects.data);
   await store.agents.finishRun(agentId, run.runId, 'completed');
 });
 
@@ -3235,8 +3233,8 @@ test('preparation journals file-view metadata with handler state and restores it
   await store.agents.beginCompaction(state);
   const makeRecord = (id: string) => ({agentId, runId: run.runId, position: 0, messageId: id, message: {role: 'toolResult' as const, toolName: 'read', toolCallId: id, content: [{type: 'text' as const, text: `view ${id}`}], isError: false, timestamp: 2}, metadata: {source: 'context-compaction', compactionId: state.id, fileViewPath: '/workspace/file.ts'}});
   const first = makeRecord(randomUUID()), second = makeRecord(randomUUID());
-  await store.agents.commitHandlerMessage(first, {handlerId: 'file-content', revision: 0, data: {visibleMessageId: first.messageId}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]});
-  await store.agents.commitHandlerMessage(second, {handlerId: 'file-content', revision: 1, data: {visibleMessageId: second.messageId}, metadataUpdates: [{messageId: first.messageId, metadata: {...first.metadata, modelContextHidden: true}}]});
+  await store.agents.commitReactHarnessMessage(first, {harnessId: 'file-content', revision: 0, data: {visibleMessageId: first.messageId}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]});
+  await store.agents.commitReactHarnessMessage(second, {harnessId: 'file-content', revision: 1, data: {visibleMessageId: second.messageId}, metadataUpdates: [{messageId: first.messageId, metadata: {...first.metadata, modelContextHidden: true}}]});
   assert.deepEqual((await store.agents.getContext(agentId)).entries, [previous], 'tentative preparation does not replace or patch ordinary context');
   await store.agents.acquireRuntime(() => undefined);
   try {await store.agents.recoverCompactions();} finally {await store.agents.releaseRuntime();}
@@ -3244,17 +3242,17 @@ test('preparation journals file-view metadata with handler state and restores it
   assert.equal(context.entries.find(entry => entry.messageId === previous.messageId)!.metadata.modelContextHidden, true);
   assert.equal(context.entries.find(entry => entry.messageId === first.messageId)!.metadata.modelContextHidden, true);
   assert.equal(context.entries.find(entry => entry.messageId === second.messageId)!.metadata.modelContextHidden, undefined);
-  assert.deepEqual((await store.agents.getAssistantResponseHandlerData(agentId, 'file-content')).data, {visibleMessageId: second.messageId});
+  assert.deepEqual((await store.agents.getReactHarnessData(agentId, 'file-content')).data, {visibleMessageId: second.messageId});
   assert.ok((await store.agents.runMessages(agentId, run.runId)).every(entry => entry.metadata.modelContextHidden === undefined), 'recovery preserves original stable history metadata');
   await store.agents.finishRun(agentId, run.runId, 'interrupted');
 });
 
 test('runtime restores file references across runs and restart, and context reset clears handler state', {timeout: 30000}, async () => {
-  const {fileAssistantResponseHandlerFactory} = await import('../../src/core/agent/file-assistant-response-handler.js');
+  const {fileReactHarnessFactory} = await import('../../src/core/agent/file-react-harness.js');
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'runtime-file-handler-')));
   await writeFile(join(directory, 'file.txt'), 'one\ntwo\nthree');
   let factories = 0;
-  const f = await fixture({policy: {...fixedPolicy(model), createAssistantResponseHandlerFactories: () => {factories++; return [fileAssistantResponseHandlerFactory(directory)];}}});
+  const f = await fixture({policy: {...fixedPolicy(model), createReactHarnessFactories: () => {factories++; return [fileReactHarnessFactory(directory)];}}});
   const getContext = store.agents.getContext; let loads = 0;
   store.agents.getContext = async id => {if (id === f.agentId) loads++; return getContext.call(store.agents, id);};
   try {
@@ -3274,7 +3272,7 @@ test('runtime restores file references across runs and restart, and context rese
     assert.match(JSON.stringify(second.context.messages), /File view omitted/);
     assert.equal(await store.agents.residentContext(f.agentId), resident);
     assert.equal(loads, 1); assert.equal(factories, 1);
-    const references = await store.agents.getAssistantResponseHandlerData(f.agentId, 'file-content');
+    const references = await store.agents.getReactHarnessData(f.agentId, 'file-content');
     assert.equal(references.revision, 2);
     await f.runtime.close(); await f.runtime.open();
     const third = await runRead('c', 2);
@@ -3284,7 +3282,7 @@ test('runtime restores file references across runs and restart, and context rese
     assert.equal(restored.entries.filter(entry => entry.message.role === 'toolResult' && entry.metadata.modelContextHidden !== true).length, 1);
     await store.agents.resetConversations([f.agentId]); f.runtime.clearProgress(f.agentId);
     await runRead('d', 1);
-    assert.equal((await store.agents.getAssistantResponseHandlerData(f.agentId, 'file-content')).revision, 1);
+    assert.equal((await store.agents.getReactHarnessData(f.agentId, 'file-content')).revision, 1);
     assert.equal(factories, 3);
   } finally {store.agents.getContext = getContext; await f.runtime.close(); await rm(directory, {recursive: true, force: true});}
 });

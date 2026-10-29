@@ -90,14 +90,6 @@ export function teamRoutes(team: TeamSystem, runtime: AgentRuntime): (route: Rou
       } else throw notFound();
       return;
     }
-    if (area === 'commit-approvals') {
-      query(url,[]);if(extra.length)throw notFound();
-      await team.service.requireWorkspace(workspaceId);
-      if(method==='GET')json(response,200,memberId?team.harness.approvals.read(workspaceId,memberId):{approvals:team.harness.approvals.list(workspaceId)});
-      else if(method==='POST'&&memberId){const input=await body(request,maxBodyBytes);fields(input,['action','message']);json(response,200,team.harness.approvals.decide(workspaceId,memberId,input.action,input.message??''));}
-      else throw notFound();
-      return;
-    }
     if (area === 'chat') {
       if (method === 'GET' && memberId === 'attachments' && extra.length === 1) {
         query(url, []); identity(extra[0], 'imageId');

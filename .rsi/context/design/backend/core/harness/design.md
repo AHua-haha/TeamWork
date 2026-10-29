@@ -1,19 +1,13 @@
-# Harness
+# Retired Harness design reference
 
-## Purpose, responsibilities and boundaries
+## Purpose and boundary
 
-Define what an agent can do and rules it follows. Own reusable tool integration, available capabilities, scope/permission policy, persistent Bash environment, explicit Git approval and maintenance prompts. Aggregate Harness configuration/resource/scope/tool-input/approval state and related operations under its data-model part. Current approvals/process resources remain session-local; no new durable Harness schema is introduced. Workspace supplies design/file information; Team supplies member authority/configuration.
+This node is retained only so existing member assignment references remain resolvable. It owns no implementation, tools, prompts or permission policy. The separate Harness system is removed. React Harness is an Agent component described in [Agent design](../agent/design.md#react-harness).
 
 ## Interface contract
 
-Resolve configured harnesses into tools and prompts; check permitted effects at invocation; expose approval requests/decisions and environment cleanup. Preserve native Pi tool formats, scoped write/edit, broad sandbox Bash, lifecycle/timeouts, user approval of explicit protected commits and operator permission bypass. Tools are reusable across agents. Custom Bash results expose captured command stdout/stderr as the plain-text body and put execution metadata, tool-generated errors and guidance inside one trailing `<metadata>` area. Empty command output produces only that area. Tool-enforced foreground timeouts report the configured time limit, distinguish themselves from command-reported network errors, and instruct long-running work to use background execution with explicit log redirection and later Bash monitoring. Guidance is maintained in release-owned prompt files. Preserve shell/job cleanup and recoverable tool-error behavior; never automatically retry a command. Harness does not schedule team members or own group/private message history. Maintain the compaction instruction as a release-owned prompt file, supplied to Agent through Runtime configuration. It explains the replacement boundary and preservation of all new messages, tool availability, original Team-owned group history, and Next steps when work remains. Agent owns estimation, trigger timing and cutover.
+No active interface is exposed by this retired node. Agent assembles File and Default React Harnesses. Team owns assignment guidance and configuration review/activation; Workspace owns bootstrap templates.
 
-The semantic-analysis maintenance Agent may receive a dedicated `submit_group_semantic_information` tool through Harness. Harness owns capability exposure and native tool-input validation; the Team public operation owns semantic source/reference validation, optimistic revision checks, involvement authority and persistence. This tool is available only to the Team-scheduled semantic-analysis run, does not publish a group response, and cannot mutate member context or shared messages. Harness does not persist semantic information or schedule the 32,000-token trigger.
+## Constraints
 
-### Agent-owned file handler boundary
-
-Team installs Agent's independent file response handler with the workspace root as path-resolution context only. Its `read`, `write` and `edit` declarations and direct filesystem effects do not inherit Harness permission checks or MemberFiles operations, including when Harness permissions are enabled. Harness retains its existing Bash and other tool policies; it does not authorize or execute the handler's file calls. The old Harness file tools may still serve callers without this handler.
-
-## Constraints, specifications and requirements
-
-Preserve existing public HTTP/SSE payloads, stable SQL/JSON formats, ordering, authority and lifecycle behavior. Each business owns its core in-memory model and any durable representation, mapping, validation, queries and related operations together. Harness uses other owners’ public interfaces, not their private persistence. Technical Storage supplies engine resources only. Share explicit interface values and lifecycle notifications; keep private runtime state and SQL schemas inside their respective owners. Filesystem/tool effects can precede failures and are never automatically replayed.
+Initial React Harness tools have no design/path, command, sandbox or Git approval gates. Preserve existing files, context/history identities, signatures and durable file-state records. Passive legacy member fields do not restore enforcement. Future member configuration representation and permission policy require separate design.

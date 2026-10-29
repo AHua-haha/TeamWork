@@ -1,5 +1,7 @@
 > Existing behavior reference inside its owning system implementation context. It is not a separate design node; the enclosing high-level design governs ownership. References to historical task documents identify their Git source.
 
+> Historical implementation reference. The current React Harness contract is documented in the owning system’s impl/README.md and Agent design. Separate Harness permission, sandbox, Git approval and startup-switch descriptions below are superseded; they are not current instructions.
+
 > Ownership after migration: Each business owns its in-memory/durable schemas and operations. AgentData owns private context/history/runs/compaction; TeamData/ConfigData own member/config/shared chat; WorkspaceData owns registry/context/models/baseline. CoreData composes owner transaction operations; MySqlStorage only provides engine resources, transactions and shutdown. The schema details below describe their existing relations, not a central store.
 
 # Team durable persistence implementation

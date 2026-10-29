@@ -81,7 +81,7 @@ test('deploy isolates committed source, preserves running release on build failu
   await assert.rejects(readFile(join(active.directory, 'rsi.config.json')));
   const url = `http://127.0.0.1:${f.config.deployment.frontendPort}`;
   assert.match(await (await fetch(url)).text(), /Snapshot/); assert.equal((await (await fetch(url + '/agents')).json()).database, '/rsi_agent');
-  assert.equal((await (await fetch(url + '/agents')).json()).harnessPermissions, 'false');
+  assert.equal((await (await fetch(url + '/agents')).json()).harnessPermissions, null);
   const firstPid = await readFile(join(f.state, 'deploy/backend.pid'), 'utf8');
   result = await f.call('deploy', 'start'); assert.equal(result.code, 0, result.output); assert.equal(await readFile(join(f.state, 'deploy/backend.pid'), 'utf8'), firstPid);
   await writeFile(join(f.root, 'backend/build.mjs'), 'process.exit(7)'); git(f.root, 'add', '.'); git(f.root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'bad build');
@@ -169,11 +169,11 @@ test('polluted shell settings and legacy env files cannot override either servic
   await writeFile(join(f.root, 'frontend/node_modules/vite/bin/vite.js'), `const http=require('node:http');const s=http.createServer((q,r)=>r.end(process.env.AGENT_BACKEND_ORIGIN));s.listen(Number(process.env.PORT),'127.0.0.1');process.on('SIGTERM',()=>{s.close();s.closeAllConnections()});`);
   let result = await f.call('deploy', 'deploy', 'HEAD'); assert.equal(result.code, 0, result.output);
   const deployed = () => fetch(`http://127.0.0.1:${f.config.deployment.frontendPort}/agents`).then(r => r.json());
-  assert.deepEqual(await deployed(), { database: '/rsi_agent', version: 'first', webKey: 'retained-test-key', unrelated: null, nodeOptions: null, proxy: null, harnessPermissions: 'true' });
+  assert.deepEqual(await deployed(), { database: '/rsi_agent', version: 'first', webKey: 'retained-test-key', unrelated: null, nodeOptions: null, proxy: null, harnessPermissions: null });
   try {
     result = await f.call('dev', 'start'); assert.equal(result.code, 0, result.output);
     const dev = await (await fetch(`http://127.0.0.1:${f.config.development.backendPort}/agents`)).json();
-    assert.deepEqual(dev, { database: '/rsi_agent_dev', version: 'first', webKey: null, unrelated: null, nodeOptions: null, proxy: null, harnessPermissions: 'true' });
+    assert.deepEqual(dev, { database: '/rsi_agent_dev', version: 'first', webKey: null, unrelated: null, nodeOptions: null, proxy: null, harnessPermissions: null });
     assert.equal(await (await fetch(`http://127.0.0.1:${f.config.development.frontendPort}`)).text(), `http://127.0.0.1:${f.config.development.backendPort}`);
     assert.equal(await readFile(join(f.root, 'backend/.env'), 'utf8'), oldFile);
     assert.equal(await readFile(profile, 'utf8'), profileText);
