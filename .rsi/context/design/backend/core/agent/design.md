@@ -111,6 +111,8 @@ Expose acknowledged context/history/run/compaction reads and mutations, restorat
 
 Expose the Agent's current durable message context as an ordered sequence of native Pi messages with their stable entry identities and metadata. This is the context retained for future model calls, including incorporated group messages, private work, and compacted or shared-summary entries when present. Stable execution history, system instructions/tool schemas assembled separately, and unfinished stream chunks are different information and are not synthesized into this view.
 
+Ordered context reads use the existing `(agent_id, position)` primary-key range, including pagination, so large native JSON message bodies are not collected into a filesort through the message-identity index. Page reads remain bounded without increasing database sort-memory settings or truncating messages.
+
 Inspection is detached and read-only. It works while idle or running and does not require runtime execution ownership, synchronize incoming group messages, repair protocol state, start models/tools, or compact. Bound each read and pair it with a revision of the retained context; if a later page's revision differs because of append, update, replacement or reset, refuse it so the caller can refresh rather than mix snapshots. Preserve content, image blocks, opaque signatures and metadata without truncation or rewriting.
 
 ## Constraints, specifications and requirements

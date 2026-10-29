@@ -139,8 +139,9 @@ export class AgentData {
         const result = await rows(this.pool, 'SELECT id FROM agents ORDER BY id');
         return result.map(row => row.id as string);
     }
+    // Read in primary-key position order; the identity index can trigger a filesort of large JSON bodies.
     private async contextRows(db: Db, agent: AgentRecord): Promise<ContextHistory> {
-        const records = await rows(db, 'SELECT position,id,entry FROM agent_context_entries WHERE agent_id = ? ORDER BY position', [agent.id]);
+        const records = await rows(db, 'SELECT position,id,entry FROM agent_context_entries FORCE INDEX (PRIMARY) WHERE agent_id = ? ORDER BY position', [agent.id]);
         if (records.length !== agent.contextLength || records.some((row, index) => row.position !== index + 1))
             throw new AppError('corrupt_data', 'Context row order or length is invalid', 500);
         const entries = records.map(row => decode<ContextEntry>(row.entry, value => validateEntries([value])));
@@ -198,7 +199,7 @@ export class AgentData {
             const agent = await this.agent(db, agentId);
             if (agent.contextFormat !== 1) throw new AppError('runtime_unavailable', 'Agent context migration is incomplete', 503);
             checkContextPage(agent.contextRevision, agent.contextLength, input);
-            const records = await rows(db, 'SELECT position,id,entry FROM agent_context_entries WHERE agent_id = ? AND position > ? ORDER BY position LIMIT ' + input.limit, [agentId, input.offset]);
+            const records = await rows(db, 'SELECT position,id,entry FROM agent_context_entries FORCE INDEX (PRIMARY) WHERE agent_id = ? AND position > ? ORDER BY position LIMIT ' + input.limit, [agentId, input.offset]);
             const expected = Math.min(input.limit, agent.contextLength - input.offset);
             if (records.length !== expected || records.some((row, index) => row.position !== input.offset + index + 1))
                 throw new AppError('corrupt_data', 'Context page order or length is invalid', 500);

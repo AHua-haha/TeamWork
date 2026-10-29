@@ -115,3 +115,7 @@ Verification for this change: backend build/type checks passed; 37 focused Agent
 ### Shared attribution format migration
 
 Team supplies a complete attribution string through GroupContextMessage.sender; Agent adds no message-index prefix. For an own accepted final it inserts only that attribution text block after thinking, leaving the original signed answer/thinking blocks intact. `refreshSharedAttribution(agentId, groupId, groups)` is a startup-only public data operation: `sharedAttributionUpdates` finds incorporated shared IDs, refreshes old user-message envelopes and replaces the old attribution-only assistant block, then patches only changed mutable rows. Stable message history, consumption positions and signed blocks are unchanged. Repeated migration is a no-op; legacy Agent adoption uses current Team envelopes.
+
+### Ordered context inspection access path
+
+Current-context restoration and paginated inspection explicitly use the `(agent_id, position)` primary index. The identity secondary index can otherwise produce `Using filesort`, causing `ER_OUT_OF_SORTMEMORY` for large native JSON entries under the normal MySQL sort buffer. Reads now stream the ordered index range without sorting payloads; pagination/revision checks and complete message content are unchanged. The regression pages 339 entries including a message larger than the normal sort buffer, verifies exact content/order and checks that query plans have no filesort.

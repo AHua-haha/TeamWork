@@ -32,6 +32,8 @@ Workspace uses the shared backend client and composes shared UI with workspace-s
 
 ### Workspace context inspection
 
+Show loaded and total counts for the selected current context, including an explicit all-loaded state. Compaction can reduce that total; this view is not the immutable execution-history archive. Show Load more only when the backend returns a next offset. Keep the pagination footer visible below independently scrollable message-list/detail panes; it must not sit below their offscreen content. Revision conflicts disable further paging until refresh. An initial request failure must not imply that the context has zero messages.
+
 The readable tool-result view renders only native content blocks (text/images). Do not append the tool’s internal `details` object as message content; it is not an additional model-visible result. Preserve the stored message unchanged, including `details` in explicit raw-data inspection.
 
 

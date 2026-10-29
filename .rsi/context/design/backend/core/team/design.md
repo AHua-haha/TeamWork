@@ -108,3 +108,5 @@ Legacy public design, project-file, managed-context browsing and detailed Team i
 ### Member file response handler integration
 
 Install Agent's independent file response handler for each member using its workspace root for relative-path resolution only. Agent owns read/write/edit declarations, direct filesystem effects and file-view context maintenance; Team does not route these calls through Harness file permissions. Member instructions explain the effective file capability and preserve assigned design responsibilities as guidance. Initialize resident handlers only after the member acquires its serial execution slot, so asynchronous configuration/state loading cannot reorder admitted runs.
+
+Ordered shared-context reads follow their position-key range without sorting native message payloads. Large message content must not require a larger database sort buffer for inspection or restoration.

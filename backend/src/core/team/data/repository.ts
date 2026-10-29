@@ -74,7 +74,7 @@ export class TeamData implements TeamStore, ChatStore {
             const includeSummary = !!summary && input.offset === 0;
             const wanted = Math.max(0, Math.min(input.limit, total - input.offset) - (includeSummary ? 1 : 0));
             const offset = Math.max(0, input.offset - (summary ? 1 : 0));
-            const records = wanted ? await rows(db, 'SELECT position,id,entry FROM chat_context_entries WHERE workspace_id = ? AND position > ? AND position <= ? ORDER BY position LIMIT ' + wanted + ' OFFSET ' + offset, [workspaceId, summary?.through ?? resetPosition, upper]) : [];
+            const records = wanted ? await rows(db, 'SELECT position,id,entry FROM chat_context_entries FORCE INDEX (PRIMARY) WHERE workspace_id = ? AND position > ? AND position <= ? ORDER BY position LIMIT ' + wanted + ' OFFSET ' + offset, [workspaceId, summary?.through ?? resetPosition, upper]) : [];
             if (records.length !== wanted) throw new AppError('corrupt_data', 'Group context page length is invalid', 500);
             const entries = records.map(row => {
                 const entry = decode<GroupContextEntry>(row.entry, validateGroupContextEntry);
@@ -129,7 +129,7 @@ export class TeamData implements TeamStore, ChatStore {
             const [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
             if (settings && settings.context_format !== 2) throw new AppError('runtime_unavailable', 'Group context migration is incomplete', 503);
             const upper = settings?.position ?? 0, resetPosition = settings?.reset_position ?? 0;
-            const records = await rows(db, 'SELECT position,id,entry FROM chat_context_entries WHERE workspace_id = ? AND position > ? AND position <= ? ORDER BY position', [workspaceId, resetPosition, upper]);
+            const records = await rows(db, 'SELECT position,id,entry FROM chat_context_entries FORCE INDEX (PRIMARY) WHERE workspace_id = ? AND position > ? AND position <= ? ORDER BY position', [workspaceId, resetPosition, upper]);
             if (records.length !== (settings?.context_length ?? 0)) throw new AppError('corrupt_data', 'Group context row length differs from its bookkeeping', 500);
             const entries = records.map(row => {
                 const entry = decode<GroupContextEntry>(row.entry, validateGroupContextEntry);

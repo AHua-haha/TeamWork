@@ -3252,3 +3252,36 @@ test('runtime restores file references across runs and restart, and context rese
     assert.equal(factories, 3);
   } finally {store.agents.getContext = getContext; await f.runtime.close(); await rm(directory, {recursive: true, force: true});}
 });
+
+test('large context inspection pages follow position order without sorting native JSON payloads', {timeout: 30000}, async () => {
+  const entries: ContextEntry[] = Array.from({length: 339}, (_, i) => ({messageId: randomUUID(), message: {role: 'user', content: i === 5 ? 'large signed tool payload '.repeat(20000) : `message ${i}`, timestamp: i}, metadata: {index: i}}));
+  const {agentId} = await store.agents.createAgent(undefined, entries);
+  const plans: {key: string; Extra: string}[] = [];
+  const transaction = store.storage.transaction;
+  store.storage.transaction = function(operation) {
+    return transaction.call(this, async db => {
+      const execute = db.execute;
+      db.execute = async function(this: typeof db, sql: any, values: any) {
+        if (typeof sql === 'string' && /^SELECT position,id,entry FROM agent_context_entries/.test(sql)) {
+          const [plan] = await (execute as any).call(this, 'EXPLAIN ' + sql, values);
+          plans.push(...plan);
+        }
+        return (execute as any).call(this, sql, values);
+      } as typeof execute;
+      try {return await operation(db);} finally {db.execute = execute;}
+    }) as any;
+  };
+  try {
+    const loaded: ContextEntry[] = [];
+    let next: number | null = 0;
+    while (next !== null) {
+      const page = await store.agents.inspectContext(agentId, {offset: next, limit: 100, revision: 0});
+      assert.equal(page.total, 339); assert.ok(page.entries.length <= 100);
+      loaded.push(...page.entries); next = page.nextOffset;
+    }
+    assert.deepEqual(loaded, entries);
+    assert.deepEqual((await store.agents.getContext(agentId)).entries, entries);
+    assert.equal(plans.length, 5);
+    assert.ok(plans.every(plan => !/filesort/i.test(plan.Extra)), JSON.stringify(plans));
+  } finally {store.storage.transaction = transaction;}
+});

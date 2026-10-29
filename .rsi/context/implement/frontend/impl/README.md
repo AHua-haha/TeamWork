@@ -126,3 +126,9 @@ Tool result `<pre>` blocks now preserve long backend lines without wrapping and 
 **Changed:** `frontend/src/app/styles.css`.
 
 **Verification:** `npm run check --prefix frontend`, `npm test --prefix frontend` (76 passed), and `git diff --check` pass.
+
+### Current context pagination clarity and layout
+
+`ContextTab` retains backend `total`, displays loaded/total counts, and distinguishes an initial request failure from an empty context. `ContextPagination` is a fixed flex footer outside the independently scrollable list/detail panes; Load more remains reachable while scrolling either pane, and is disabled on stale revisions until refresh. Exhausted contexts explicitly show that every current-context message is loaded (for example, 73 of 73 after compaction). This does not substitute immutable execution history for the current context. Existing horizontal output scrolling remains intact.
+
+Verification: 79 frontend tests and 95 disposable-MySQL integration tests passed; both builds passed. Read-only verification paged every member in the deployed team-work database through the patched data reader. Browser checks confirmed Lead opening, 100-to-200 message pagination, the footer inside a 1280×720 viewport, and the exhausted Backend context state.
