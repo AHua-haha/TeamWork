@@ -5,12 +5,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fauxAssistantMessage, fauxProvider, Type, type JsonObject, type ToolCall } from '@earendil-works/pi-ai';
 import { png } from './image-fixture.js';
+import {AgentState, AgentContextState} from '../src/core/agent/data/state.js';
+import {AgentMessageData, AgentTurnData} from '../src/core/agent/data/messages.js';
 import { AgentExecution, fixedPolicy } from '../src/core/agent/agent.js';
 import type { ModelStream, RuntimeTool, RuntimePolicy } from '../src/core/agent/contracts.js';
-import {DefaultReactHarness} from '../src/core/agent/react-harness.js';
-import {resetMemberShell} from '../src/core/agent/tools/bash.js';
-import { FileReactHarness } from '../src/core/agent/file-react-harness.js';
-import type { ReactHarnessData, CompletedMessage, ContextHistory, ReactHarnessMessageEffects, RunState } from '../src/core/agent/data/model.js';
+import {DefaultReactHarness} from '../src/core/react-harness/default/harness.js';
+import {resetMemberShell} from '../src/core/react-harness/default/bash.js';
+import { FileReactHarness } from '../src/core/react-harness/file/harness.js';
+import type { ComponentState, CompletedMessage, ContextHistory, ComponentMessageEffects, RunState } from '../src/core/agent/data/model.js';
 
 const model = fauxProvider().getModel();
 const call = (id: string, name: string, arguments_: JsonObject): ToolCall => ({type: 'toolCall', id, name, arguments: arguments_});
@@ -21,10 +23,10 @@ async function fixture(t: TestContext, initial: Record<string, string> = {}) {
   await mkdir(root);
   t.after(() => rm(directory, {recursive: true, force: true}));
   for (const [path, content] of Object.entries(initial)) { await mkdir(dirname(join(root, path)), {recursive: true}); await writeFile(join(root, path), content); }
-  let state: ReactHarnessData = {revision: 0, data: {}};
+  let state: ComponentState = {revision: 0, data: {}};
   let handler = new FileReactHarness(root, state);
   let context: ContextHistory = {revision: 0, entries: []};
-  const history: CompletedMessage[] = [], commits: ReactHarnessMessageEffects[] = [], requests: string[] = [], systemPrompts: string[] = [];
+  const history: CompletedMessage[] = [], commits: ComponentMessageEffects[] = [], requests: string[] = [], systemPrompts: string[] = [];
   let failCommit = false;
   async function run(turns: ToolCall[][], tools: RuntimeTool[] = [], policyExtra: Partial<RuntimePolicy> = {}) {
     let index = 0;
@@ -39,7 +41,7 @@ async function fixture(t: TestContext, initial: Record<string, string> = {}) {
     const run: RunState = {agentId: 'agent', runId: `run-${history.length}`, status: 'running', phase: 'model', step: 0, startedAt: 1, endedAt: null, endPosition: null, activeMessageId: null, error: null};
     const execution = new AgentExecution(run, context, history.length, {model, tools, systemPrompt: 'Caller rules.', options: {}}, {...fixedPolicy(model, tools, 'Caller rules.'), createReactHarnesses: () => [handler], ...policyExtra}, stream, {
       message: async record => { history.push(structuredClone(record)); return record; },
-      reactHarnessMessage: async (record, effects) => {
+      componentMessage: async (record, effects) => {
         if (failCommit) throw new Error('transaction rolled back');
         assert.equal(effects.revision, state.revision);
         state = {revision: state.revision + 1, data: structuredClone(effects.data)};
@@ -225,18 +227,21 @@ test('persistence failure is fatal, publishes no handler state, and does not rep
 
 test('legacy file ranges obtain a visible reference once from restored context', async t => {
   const f = await fixture(t, {'file.txt': 'one\ntwo'});
-  const initial: ReactHarnessData = {revision: 0, data: {files: {'file.txt': {ranges: [{start: 1, end: 1}]}}}};
+  const initial: ComponentState = {revision: 0, data: {files: {'file.txt': {ranges: [{start: 1, end: 1}]}}}};
   const handler = new FileReactHarness(f.root, initial);
   const legacy = {messageId: 'legacy-read', message: {role: 'toolResult' as const, toolName: 'read', toolCallId: 'old', content: [{type: 'text' as const, text: 'old view'}], isError: false, timestamp: 1}, metadata: {fileViewPath: 'file.txt'}};
-  handler.restoreContext({revision: 1, entries: [legacy]});
-  handler.restoreContext({revision: 2, entries: [],}); // Later activations do not rescan/rebuild references.
+  handler.restoreContext(new AgentContextState({revision:1,entries:[legacy]}));
+  handler.restoreContext(new AgentContextState({revision:2,entries:[]})); // Later activations do not rescan/rebuild references.
   let previous: string | undefined;
-  const calls = [call('read', 'read', {path: 'file.txt'})];
-  await handler.handle(fauxAssistantMessage(calls, {stopReason: 'toolUse'}), {
-    scope: {signal: new AbortController().signal} as never, toolCalls: calls,
-    beforeToolCall: async () => undefined, validateToolCall: c => c.arguments,
-    recordToolResult: async (c, output, _metadata, commit) => {previous = commit?.hideMessageId; return {...output, role: 'toolResult', toolCallId: c.id, toolName: c.name, timestamp: 1};},
-    contextEntry: () => undefined, execute: async () => {throw new Error('not used');}, appendHint: async () => undefined, updateMetadata: async () => undefined, suppressToolCallArguments: async () => undefined,
+  const calls = [call('read', 'read', {path: 'file.txt'})], response = fauxAssistantMessage(calls,{stopReason:'toolUse'});
+  const run: RunState = {agentId:'agent',runId:'legacy',status:'running',phase:'tools',step:1,startedAt:1,endedAt:null,endPosition:null,activeMessageId:null,error:null};
+  const assistant = {agentId:'agent',runId:'legacy',position:1,messageId:'assistant',message:response,metadata:{}};
+  const state = new AgentState(run,{revision:2,entries:[legacy,{messageId:'assistant',message:response,metadata:{}}]},1);
+  const messages = new AgentMessageData(state,{componentMessage:async(record,effects)=>{previous=effects.metadataUpdates[0]?.messageId;return record;}});
+  await handler.handle(response, {
+    scope: {signal:new AbortController().signal} as never,toolCalls:calls,
+    beforeToolCall:async()=>undefined,validateToolCall:c=>c.arguments,
+    execute:async()=>{throw new Error('not used');},data:new AgentTurnData(messages,assistant),
   });
   assert.equal(previous, 'legacy-read');
 });
@@ -260,7 +265,7 @@ test('compaction executes handler-owned file tools and retains only the latest v
   const execution = new AgentExecution(initial, {revision: 0, entries: [{messageId: 'large', message: {role: 'user', content: 'old '.repeat(15000), timestamp: 1}, metadata: {}}]}, 0,
     {model, tools: [], systemPrompt: '', options: {}, compaction: {thresholdTokens: 4000, prompt: 'Preserve useful context; do not continue work.'}},
     {...base, createReactHarnesses: () => [handler], buildRequest: async(scope, history) => {mode = scope.mode!; return base.buildRequest(scope, history);}}, stream,
-    {message: async record => {stable.push(structuredClone(record)); return record;}, compactionMessage: async record => {stable.push(structuredClone(record)); return record;}, reactHarnessMessage: async record => {stable.push(structuredClone(record)); return record;}});
+    {message: async record => {stable.push(structuredClone(record)); return record;}, compactionMessage: async record => {stable.push(structuredClone(record)); return record;}, componentMessage: async record => {stable.push(structuredClone(record)); return record;}});
   assert.equal((await execution.run(new AbortController().signal)).status, 'completed');
   const results = execution.snapshot().context.entries.filter(entry => entry.message.role === 'toolResult');
   assert.equal(results.length, 2); assert.equal(results[0]!.metadata.modelContextHidden, true); assert.equal(results[1]!.metadata.modelContextHidden, undefined);

@@ -1,9 +1,9 @@
 import {createLsTool, createFindTool, createGrepTool} from '@earendil-works/pi-coding-agent';
 import {Type} from '@earendil-works/pi-ai';
-import type {RuntimeTool} from '../contracts.js';
+import type {RuntimeTool} from '../../agent/data/index.js';
 import {executeBash, parseBashInput} from './bash.js';
-import {backgroundStartTimeoutMs, commandTimeoutMs} from '../data/bash.js';
-import {agentPrompt} from '../prompts.js';
+import {backgroundStartTimeoutMs, commandTimeoutMs} from './bash-model.js';
+import {defaultPrompt} from './prompts.js';
 
 /** Native Pi operations, unchanged. File read/write/edit belong exclusively to FileReactHarness. */
 export function defaultTools(root: string, extras: RuntimeTool[] = []): RuntimeTool[] {
@@ -33,7 +33,7 @@ export function bashTool(root: string): RuntimeTool {
       const background = args.background === true;
       const timeoutSeconds = background ? backgroundStartTimeoutMs / 1000 : typeof args.timeout === 'number' ? args.timeout : commandTimeoutMs / 1000;
       const hints = [
-        ...(timedOut ? [agentPrompt(background ? 'bash-background-timeout' : 'bash-timeout', { timeout_seconds: String(timeoutSeconds) })] : []),
+        ...(timedOut ? [defaultPrompt(background ? 'bash-background-timeout' : 'bash-timeout', { timeout_seconds: String(timeoutSeconds) })] : []),
         ...(shellRestarted ? ['Member shell restarted; previous shell state and job handles are no longer available.'] : []),
         ...(truncated ? ['Output truncated: showing the last 50 KiB. Redirect to a workspace file and read selected ranges to retain more output.'] : []),
       ];

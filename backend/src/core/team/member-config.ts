@@ -1,4 +1,4 @@
-import {resetMemberShell} from '../agent/tools/bash.js';
+import {resetMemberShell} from '../react-harness/index.js';
 import { fileChanges, configurationCommits } from '../workspace/workspace-git.js';
 import { memberRoot } from '../workspace/workspace-layout.js';
 import { randomUUID } from 'node:crypto';

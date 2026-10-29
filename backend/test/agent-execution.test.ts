@@ -92,15 +92,15 @@ test('Agent reads its shared reference only at work boundaries and carries priva
   assert.equal(next.snapshot().context.entries.filter(entry=>entry.messageId==='g1').length,1);
 });
 
-test('assistant response handlers wrap tool execution, metadata updates and deferred private hints', async () => {
+test('React Harnesses using Agent data models wrap tool execution, metadata updates and deferred private hints', async () => {
   const tool = {definition:{name:'check',description:'check',parameters:{type:'object' as const,properties:{}}},execute:async()=>({content:[{type:'text' as const,text:'normal result'}],isError:false})};
   const calls: string[] = [];
   const handler = {
     canHandle: (response: import('@earendil-works/pi-ai').AssistantMessage) => response.content.some(part => part.type === 'toolCall'),
-    handle: async (_response: import('@earendil-works/pi-ai').AssistantMessage, context: import('../src/core/agent/contracts.js').ReactHarnessContext) => {
-      await context.updateMetadata([{messageId:'old-read',metadata:{modelContext:'superseded',other:'kept'}}]);
+    handle: async (_response: import('@earendil-works/pi-ai').AssistantMessage, context: import('../src/core/react-harness/contracts.js').ReactHarnessContext) => {
+      await context.data.updateMetadata([{messageId:'old-read',metadata:{modelContext:'superseded',other:'kept'}}]);
       await context.execute(context.toolCalls[0]!);
-      await context.appendHint({role:'user',content:'Runtime-generated private instruction',timestamp:3},{source:'react-harness'});
+      await context.data.appendInstruction({role:'user',content:'Runtime-generated private instruction',timestamp:3},{source:'react-harness'});
     },
   };
   const response = fauxAssistantMessage([{type:'toolCall',id:'tool-1',name:'check',arguments:{}}],{stopReason:'toolUse'});
@@ -126,12 +126,12 @@ test('assistant response handlers wrap tool execution, metadata updates and defe
   assert.equal(entries[3]!.metadata.source,'react-harness');
 });
 
-test('assistant response handlers can react to a response without executing a tool', async () => {
+test('React Harnesses using Agent data models can react to a response without executing a tool', async () => {
   const response = fauxAssistantMessage('inspection checkpoint');
   const handler = {
     canHandle: () => true,
-    handle: async (_message: import('@earendil-works/pi-ai').AssistantMessage, context: import('../src/core/agent/contracts.js').ReactHarnessContext) => {
-      await context.appendHint({role:'user',content:'A private hint derived from handler state',timestamp:4});
+    handle: async (_message: import('@earendil-works/pi-ai').AssistantMessage, context: import('../src/core/react-harness/contracts.js').ReactHarnessContext) => {
+      await context.data.appendInstruction({role:'user',content:'A private hint derived from handler state',timestamp:4});
     },
   };
   const stream: ModelStream = async function*() {

@@ -11,7 +11,7 @@ import { homedir } from 'node:os';
 import { test } from 'node:test';
 import { designMetadata } from '../src/core/workspace/design.js';
 import { emptyDesignScope, parseDesignScope } from '../src/core/team/data/assignment.js';
-import { parseBashInput } from '../src/core/agent/tools/bash.js';
+import { parseBashInput } from '../src/core/react-harness/default/bash.js';
 import { code, configureAssignment, withTeam, worker } from './team-fixture.js';
 
 const signal = () => new AbortController().signal;

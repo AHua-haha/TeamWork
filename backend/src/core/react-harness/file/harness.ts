@@ -5,8 +5,11 @@ import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { detectSupportedImageMimeTypeFromFile, resizeImage } from '@earendil-works/pi-coding-agent';
 import { Type, type AssistantMessage, type JsonObject, type ToolCall, type ToolResultMessage } from '@earendil-works/pi-ai';
-import type { ReactHarness, ReactHarnessContext, ReactHarnessFactory, ReactHarnessTool } from './contracts.js';
-import { AppError, type ReactHarnessData, type ContextHistory } from './data/model.js';
+import {projectFileContextEntry} from './context.js';
+import type {AgentContextState} from '../../agent/data/index.js';
+import type {ReactHarness, ReactHarnessContext, ReactHarnessFactory, ReactHarnessTool} from '../contracts.js';
+import {AppError} from '../../errors.js';
+import type {ComponentState} from '../../agent/data/index.js';
 
 type Range = { start: number; end: number };
 type FileState = { ranges: Range[]; visibleMessageId: string | null };
@@ -14,7 +17,7 @@ type State = { files: Record<string, FileState> };
 type EditChange = { start: number; oldEnd: number; newEnd: number; delta: number };
 
 const fileToolNames = new Set(['read', 'write', 'edit']);
-const fileToolInstructions = readFileSync(new URL('../../../prompts/agent/file-tools.md', import.meta.url), 'utf8').trim();
+const fileToolInstructions = readFileSync(new URL('./instructions.md', import.meta.url), 'utf8').trim();
 if (!fileToolInstructions) throw new AppError('invalid_config', 'File handler instructions must not be empty', 500);
 
 function normalizeRanges(ranges: Range[]): Range[] {
@@ -111,17 +114,17 @@ export class FileReactHarness implements ReactHarness {
   private revision: number;
   private restoreLegacyReferences: boolean;
 
-  constructor(private readonly root: string, initial: ReactHarnessData) {
+  constructor(private readonly root: string, initial: ComponentState) {
     this.revision = initial.revision;
     this.data = parseState(root, initial.data);
     const source = initial.data.files;
     this.restoreLegacyReferences = !!source && typeof source === 'object' && Object.values(source).some(value => value && typeof value === 'object' && !('visibleMessageId' in value));
   }
 
-  restoreContext(context: ContextHistory): void {
+  restoreContext(context: AgentContextState): void {
     if (!this.restoreLegacyReferences) return;
     // Upgrade pre-reference state once from an already-loaded context, never from SQL or per operation.
-    for (const entry of context.entries) {
+    for (const entry of context.history.entries) {
       const path = entry.metadata.fileViewPath;
       if (typeof path !== 'string' || entry.metadata.modelContextHidden === true || entry.message.role !== 'toolResult' || entry.message.isError) continue;
       const file = this.data.files[resolve(this.root, path)];
@@ -138,6 +141,8 @@ export class FileReactHarness implements ReactHarness {
       { definition: { name: 'edit', description: 'Edit a UTF-8 text file using one or more unique exact string replacements. All oldText matches must exist once in the original file and must not overlap. Returns the current aggregate including changed lines. Use actual source text, excluding presentation markers and metadata.', parameters: Type.Object({path, edits: Type.Array(Type.Object({oldText: Type.String({minLength: 1}), newText: Type.String()}, {additionalProperties: false}), {minItems: 1})}, {additionalProperties: false}) } },
     ];
   }
+
+  projectContextEntry = projectFileContextEntry;
 
   systemPrompt(): string { return fileToolInstructions; }
 
@@ -156,7 +161,7 @@ export class FileReactHarness implements ReactHarness {
       } catch (error) {
         context.scope.signal.throwIfAborted();
         const path = typeof call.arguments.path === 'string' ? call.arguments.path : '(unknown)';
-        await context.recordToolResult(call, {content: [{type: 'text', text: `${call.name} failed: ${errorMessage(error)}\n\n<metadata>\npath: ${safePath(path)}\noperation: ${call.name}\nstatus: error\n</metadata>`}], isError: true});
+        await context.data.recordToolResult(call, {content: [{type: 'text', text: `${call.name} failed: ${errorMessage(error)}\n\n<metadata>\npath: ${safePath(path)}\noperation: ${call.name}\nstatus: error\n</metadata>`}], isError: true});
         continue;
       }
       context.scope.signal.throwIfAborted();
@@ -164,9 +169,9 @@ export class FileReactHarness implements ReactHarness {
       const previous = this.data.files[result.path]?.visibleMessageId;
       const next: State = { files: {...this.data.files, [result.path]: {...result.file, visibleMessageId: messageId}} };
       try {
-        await context.recordToolResult(call, {content: result.content, isError: false}, {fileViewPath: result.path}, {
-          messageId, harnessId: this.harnessId, revision: this.revision, data: next as unknown as JsonObject,
-          ...(previous ? {hideMessageId: previous} : {}), suppressArguments: call.name === 'write',
+        await context.data.recordToolResult(call, {content: result.content, isError: false}, {fileViewPath: result.path}, {
+          messageId, effects: {componentId: this.harnessId, revision: this.revision, data: next as unknown as JsonObject,
+            metadataUpdates: this.viewMetadata(context, previous, call)},
         });
       } catch (error) {
         if (error instanceof AppError && error.code === 'compaction_persistence_failure') throw error;
@@ -175,6 +180,19 @@ export class FileReactHarness implements ReactHarness {
       this.data = next;
       this.revision++;
     }
+  }
+
+  private viewMetadata(context: ReactHarnessContext, previousId: string | null | undefined, call: ToolCall) {
+    const updates: import('../../agent/data/model.js').ContextMetadataUpdate[] = [];
+    const previous = previousId ? context.data.entry(previousId) : undefined;
+    if (previous) updates.push({messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}});
+    if (call.name === 'write') {
+      const assistant = context.data.entry(context.data.assistant.messageId);
+      if (!assistant) throw new AppError('invalid_context_update', 'Assistant response context entry is unavailable');
+      const ids = Array.isArray(assistant.metadata.suppressedToolCallArguments) ? assistant.metadata.suppressedToolCallArguments as string[] : [];
+      updates.push({messageId: assistant.messageId, metadata: {...assistant.metadata, suppressedToolCallArguments: [...new Set([...ids,call.id])]}});
+    }
+    return updates;
   }
 
   private async perform(call: ToolCall, context: ReactHarnessContext): Promise<{path: string; file: FileState; content: ToolResultMessage['content']}> {

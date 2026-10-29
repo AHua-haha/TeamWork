@@ -1,5 +1,5 @@
 import { Type } from '@earendil-works/pi-ai';
-import type { RuntimeTool } from '../contracts.js';
+import type { RuntimeTool } from '../../agent/data/index.js';
 import { toolText, type ToolOutput } from './tool-result.js';
 
 const endpoint = 'https://api.deepseek.com/v1/tools/';

@@ -1,12 +1,12 @@
-import { backgroundStartTimeoutMs, commandTimeoutMs, commandOutputBytes, parseBashInput, type BashInput, type CommandResult } from '../data/bash.js';
-export { commandTimeoutMs, commandOutputBytes, parseBashInput, type BashInput, type CommandResult } from '../data/bash.js';
+import { backgroundStartTimeoutMs, commandTimeoutMs, commandOutputBytes, parseBashInput, type BashInput, type CommandResult } from './bash-model.js';
+export { commandTimeoutMs, commandOutputBytes, parseBashInput, type BashInput, type CommandResult } from './bash-model.js';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomInt, randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { OperationQueue } from '../../operation-queue.js';
-import { AppError } from '../data/model.js';
+import {AppError} from '../../errors.js';
 import { hostShellEnvironment } from './shell-environment.js';
 
 interface BashEnvironment { memberId: string; root: string; request: BashInput; signal: AbortSignal }

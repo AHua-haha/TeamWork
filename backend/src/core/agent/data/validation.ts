@@ -1,5 +1,5 @@
 import type { Message } from '@earendil-works/pi-ai';
-import { identity, position, type ReactHarnessData, type ContextEntry, type RunState } from './model.js';
+import { identity, position, type ComponentState, type ContextEntry, type RunState } from './model.js';
 import { invalid, object, jsonValue } from '../../validation.js';
 
 export function validateMessage(value: unknown): asserts value is Message {
@@ -39,7 +39,7 @@ export function validateMessage(value: unknown): asserts value is Message {
   jsonValue(value);
 }
 
-export function validateReactHarnessData(value: unknown): asserts value is ReactHarnessData {
+export function validateComponentState(value: unknown): asserts value is ComponentState {
   object(value);
   position(value.revision);
   object(value.data);

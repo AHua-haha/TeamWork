@@ -14,9 +14,10 @@ export type * from './contracts.js';
 import { validateCompactionSettings, type CompactionSettings } from './data/compaction.js';
 import { AgentMessageContext } from './data/context.js';
 import { AgentExecution, type AgentObserver } from './agent.js';
-import type { RuntimePolicy, ModelStream, ReactHarness, ReactHarnessFactory } from './contracts.js';
+import type {RuntimePolicy, ModelStream} from './contracts.js';
+import type {ReactHarness} from '../react-harness/index.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
-import { ResidentHarnesses } from './data/resident-harnesses.js';
+import {ReactHarnessRegistry} from '../react-harness/index.js';
 
 interface Job { execution?: AgentExecution; agentId: string; controller: AbortController; done: Promise<void> }
 
@@ -30,9 +31,10 @@ export class AgentRuntime {
   private readonly contextFailures = new Map<string, unknown>();
   private readonly maxSteps: number;
   private readonly pendingStarts = new Set<Promise<RunState>>();
-  private readonly residentHarnesses = new ResidentHarnesses();
+  private readonly harnesses: ReactHarnessRegistry;
 
   constructor(readonly store: AgentData, private readonly config: RunConfigSource, private readonly policy: RuntimePolicy, private readonly stream: ModelStream, private readonly options: { progressCapacity?: number; maxSteps?: number; compaction?: CompactionSettings } = {}) {
+    this.harnesses = new ReactHarnessRegistry(store, policy);
     if (options.compaction) validateCompactionSettings(options.compaction);
     this.progress = new ProgressStore(options.progressCapacity);
     this.maxSteps = options.maxSteps ?? 64;
@@ -49,65 +51,12 @@ export class AgentRuntime {
       await this.store.recoverCompactions();
       await this.store.recoverInterruptedRuns(async run => this.policy.afterRun?.({ ...run, status: 'interrupted' }));
       this.finalizationFailures.clear();
-      this.residentHarnesses.clear();
+      this.harnesses.clear();
       this.accepting = true;
     } catch (error) {
       await this.store.releaseRuntime();
       throw error;
     }
-  }
-
-  private async harnessesFor(agentId: string): Promise<ReactHarness[]> {
-    return this.residentHarnesses.get(agentId, async () => {
-      const factories = await this.policy.createReactHarnessFactories?.(agentId) ?? [];
-      const ids = new Set<string>();
-      const harnesses: ReactHarness[] = [];
-
-      for (const factory of factories) {
-        if (!factory.harnessId || ids.has(factory.harnessId)) {
-          throw new AppError('invalid_config', `Duplicate or empty React Harness id: ${factory.harnessId}`);
-        }
-        ids.add(factory.harnessId);
-
-        const state = await this.store.getReactHarnessData(agentId, factory.harnessId);
-        let acknowledged = state;
-        let saving = Promise.resolve();
-
-        const persist = (revision: number, data: JsonObject) => {
-          const operation = saving.then(async () => {
-            try {
-              const next = await this.store.saveReactHarnessData(agentId, factory.harnessId, revision, data);
-              acknowledged = next;
-              // Notify resident that harness state has been persisted
-              this.residentHarnesses.changed(agentId, {
-                baseRevision: revision,
-                revision: next.revision,
-                harnessId: factory.harnessId,
-                data: next.data,
-              });
-              return structuredClone(next);
-            } catch (error) {
-              this.residentHarnesses.invalidate(agentId);
-              throw error;
-            }
-          });
-          saving = operation.then(() => undefined);
-          return operation;
-        };
-
-        const harness = factory.create(acknowledged, persist);
-        if (!harness || typeof harness.handle !== 'function' || typeof harness.canHandle !== 'function') {
-          throw new AppError('invalid_config', `Invalid React Harness: ${factory.harnessId}`);
-        }
-        harnesses.push(harness);
-      }
-
-      if (!factories.length) {
-        harnesses.push(...(this.policy.createReactHarnesses?.(agentId) ?? []));
-      }
-
-      return harnesses;
-    });
   }
 
   private available(): void {
@@ -122,7 +71,7 @@ export class AgentRuntime {
     for (const job of this.jobs.values()) job.controller.abort();
     this.progress.close();
     await Promise.allSettled([...this.jobs.values()].map(job => job.done));
-    this.residentHarnesses.clear();
+    this.harnesses.clear();
     await this.store.releaseRuntime();
   }
 
@@ -217,7 +166,7 @@ export class AgentRuntime {
     return '';
   }
 
-  clearProgress(agentId: string): void { this.residentHarnesses.invalidate(agentId); this.progress.clear(agentId); this.contextFailures.delete(agentId); }
+  clearProgress(agentId: string): void { this.harnesses.invalidate(agentId); this.progress.clear(agentId); this.contextFailures.delete(agentId); }
 
   /** Inspection reads durable context even when the execution runtime is unavailable. */
   inspectContext(agentId: string, input: ContextPageInput = {}) { return this.store.inspectContext(agentId, input); }
@@ -274,7 +223,7 @@ export class AgentRuntime {
           try {
             await this.contextUpdates.get(run.agentId);
             execution.attachContext(await this.store.residentContext(run.agentId));
-            harnesses.push(...await this.harnessesFor(run.agentId));
+            harnesses.push(...await this.harnesses.get(run.agentId));
             this.contextFailures.delete(run.agentId);
             return release ?? (() => {});
           } catch (error) { release?.(); throw error; }
@@ -284,11 +233,12 @@ export class AgentRuntime {
         assertActive: () => this.store.assertRuntime(),
         messageStart: state => this.store.beginMessage(state.agentId, state.runId, state.activeMessageId!, state.step),
         message: record => this.store.commitMessage(record.agentId, record.runId, { messageId: record.messageId, message: record.message, metadata: record.metadata }),
-        reactHarnessMessage: async (record, effects) => {
-          try { return await this.store.commitReactHarnessMessage(record, effects); }
-          catch (error) { this.residentHarnesses.invalidate(run.agentId); throw error; }
+        componentMessage: async (record, effects) => {
+          try { return await this.store.commitComponentMessage(record, effects); }
+          catch (error) { this.harnesses.invalidate(run.agentId); throw error; }
         },
         contextChanged: (revision, entries) => this.replaceContext(run.agentId, revision, entries),
+        compactionMetadata: (id, updates) => this.store.patchCompactionMetadata(run.agentId, id, updates),
         contextPatched: (revision, patch) => this.store.patchContext(run.agentId, revision, patch),
         compactionStarted: state => this.store.beginCompaction(state),
         compactionMessage: record => this.store.commitCompactionMessage(record),

@@ -67,3 +67,8 @@ export function interruptedCompactionContext(current: ContextHistory, recorded: 
   entries.push(compactionInput(`Context compaction ended without replacement${error ? ` (${error.code}): ${error.message}` : '.'} No old context was discarded. Recorded preparation tools may have changed external state; inspect it before acting. Preparation is over; resume ordinary work only when the caller requests it.`, {source: 'context-compaction-recovery'}));
   return entries;
 }
+
+export async function compactionAcknowledgement<T>(operation: () => Promise<T> | undefined): Promise<T | undefined> {
+  try { return await operation(); }
+  catch (error) { throw new AppError('compaction_persistence_failure', `Context preparation could not be acknowledged: ${error instanceof Error ? error.message : 'persistence failed'}`); }
+}

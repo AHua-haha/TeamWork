@@ -24,8 +24,8 @@ No agent activation or implicit acceptance from conversation/run completion. Exi
 
 ## Code map
 
-- [Member instructions](../../../../../../../../../../../backend/src/core/team/member-instructions.ts), [management base](../../../../../../../../../../../backend/prompts/agent/default-react-harness.md), [member maintenance rules](../../../../../../../../../../../backend/prompts/agent/default-react-harness.md).
-- [Team composition](../../../../../../../../../../../backend/src/core/team/team-system.ts), [member service](../../../../../../../../../../../backend/src/core/team/member-config.ts), [harness assembly](../../../../../../../../../../../backend/src/core/agent/react-harness.ts).
+- [Member instructions](../../../../../../../../../../../backend/src/core/team/member-instructions.ts), [management base](../../../../../../../../../../../backend/src/core/react-harness/default/prompts/instructions.md), [member maintenance rules](../../../../../../../../../../../backend/src/core/react-harness/default/prompts/instructions.md).
+- [Team composition](../../../../../../../../../../../backend/src/core/team/team-system.ts), [member service](../../../../../../../../../../../backend/src/core/team/member-config.ts), [harness assembly](../../../../../../../../../../../backend/src/core/react-harness/default/harness.ts).
 
 ## Verification
 

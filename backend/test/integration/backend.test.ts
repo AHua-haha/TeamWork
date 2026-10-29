@@ -8,7 +8,7 @@ import { gitText } from '../../src/core/workspace/workspace-git.js';
 import { seedDesign } from '../design-fixture.js';
 import { testModels, testModelValidator } from '../memory-store.js';
 import { emptyDesignScope } from '../../src/core/team/data/assignment.js';
-import { closeBashRuntime } from '../../src/core/agent/tools/bash.js';
+import { closeBashRuntime } from '../../src/core/react-harness/default/bash.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -26,7 +26,7 @@ import { createBackendModels } from '../../src/core/agent/providers.js';
 import { AgentRuntime, configuredPolicy, fixedPolicy, piModelStream, type ModelRequest, type RuntimePolicy, type RuntimeTool } from '../../src/core/agent/runtime.js';
 import { createAgentServer } from '../../src/api/http.js';
 import { TeamSystem } from '../../src/core/team/team-system.js';
-import { webTools } from '../../src/core/agent/tools/web-tools.js';
+import { webTools } from '../../src/core/react-harness/default/web-tools.js';
 import { newLead } from '../../src/core/team/data/members.js';
 import { WorkspaceService } from '../../src/core/workspace/workspace.js';
 import type { ContextCommit } from '../../src/core/workspace/data/context-base.js';
@@ -2639,9 +2639,9 @@ test('Agent owns durable execution/context independently of Team or Workspace sc
     assert.deepEqual(Object.keys(await data.executionState(agentId)).sort(),['activeRunId','historyPosition','id']);
     const [tables]=await storage.pool.query<any[]>('SHOW TABLES');
     assert.deepEqual(tables.map(row=>Object.values(row)[0]).sort(),['agent_assistant_response_handler_state','agent_context_entries','agents','context_compactions','messages','runs']);
-    const savedHandlerState=await data.saveReactHarnessData(agentId,'file-handler',0,{lastPath:'README.md'});
+    const savedHandlerState=await data.saveComponentState(agentId,'file-handler',0,{lastPath:'README.md'});
     assert.deepEqual(savedHandlerState,{revision:1,data:{lastPath:'README.md'}});
-    await assert.rejects(data.saveReactHarnessData(agentId,'file-handler',0,{lastPath:'stale'}),code('context_conflict'));
+    await assert.rejects(data.saveComponentState(agentId,'file-handler',0,{lastPath:'stale'}),code('context_conflict'));
     const rolledBack=randomUUID();
     await assert.rejects(storage.transaction(async db=>{
       const session=data.inTransaction(db);await session.createRecord(rolledBack);await session.admitRun(rolledBack);throw new Error('rollback owner operations');
@@ -2650,7 +2650,7 @@ test('Agent owns durable execution/context independently of Team or Workspace sc
     await runtime.close();await storage.close();
     reopened=new MySqlStorage(url.toString());const restored=new AgentData(reopened);await restored.migrate();
     assert.deepEqual(await restored.getContext(agentId),context);assert.deepEqual(await restored.runMessages(agentId,run.runId),history);
-    assert.deepEqual(await restored.getReactHarnessData(agentId,'file-handler'),savedHandlerState);
+    assert.deepEqual(await restored.getComponentState(agentId,'file-handler'),savedHandlerState);
   }finally{await runtime.close();await storage.close();await reopened?.close();await store.pool.query(`DROP DATABASE ${database}`);}
 });
 
@@ -3187,7 +3187,7 @@ test('file aggregates atomically append one result, patch only old metadata and 
   const run = await store.agents.admitRun(agentId);
   const resident = await store.agents.residentContext(agentId);
   const record = {agentId, runId: run.runId, position: 1, messageId: randomUUID(), message: {role: 'toolResult' as const, toolName: 'read', toolCallId: 'new', content: [{type: 'text' as const, text: 'new aggregate'}], isError: false, timestamp: 2}, metadata: {fileViewPath: '/workspace/file.ts'}};
-  const effects = {harnessId: 'file-content', revision: 0, data: {files: {'/workspace/file.ts': {ranges: [{start: 1, end: 2}], visibleMessageId: record.messageId}}}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]};
+  const effects = {componentId: 'file-content', revision: 0, data: {files: {'/workspace/file.ts': {ranges: [{start: 1, end: 2}], visibleMessageId: record.messageId}}}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]};
   const statements: {sql: string; bytes: number}[] = [];
   const transaction = store.storage.transaction;
   store.storage.transaction = function(operation) {
@@ -3199,7 +3199,7 @@ test('file aggregates atomically append one result, patch only old metadata and 
   };
   try {
     await store.storage.transaction(async db => {
-      await store.agents.inTransaction(db).commitReactHarnessMessage(record, effects);
+      await store.agents.inTransaction(db).commitComponentMessage(record, effects);
       assert.equal(resident.history.entries.length, 1, 'no speculative append before outer commit');
       assert.equal(resident.entry(previous.messageId)!.metadata.modelContextHidden, undefined);
     });
@@ -3212,16 +3212,16 @@ test('file aggregates atomically append one result, patch only old metadata and 
   assert.equal(resident.entry(previous.messageId)!.metadata.modelContextHidden, true);
   assert.equal(resident.history.entries.length, 2);
   assert.deepEqual(await store.agents.getContext(agentId), resident.history);
-  assert.equal((await store.agents.getReactHarnessData(agentId, 'file-content')).revision, 1);
+  assert.equal((await store.agents.getComponentState(agentId, 'file-content')).revision, 1);
   const before = structuredClone(resident.history);
   const failed = {...record, messageId: randomUUID()};
   const stale = {...effects, metadataUpdates: [{messageId: record.messageId, metadata: {modelContextHidden: true}}]};
-  await assert.rejects(store.agents.commitReactHarnessMessage(failed, stale), code('context_conflict'));
+  await assert.rejects(store.agents.commitComponentMessage(failed, stale), code('context_conflict'));
   assert.deepEqual(await store.agents.getContext(agentId), before, 'state CAS refusal rolls back appended result and visibility');
   assert.deepEqual(resident.history, before);
   assert.equal((await store.agents.runMessages(agentId, run.runId)).length, 1);
   assert.equal((await store.agents.runMessages(agentId, run.runId))[0]!.metadata.modelContextHidden, undefined, 'stable history was not edited');
-  assert.deepEqual((await store.agents.getReactHarnessData(agentId, 'file-content')).data, effects.data);
+  assert.deepEqual((await store.agents.getComponentState(agentId, 'file-content')).data, effects.data);
   await store.agents.finishRun(agentId, run.runId, 'completed');
 });
 
@@ -3233,8 +3233,8 @@ test('preparation journals file-view metadata with handler state and restores it
   await store.agents.beginCompaction(state);
   const makeRecord = (id: string) => ({agentId, runId: run.runId, position: 0, messageId: id, message: {role: 'toolResult' as const, toolName: 'read', toolCallId: id, content: [{type: 'text' as const, text: `view ${id}`}], isError: false, timestamp: 2}, metadata: {source: 'context-compaction', compactionId: state.id, fileViewPath: '/workspace/file.ts'}});
   const first = makeRecord(randomUUID()), second = makeRecord(randomUUID());
-  await store.agents.commitReactHarnessMessage(first, {harnessId: 'file-content', revision: 0, data: {visibleMessageId: first.messageId}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]});
-  await store.agents.commitReactHarnessMessage(second, {harnessId: 'file-content', revision: 1, data: {visibleMessageId: second.messageId}, metadataUpdates: [{messageId: first.messageId, metadata: {...first.metadata, modelContextHidden: true}}]});
+  await store.agents.commitComponentMessage(first, {componentId: 'file-content', revision: 0, data: {visibleMessageId: first.messageId}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]});
+  await store.agents.commitComponentMessage(second, {componentId: 'file-content', revision: 1, data: {visibleMessageId: second.messageId}, metadataUpdates: [{messageId: first.messageId, metadata: {...first.metadata, modelContextHidden: true}}]});
   assert.deepEqual((await store.agents.getContext(agentId)).entries, [previous], 'tentative preparation does not replace or patch ordinary context');
   await store.agents.acquireRuntime(() => undefined);
   try {await store.agents.recoverCompactions();} finally {await store.agents.releaseRuntime();}
@@ -3242,13 +3242,13 @@ test('preparation journals file-view metadata with handler state and restores it
   assert.equal(context.entries.find(entry => entry.messageId === previous.messageId)!.metadata.modelContextHidden, true);
   assert.equal(context.entries.find(entry => entry.messageId === first.messageId)!.metadata.modelContextHidden, true);
   assert.equal(context.entries.find(entry => entry.messageId === second.messageId)!.metadata.modelContextHidden, undefined);
-  assert.deepEqual((await store.agents.getReactHarnessData(agentId, 'file-content')).data, {visibleMessageId: second.messageId});
+  assert.deepEqual((await store.agents.getComponentState(agentId, 'file-content')).data, {visibleMessageId: second.messageId});
   assert.ok((await store.agents.runMessages(agentId, run.runId)).every(entry => entry.metadata.modelContextHidden === undefined), 'recovery preserves original stable history metadata');
   await store.agents.finishRun(agentId, run.runId, 'interrupted');
 });
 
 test('runtime restores file references across runs and restart, and context reset clears handler state', {timeout: 30000}, async () => {
-  const {fileReactHarnessFactory} = await import('../../src/core/agent/file-react-harness.js');
+  const {fileReactHarnessFactory} = await import('../../src/core/react-harness/file/harness.js');
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'runtime-file-handler-')));
   await writeFile(join(directory, 'file.txt'), 'one\ntwo\nthree');
   let factories = 0;
@@ -3272,7 +3272,7 @@ test('runtime restores file references across runs and restart, and context rese
     assert.match(JSON.stringify(second.context.messages), /File view omitted/);
     assert.equal(await store.agents.residentContext(f.agentId), resident);
     assert.equal(loads, 1); assert.equal(factories, 1);
-    const references = await store.agents.getReactHarnessData(f.agentId, 'file-content');
+    const references = await store.agents.getComponentState(f.agentId, 'file-content');
     assert.equal(references.revision, 2);
     await f.runtime.close(); await f.runtime.open();
     const third = await runRead('c', 2);
@@ -3282,7 +3282,7 @@ test('runtime restores file references across runs and restart, and context rese
     assert.equal(restored.entries.filter(entry => entry.message.role === 'toolResult' && entry.metadata.modelContextHidden !== true).length, 1);
     await store.agents.resetConversations([f.agentId]); f.runtime.clearProgress(f.agentId);
     await runRead('d', 1);
-    assert.equal((await store.agents.getReactHarnessData(f.agentId, 'file-content')).revision, 1);
+    assert.equal((await store.agents.getComponentState(f.agentId, 'file-content')).revision, 1);
     assert.equal(factories, 3);
   } finally {store.agents.getContext = getContext; await f.runtime.close(); await rm(directory, {recursive: true, force: true});}
 });
@@ -3350,4 +3350,26 @@ test('member design-scope migration persists canonical rows and snapshots withou
   const reopened=new CoreData(new MySqlStorage(databaseUrl!));
   try {assert.deepEqual(await reopened.team.getMember(current.id),migrated);assert.deepEqual(await reopened.agents.getContext(current.id),context);}finally{await reopened.close();}
  }finally{await f.close();}
+});
+
+test('direct preparation metadata updates journal independently and recover without rewriting stable messages', {timeout:15000},async()=>{
+ const original:ContextEntry={messageId:randomUUID(),message:{role:'user',content:'retained original context',timestamp:1},metadata:{original:true}};
+ const {agentId}=await store.agents.createAgent(undefined,[original]);
+ const run=await store.agents.startRun(agentId,user),before=await store.agents.getContext(agentId),history=await store.agents.runMessages(agentId,run.runId);
+ const state:CompactionState={id:randomUUID(),agentId,runId:run.runId,trigger:'before-model',status:'preparing',startedAt:1,endedAt:null,error:null};
+ await store.agents.beginCompaction(state);
+ const updates=[{messageId:original.messageId,metadata:{original:true,retainedByHarness:true}}];
+ await store.agents.patchCompactionMetadata(agentId,state.id,updates);
+ assert.deepEqual(await store.agents.getContext(agentId),before);assert.deepEqual(await store.agents.runMessages(agentId,run.runId),history);
+ const reopened=new CoreData(new MySqlStorage(databaseUrl!));
+ try {
+  await reopened.agents.acquireRuntime(()=>undefined);
+  await reopened.agents.recoverCompactions();
+  const restored=await reopened.agents.getContext(agentId);
+  assert.deepEqual(restored.entries.find(e=>e.messageId===original.messageId)!.metadata,updates[0]!.metadata);
+  assert.equal(restored.entries.find(e=>e.messageId===original.messageId)!.message.content,'retained original context');
+  assert.deepEqual(await reopened.agents.runMessages(agentId,run.runId),history);
+  await assert.rejects(reopened.agents.patchCompactionMetadata(agentId,state.id,updates),code('context_conflict'));
+ }finally{await reopened.agents.releaseRuntime();await reopened.close();}
+ await store.agents.finishRun(agentId,run.runId,'failed');
 });

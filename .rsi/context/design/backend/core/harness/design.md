@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-This node is retained only so existing member assignment references remain resolvable. It owns no implementation, tools, prompts or permission policy. The separate Harness system is removed. React Harness is an Agent component described in [Agent design](../agent/design.md#react-harness).
+This node is retained only so existing member assignment references remain resolvable. It owns no implementation, tools, prompts or permission policy. The separate Harness system is removed. The current [React Harness system](../react-harness/design.md) is a separate Core sibling that uses Agent data-model operations.
 
 ## Interface contract
 

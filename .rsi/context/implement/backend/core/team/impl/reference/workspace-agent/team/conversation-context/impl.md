@@ -28,7 +28,7 @@ Context persistence refusal prevents acknowledged consumption advancement. Idle 
 - [Read reference policy](../../../../../../../../../../../backend/src/core/team/team-system.ts)
 - [Restoration and idle synchronization](../../../../../../../../../../../backend/src/core/agent/runtime.ts)
 - [Publication and synchronization notification](../../../../../../../../../../../backend/src/core/team/team-runner.ts)
-- [Implementation maintenance instructions](../../../../../../../../../../../backend/prompts/agent/default-react-harness.md)
+- [Implementation maintenance instructions](../../../../../../../../../../../backend/src/core/react-harness/default/prompts/instructions.md)
 - [Context ownership tests](../../../../../../../../../../../backend/test/conversation-context.test.ts)
 - [In-memory execution and acknowledgement tests](../../../../../../../../../../../backend/test/agent-execution.test.ts)
 - [Disposable MySQL/restart/migration/reset/image tests](../../../../../../../../../../../backend/test/integration/backend.test.ts)

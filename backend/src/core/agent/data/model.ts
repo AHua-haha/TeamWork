@@ -14,14 +14,14 @@ export interface ContextHistory {
   entries: ContextEntry[];
 }
 
-export interface ReactHarnessData {
+export interface ComponentState {
   revision: number;
   data: JsonObject;
 }
 
 export interface ContextMetadataUpdate { messageId: string; metadata: JsonObject }
-export interface ReactHarnessMessageEffects {
-  harnessId: string;
+export interface ComponentMessageEffects {
+  componentId: string;
   revision: number;
   data: JsonObject;
   metadataUpdates: ContextMetadataUpdate[];

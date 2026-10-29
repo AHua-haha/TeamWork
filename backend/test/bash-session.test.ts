@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { closeBashRuntime, executeBash, parseBashInput, resetMemberShell, type BashInput } from '../src/core/agent/tools/bash.js';
+import { closeBashRuntime, executeBash, parseBashInput, resetMemberShell, type BashInput } from '../src/core/react-harness/default/bash.js';
 import { withFolder } from './memory-store.js';
 
 after(closeBashRuntime);

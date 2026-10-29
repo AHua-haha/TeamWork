@@ -219,7 +219,7 @@ Integration tests create agents, write data, and intentionally corrupt one test 
 ## Contracts and implementation
 
 - [Backend design](../.rsi/context/design/backend/design.md) and [implementation context](../.rsi/context/implement/backend/impl/README.md).
-- [Core](../.rsi/context/design/backend/core/design.md) owns business behavior, data models, SQL and migrations. Its child systems are Agent, Workspace and Team. Each business owns its related memory and durable models; Agent also owns React Harness capabilities/state.
+- [Core](../.rsi/context/design/backend/core/design.md) owns business behavior, data models, SQL and migrations. Its child systems are Agent, React Harness, Workspace and Team. Each business owns its related memory and durable models; React Harness owns capabilities, instructions and purpose-related state meaning, and directly uses Agent data operations.
 - [API](../.rsi/context/design/backend/api/design.md) owns HTTP/SSE/multipart transport.
 - [Storage](../.rsi/context/design/backend/storage/design.md) supplies MySQL resources and generic transactions, with no business schema.
 - [Runtime](../.rsi/context/design/backend/runtime/design.md) hosts and wires the backend; the agent loop is inside Core.
@@ -314,3 +314,7 @@ Each Core business aggregates its in-memory schema, durable representation and r
 ### Member design assignment
 
 Member records and member.json use a direct `designScope: {working: string[], dependencies: string[]}` field. There is no member Harness configuration, command allowlist or derived implementation permission view. Startup migrates historical records/manifests without changing assignments, model preferences, prompts, Git history or message history; recorded old committed blobs remain readable for review. Newly authored obsolete fields are rejected. Detailed Harness inspection methods and routes are removed; member metadata/context/model settings and configuration review/activation remain.
+
+### React Harness directory and Agent data model
+
+React Harness lives at `src/core/react-harness/`, beside agent/team/workspace. Its public index exports factories/contracts; file/ and default/ keep purpose-owned implementation and Markdown instructions together; data/ holds residency and state restoration. Agent data/messages.ts exposes acknowledged AgentMessageData and AgentTurnData directly to harnesses. Context mutation callbacks formerly constructed by AgentExecution are removed. Generic component-state persistence retains the existing SQL schema and identities. Build copies colocated prompts into the same compiled paths; compaction instructions remain under prompts/agent.

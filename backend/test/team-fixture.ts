@@ -1,6 +1,6 @@
 import { seedDesign } from './design-fixture.js';
 import { after } from 'node:test';
-import { executeBash, type BashInput, closeBashRuntime } from '../src/core/agent/tools/bash.js';
+import { executeBash, type BashInput, closeBashRuntime } from '../src/core/react-harness/default/bash.js';
 import { realpath, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ResolvedRunConfig } from '../src/core/team/data/config.js';

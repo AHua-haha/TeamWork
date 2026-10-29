@@ -1,7 +1,8 @@
 import type {AssistantMessage} from '@earendil-works/pi-ai';
-import type {ReactHarness, ReactHarnessContext, ReactHarnessFactory, RuntimeTool} from './contracts.js';
-import {defaultTools} from './tools/default-tools.js';
-import {agentPrompt} from './prompts.js';
+import type {ReactHarness, ReactHarnessContext, ReactHarnessFactory} from '../contracts.js';
+import type {RuntimeTool} from '../../agent/data/index.js';
+import {defaultTools} from './tools.js';
+import {defaultPrompt} from './prompts.js';
 
 /** Fallback for every unclaimed configured tool, preserving its existing executor and paired result. */
 export class DefaultReactHarness implements ReactHarness {
@@ -10,7 +11,7 @@ export class DefaultReactHarness implements ReactHarness {
   tools(): RuntimeTool[] { return this.root ? defaultTools(this.root, this.extraTools) : []; }
   async systemPrompt(): Promise<string> {
     if (!this.root) return '';
-    return [agentPrompt('default-react-harness', {workspace: this.root}), await this.guidance?.()].filter(Boolean).join('\n\n');
+    return [defaultPrompt('instructions', {workspace: this.root}), await this.guidance?.()].filter(Boolean).join('\n\n');
   }
   async handle(_response: AssistantMessage, context: ReactHarnessContext): Promise<void> {
     for (const call of context.toolCalls) await context.execute(call);

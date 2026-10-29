@@ -31,14 +31,19 @@ test('backend source follows the four agreed boundaries and imports only permitt
     }
   }
   const core = await readdir(join(source, 'core'), { withFileTypes: true });
-  assert.deepEqual(core.filter(entry => entry.isDirectory()).map(entry => entry.name).sort(), ['agent', 'team', 'workspace']);
-  for(const owner of ['agent','team','workspace'])assert.ok((await stat(join(source,`core/${owner}/data`))).isDirectory());
+  assert.deepEqual(core.filter(entry => entry.isDirectory()).map(entry => entry.name).sort(), ['agent', 'react-harness', 'team', 'workspace']);
+  for(const owner of ['agent','react-harness','team','workspace'])assert.ok((await stat(join(source,`core/${owner}/data`))).isDirectory());
   for (const path of await files(join(source, 'core/agent'))) {
     const text = await readFile(path, 'utf8');
-    assert.doesNotMatch(text, /from ['"][^'"]*(?:team|harness|workspace)\//, `${path} must not depend on another business's private model`);
+    assert.doesNotMatch(text, /from ['"][^'"]*(?:team|workspace)\//, `${path} must not depend on another business's private model`);
     if(path.endsWith('/agent.ts')||path.endsWith('/contracts.ts'))assert.doesNotMatch(text,/mysql2|storage\/mysql|CREATE TABLE|this\.store/,`${path} keeps the in-memory execution mechanism reusable`);
   }
-  const owned={agent:['agents','agent_context_entries','agent_assistant_response_handler_state','runs','messages','context_compactions'],team:['members','member_activation','config_records','chat_images','chat_settings','chat_context_summaries','chat_exchanges','chat_messages','chat_context_entries','chat_runs','chat_clock','chat_entries','chat_changes'],workspace:['workspaces','workspace_models','workspace_git_baselines','context_blobs','context_versions','context_files','context_records']};
+  for (const path of await files(join(source,'core/react-harness'))) {
+    const text=await readFile(path,'utf8');
+    assert.doesNotMatch(text,/from ['"][^'"]*agent\/(?:agent|runtime|contracts)\.js/,'React Harness depends on Agent data models, not execution internals');
+  }
+  assert.doesNotMatch(await readFile(join(source,'core/agent/agent.ts'),'utf8'),/modelContextHidden|suppressedToolCallArguments|hideMessageId/,'File context policy belongs to File React Harness');
+  const owned: Record<string,string[]>={'react-harness':[],agent:['agents','agent_context_entries','agent_assistant_response_handler_state','runs','messages','context_compactions'],team:['members','member_activation','config_records','chat_images','chat_settings','chat_context_summaries','chat_exchanges','chat_messages','chat_context_entries','chat_runs','chat_clock','chat_entries','chat_changes'],workspace:['workspaces','workspace_models','workspace_git_baselines','context_blobs','context_versions','context_files','context_records']};
   for(const [owner,tables]of Object.entries(owned)){
     for(const path of await files(join(source,`core/${owner}/data`))){
       const text=await readFile(path,'utf8');

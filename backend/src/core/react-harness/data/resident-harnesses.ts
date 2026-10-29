@@ -1,6 +1,6 @@
 import type { JsonObject } from '@earendil-works/pi-ai';
 import type { ReactHarness } from '../contracts.js';
-import { AppError } from './model.js';
+import {AppError} from '../../errors.js';
 
 export interface ReactHarnessUpdate {
   baseRevision: number;

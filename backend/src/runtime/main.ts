@@ -6,9 +6,9 @@ import { AgentRuntime, configuredPolicy, piModelStream } from '../core/agent/run
 import { createAgentServer } from '../api/http.js';
 import { TeamSystem } from '../core/team/team-system.js';
 import { WorkspaceService } from '../core/workspace/workspace.js';
-import { webTools } from '../core/agent/tools/web-tools.js';
+import { webTools } from '../core/react-harness/index.js';
 import { agentPrompt } from '../core/agent/prompts.js';
-import { closeBashRuntime } from '../core/agent/tools/bash.js';
+import { closeBashRuntime } from '../core/react-harness/index.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Set DATABASE_URL to a MySQL database URL');

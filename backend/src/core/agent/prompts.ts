@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {AppError} from './data/model.js';
-const names = ['bash-timeout', 'bash-background-timeout', 'context-compaction', 'default-react-harness'] as const;
+const names = ['context-compaction'] as const;
 type PromptName = typeof names[number];
 const prompts = new Map(names.map(name => {
   const path = new URL(`../../../prompts/agent/${name}.md`, import.meta.url);

@@ -2,13 +2,13 @@
 
 ## Purpose, responsibilities and boundaries
 
-Compose Agent, Workspace and Team through their public contracts. Coordinate cross-system workflows without moving a child's business state or policy into the parent. Each business aggregates and owns its core in-memory schema, persistence schema/mapping/migrations and related data operations in its data-model part. No central business-data store duplicates those models.
+Compose Agent, React Harness, Workspace and Team through their public contracts. Coordinate cross-system workflows without moving a child's business state or policy into the parent. Each business aggregates and owns its core in-memory schema, persistence schema/mapping/migrations and related data operations in its data-model part. No central business-data store duplicates those models.
 
-For member conversations, Team owns authoritative shared group context; Agent owns its assembled message context and the state needed to consume group messages. Agent assembles purpose-specific React Harnesses that provide capabilities, instructions and rules and manage related private context and durable state. React Harness replaces the separate legacy Harness system and the Assistant Response Handler concept; it is not a new wrapper layer. Agent owns its durable context, private history, execution and compaction state. Team uses Agent’s public interfaces and does not implement Agent persistence.
+For member conversations, Team owns authoritative shared group context; Agent owns its assembled message context and the state needed to consume group messages. React Harness is a separate Core system; Agent assembles its purpose-specific implementations that provide capabilities, instructions and rules and manage related private context and durable state. React Harness replaces the separate legacy Harness system and the Assistant Response Handler concept; it is not a new wrapper layer. Agent owns its durable context, private history, execution and compaction state. Team uses Agent’s public interfaces and does not implement Agent persistence.
 
 ### React Harness transition
 
-The React Harness responsibility and unrestricted development policy are settled in [Agent design](agent/design.md#react-harness). The legacy Harness design is superseded. Agent implements File and Default React Harnesses. Team owns assignment guidance and member review/activation; Workspace owns initialization templates. The separate Harness source tree and permission mechanisms are removed. Member-facing harness configuration and future permission enforcement remain deferred.
+The React Harness responsibility and unrestricted development policy are settled in [React Harness design](react-harness/design.md). The legacy Harness design is superseded. The separate React Harness directory implements File and Default React Harnesses and directly uses Agent data-model operations. Team owns assignment guidance and member review/activation; Workspace owns initialization templates. The separate Harness source tree and permission mechanisms are removed. Member-facing harness configuration and future permission enforcement remain deferred.
 
 ## Interface contract
 

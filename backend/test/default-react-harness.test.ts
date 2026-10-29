@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {mkdir, readFile, writeFile, symlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import type {StepScope} from '../src/core/agent/contracts.js';
-import {DefaultReactHarness} from '../src/core/agent/react-harness.js';
+import {DefaultReactHarness} from '../src/core/react-harness/default/harness.js';
 import {teamTools} from '../src/core/team/member-tools.js';
 import {withTeam, worker} from './team-fixture.js';
 const scope = (agentId: string) => ({agentId,runId:'tools-run',signal:new AbortController().signal} as StepScope);

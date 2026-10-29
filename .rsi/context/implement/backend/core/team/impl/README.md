@@ -133,7 +133,7 @@ TeamData owns the resident shared source transcript and accepted group summary. 
 
 **Input:** `TeamSystem.policy(base)` registers `fileReactHarnessFactory(root)` and `defaultReactHarnessFactory(root, tools, guidance)` for active members. `MemberWorkspace` supplies root, assignment guidance, current/committed control files and review diffs. `resolveAssignment` derives accepted recursive working designs and explicit dependencies.
 
-**Output/effect:** Agent owns tool declarations/executors, instructions and durable React Harness state. Team's assignment mappings describe responsibility, never tool permission. Management `list_models` and `validate_member_config` remain the same business tools but are available to every active member. Validation/committed-file review/user activation remain separate, with existing semantic field restrictions, atomic reviewed change sets and whole-workspace idle checks. Git commits execute normally and do not activate members. The old Git approval HTTP routes are removed.
+**Output/effect:** React Harness owns tool declarations/executors, instructions and related-state meaning; Agent data owns message/context/state persistence operations. Team's assignment mappings describe responsibility, never tool permission. Management `list_models` and `validate_member_config` remain the same business tools but are available to every active member. Validation/committed-file review/user activation remain separate, with existing semantic field restrictions, atomic reviewed change sets and whole-workspace idle checks. Git commits execute normally and do not activate members. The old Git approval HTTP routes are removed.
 
 **Lifecycle:** Team reset/retirement/activation requests Agent-tool shell cleanup. Global cleanup operates on resident shell resources without enumerating Workspace/SQL records, so it remains valid during shutdown.
 
@@ -166,3 +166,7 @@ A read-only check against the deployed `team work` data returned 50 entries (50,
 **Usage:** `{"name":"Backend","role":"developer","responsibility":"Own backend","settings":{},"promptFiles":["prompts/member.md"],"designScope":{"working":["backend/metadata.json"],"dependencies":["shared/metadata.json"]}}`. Edit files, validate the whole `.rsi/members` directory, commit through native Git and explicitly activate the reviewed committed change set while the team is idle.
 
 Verification: 255 backend unit/HTTP tests and 97 disposable-MySQL integration tests passed, including SQL migration/reopen with unchanged private context, stable execution messages and group history. Both backend and frontend production builds passed. New member fields/serialization and existing recursive design/dependency behavior are covered. No application database was directly changed during development; startup performs the metadata migration when the updated backend runs.
+
+### React Harness sibling-module integration
+
+Team imports React Harness factories, web tools and shell lifecycle operations from `core/react-harness/index.ts`. It supplies tools and responsibility guidance to that owner. React Harness uses public Agent data models for message/context/state operations; Team does not implement their context manipulation. Member configuration and assignment fields are unchanged by this directory refactor.
