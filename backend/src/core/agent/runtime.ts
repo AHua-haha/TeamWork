@@ -59,7 +59,7 @@ export class AgentRuntime {
 
   private async handlersFor(agentId: string): Promise<AssistantResponseHandler[]> {
     return this.residentHandlers.get(agentId, async () => {
-      const factories = this.policy.createAssistantResponseHandlerFactories?.(agentId) ?? [];
+      const factories = await this.policy.createAssistantResponseHandlerFactories?.(agentId) ?? [];
       const ids = new Set<string>();
       const handlers: AssistantResponseHandler[] = [];
 
@@ -80,7 +80,7 @@ export class AgentRuntime {
               acknowledged = next;
               // Notify resident that handler state has been persisted
               this.residentHandlers.changed(agentId, {
-                baseRevision: (state as any).revision ?? 0,
+                baseRevision: revision,
                 revision: (next as any).revision ?? ((state as any).revision ?? 0) + 1,
                 handlerId: factory.handlerId,
                 data: (next as any).data ?? next,
@@ -217,7 +217,7 @@ export class AgentRuntime {
     return '';
   }
 
-  clearProgress(agentId: string): void { this.progress.clear(agentId); this.contextFailures.delete(agentId); }
+  clearProgress(agentId: string): void { this.residentHandlers.invalidate(agentId); this.progress.clear(agentId); this.contextFailures.delete(agentId); }
 
   /** Inspection reads durable context even when the execution runtime is unavailable. */
   inspectContext(agentId: string, input: ContextPageInput = {}) { return this.store.inspectContext(agentId, input); }
@@ -266,6 +266,7 @@ export class AgentRuntime {
   private async runLoop(run: RunState, config: ResolvedRunConfig, signal: AbortSignal): Promise<void> {
     try {
       let execution: AgentExecution;
+      const handlers: AssistantResponseHandler[] = [];
       const policy: RuntimePolicy = {
         ...this.policy,
         acquireRun: async (state, activeSignal) => {
@@ -273,16 +274,20 @@ export class AgentRuntime {
           try {
             await this.contextUpdates.get(run.agentId);
             execution.attachContext(await this.store.residentContext(run.agentId));
+            handlers.push(...await this.handlersFor(run.agentId));
             this.contextFailures.delete(run.agentId);
             return release ?? (() => {});
           } catch (error) { release?.(); throw error; }
         },
       };
-      const handlers = await this.handlersFor(run.agentId);
       execution = new AgentExecution(run, { revision: 0, entries: [] }, 0, {...config, ...(this.options.compaction ? {compaction: this.options.compaction} : {})}, policy, this.stream, {
         assertActive: () => this.store.assertRuntime(),
         messageStart: state => this.store.beginMessage(state.agentId, state.runId, state.activeMessageId!, state.step),
         message: record => this.store.commitMessage(record.agentId, record.runId, { messageId: record.messageId, message: record.message, metadata: record.metadata }),
+        handlerMessage: async (record, effects) => {
+          try { return await this.store.commitHandlerMessage(record, effects); }
+          catch (error) { this.residentHandlers.invalidate(run.agentId); throw error; }
+        },
         contextChanged: (revision, entries) => this.replaceContext(run.agentId, revision, entries),
         contextPatched: (revision, patch) => this.store.patchContext(run.agentId, revision, patch),
         compactionStarted: state => this.store.beginCompaction(state),

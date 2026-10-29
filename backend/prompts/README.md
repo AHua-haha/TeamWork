@@ -31,3 +31,5 @@ Pi read/ls/grep/find use default operations for workspace reads. write/edit reta
 
 
 `harness/bash-timeout.md` supplies model-facing foreground timeout recovery guidance in the Bash result metadata. `harness/bash-background-timeout.md` describes the separate background-launch acknowledgment deadline. These release-owned prompts identify tool-enforced limits, preserve shell/job-reset semantics and never request an automatic retry.
+
+`team/file-tools.md` explains the effective Agent-owned read/write/edit capabilities after legacy Harness scope descriptions. It is a required, release-owned prompt packaged with the other team assets. The handler executes direct filesystem operations without Harness file permission checks; Bash and other Harness rules still apply.

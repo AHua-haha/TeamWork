@@ -70,3 +70,7 @@ The semantic-analysis Harness capability is implemented as `semanticSubmissionTo
 ```json
 {"commands": []}
 ```
+
+### Agent-owned file tools
+
+Team members use Agent's declaration-only read/write/edit tools and direct filesystem execution. `HarnessService.fileCapability` and the AgentFileCapability adapter were removed. The original Harness file tools remain for callers without that handler; their policy and Bash enforcement are unchanged. Team appends the release-owned `team/file-tools.md` prompt to clarify the effective capability and keep design responsibilities distinct from access checks.

@@ -10,6 +10,10 @@ Resolve configured harnesses into tools and prompts; check permitted effects at 
 
 The semantic-analysis maintenance Agent may receive a dedicated `submit_group_semantic_information` tool through Harness. Harness owns capability exposure and native tool-input validation; the Team public operation owns semantic source/reference validation, optimistic revision checks, involvement authority and persistence. This tool is available only to the Team-scheduled semantic-analysis run, does not publish a group response, and cannot mutate member context or shared messages. Harness does not persist semantic information or schedule the 32,000-token trigger.
 
+### Agent-owned file handler boundary
+
+Team installs Agent's independent file response handler with the workspace root as path-resolution context only. Its `read`, `write` and `edit` declarations and direct filesystem effects do not inherit Harness permission checks or MemberFiles operations, including when Harness permissions are enabled. Harness retains its existing Bash and other tool policies; it does not authorize or execute the handler's file calls. The old Harness file tools may still serve callers without this handler.
+
 ## Constraints, specifications and requirements
 
 Preserve existing public HTTP/SSE payloads, stable SQL/JSON formats, ordering, authority and lifecycle behavior. Each business owns its core in-memory model and any durable representation, mapping, validation, queries and related operations together. Harness uses other owners’ public interfaces, not their private persistence. Technical Storage supplies engine resources only. Share explicit interface values and lifecycle notifications; keep private runtime state and SQL schemas inside their respective owners. Filesystem/tool effects can precede failures and are never automatically replayed.

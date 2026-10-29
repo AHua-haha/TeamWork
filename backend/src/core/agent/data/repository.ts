@@ -12,7 +12,7 @@ import { AppError, identity, position, type AssistantResponseHandlerData, type C
 import { clearTables, dataTransaction, insertRows, rows, type DataConnection as Db } from '../../data-transaction.js';
 import { schema } from './schema.js';
 import { ResidentContexts, type ContextChange } from './resident-context.js';
-import type { ContextPatch } from './model.js';
+import type { ContextPatch, ContextMetadataUpdate, HandlerMessageEffects } from './model.js';
 export interface AgentDataHooks {
     created?(db: PoolConnection, agentId: string): Promise<void>;
     finished?(db: PoolConnection, run: RunState): Promise<void>;
@@ -240,11 +240,12 @@ export class AgentData {
     async patchContext(agentId: string, revision: number, patch: ContextPatch): Promise<void> {
         position(revision);
         validateEntries([...patch.update, ...patch.append]);
-        if (!patch.update.length && !patch.append.length) return;
+        if (!patch.update.length && !patch.append.length && !patch.metadata?.length) return;
         const saved = structuredClone(patch);
         await this.transaction(async db => {
             const agent = await this.agent(db, agentId, true);
             if (agent.contextRevision !== revision) throw new AppError('context_conflict', 'Context revision changed', 409);
+            await this.writeContextMetadata(db, agentId, saved.metadata ?? []);
             for (const entry of saved.update) {
                 const [result] = await db.execute<ResultSetHeader>('UPDATE agent_context_entries SET entry = ? WHERE agent_id = ? AND id = ?', [encode(entry), agentId, entry.messageId]);
                 if (result.affectedRows !== 1) throw new AppError('context_conflict', 'Context entry no longer exists', 409);
@@ -255,15 +256,23 @@ export class AgentData {
             this.acknowledge(db, agentId, {baseRevision: revision, revision: revision + 1, patch: saved});
         });
     }
-    private async append(db: PoolConnection, agent: AgentRecord, runId: string, entry: ContextEntry): Promise<CompletedMessage> {
+    private async writeContextMetadata(db: Db, agentId: string, updates: ContextMetadataUpdate[]): Promise<void> {
+        for (const update of updates) {
+            identity(update.messageId, 'messageId');
+            const [result] = await db.execute<ResultSetHeader>("UPDATE agent_context_entries SET entry = JSON_SET(entry, '$.data.metadata', CAST(? AS JSON)) WHERE agent_id = ? AND id = ?", [JSON.stringify(update.metadata), agentId, update.messageId]);
+            if (result.affectedRows !== 1) throw new AppError('context_conflict', 'Context entry no longer exists', 409);
+        }
+    }
+    private async append(db: PoolConnection, agent: AgentRecord, runId: string, entry: ContextEntry, metadataUpdates: ContextMetadataUpdate[] = []): Promise<CompletedMessage> {
         validateEntries([entry]);
         const next = agent.historyPosition + 1;
         position(next);
         const serialized = encode(entry);
+        await this.writeContextMetadata(db, agent.id, metadataUpdates);
         await db.execute('INSERT INTO messages (agent_id, position, id, run_id, entry) VALUES (?, ?, ?, ?, ?)', [agent.id, next, entry.messageId, runId, serialized]);
         await db.execute('INSERT INTO agent_context_entries (agent_id,position,id,entry) VALUES (?, ?, ?, ?)', [agent.id, agent.contextLength + 1, entry.messageId, serialized]);
         await db.execute('UPDATE agents SET history_position = ?, context_length = context_length + 1, context_revision = context_revision + 1 WHERE id = ?', [next, agent.id]);
-        this.acknowledge(db, agent.id, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, patch: {append: [entry], update: []}});
+        this.acknowledge(db, agent.id, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, patch: {append: [entry], update: [], ...(metadataUpdates.length ? {metadata: metadataUpdates} : {})}});
         return { ...entry, agentId: agent.id, runId, position: next };
     }
     async startRun(agentId: string, input: UserMessage, runId: string = randomUUID()): Promise<RunState> {
@@ -292,7 +301,7 @@ export class AgentData {
             return agent.historyPosition as number;
         });
     }
-    async commitMessage(agentId: string, runId: string, entry: ContextEntry): Promise<CompletedMessage> {
+    async commitMessage(agentId: string, runId: string, entry: ContextEntry, metadataUpdates: ContextMetadataUpdate[] = []): Promise<CompletedMessage> {
         validateEntries([entry]);
         if (entry.message.role === 'assistant' && !['stop', 'length', 'toolUse'].includes(entry.message.stopReason))
             throw new AppError('invalid_data', 'Only finished model responses can be committed');
@@ -301,11 +310,28 @@ export class AgentData {
             const run = await this.active(db, agent, runId);
             if (entry.message.role === 'assistant' && run.activeMessageId !== entry.messageId)
                 throw new AppError('conflict', 'Assistant message identity does not match active message', 409);
-            const record = await this.append(db, agent, runId, entry);
+            const record = await this.append(db, agent, runId, entry, metadataUpdates);
             if (run.activeMessageId === entry.messageId) {
                 await this.saveRun(db, { ...run, activeMessageId: null, phase: 'tools' });
             }
             return record;
+        });
+    }
+    /** New result, targeted visibility/argument metadata and small handler state acknowledge together. */
+    async commitHandlerMessage(record: CompletedMessage, effects: HandlerMessageEffects): Promise<CompletedMessage> {
+        return this.transaction(async db => {
+            const session = this.inTransaction(db);
+            let saved: CompletedMessage;
+            if (record.metadata.source === 'context-compaction') {
+                saved = await session.commitCompactionMessage(record);
+                const [row] = await rows(db, 'SELECT state FROM context_compactions WHERE id = ? AND agent_id = ? FOR UPDATE', [String(record.metadata.compactionId), record.agentId]);
+                const state = decode<CompactionState>(row!.state, validateCompactionState);
+                const updates = new Map((state.contextMetadata ?? []).map(update => [update.messageId, update]));
+                for (const update of effects.metadataUpdates) updates.set(update.messageId, update);
+                await db.execute('UPDATE context_compactions SET state = ? WHERE id = ?', [encode({...state, contextMetadata: [...updates.values()]}), String(record.metadata.compactionId)]);
+            } else saved = await session.commitMessage(record.agentId, record.runId, {messageId: record.messageId, message: record.message, metadata: record.metadata}, effects.metadataUpdates);
+            await session.saveAssistantResponseHandlerData(record.agentId, effects.handlerId, effects.revision, effects.data);
+            return saved;
         });
     }
     async beginCompaction(state: CompactionState): Promise<void> {
@@ -368,6 +394,8 @@ export class AgentData {
                 const trace = records.map(row => decode<ContextEntry>(row.entry, value => validateEntries([value]))).filter(entry => entry.metadata.compactionId === state.id);
                 const error = { code: 'runtime_restarted', message: 'Runtime stopped during context preparation; recorded effects were not replayed' };
                 const entries = interruptedCompactionContext({ revision: agent.contextRevision, entries: (await this.contextRows(db, agent)).entries }, trace, error);
+                const metadata = new Map((state.contextMetadata ?? []).map(update => [update.messageId, update.metadata]));
+                for (const entry of entries) { const update = metadata.get(entry.messageId); if (update) entry.metadata = update; }
                 await this.writeContext(db, state.agentId, entries);
                 await db.execute('UPDATE agents SET context_length = ?, context_revision = context_revision + 1 WHERE id = ?', [entries.length, state.agentId]);
                 this.acknowledge(db, state.agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries});

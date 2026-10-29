@@ -1,5 +1,5 @@
 import { validateEntries, validateRun } from './validation.js';
-import { AppError, position, type CompletedMessage, type ContextEntry, type ContextHistory, type ContextPatch, type RunState } from './model.js';
+import { AppError, position, type CompletedMessage, type ContextEntry, type ContextHistory, type ContextPatch, type ContextMetadataUpdate, type RunState } from './model.js';
 
 /** One mutable context per loaded agent, independent of any activation. */
 export class AgentContextState {
@@ -28,8 +28,21 @@ export class AgentContextState {
         this.value.entries.push(structuredClone(entry));
         this.value.revision++;
     }
+    entry(messageId: string): ContextEntry | undefined {
+        void this.history;
+        const index = this.indices.get(messageId);
+        return index === undefined ? undefined : this.value.entries[index];
+    }
+    updateMetadata(updates: ContextMetadataUpdate[]): void {
+        for (const update of updates) {
+            const entry = this.entry(update.messageId);
+            if (!entry) throw new AppError('context_conflict', 'Context entry no longer exists', 409);
+            entry.metadata = structuredClone(update.metadata);
+        }
+    }
     patch(revision: number, patch: ContextPatch): void {
         void this.history;
+        this.updateMetadata(patch.metadata ?? []);
         for (const entry of patch.update) {
             const index = this.indices.get(entry.messageId);
             if (index === undefined) throw new AppError('context_conflict', 'Context entry no longer exists', 409);
@@ -51,6 +64,7 @@ export class AgentState {
         this.currentContext = context instanceof AgentContextState ? context : new AgentContextState(context);
         this.currentPosition = historyPosition;
     }
+    get contextModel() { return this.currentContext; }
     get context() { return this.currentContext.history; }
     get run() { return this.currentRun; }
     get historyPosition() { return this.currentPosition; }

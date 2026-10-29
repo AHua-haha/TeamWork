@@ -14,7 +14,7 @@ import { OperationQueue, committedFiles, currentFiles, filesRevision, fileChange
 import { GitCommitControl } from './git-approval.js';
 import { ApprovalRequests } from './data/approvals.js';
 import { MemberFiles, type FileAccess } from './member-files.js';
-import type { RuntimeTool, AgentFileCapability } from '../agent/contracts.js';
+import type { RuntimeTool } from '../agent/contracts.js';
 import type { StoredMember } from '../team/data/members.js';
 import { AppError } from '../agent/data/model.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
@@ -98,9 +98,6 @@ export class HarnessService {
   }
   async operation<T>(id:string,action:()=>Promise<T>):Promise<T>{const member=await this.member(id);return this.operations.run(member?.workspaceId??id,action);}
   async files(id:string):Promise<MemberFiles>{const member=await this.active(id),resolved=await resolveHarness(this.designs,member.workspaceId,member.value.harness);return new MemberFiles((await this.workspaces.record(member.workspaceId)).directory,harnessAccess(member,resolved));}
-  fileCapability(): AgentFileCapability {
-    return { operation: (id, action) => this.operation(id, action), fileInvocation: (id, name, input) => this.fileInvocation(id, name, input), files: id => this.files(id) };
-  }
   /** Invocation authorization; Pi still performs its own default filesystem operations. */
   async fileInvocation(id: string, name: string, input: string): Promise<{ root: string; path: string }> {
     const member = await this.active(id);

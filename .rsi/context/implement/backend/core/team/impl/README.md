@@ -128,3 +128,7 @@ TeamData owns the resident shared source transcript and accepted group summary. 
 **Verification:** Backend `npm run check` and `npm test` passed (248 tests). Frontend `npm run check` and `npm test` passed (103 tests). `git diff --check` passed.
 
 **Remaining:** Detailed Workspace/Team feature components and client methods still exist in frontend but target now-retired inspection routes. Temporary workspace mode hides most of these tabs; remove or migrate those consumers before re-enabling them. `WorkspaceService.get()` and workspace creation can still include context overview for internal/creation callers; public GET calls `record()` and avoids the overview. Pre-existing `.rsi/members` deletions were not modified.
+
+### Independent file handler installation
+
+`TeamSystem.policy.createAssistantResponseHandlerFactories` resolves the member workspace and supplies `fileAssistantResponseHandlerFactory(directory)` through Agent's asynchronous factory hook. It passes no Harness file capability. Agent initializes the resident after serial execution acquisition and reuses it across runs. The required `backend/prompts/team/file-tools.md` asset is appended after Harness context to describe the effective unscoped read/write/edit capabilities while keeping Bash rules and assigned responsibilities.

@@ -27,6 +27,8 @@ import type { WorkspaceService } from '../workspace/workspace.js';
 
 const summaryInstructions = readFileSync(new URL('../../../prompts/team/group-summary.md', import.meta.url), 'utf8').trim();
 if (!summaryInstructions) throw new Error('Group summary instructions must not be empty');
+const fileToolInstructions = readFileSync(new URL('../../../prompts/team/file-tools.md', import.meta.url), 'utf8').trim();
+if (!fileToolInstructions) throw new Error('File tool instructions must not be empty');
 
 
 /** A member as the team's callers see it: its record, and whether it has a run in progress. */
@@ -246,10 +248,13 @@ export class TeamSystem {
     const { management } = teamTools(this.service, this.configuration, this.harness.permissionsEnabled);
     return {
       ...base,
-      createAssistantResponseHandlerFactories: agentId => [
-        ...(base.createAssistantResponseHandlerFactories?.(agentId) ?? []),
-        fileAssistantResponseHandlerFactory(this.harness.fileCapability(),agentId),
-      ],
+      createAssistantResponseHandlerFactories: async agentId => {
+        const factories = await base.createAssistantResponseHandlerFactories?.(agentId) ?? [];
+        const member = await this.service.find(agentId);
+        if (!member) return factories;
+        const workspace = await this.workspaces.record(member.workspaceId);
+        return [...factories, fileAssistantResponseHandlerFactory(workspace.directory)];
+      },
       groupContext: async agentId => {
         const member = await this.service.find(agentId);
         if (!member) return base.groupContext?.(agentId);
@@ -293,7 +298,7 @@ export class TeamSystem {
           throw new AppError('image_not_supported', 'This context contains pictures; select a model with image input', 409);
         }
         const prepared = await this.harness.prepare(scope.agentId, member.value.lead || !this.harness.permissionsEnabled ? management : []);
-        const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
+        const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context, fileToolInstructions].join('\n\n');
         return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };
       },
     };

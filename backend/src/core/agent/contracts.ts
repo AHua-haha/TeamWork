@@ -26,26 +26,18 @@ export interface StepScope {
   recordInput(text: string, metadata: JsonObject): Promise<void>;
 }
 
-export interface AgentFileCapability {
-  operation<T>(agentId: string, action: () => Promise<T>): Promise<T>;
-  fileInvocation(agentId: string, name: string, input: string): Promise<{ root: string; path: string }>;
-  files(agentId: string): Promise<{
-    read: { readFile(path: string): Promise<Buffer> };
-    write: { mkdir(path: string): Promise<void>; writeFile(path: string, content: string): Promise<void> };
-    edit: { readFile(path: string): Promise<Buffer>; writeFile(path: string, content: string): Promise<void> };
-  }>;
-}
-
 export interface RuntimeTool {
   definition: Tool;
   execute(args: JsonObject, scope: StepScope, call: ToolCall): Promise<Pick<ToolResultMessage, 'content' | 'isError' | 'details'>>;
 }
 
+export interface HandlerTool { definition: Tool; execute?: never }
+
 export interface ModelRequest {
   model: Model<Api>;
   models?: Models;
   context: Context;
-  tools: RuntimeTool[];
+  tools: Array<RuntimeTool | HandlerTool>;
   options?: SimpleStreamOptions;
 }
 
@@ -59,13 +51,13 @@ export interface AssistantResponseHandlerContext {
   /** Completes earlier calls in this assistant turn, except explicitly deferred call identities. */
   beforeToolCall(call: ToolCall, deferCallIds?: string[]): Promise<void>;
   /** Records a handler-constructed native result without invoking the configured tool implementation. */
-  recordToolResult(call: ToolCall, output: Pick<ToolResultMessage, 'content'|'isError'|'details'>, metadata?: JsonObject): Promise<ToolResultMessage>;
+  recordToolResult(call: ToolCall, output: Pick<ToolResultMessage, 'content'|'isError'|'details'>, metadata?: JsonObject, commit?: {messageId: string; handlerId: string; revision: number; data: JsonObject; hideMessageId?: string; suppressArguments?: boolean}): Promise<ToolResultMessage>;
+  /** Direct resident lookup, including the preparation context during compaction. */
+  contextEntry(messageId: string): ContextEntry | undefined;
   /** Append an Agent-owned private message after outstanding tool results have been recorded. */
   appendHint(message: Message, metadata?: JsonObject): Promise<void>;
   /** Persist targeted metadata changes without modifying stored message content. */
   updateMetadata(updates: Array<{messageId: string; metadata: JsonObject}>): Promise<void>;
-  /** Hide older result payloads for a canonical file, keeping the specified latest tool-call result visible. */
-  hideFileViews(path: string, keepToolCallId: string): Promise<void>;
   /** Suppress long arguments on successful write calls in future model-facing projections. */
   suppressToolCallArguments(callIds: string[]): Promise<void>;
 }
@@ -74,8 +66,10 @@ export interface AssistantResponseHandlerContext {
 export interface AssistantResponseHandler {
   canHandle(response: AssistantMessage): boolean;
   handle(response: AssistantMessage, context: AssistantResponseHandlerContext): Promise<void>;
-  /** Model-facing tools owned by this handler. Only names already admitted by the policy are installed. */
-  tools?(scope: StepScope): RuntimeTool[];
+  /** Reconcile legacy state once from the already-loaded context when needed. */
+  restoreContext?(context: ContextHistory): void;
+  /** Declarations owned and executed by this handler, independently of Harness tools. */
+  tools?(scope: StepScope): Array<RuntimeTool | HandlerTool>;
   /** Names whose configured implementations are replaced by this handler. */
   overrideToolNames?(scope: StepScope): string[];
 }
@@ -88,7 +82,7 @@ export interface AssistantResponseHandlerFactory {
 
 export interface RuntimePolicy {
   /** Creates durable handler factories. AgentRuntime initializes each factory once per Agent and reuses the instances across runs. */
-  createAssistantResponseHandlerFactories?(agentId: string): AssistantResponseHandlerFactory[];
+  createAssistantResponseHandlerFactories?(agentId: string): AssistantResponseHandlerFactory[] | Promise<AssistantResponseHandlerFactory[]>;
   /** Legacy compatibility: instances are cached per Agent, not created per run. */
   createAssistantResponseHandlers?(agentId: string): AssistantResponseHandler[];
   /** Read reference only; Agent selects incoming messages using its own state. */

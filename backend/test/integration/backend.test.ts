@@ -3146,3 +3146,109 @@ test('group envelope migration preserves stable records and identities, refreshe
     finally{await reopened.close();}
   }finally{await f.close();}
 });
+
+test('file aggregates atomically append one result, patch only old metadata and replace small handler state', {timeout: 30000}, async () => {
+  const previous: ContextEntry = {messageId: randomUUID(), message: {role: 'toolResult', toolName: 'read', toolCallId: 'old', content: [{type: 'text', text: 'large-original-payload '.repeat(15000)}], isError: false, timestamp: 1}, metadata: {fileViewPath: '/workspace/file.ts', other: 'preserved'}};
+  const {agentId} = await store.agents.createAgent(undefined, [previous]);
+  const run = await store.agents.admitRun(agentId);
+  const resident = await store.agents.residentContext(agentId);
+  const record = {agentId, runId: run.runId, position: 1, messageId: randomUUID(), message: {role: 'toolResult' as const, toolName: 'read', toolCallId: 'new', content: [{type: 'text' as const, text: 'new aggregate'}], isError: false, timestamp: 2}, metadata: {fileViewPath: '/workspace/file.ts'}};
+  const effects = {handlerId: 'file-content', revision: 0, data: {files: {'/workspace/file.ts': {ranges: [{start: 1, end: 2}], visibleMessageId: record.messageId}}}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]};
+  const statements: {sql: string; bytes: number}[] = [];
+  const transaction = store.storage.transaction;
+  store.storage.transaction = function(operation) {
+    return transaction.call(this, async db => {
+      const execute = db.execute;
+      db.execute = function(this: typeof db, sql: any, values: any) { statements.push({sql: typeof sql === 'string' ? sql : sql.sql, bytes: JSON.stringify(values ?? []).length}); return (execute as any).call(this, sql, values); } as typeof execute;
+      try {return await operation(db);} finally {db.execute = execute;}
+    }) as any;
+  };
+  try {
+    await store.storage.transaction(async db => {
+      await store.agents.inTransaction(db).commitHandlerMessage(record, effects);
+      assert.equal(resident.history.entries.length, 1, 'no speculative append before outer commit');
+      assert.equal(resident.entry(previous.messageId)!.metadata.modelContextHidden, undefined);
+    });
+  } finally {store.storage.transaction = transaction;}
+  assert.equal(statements.filter(value => /INSERT INTO messages /.test(value.sql)).length, 1);
+  assert.equal(statements.filter(value => /INSERT INTO agent_context_entries /.test(value.sql)).length, 1);
+  const metadataWrites = statements.filter(value => /UPDATE agent_context_entries /.test(value.sql));
+  assert.equal(metadataWrites.length, 1); assert.match(metadataWrites[0]!.sql, /JSON_SET/); assert.ok(metadataWrites[0]!.bytes < 1000, 'old large message content never travels through the metadata update');
+  assert.ok(!statements.some(value => /SELECT .*entry FROM agent_context_entries|DELETE FROM agent_context_entries/.test(value.sql)));
+  assert.equal(resident.entry(previous.messageId)!.metadata.modelContextHidden, true);
+  assert.equal(resident.history.entries.length, 2);
+  assert.deepEqual(await store.agents.getContext(agentId), resident.history);
+  assert.equal((await store.agents.getAssistantResponseHandlerData(agentId, 'file-content')).revision, 1);
+  const before = structuredClone(resident.history);
+  const failed = {...record, messageId: randomUUID()};
+  const stale = {...effects, metadataUpdates: [{messageId: record.messageId, metadata: {modelContextHidden: true}}]};
+  await assert.rejects(store.agents.commitHandlerMessage(failed, stale), code('context_conflict'));
+  assert.deepEqual(await store.agents.getContext(agentId), before, 'state CAS refusal rolls back appended result and visibility');
+  assert.deepEqual(resident.history, before);
+  assert.equal((await store.agents.runMessages(agentId, run.runId)).length, 1);
+  assert.equal((await store.agents.runMessages(agentId, run.runId))[0]!.metadata.modelContextHidden, undefined, 'stable history was not edited');
+  assert.deepEqual((await store.agents.getAssistantResponseHandlerData(agentId, 'file-content')).data, effects.data);
+  await store.agents.finishRun(agentId, run.runId, 'completed');
+});
+
+test('preparation journals file-view metadata with handler state and restores it after restart', {timeout: 30000}, async () => {
+  const previous: ContextEntry = {messageId: randomUUID(), message: {role: 'toolResult', toolName: 'read', toolCallId: 'old', content: [{type: 'text', text: 'original view'}], isError: false, timestamp: 1}, metadata: {fileViewPath: '/workspace/file.ts'}};
+  const {agentId} = await store.agents.createAgent(undefined, [previous]);
+  const run = await store.agents.admitRun(agentId);
+  const state = {id: randomUUID(), agentId, runId: run.runId, trigger: 'before-model' as const, status: 'preparing' as const, startedAt: 1, endedAt: null, error: null};
+  await store.agents.beginCompaction(state);
+  const makeRecord = (id: string) => ({agentId, runId: run.runId, position: 0, messageId: id, message: {role: 'toolResult' as const, toolName: 'read', toolCallId: id, content: [{type: 'text' as const, text: `view ${id}`}], isError: false, timestamp: 2}, metadata: {source: 'context-compaction', compactionId: state.id, fileViewPath: '/workspace/file.ts'}});
+  const first = makeRecord(randomUUID()), second = makeRecord(randomUUID());
+  await store.agents.commitHandlerMessage(first, {handlerId: 'file-content', revision: 0, data: {visibleMessageId: first.messageId}, metadataUpdates: [{messageId: previous.messageId, metadata: {...previous.metadata, modelContextHidden: true}}]});
+  await store.agents.commitHandlerMessage(second, {handlerId: 'file-content', revision: 1, data: {visibleMessageId: second.messageId}, metadataUpdates: [{messageId: first.messageId, metadata: {...first.metadata, modelContextHidden: true}}]});
+  assert.deepEqual((await store.agents.getContext(agentId)).entries, [previous], 'tentative preparation does not replace or patch ordinary context');
+  await store.agents.acquireRuntime(() => undefined);
+  try {await store.agents.recoverCompactions();} finally {await store.agents.releaseRuntime();}
+  const context = await store.agents.getContext(agentId);
+  assert.equal(context.entries.find(entry => entry.messageId === previous.messageId)!.metadata.modelContextHidden, true);
+  assert.equal(context.entries.find(entry => entry.messageId === first.messageId)!.metadata.modelContextHidden, true);
+  assert.equal(context.entries.find(entry => entry.messageId === second.messageId)!.metadata.modelContextHidden, undefined);
+  assert.deepEqual((await store.agents.getAssistantResponseHandlerData(agentId, 'file-content')).data, {visibleMessageId: second.messageId});
+  assert.ok((await store.agents.runMessages(agentId, run.runId)).every(entry => entry.metadata.modelContextHidden === undefined), 'recovery preserves original stable history metadata');
+  await store.agents.finishRun(agentId, run.runId, 'interrupted');
+});
+
+test('runtime restores file references across runs and restart, and context reset clears handler state', {timeout: 30000}, async () => {
+  const {fileAssistantResponseHandlerFactory} = await import('../../src/core/agent/file-assistant-response-handler.js');
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'runtime-file-handler-')));
+  await writeFile(join(directory, 'file.txt'), 'one\ntwo\nthree');
+  let factories = 0;
+  const f = await fixture({policy: {...fixedPolicy(model), createAssistantResponseHandlerFactories: () => {factories++; return [fileAssistantResponseHandlerFactory(directory)];}}});
+  const getContext = store.agents.getContext; let loads = 0;
+  store.agents.getContext = async id => {if (id === f.agentId) loads++; return getContext.call(store.agents, id);};
+  try {
+    async function runRead(id: string, offset: number) {
+      const run = await f.runtime.start(f.agentId, 'read file');
+      const request = await f.requests.next();
+      assert.ok(request.request.tools.some(tool => tool.definition.name === 'read'), 'handler declarations do not require Harness file tools');
+      answer(request.events, fauxAssistantMessage([{type: 'toolCall', id, name: 'read', arguments: {path: 'file.txt', offset, limit: 1}}], {stopReason: 'toolUse'}));
+      const next = await f.requests.next();
+      answer(next.events, message('done'));
+      assert.equal((await f.runtime.finished(f.agentId, run.runId)).status, 'completed');
+      return next.request;
+    }
+    await runRead('a', 1);
+    const resident = await store.agents.residentContext(f.agentId);
+    const second = await runRead('b', 3);
+    assert.match(JSON.stringify(second.context.messages), /File view omitted/);
+    assert.equal(await store.agents.residentContext(f.agentId), resident);
+    assert.equal(loads, 1); assert.equal(factories, 1);
+    const references = await store.agents.getAssistantResponseHandlerData(f.agentId, 'file-content');
+    assert.equal(references.revision, 2);
+    await f.runtime.close(); await f.runtime.open();
+    const third = await runRead('c', 2);
+    assert.match(JSON.stringify(third.context.messages), /one/); assert.match(JSON.stringify(third.context.messages), /three/);
+    assert.equal(factories, 2); assert.equal(loads, 2);
+    const restored = await store.agents.getContext(f.agentId);
+    assert.equal(restored.entries.filter(entry => entry.message.role === 'toolResult' && entry.metadata.modelContextHidden !== true).length, 1);
+    await store.agents.resetConversations([f.agentId]); f.runtime.clearProgress(f.agentId);
+    await runRead('d', 1);
+    assert.equal((await store.agents.getAssistantResponseHandlerData(f.agentId, 'file-content')).revision, 1);
+    assert.equal(factories, 3);
+  } finally {store.agents.getContext = getContext; await f.runtime.close(); await rm(directory, {recursive: true, force: true});}
+});

@@ -19,7 +19,16 @@ export interface AssistantResponseHandlerData {
   data: JsonObject;
 }
 
+export interface ContextMetadataUpdate { messageId: string; metadata: JsonObject }
+export interface HandlerMessageEffects {
+  handlerId: string;
+  revision: number;
+  data: JsonObject;
+  metadataUpdates: ContextMetadataUpdate[];
+}
+
 export interface ContextPatch {
+  metadata?: ContextMetadataUpdate[];
   append: ContextEntry[];
   update: ContextEntry[];
 }

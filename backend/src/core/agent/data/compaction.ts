@@ -3,11 +3,12 @@ import { normalizeContext } from '@earendil-works/pi-ai';
 import { estimateContextTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { ModelRequest } from '../contracts.js';
 import { AgentMessageContext, repairInterruptedTools, type GroupContextMessage, type GroupContextReference } from './context.js';
-import { AppError, identity, type ContextEntry, type ContextHistory } from './model.js';
+import { AppError, identity, type ContextEntry, type ContextHistory, type ContextMetadataUpdate } from './model.js';
 
 export interface CompactionSettings { thresholdTokens: number; prompt: string }
 export type CompactionTrigger = 'before-model' | 'after-run';
 export interface CompactionState {
+  contextMetadata?: ContextMetadataUpdate[];
   id: string; agentId: string; runId: string; trigger: CompactionTrigger;
   status: 'preparing' | 'completed' | 'failed'; startedAt: number; endedAt: number | null;
   error: {code: string; message: string} | null;

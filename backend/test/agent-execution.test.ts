@@ -114,7 +114,7 @@ test('assistant response handlers wrap tool execution, metadata updates and defe
   const prior = {messageId:'old-read',message:{role:'user' as const,content:'original file contents',timestamp:1},metadata:{source:'read'}};
   const agent = new AgentExecution(initial,{revision:0,entries:[prior]},0,{...config,tools:[tool]},
     {...fixedPolicy(model,[tool]),createAssistantResponseHandlers:()=>[handler]},stream,{
-      contextPatched:async(_revision,patch)=>{calls.push(`patch:${patch.update[0]?.messageId}`);},
+      contextPatched:async(_revision,patch)=>{calls.push(`patch:${(patch.metadata?.[0] ?? patch.update[0])?.messageId}`);},
     });
   assert.equal((await agent.run(new AbortController().signal)).status,'completed');
   const entries = agent.snapshot().context.entries;

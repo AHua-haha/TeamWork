@@ -1,14 +1,15 @@
-import { dirname, isAbsolute, relative as relativePath } from 'node:path';
-import { createEditToolDefinition, createReadToolDefinition, createWriteToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { AssistantMessage, JsonObject, ToolCall, ToolResultMessage } from '@earendil-works/pi-ai';
-import type { AssistantResponseHandler, AssistantResponseHandlerContext, AssistantResponseHandlerFactory, RuntimeTool, AgentFileCapability } from './contracts.js';
-import { AppError, type AssistantResponseHandlerData } from './data/model.js';
+import { dirname, isAbsolute, relative as relativePath, resolve, basename, join } from 'node:path';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { detectSupportedImageMimeTypeFromFile, resizeImage } from '@earendil-works/pi-coding-agent';
+import { Type, type AssistantMessage, type JsonObject, type ToolCall, type ToolResultMessage } from '@earendil-works/pi-ai';
+import type { AssistantResponseHandler, AssistantResponseHandlerContext, AssistantResponseHandlerFactory, HandlerTool } from './contracts.js';
+import { AppError, type AssistantResponseHandlerData, type ContextHistory } from './data/model.js';
 
 type Range = { start: number; end: number };
-type FileState = { ranges: Range[] };
+type FileState = { ranges: Range[]; visibleMessageId: string | null };
 type State = { files: Record<string, FileState> };
-type OperationResult = Pick<ToolResultMessage, 'content' | 'isError'>;
-type Operation = { call: ToolCall; path: string; result: OperationResult; view?: string; status: 'success' | 'error'; operation: 'read' | 'write' | 'edit'; suppress?: boolean };
 type EditChange = { start: number; oldEnd: number; newEnd: number; delta: number };
 
 const fileToolNames = new Set(['read', 'write', 'edit']);
@@ -53,7 +54,7 @@ function metadata(path: string, totalLines: number, operation: 'read' | 'write' 
 function formatAggregate(path: string, content: string, ranges: Range[], operation: 'read' | 'edit', editResult?: string): string {
   const lines = fileLines(content);
   const visible = normalizeRanges(ranges)
-    .map(range => ({ start: Math.min(range.start, lines.length), end: Math.min(range.end, lines.length) }))
+    .map(range => ({ start: range.start, end: Math.min(range.end, lines.length) }))
     .filter(range => range.start <= range.end);
   const body = [operation === 'read'
     ? 'Aggregated file view: combines ranges revealed by this and previous reads. Gaps are not shown.'
@@ -102,204 +103,183 @@ function canonicalEditList(value: unknown): Array<{ oldText: string; newText: st
   });
 }
 
-/** File tools are Agent-handler-owned; Harness supplies only the scoped, permission-checked file capability. */
+/** The handler owns declarations and direct filesystem execution, independently of Harness. */
 export class FileAssistantResponseHandler implements AssistantResponseHandler {
   readonly handlerId = 'file-content';
   private data: State;
   private revision: number;
-  private saving: Promise<void> = Promise.resolve();
+  private restoreLegacyReferences: boolean;
 
-  constructor(
-    private readonly filesCapability: AgentFileCapability,
-    private readonly agentId: string,
-    initial: AssistantResponseHandlerData,
-    private readonly persist: (revision: number, data: JsonObject) => Promise<AssistantResponseHandlerData>,
-  ) {
+  constructor(private readonly root: string, initial: AssistantResponseHandlerData) {
     this.revision = initial.revision;
-    this.data = parseState(initial.data);
+    this.data = parseState(root, initial.data);
+    const source = initial.data.files;
+    this.restoreLegacyReferences = !!source && typeof source === 'object' && Object.values(source).some(value => value && typeof value === 'object' && !('visibleMessageId' in value));
   }
 
-  tools(_scope: AssistantResponseHandlerContext['scope']): RuntimeTool[] {
-    const definitions = [createReadToolDefinition('/'), createWriteToolDefinition('/'), createEditToolDefinition('/')];
-    return definitions.map(definition => ({
-      definition: { name: definition.name, description: definition.description, parameters: definition.parameters },
-      execute: async () => { throw new AppError('handler_tool_only', 'File tools execute through the Assistant Response Handler'); },
-    }));
+  restoreContext(context: ContextHistory): void {
+    if (!this.restoreLegacyReferences) return;
+    // Upgrade pre-reference state once from an already-loaded context, never from SQL or per operation.
+    for (const entry of context.entries) {
+      const path = entry.metadata.fileViewPath;
+      if (typeof path !== 'string' || entry.metadata.modelContextHidden === true || entry.message.role !== 'toolResult' || entry.message.isError) continue;
+      const file = this.data.files[resolve(this.root, path)];
+      if (file) file.visibleMessageId = entry.messageId;
+    }
+    this.restoreLegacyReferences = false;
   }
 
-  overrideToolNames(_scope: AssistantResponseHandlerContext['scope']): string[] { return ['read', 'write', 'edit']; }
-
-  canHandle(response: AssistantMessage): boolean {
-    return response.content.some(part => part.type === 'toolCall' && fileToolNames.has(part.name));
+  tools(): HandlerTool[] {
+    const path = Type.String({ minLength: 1, description: 'Relative to the workspace root, or an absolute filesystem path.' });
+    return [
+      { definition: { name: 'read', description: 'Read text or an image directly from the filesystem. Text results show line numbers and the aggregate of all ranges revealed for this file. offset is 1-indexed; omit limit to reveal the remaining lines. The aggregate is not truncated. Images are returned as image blocks. Previous aggregates are hidden from future model context.', parameters: Type.Object({path, offset: Type.Optional(Type.Integer({minimum: 1})), limit: Type.Optional(Type.Integer({minimum: 1}))}, {additionalProperties: false}) } },
+      { definition: { name: 'write', description: 'Create or replace a UTF-8 text file, creating parent directories as needed. Returns the full post-write file with line numbers and metadata. The successful content argument is omitted from future model context.', parameters: Type.Object({path, content: Type.String()}, {additionalProperties: false}) } },
+      { definition: { name: 'edit', description: 'Edit a UTF-8 text file using one or more unique exact string replacements. All oldText matches must exist once in the original file and must not overlap. Returns the current aggregate including changed lines. Use original text without output line-number prefixes.', parameters: Type.Object({path, edits: Type.Array(Type.Object({oldText: Type.String({minLength: 1}), newText: Type.String()}, {additionalProperties: false}), {minItems: 1})}, {additionalProperties: false}) } },
+    ];
   }
+
+  overrideToolNames(): string[] { return ['read', 'write', 'edit']; }
+  canHandle(response: AssistantMessage): boolean { return response.content.some(part => part.type === 'toolCall' && fileToolNames.has(part.name)); }
 
   async handle(response: AssistantMessage, context: AssistantResponseHandlerContext): Promise<void> {
     const calls = response.content.filter((part): part is ToolCall => part.type === 'toolCall' && fileToolNames.has(part.name));
     const fileCallIds = calls.map(call => call.id);
-    const lastByPath = new Map<string, number>();
-    const latestViews = new Map<string, string>();
-    for (const call of context.toolCalls) {
-      if (!fileToolNames.has(call.name) || typeof call.arguments.path !== 'string') continue;
-      try {
-        const resolved = await this.filesCapability.fileInvocation(this.agentId, call.name, call.arguments.path);
-        lastByPath.set(fileKey(resolved.root, resolved.path), context.toolCalls.findIndex(candidate => candidate.id === call.id));
-      } catch { /* The normal handler path records this as an error result when its turn arrives. */ }
-    }
     for (const call of calls) {
+      await context.beforeToolCall(call, fileCallIds);
+      let result: {path: string; file: FileState; content: ToolResultMessage['content']};
       try {
         context.validateToolCall(call);
-      } catch (error) {
-        await context.beforeToolCall(call, fileCallIds);
-        await context.recordToolResult(call, { content: [{ type: 'text', text: `${call.name} failed: ${errorMessage(error)}\n\n<metadata>\npath: ${safePath(typeof call.arguments.path === 'string' ? call.arguments.path : '(unknown)')}\noperation: ${call.name}\nstatus: error\n</metadata>` }], isError: true });
-        continue;
-      }
-      await context.beforeToolCall(call, fileCallIds);
-      let result: Operation;
-      try {
         result = await this.perform(call, context);
       } catch (error) {
-        if (error instanceof AppError && error.code === 'handler_state_persistence_failure') throw error;
-        result = {
-          call,
-          path: typeof call.arguments.path === 'string' ? call.arguments.path : '(unknown)',
-          result: { content: [{ type: 'text', text: `${call.name} failed: ${errorMessage(error)}` }], isError: true },
-          status: 'error',
-          operation: call.name as Operation['operation'],
-        };
+        context.scope.signal.throwIfAborted();
+        const path = typeof call.arguments.path === 'string' ? call.arguments.path : '(unknown)';
+        await context.recordToolResult(call, {content: [{type: 'text', text: `${call.name} failed: ${errorMessage(error)}\n\n<metadata>\npath: ${safePath(path)}\noperation: ${call.name}\nstatus: error\n</metadata>`}], isError: true});
+        continue;
       }
-
-      const currentIndex = context.toolCalls.findIndex(candidate => candidate.id === result.call.id);
-      if (result.view) latestViews.set(result.path, result.view);
-      const isFinalForPath = lastByPath.get(result.path) === currentIndex;
-      const visibleView = isFinalForPath ? result.view ?? latestViews.get(result.path) : undefined;
-      const keepView = !!visibleView;
-      const entryMetadata: JsonObject = keepView ? { fileViewPath: result.path } : {};
-      const error = result.result.content.find(content => content.type === 'text')?.text ?? `${result.operation} failed for ${result.path}.`;
-      const text = result.result.isError
-        ? `${error}\n\n<metadata>\npath: ${safePath(result.path)}\noperation: ${result.operation}\nstatus: error\n</metadata>`
-        : keepView ? visibleView! : `${result.operation} succeeded for ${safePath(result.path)}.`;
-      await context.recordToolResult(result.call, { content: [{ type: 'text', text }], isError: result.result.isError }, entryMetadata);
-      if (keepView) await context.hideFileViews(result.path, result.call.id);
-      if (result.suppress && result.status === 'success') await context.suppressToolCallArguments([result.call.id]);
+      context.scope.signal.throwIfAborted();
+      const messageId = randomUUID();
+      const previous = this.data.files[result.path]?.visibleMessageId;
+      const next: State = { files: {...this.data.files, [result.path]: {...result.file, visibleMessageId: messageId}} };
+      try {
+        await context.recordToolResult(call, {content: result.content, isError: false}, {fileViewPath: result.path}, {
+          messageId, handlerId: this.handlerId, revision: this.revision, data: next as unknown as JsonObject,
+          ...(previous ? {hideMessageId: previous} : {}), suppressArguments: call.name === 'write',
+        });
+      } catch (error) {
+        if (error instanceof AppError && error.code === 'compaction_persistence_failure') throw error;
+        throw new AppError('handler_state_persistence_failure', 'Could not acknowledge the file result and handler state; restore execution before retrying. Filesystem effects may already have occurred and were not replayed.', 500);
+      }
+      this.data = next;
+      this.revision++;
     }
   }
 
-  private updateState(change: (draft: State) => void): Promise<void> {
-    const operation = this.saving.then(async () => {
-      const draft = structuredClone(this.data) as State;
-      change(draft);
-      try {
-        const saved = await this.persist(this.revision, draft as unknown as JsonObject);
-        this.revision = saved.revision;
-        this.data = parseState(saved.data);
-      } catch {
-        throw new AppError('handler_state_persistence_failure', 'Could not persist file handler state; execution must be restored before retrying', 500);
-      }
-    });
-    this.saving = operation;
-    return operation;
-  }
-
-  private async perform(call: ToolCall, context: AssistantResponseHandlerContext): Promise<Operation> {
+  private async perform(call: ToolCall, context: AssistantResponseHandlerContext): Promise<{path: string; file: FileState; content: ToolResultMessage['content']}> {
+    context.scope.signal.throwIfAborted();
     if (typeof call.arguments.path !== 'string' || !call.arguments.path) throw new AppError('invalid_input', 'A non-empty file path is required');
-    const action = call.name as Operation['operation'];
-    return this.filesCapability.operation(this.agentId, async () => {
+    const path = await canonicalPath(this.root, call.arguments.path);
+    const label = fileKey(this.root, path);
+    const file = structuredClone(this.data.files[path] ?? {ranges: [], visibleMessageId: null});
+    let content: string;
+    let view: string;
+    if (call.name === 'read') {
+      assertArguments(call, ['path', 'offset', 'limit'], ['path']);
+      const offset = call.arguments.offset === undefined ? 1 : call.arguments.offset;
+      const limit = call.arguments.limit;
+      if (!Number.isSafeInteger(offset) || Number(offset) < 1 || (limit !== undefined && (!Number.isSafeInteger(limit) || Number(limit) < 1))) throw new AppError('invalid_input', 'Read offset and limit must be positive whole numbers');
+      const bytes = await readFile(path);
+      const mimeType = await detectSupportedImageMimeTypeFromFile(path);
+      if (mimeType) {
+        const image = await resizeImage(bytes, mimeType, {maxWidth: 2000, maxHeight: 2000, maxBytes: 4.5 * 1024 * 1024});
+        if (!image) throw new AppError('invalid_image', 'Image could not be prepared');
+        file.ranges = [];
+        return {path, file, content: [{type: 'text', text: `Read image file [${image.mimeType}]\n\n${metadata(label, 0, 'read')}`}, {type: 'image', mimeType: image.mimeType, data: image.data}]};
+      }
+      content = textContent(bytes);
+      const count = lineCount(content);
+      if (Number(offset) > count && count !== 0) throw new AppError('invalid_input', `Offset ${offset} is beyond end of file (${count} lines total)`);
+      file.ranges = file.ranges.map(range => ({start: range.start, end: Math.min(range.end, count)})).filter(range => range.start <= range.end);
+      if (count) file.ranges = normalizeRanges([...file.ranges, {start: Number(offset), end: Math.min(count, Number(offset) + (limit === undefined ? count : Number(limit)) - 1)}]);
+      view = formatAggregate(label, content, file.ranges, 'read');
+    } else if (call.name === 'write') {
+      assertArguments(call, ['path', 'content'], ['path', 'content']);
+      if (typeof call.arguments.content !== 'string') throw new AppError('invalid_input', 'Write content must be text');
+      await mkdir(dirname(path), {recursive: true});
       context.scope.signal.throwIfAborted();
-      const resolved = await this.filesCapability.fileInvocation(this.agentId, action, call.arguments.path as string);
-      const files = await this.filesCapability.files(this.agentId);
-      const canonical = resolved.path;
-      const path = fileKey(resolved.root, canonical);
-
-      if (action === 'read') {
-        assertArguments(call, ['path', 'offset', 'limit'], ['path']);
-        if (call.arguments.offset !== undefined && typeof call.arguments.offset !== 'number') throw new AppError('invalid_input', 'Read offset must be a positive whole number');
-        if (call.arguments.limit !== undefined && typeof call.arguments.limit !== 'number') throw new AppError('invalid_input', 'Read limit must be a positive whole number');
-        const content = (await files.read.readFile(canonical)).toString('utf8');
-        const lines = fileLines(content);
-        const offset = call.arguments.offset === undefined ? 1 : call.arguments.offset as number;
-        const limit = call.arguments.limit === undefined ? Math.max(1, lines.length) : call.arguments.limit as number;
-        if (!Number.isSafeInteger(offset) || offset < 1 || !Number.isSafeInteger(limit) || limit < 1) throw new AppError('invalid_input', 'Read offset and limit must be positive whole numbers');
-        if (offset > lines.length && lines.length !== 0) throw new AppError('invalid_input', `Offset ${offset} is beyond end of file (${lines.length} lines total)`);
-        const start = Math.min(offset, Math.max(1, lines.length));
-        const end = Math.min(lines.length, start + limit - 1);
-        await this.updateState(draft => {
-          const file = draft.files[path] ??= { ranges: [] };
-          if (end >= start) file.ranges = normalizeRanges([...file.ranges, { start, end }]);
-        });
-        const view = formatAggregate(path, content, this.data.files[path]?.ranges ?? [], 'read');
-        return { call, path, result: { content: [{ type: 'text', text: view }], isError: false }, view, status: 'success', operation: action };
-      }
-
-      if (action === 'write') {
-        assertArguments(call, ['path', 'content'], ['path', 'content']);
-        if (typeof call.arguments.content !== 'string') throw new AppError('invalid_input', 'Write content must be text');
-        await files.write.mkdir(dirname(canonical));
-        await files.write.writeFile(canonical, call.arguments.content);
-        context.scope.signal.throwIfAborted();
-        const content = (await files.read.readFile(canonical)).toString('utf8');
-        const count = lineCount(content);
-        await this.updateState(draft => { draft.files[path] = { ranges: count ? [{ start: 1, end: count }] : [] }; });
-        const view = formatWholeFile(path, content);
-        return { call, path, result: { content: [{ type: 'text', text: view }], isError: false }, view, status: 'success', operation: action, suppress: true };
-      }
-
+      await writeFile(path, call.arguments.content, 'utf8');
+      content = textContent(await readFile(path));
+      const count = lineCount(content);
+      file.ranges = count ? [{start: 1, end: count}] : [];
+      view = formatWholeFile(label, content);
+    } else {
       assertArguments(call, ['path', 'edits'], ['path', 'edits']);
       const edits = canonicalEditList(call.arguments.edits);
-      const original = (await files.edit.readFile(canonical)).toString('utf8');
+      const original = textContent(await readFile(path));
       const crlf = original.includes('\r\n');
-      const normalizedOriginal = original.replace(/\r\n/g, '\n');
+      content = original.replace(/\r\n/g, '\n');
       const matches = edits.map(edit => {
-        const index = normalizedOriginal.indexOf(edit.oldText);
+        const oldText = edit.oldText.replace(/\r\n/g, '\n'), newText = edit.newText.replace(/\r\n/g, '\n');
+        const index = content.indexOf(oldText);
         if (index < 0) throw new AppError('edit_failed', 'Requested oldText was not found; file was not changed');
-        if (normalizedOriginal.indexOf(edit.oldText, index + 1) >= 0) throw new AppError('edit_failed', 'Requested oldText is ambiguous; use a unique exact match');
-        return { ...edit, originalIndex: index };
+        if (content.indexOf(oldText, index + 1) >= 0) throw new AppError('edit_failed', 'Requested oldText is ambiguous; use a unique exact match');
+        return {oldText, newText, originalIndex: index};
       }).sort((left, right) => left.originalIndex - right.originalIndex);
       for (let index = 1; index < matches.length; index++) {
         const previous = matches[index - 1]!;
         if (previous.originalIndex + previous.oldText.length > matches[index]!.originalIndex) throw new AppError('invalid_input', 'Edit oldText matches must not overlap');
       }
-
-      let content = normalizedOriginal;
-      const changes: EditChange[] = [];
       for (const edit of [...matches].reverse()) {
-        const index = edit.originalIndex;
-        if (content.slice(index, index + edit.oldText.length) !== edit.oldText) throw new AppError('edit_failed', 'Edit matches overlap after replacement; the file was not changed');
-        const start = lineAt(content, index);
-        const previousLineCount = lineCount(content);
-        const nextContent = content.slice(0, index) + edit.newText + content.slice(index + edit.oldText.length);
-        const delta = lineCount(nextContent) - previousLineCount;
-        changes.push({ start, oldEnd: start + newlineCount(edit.oldText), newEnd: edit.newText ? start + newlineCount(edit.newText) : start - 1, delta });
-        content = nextContent;
+        const start = lineAt(content, edit.originalIndex), previousCount = lineCount(content);
+        content = content.slice(0, edit.originalIndex) + edit.newText + content.slice(edit.originalIndex + edit.oldText.length);
+        file.ranges = adjustRanges(file.ranges, {start, oldEnd: start + newlineCount(edit.oldText), newEnd: Math.min(lineCount(content), start + newlineCount(edit.newText)), delta: lineCount(content) - previousCount});
       }
       context.scope.signal.throwIfAborted();
-      const output = crlf ? content.replace(/\n/g, '\r\n') : content;
-      await files.edit.writeFile(canonical, output);
-      await this.updateState(draft => {
-        const file = draft.files[path] ??= { ranges: [] };
-        for (const change of changes) file.ranges = adjustRanges(file.ranges, change);
-      });
-      const current = (await files.read.readFile(canonical)).toString('utf8');
-      const editResult = `applied ${edits.length} exact string replacement${edits.length === 1 ? '' : 's'}`;
-      const view = formatAggregate(path, current, this.data.files[path]?.ranges ?? [], 'edit', editResult);
-      return { call, path, result: { content: [{ type: 'text', text: view }], isError: false }, view, status: 'success', operation: action };
-    });
+      await writeFile(path, crlf ? content.replace(/\n/g, '\r\n') : content, 'utf8');
+      content = textContent(await readFile(path));
+      file.ranges = file.ranges.map(range => ({start: range.start, end: Math.min(range.end, lineCount(content))})).filter(range => range.start <= range.end);
+      view = formatAggregate(label, content, file.ranges, 'edit', `applied ${edits.length} exact string replacement${edits.length === 1 ? '' : 's'}`);
+    }
+    return {path, file, content: [{type: 'text', text: view}]};
   }
 }
 
-export function fileAssistantResponseHandlerFactory(fileCapability: AgentFileCapability, agentId: string): AssistantResponseHandlerFactory {
-  return { handlerId: 'file-content', create: (data, persist) => new FileAssistantResponseHandler(fileCapability, agentId, data, persist) };
+export function fileAssistantResponseHandlerFactory(root: string): AssistantResponseHandlerFactory {
+  return {handlerId: 'file-content', create: initial => new FileAssistantResponseHandler(root, initial)};
 }
 
-function parseState(data: JsonObject): State {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return { files: {} };
+function textContent(bytes: Buffer): string {
+  let text: string;
+  try { text = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes); }
+  catch { throw new AppError('unsupported_file', 'File is not UTF-8 text or a supported image'); }
+  if (text.includes('\0')) throw new AppError('unsupported_file', 'File is not UTF-8 text or a supported image');
+  return text;
+}
+
+async function canonicalPath(root: string, input: string): Promise<string> {
+  let path = input;
+  if (path === '~' || path.startsWith('~/')) path = homedir() + path.slice(1);
+  let absolute = resolve(root, path);
+  const suffix: string[] = [];
+  for (;;) {
+    try { return join(await realpath(absolute), ...suffix); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const parent = dirname(absolute);
+      if (parent === absolute) throw error;
+      suffix.unshift(basename(absolute)); absolute = parent;
+    }
+  }
+}
+
+function parseState(root: string, data: JsonObject): State {
   const files: State['files'] = {};
-  const source = (data as { files?: unknown }).files;
+  const source = data?.files;
   if (source && typeof source === 'object' && !Array.isArray(source)) {
     for (const [path, value] of Object.entries(source)) {
       if (!value || typeof value !== 'object' || !Array.isArray((value as FileState).ranges)) continue;
       const ranges = (value as FileState).ranges.filter((range): range is Range => !!range && Number.isSafeInteger(range.start) && Number.isSafeInteger(range.end));
-      files[path] = { ranges: normalizeRanges(ranges) };
+      files[resolve(root, path)] = {ranges: normalizeRanges(ranges), visibleMessageId: typeof (value as FileState).visibleMessageId === 'string' ? (value as FileState).visibleMessageId : null};
     }
   }
-  return { files };
+  return {files};
 }

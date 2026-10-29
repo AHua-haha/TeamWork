@@ -28,7 +28,7 @@ function summaryFixture(f: Fixture, count=40, size=4000) {
   const submit=async(configuration:AgentConfiguration)=>{
     assert.equal(configuration.tools.length,1);const tool=configuration.tools[0]!;
     assert.equal(tool.definition.name,'submit_group_summary');
-    await tool.execute({summary:'Current shared goals, decisions and remaining work.'},{} as StepScope,{type:'toolCall',id:'submit',name:tool.definition.name,arguments:{summary:'Current shared goals, decisions and remaining work.'}});
+    await tool.execute!({summary:'Current shared goals, decisions and remaining work.'},{} as StepScope,{type:'toolCall',id:'submit',name:tool.definition.name,arguments:{summary:'Current shared goals, decisions and remaining work.'}});
   };
   return {source,config,submit,get saved(){return saved;},get reads(){return reads;}};
 }
@@ -91,6 +91,6 @@ test('maintenance cannot succeed without accepted text and shutdown drains activ
 test('stale summary source aborts maintenance instead of asking the model to repair backend metadata',t=>withTeam(async f=>{
   summaryFixture(f);t.mock.method(console,'error',()=>{});Object.assign(f.store,{submitGroupSummary:async()=>{throw new AppError('context_conflict','Source reset',409);}});
   let aborted=false;
-  Object.assign(f.runtime,{async runMaintenance(configuration:AgentConfiguration,_entries:unknown[],signal:AbortSignal){try{await configuration.tools[0]!.execute({summary:'Valid text'},{} as StepScope,{type:'toolCall',id:'submit',name:'submit_group_summary',arguments:{summary:'Valid text'}});}catch{}aborted=signal.aborted;return terminal('cancelled');}});
+  Object.assign(f.runtime,{async runMaintenance(configuration:AgentConfiguration,_entries:unknown[],signal:AbortSignal){try{await configuration.tools[0]!.execute!({summary:'Valid text'},{} as StepScope,{type:'toolCall',id:'submit',name:'submit_group_summary',arguments:{summary:'Valid text'}});}catch{}aborted=signal.aborted;return terminal('cancelled');}});
   await f.team.startMaintenance();assert.equal(aborted,true);
 }));
