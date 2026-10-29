@@ -4,6 +4,7 @@ import { mkdir,writeFile } from 'node:fs/promises';
 import { dirname,join } from 'node:path';
 import { filesRevision } from '../workspace/workspace-git.js';
 import { finalAnswer, textPhase } from '../agent/final-answer.js';
+import { fileAssistantResponseHandlerFactory } from '../agent/file-assistant-response-handler.js';
 import type { ChatStore } from './data/group-chat.js';
 import { AppError } from '../agent/data/model.js';
 import type { ConfigService } from './data/config.js';
@@ -245,6 +246,10 @@ export class TeamSystem {
     const { management } = teamTools(this.service, this.configuration, this.harness.permissionsEnabled);
     return {
       ...base,
+      createAssistantResponseHandlerFactories: agentId => [
+        ...(base.createAssistantResponseHandlerFactories?.(agentId) ?? []),
+        fileAssistantResponseHandlerFactory(this.harness.fileCapability(),agentId),
+      ],
       groupContext: async agentId => {
         const member = await this.service.find(agentId);
         if (!member) return base.groupContext?.(agentId);

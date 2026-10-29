@@ -3,7 +3,7 @@ import { compactedContext, compactionInput, estimateRequestTokens, interruptedCo
 import { finalAnswer, textPhase } from './final-answer.js';
 import { AgentMessageContext, type GroupContextReference } from './data/context.js';
 import { randomUUID } from 'node:crypto';
-import { AssistantMessageFrameEncoder, getCurrentTools, normalizeContext, validateToolArguments, type Api, type AssistantMessage, type Model, type Models, type SimpleStreamOptions, type ToolResultMessage, type JsonObject, type Message } from '@earendil-works/pi-ai';
+import { AssistantMessageFrameEncoder, validateToolArguments, type Api, type AssistantMessage, type Model, type Models, type SimpleStreamOptions, type ToolResultMessage, type JsonObject, type Message } from '@earendil-works/pi-ai';
 import { validateEntries } from './data/validation.js';
 import { ProgressStore } from './data/progress.js';
 import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type ContextPatch, type RunState } from './data/model.js';
@@ -24,6 +24,19 @@ export interface AgentObserver {
   compactionFinished?(state: CompactionState, revision: number, entries: ContextEntry[]): Promise<ContextHistory | void>;
   finished?(state: RunState): Promise<RunState | void>;
 }
+function projectContextEntry(entry: ContextEntry): ContextEntry {
+  const message = structuredClone(entry.message);
+  if (entry.metadata.modelContextHidden === true && message.role === 'toolResult') {
+    message.content = [{type:'text',text:'[File view omitted; a newer aggregate is available.]'}];
+  }
+  if (message.role === 'assistant' && Array.isArray(message.content) && Array.isArray(entry.metadata.suppressedToolCallArguments)) {
+    const suppressed = new Set(entry.metadata.suppressedToolCallArguments.filter((id): id is string => typeof id === 'string'));
+    message.content = message.content.map(part => part.type === 'toolCall' && suppressed.has(part.id)
+      ? {...part,arguments:{...part.arguments,content:'[Written successfully; content omitted from future context.]'}} : part);
+  }
+  return {...entry,message};
+}
+
 export class AgentExecution {
   private readonly state:AgentState;
   private readonly responseHandlers: AssistantResponseHandler[];
@@ -65,6 +78,18 @@ export class AgentExecution {
       await this.replaceContext(revision, next.history.entries);
     } else this.state.patchContext(revision + 1, patch);
   }
+  private async buildModelRequest(scope: StepScope, history: ContextHistory): Promise<ModelRequest> {
+    const projected = {revision: history.revision, entries: history.entries.map(projectContextEntry)};
+    const request = await this.policy.buildRequest(scope, projected);
+    const admitted = new Set(request.tools.map(tool => tool.definition.name));
+    const owned = this.responseHandlers.flatMap(handler => handler.tools?.(scope) ?? []).filter(tool => admitted.has(tool.definition.name));
+    const overridden = new Set(this.responseHandlers.flatMap(handler => handler.overrideToolNames?.(scope) ?? []));
+    if (!owned.length && !overridden.size) return request;
+    const tools = request.tools.map(tool => overridden.has(tool.definition.name) ? owned.find(candidate => candidate.definition.name === tool.definition.name) ?? tool : tool);
+    const definitions = tools.map(tool => tool.definition);
+    return {...request, tools, context: {...request.context, tools: definitions}};
+  }
+
   private async updateContextMetadata(updates: Array<{messageId: string; metadata: JsonObject}>): Promise<void> {
     if (!updates.length) return;
     const ids = new Set<string>();
@@ -136,11 +161,11 @@ export class AgentExecution {
           },
         };
         if (this.policy.beforeStep) await abortable(track(this.policy.beforeStep(scope)), signal);
-        let request = await abortable(track(Promise.resolve(this.policy.buildRequest(scope, structuredClone(this.context)))), signal);
+        let request = await abortable(track(this.buildModelRequest(scope, structuredClone(this.context))), signal);
         if (config.compaction && estimateRequestTokens(request) > config.compaction.thresholdTokens) {
           try { await this.compact('before-model', scope, group, track, () => Promise.allSettled([...pendingEffects])); }
           catch (error) { preparationFailed = true; throw error; }
-          request = await abortable(track(Promise.resolve(this.policy.buildRequest(scope, structuredClone(this.context)))), signal);
+          request = await abortable(track(this.buildModelRequest(scope, structuredClone(this.context))), signal);
         }
         const {response, results, record} = await this.turn(scope, request, entry => this.record(entry), track);
         const again = this.policy.shouldContinue ? await abortable(track(Promise.resolve(this.policy.shouldContinue(scope, response, results, record))), signal) : response.content.some(part => part.type === 'toolCall');
@@ -159,7 +184,7 @@ export class AgentExecution {
         if (config.compaction && !signal.aborted && !preparationFailed) {
           await synchronize();
           const scope = this.scope(Math.max(1, this.runState.step), signal, 'work');
-          const request = await this.policy.buildRequest(scope, structuredClone(this.context));
+          const request = await this.buildModelRequest(scope, structuredClone(this.context));
           if (estimateRequestTokens(request) > config.compaction.thresholdTokens) {
             // A finishing preparation failure must not overwrite the ordinary outcome.
             try { await this.compact('after-run', scope, group, track, () => Promise.allSettled([...pendingEffects])); }
@@ -250,7 +275,7 @@ export class AgentExecution {
   private async turn(scope: StepScope, request: ModelRequest, recordMessage: (entry: ContextEntry) => Promise<CompletedMessage>,
     track: <T>(promise: Promise<T>) => Promise<T>): Promise<{response: AssistantMessage; results: ToolResultMessage[]; record: CompletedMessage}> {
     const run = this.runState, signal = scope.signal;
-    const declared = getCurrentTools(normalizeContext(request.context).messages);
+    const declared = request.tools.map(tool => tool.definition);
     const tools = new Map<string, RuntimeTool>();
     for (const tool of request.tools) {
       if (tools.has(tool.definition.name)) throw new AppError('invalid_tools', 'Duplicate executable tool name');
@@ -299,19 +324,22 @@ export class AgentExecution {
     if (new Set(calls.map(call => call.id)).size !== calls.length) throw new AppError('invalid_tool_calls', 'Duplicate tool-call identity');
     const executed = new Map<string, ToolResultMessage>();
     const hints: Array<{message: Message; metadata?: JsonObject}> = [];
-    const execute = async (call: typeof calls[number]): Promise<ToolResultMessage> => {
-      const existing = executed.get(call.id);
-      if (existing) return structuredClone(existing);
+    const ensurePrior = async (call: typeof calls[number], deferCallIds: string[] = []): Promise<void> => {
+      const deferred = new Set(deferCallIds);
       const index = calls.findIndex(candidate => candidate.id === call.id);
       if (index < 0) throw new AppError('invalid_tool_calls', `Assistant handler requested unknown tool call: ${call.id}`);
-      // Keep native call/result order even when a specialized handler selects only a subset.
       for (let prior = 0; prior < index; prior++) {
         const pending = calls[prior]!;
-        if (!executed.has(pending.id)) await executeOne(pending);
+        if (!executed.has(pending.id) && !deferred.has(pending.id)) await executeOne(pending);
       }
-      return executeOne(call);
     };
-    const executeOne = async (call: typeof calls[number]): Promise<ToolResultMessage> => {
+    const execute = async (call: typeof calls[number], entryMetadata: JsonObject = {}): Promise<ToolResultMessage> => {
+      const existing = executed.get(call.id);
+      if (existing) return structuredClone(existing);
+      await ensurePrior(call);
+      return executeOne(call, entryMetadata);
+    };
+    const executeOne = async (call: typeof calls[number], entryMetadata: JsonObject = {}): Promise<ToolResultMessage> => {
       const existing = executed.get(call.id);
       if (existing) return structuredClone(existing);
       signal.throwIfAborted();
@@ -329,15 +357,45 @@ export class AgentExecution {
         result = {role: 'toolResult', toolCallId: call.id, toolName: call.name, content: [{type: 'text', text: error instanceof Error ? error.message : 'Tool failed'}], isError: true, timestamp: Date.now()};
       }
       signal.throwIfAborted();
-      await recordMessage({messageId: randomUUID(), message: result, metadata: this.policy.messageMetadata?.(scope, result) ?? {}});
+      await recordMessage({messageId: randomUUID(), message: result, metadata: {...(this.policy.messageMetadata?.(scope, result) ?? {}), ...entryMetadata}});
       if (scope.mode !== 'compaction') this.progress.changed(run.agentId);
       executed.set(call.id, result);
       return structuredClone(result);
     };
     const handlerContext: AssistantResponseHandlerContext = {
-      scope, toolCalls: calls, execute,
+      scope, toolCalls: calls,
+      execute: async (call, metadata = {}) => execute(call, metadata),
+      beforeToolCall: (call, deferCallIds = []) => ensurePrior(call, deferCallIds),
+      validateToolCall: call => {
+        const definition = declared.find(tool => tool.name === call.name);
+        if (!definition) throw new AppError('unknown_tool', `Tool is unavailable: ${call.name}`);
+        return validateToolArguments(definition, call) as JsonObject;
+      },
+      recordToolResult: async (call, output, metadata = {}) => {
+        const known = calls.find(candidate => candidate.id === call.id);
+        if (!known || known.name !== call.name) throw new AppError('invalid_tool_calls', `Assistant handler requested unknown tool call: ${call.id}`);
+        signal.throwIfAborted();
+        const result: ToolResultMessage = {...output, role:'toolResult', toolCallId:call.id, toolName:call.name, timestamp:Date.now()};
+        await recordMessage({messageId:randomUUID(),message:result,metadata:{...(this.policy.messageMetadata?.(scope,result)??{}),...metadata}});
+        executed.set(call.id,result);
+        if(scope.mode!=='compaction')this.progress.changed(run.agentId);
+        return structuredClone(result);
+      },
       appendHint: async (message, metadata = {}) => { hints.push({message: structuredClone(message), metadata: structuredClone(metadata)}); },
       updateMetadata: updates => this.updateContextMetadata(updates),
+      hideFileViews: async (path, keepToolCallId) => {
+        const updates = this.context.entries.filter(entry => entry.metadata.fileViewPath === path && entry.message.role === 'toolResult' && entry.message.toolCallId !== keepToolCallId)
+          .filter(entry => entry.metadata.modelContextHidden !== true)
+          .map(entry => ({messageId: entry.messageId, metadata: {...entry.metadata, modelContextHidden: true}}));
+        await this.updateContextMetadata(updates);
+      },
+      suppressToolCallArguments: async callIds => {
+        if (!callIds.length) return;
+        const entry = this.context.entries.find(candidate => candidate.messageId === record.messageId);
+        if (!entry) throw new AppError('invalid_context_update', 'Assistant response context entry is unavailable');
+        const existingIds = Array.isArray(entry.metadata.suppressedToolCallArguments) ? entry.metadata.suppressedToolCallArguments.filter((id): id is string => typeof id === 'string') : [];
+        await this.updateContextMetadata([{messageId: entry.messageId, metadata: {...entry.metadata, suppressedToolCallArguments: [...new Set([...existingIds, ...callIds])]}}]);
+      },
     };
     const handlers = this.responseHandlers;
     for (const handler of handlers) if (handler.canHandle(response)) await handler.handle(response, handlerContext);

@@ -26,6 +26,16 @@ export interface StepScope {
   recordInput(text: string, metadata: JsonObject): Promise<void>;
 }
 
+export interface AgentFileCapability {
+  operation<T>(agentId: string, action: () => Promise<T>): Promise<T>;
+  fileInvocation(agentId: string, name: string, input: string): Promise<{ root: string; path: string }>;
+  files(agentId: string): Promise<{
+    read: { readFile(path: string): Promise<Buffer> };
+    write: { mkdir(path: string): Promise<void>; writeFile(path: string, content: string): Promise<void> };
+    edit: { readFile(path: string): Promise<Buffer>; writeFile(path: string, content: string): Promise<void> };
+  }>;
+}
+
 export interface RuntimeTool {
   definition: Tool;
   execute(args: JsonObject, scope: StepScope, call: ToolCall): Promise<Pick<ToolResultMessage, 'content' | 'isError' | 'details'>>;
@@ -42,18 +52,32 @@ export interface ModelRequest {
 export interface AssistantResponseHandlerContext {
   scope: StepScope;
   toolCalls: ToolCall[];
-  /** Executes one existing configured tool and records its protocol-paired result. */
-  execute(call: ToolCall): Promise<ToolResultMessage>;
+  /** Executes one configured tool and records its protocol-paired result. Optional metadata is attached to that retained result. */
+  execute(call: ToolCall, metadata?: JsonObject): Promise<ToolResultMessage>;
+  /** Validate the call against tool definitions admitted to this model request. */
+  validateToolCall(call: ToolCall): JsonObject;
+  /** Completes earlier calls in this assistant turn, except explicitly deferred call identities. */
+  beforeToolCall(call: ToolCall, deferCallIds?: string[]): Promise<void>;
+  /** Records a handler-constructed native result without invoking the configured tool implementation. */
+  recordToolResult(call: ToolCall, output: Pick<ToolResultMessage, 'content'|'isError'|'details'>, metadata?: JsonObject): Promise<ToolResultMessage>;
   /** Append an Agent-owned private message after outstanding tool results have been recorded. */
   appendHint(message: Message, metadata?: JsonObject): Promise<void>;
   /** Persist targeted metadata changes without modifying stored message content. */
   updateMetadata(updates: Array<{messageId: string; metadata: JsonObject}>): Promise<void>;
+  /** Hide older result payloads for a canonical file, keeping the specified latest tool-call result visible. */
+  hideFileViews(path: string, keepToolCallId: string): Promise<void>;
+  /** Suppress long arguments on successful write calls in future model-facing projections. */
+  suppressToolCallArguments(callIds: string[]): Promise<void>;
 }
 
-/** Agent-owned reaction to an assistant response; handlers orchestrate existing tools, not define new tool capabilities. */
+/** Agent-owned reaction to an assistant response; handlers may own scoped model tool definitions. */
 export interface AssistantResponseHandler {
   canHandle(response: AssistantMessage): boolean;
   handle(response: AssistantMessage, context: AssistantResponseHandlerContext): Promise<void>;
+  /** Model-facing tools owned by this handler. Only names already admitted by the policy are installed. */
+  tools?(scope: StepScope): RuntimeTool[];
+  /** Names whose configured implementations are replaced by this handler. */
+  overrideToolNames?(scope: StepScope): string[];
 }
 
 /** Creates one durable handler instance for an Agent. The instance is reused across runs. */
