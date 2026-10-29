@@ -86,7 +86,7 @@ curl -s http://127.0.0.1:3100/workspaces -H 'Content-Type: application/json' -d 
 
 Workspace, models and initialized lead persist atomically; invalid model settings create no directory. `GET /workspaces/:id/models` returns `{revision,value,issues}`; `PUT` takes `{revision,value}` and rejects stale writes. **Team → Workspace models** edits this record. Changing the default preserves existing member selections. New members use the workspace default rather than copying the lead, and `list_models` exposes workspace choices to the lead. A file submission can select these models or retain an existing selection removed from the list. Provider validation still applies.
 
-Startup initializes legacy workspace choices once from existing member selections. Saving a default initializes a legacy lead only when it has no assigned provider/model. Member inspection remains read-only. Group-chat avatars provide user model settings; inspect accepted source/prompts and harness policies through **Team → Active members**. Separate user commit and activation controls are available in **Configuration changes**. Existing file review/history/acceptance APIs retain their behavior.
+Startup initializes legacy workspace choices once from existing member selections. Saving a default initializes a legacy lead only when it has no assigned provider/model. Member inspection remains read-only. Group-chat avatars provide user model settings; inspect current member files/status through the separate configuration review operations. Separate user commit and activation controls are available in **Configuration changes**. Existing file review/history/acceptance APIs retain their behavior.
 
 
 ### User model settings for a member
@@ -99,7 +99,7 @@ Hover, focus or click a group-chat member avatar to choose its model, reasoning 
 
 User input uses `POST /workspaces/:id/chat/messages` with `{text}` or the documented picture multipart input. No mention triggers Lead; user @ mentions route to active members. Agent finals use an optional leading `<mentions>["Member"]</mentions>` block and may name at most one member. Other @ text is ordinary content. Members share project files and execute sequentially; only final reports enter shared chat. Completed history is SQL-backed, progress is a bounded in-memory delta stream.
 
-`GET /workspaces/:id/members` lists active member metadata; `/members/:memberId` reads one member. Detailed legacy Team/Harness inspection endpoints are retired. Agents edit `.rsi/members/<name>/member.json` and referenced Markdown prompts through File React Harness; `validate_member_config` checks the whole directory. Existing-member updates allow responsibility, supplementary prompts and historical execution settings; identity/models/design assignments remain fixed. User model preferences use the separate model-settings API.
+`GET /workspaces/:id/members` lists active member metadata; `/members/:memberId` reads one member. Detailed legacy Team/Harness inspection endpoints are retired. Agents edit `.rsi/members/<name>/member.json` and referenced Markdown prompts through File React Harness; `validate_member_config` checks the whole directory. Existing-member updates allow responsibility and supplementary prompts; identity/models/design assignments remain fixed. User model preferences use the separate model-settings API.
 
 ### Native Git and separate member activation
 
@@ -268,7 +268,7 @@ Timeline reads add `resetCursor`; shared-history reads add `resetPosition` (init
 
 Changes contains read-only committed-to-current design/member diffs and separate idle member activation. Commit approval lives above the composer; Review opens the exact candidate in the right panel.
 
-The old member harness scope review/commit/history/restore routes are removed. Use the pending commit approval endpoints for exact review; configuration activation stays separate.
+The old Harness resource inspection, scope review/commit/history/restore and Git approval routes are removed. Member designScope is direct responsibility guidance; current configuration review and separate activation remain.
 
 ### Sequential execution
 
@@ -310,3 +310,7 @@ File and Default React Harnesses execute available tools directly with no design
 ## Business data ownership
 
 Each Core business aggregates its in-memory schema, durable representation and related operations under `data/`. Agent owns context/history/run/compaction persistence and its AgentRuntime host. Team owns member/provider/configuration/shared-chat data; Workspace owns registry/context/model/history data; Harness owns its scope/tool-input/approval data. CoreData exposes owner instances and coordinates transactional lifecycle hooks without business SQL. Existing database rows and HTTP/SSE contracts are preserved; no workspace reset is required.
+
+### Member design assignment
+
+Member records and member.json use a direct `designScope: {working: string[], dependencies: string[]}` field. There is no member Harness configuration, command allowlist or derived implementation permission view. Startup migrates historical records/manifests without changing assignments, model preferences, prompts, Git history or message history; recorded old committed blobs remain readable for review. Newly authored obsolete fields are rejected. Detailed Harness inspection methods and routes are removed; member metadata/context/model settings and configuration review/activation remain.

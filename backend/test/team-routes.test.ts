@@ -10,8 +10,8 @@ import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { createAgentServer } from '../src/api/http.js';
 import type { AgentRuntime } from '../src/core/agent/runtime.js';
-import { emptyAssignment } from '../src/core/team/data/assignment.js';
-import { stubConfig, withTeam, worker, configureHarness, type Fixture } from './team-fixture.js';
+import { emptyDesignScope } from '../src/core/team/data/assignment.js';
+import { stubConfig, withTeam, worker, configureAssignment, type Fixture } from './team-fixture.js';
 
 type Body = Record<string, any>;
 
@@ -151,7 +151,7 @@ test('user model settings persist independently of member files, reject stale/fo
   const before = await f.team.service.find(member.memberId);
   await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{connectionId:'conn',modelId:'model'}}});
   await call(path + '/model-settings', { method:'PUT', status:409, data:{revision:initial.revision,value} });
-  for (const extra of [{ prompt:'bypass' }, { toolOptionIds:['admin'] }, { harness:{} }]) await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{...value,...extra}}});
+  for (const extra of [{ prompt:'bypass' }, { toolOptionIds:['admin'] }, { designScope:{} }]) await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{...value,...extra}}});
   await call(path+'/model-settings',{method:'PUT',status:400,data:{revision:saved.revision,value:{...value,modelOptions:[{connectionId:'conn',modelId:'model',temperature:10}]}}});
   await call(`/workspaces/wrong/members/${member.memberId}/model-settings`,{status:404});
   assert.deepEqual(await f.team.service.find(member.memberId), before);

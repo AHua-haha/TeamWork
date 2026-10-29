@@ -1,3 +1,4 @@
+import {resolveAssignment} from '../src/core/team/member-workspace.js';
 import { memberBash } from './team-fixture.js';
 import { acceptFiles, initGit } from './git-fixture.js';
 import { seedDesign } from './design-fixture.js';
@@ -10,7 +11,7 @@ import { code, settle, stubConfig, withTeam, worker, type Fixture } from './team
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 const signal = () => new AbortController().signal;
-const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['work/metadata.json'], dependencies: [] }, execute: { allowedCommands: [] as unknown[] } });
+const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['work/metadata.json'], dependencies: [] } });
 async function setup(f: Fixture) {
   await seedDesign(f.workspaces, f.workspaceId, 'work/metadata.json', { content: 'Work', implementation: ['src'] });
   }
@@ -40,20 +41,20 @@ test('file validation and user commit do not activate; separate activation consu
   assert.equal(member.value.settings.prompt, 'Accepted prompt');
   assert.equal(member.value.configuration!.acceptedRevision, review.revision);
   assert.equal(await readFile(join(files.root, dirname(path), 'prompts/member.md'), 'utf8'), 'Uncommitted prompt');
-  assert.deepEqual((await f.team.service.get(f.workspaceId, member.id)).harness.implementationScope.paths, ['src']);
+  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.get(f.workspaceId,member.id)).designScope)).working.flatMap(d=>d.implementation), ['src']);
   await assert.rejects(f.team.activateConfiguration(f.workspaceId, review.revision, review.digest), code('stale_revision'));
 }));
 
-test('updates allow responsibility, prompt and execute rules while preserving identity, models and assignments', () => withTeam(async f => {
+test('updates allow responsibility and prompts while preserving identity, models and assignments', () => withTeam(async f => {
   await setup(f); const path = '.rsi/members/Backend/member.json'; await draft(f, path, manifest('Backend')); await activate(f);
   const before = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
   const original = JSON.parse(before.value.configuration!.files['member.json']!);
-  await draft(f, path, { ...original, responsibility: 'New responsibility', execute: { allowedCommands: [{ kind: 'executable', executable: 'bash' }] } }, 'New prompt');
+  await draft(f, path, { ...original, responsibility: 'New responsibility' }, 'New prompt');
   await activate(f);
   const after = (await f.team.service.byName(f.workspaceId, 'Backend'))!;
   assert.equal(after.id, before.id); assert.equal(after.revision, before.revision + 1); assert.equal(after.value.settings.modelId, before.value.settings.modelId);
   assert.equal(after.value.responsibility, 'New responsibility'); assert.equal(after.value.settings.prompt, 'New prompt');
-  assert.deepEqual(after.value.harness.allowedCommands, [{ kind: 'executable', executable: 'bash' }]); assert.deepEqual(after.value.harness.designScope, before.value.harness.designScope);
+  assert.deepEqual(after.value.designScope, before.value.designScope);
   const current = JSON.parse(after.value.configuration!.files['member.json']!);
   for (const changed of [{ name: 'Renamed' }, { role: 'other' }, { settings: { modelOptions: [{ connectionId: 'conn', modelId: 'model', temperature: 0.2 }] } }, { settings: { modelId: 'other' } }, { designScope: { working: [], dependencies: ['work/metadata.json'] } }]) {
     await draft(f, path, { ...current, ...changed }, 'New prompt');
@@ -80,7 +81,7 @@ test('scoped Git deletion persists through materialization/restart and activatio
 
 test('malformed references, lead deletion, duplicate names and base-policy overrides refuse activation without changing active state', () => withTeam(async f => {
   await setup(f); const path = '.rsi/members/Backend/member.json', original = await f.team.service.team(f.workspaceId);
-  for (const change of [{ promptFiles: ['../escape.md'] }, { promptFiles: ['prompts/missing.md'] }, { designScope: { working: ['missing/metadata.json'], dependencies: [] } }, { name: 'Lead' }, { extra: true }, { execute: { tools: ['anything'], allowedCommands: [] } }]) {
+  for (const change of [{ promptFiles: ['../escape.md'] }, { promptFiles: ['prompts/missing.md'] }, { designScope: { working: ['missing/metadata.json'], dependencies: [] } }, { name: 'Lead' }, { extra: true }, { execute: {allowedCommands: []} }]) {
     await draft(f, path, { ...manifest('Backend'), ...change });
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, false);
     const review = await commit(f); await assert.rejects(f.team.activateConfiguration(f.workspaceId, review.revision, review.digest), code('invalid_config'));
@@ -168,7 +169,7 @@ test('binary prompt bytes and an active configuration changed after review are r
   await assert.rejects(f.team.configuration.validate(f.lead.memberId,'.rsi/members'),/UTF-8/);
   await draft(f, path, manifest('Backend')); const review = await commit(f);
   const lead = (await f.team.service.find(f.lead.memberId))!;
-  await f.team.service.update(f.workspaceId, lead.id, lead.revision, {name:lead.value.name,role:lead.value.role,responsibility:'Concurrent backend change',settings:lead.value.settings,harness:lead.value.harness});
+  await f.team.service.update(f.workspaceId, lead.id, lead.revision, {name:lead.value.name,role:lead.value.role,responsibility:'Concurrent backend change',settings:lead.value.settings,designScope:lead.value.designScope});
   await assert.rejects(f.team.activateConfiguration(f.workspaceId, review.revision, review.digest), code('stale_revision'));
   assert.equal(await f.team.service.byName(f.workspaceId, 'Backend'), undefined);
 }));

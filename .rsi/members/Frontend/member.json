@@ -32,8 +32,5 @@
       "frontend/shared/backend-client/metadata.json",
       "frontend/shared/ui/metadata.json"
     ]
-  },
-  "execute": {
-    "allowedCommands": []
   }
 }

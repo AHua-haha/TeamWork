@@ -136,16 +136,7 @@ export function teamRoutes(team: TeamSystem, runtime: AgentRuntime): (route: Rou
       } else throw notFound();
       return;
     }
-    if (extra.length || (area !== undefined && area !== 'members')) throw notFound();
-    query(url, []);
-    if (area === undefined) {
-      if (method !== 'GET') throw notFound();
-      json(response, 200, await team.team(workspaceId));
-      return;
-    }
-    if (method !== 'GET' || memberId === undefined) throw notFound();
-    identity(memberId, 'memberId');
-    json(response, 200, await team.inspect(workspaceId, memberId));
+    throw notFound();
   };
 }
 

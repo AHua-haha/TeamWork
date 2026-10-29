@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { rm, mkdir, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { withTeam, worker, configureHarness, code } from './team-fixture.js';
+import { withTeam, worker, configureAssignment, code } from './team-fixture.js';
 import { seedDesign } from './design-fixture.js';
 
 const signal=()=>new AbortController().signal;
@@ -40,18 +40,18 @@ test('invalid metadata, mixed document forms and missing directory entries never
 }));
 
 test('context files support both document forms and children in the shared workspace',()=>withTeam(async f=>{
- const parent=await worker(f,'Parent',[]),reference=parent.harness.designScope.working[0]!;
+ const parent=await worker(f,'Parent',[]),reference=parent.designScope.working[0]!;
  const prefix=reference.slice(0,-'metadata.json'.length);
  await seedDesign(f.workspaces,f.workspaceId,prefix+'child/metadata.json',{content:'# Child',implementation:[]});
  const dependency=await worker(f,'Dependency',[]);
- await configureHarness(f,'Parent',{designScope:{working:[reference],dependencies:dependency.harness.designScope.working},allowedCommands:[]});
+ await configureAssignment(f,'Parent',{designScope:{working:[reference],dependencies:dependency.designScope.working}});
  const files=await f.team.memberWorkspace.files(parent.memberId);
  await files.write.mkdir(join(files.root,'.rsi/context/implement',prefix,'impl'));
  await files.write.writeFile(join(files.root,'.rsi/context/implement',prefix,'impl/README.md'),'# Implemented contract');
  await files.write.writeFile(join(files.root,'.rsi/context/implement',prefix,'impl/runtime.md'),'Runtime facts');
  await files.write.mkdir(join(files.root,'.rsi/context/implement',prefix,'child'));
  await files.write.writeFile(join(files.root,'.rsi/context/implement',prefix,'child/impl.md'),'# Child implementation');
- const depPrefix=dependency.harness.designScope.working[0]!.slice(0,-'metadata.json'.length);
+ const depPrefix=dependency.designScope.working[0]!.slice(0,-'metadata.json'.length);
  await files.write.mkdir(join(files.root,'.rsi/context/implement',depPrefix,'impl'));
  await initGit(f);
  const staged=await memberBash(f.team, parent.memberId,{command:'git add -f .rsi/context/implement && git commit -m "Document runtime"'},signal());
@@ -75,7 +75,7 @@ test('raw operations preserve separate roots and design history; implementation 
 
 test('case-insensitive node references preserve actual node/document spelling in a member worktree',()=>withTeam(async f=>{
  await seedDesign(f.workspaces,f.workspaceId,'Backend/metadata.json',{content:'# Backend',implementation:[]});
- const member=await f.team.service.create(f.workspaceId,{name:'Case worker',role:'developer',settings:{},harness:{designScope:{working:['backend/metadata.json'],dependencies:[]},allowedCommands:[]}});
+ const member=await f.team.service.create(f.workspaceId,{name:'Case worker',role:'developer',settings:{},designScope: {working:['backend/metadata.json'],dependencies:[]}});
  const files=await f.team.memberWorkspace.files(member.memberId);
  await files.write.mkdir(join(files.root,'.rsi/context/implement/Backend'));
  await files.write.writeFile(join(files.root,'.rsi/context/implement/Backend/impl.md'),'# Implementation facts');
@@ -87,10 +87,10 @@ test('case-insensitive node references preserve actual node/document spelling in
 }));
 
 test('unresolvable safe assignments remain inspectable but cannot run or gain context authority',()=>withTeam(async f=>{
- await configureHarness(f,'Lead',{designScope:{working:['missing-record.json'],dependencies:[]},allowedCommands:[]});
- const inspection=await f.team.inspect(f.workspaceId,f.lead.memberId);
- assert.equal(inspection.member.ready,false);assert.match(inspection.member.issues.join(' '),/metadata.json/);
- assert.deepEqual(inspection.working,[]);
+ await configureAssignment(f,'Lead',{designScope:{working:['missing-record.json'],dependencies:[]}});
+ const member=await f.team.member(f.workspaceId,f.lead.memberId);
+ assert.equal(member.ready,false);assert.match(member.issues.join(' '),/metadata.json/);
+ assert.deepEqual(member.designScope.working,['missing-record.json']);
  assert.equal((await f.team.memberWorkspace.files(f.lead.memberId)).root,f.directory);
 }));
 
@@ -102,14 +102,14 @@ test('read-only member views receive accepted design additions, updates and docu
  await lead.write.writeFile(join(lead.root,'.rsi/context/design/new/metadata.json'),'{"implementation":["src"]}');
  await lead.write.writeFile(join(lead.root,'.rsi/context/design/new/design.md'),'# First accepted contract');
  await accept();
- const first=await f.team.service.create(f.workspaceId,{name:'First',role:'developer',harness:{designScope:{working:['new/metadata.json'],dependencies:[]},allowedCommands:[]}});
+ const first=await f.team.service.create(f.workspaceId,{name:'First',role:'developer',designScope: {working:['new/metadata.json'],dependencies:[]}});
  const firstFiles=await f.team.memberWorkspace.files(first.memberId);
  assert.match((await firstFiles.read.readFile(join(firstFiles.root,'.rsi/context/design/new/design.md'))).toString(),/First accepted/);
  await lead.write.mkdir(join(lead.root,'.rsi/context/design/new/design'));
  await lead.write.writeFile(join(lead.root,'.rsi/context/design/new/design/README.md'),'# Updated accepted contract');
  await rm(join(lead.root,'.rsi/context/design/new/design.md'));
  await accept();
- const second=await f.team.service.create(f.workspaceId,{name:'Second',role:'developer',harness:{designScope:{working:['new/metadata.json'],dependencies:[]},allowedCommands:[]}});
+ const second=await f.team.service.create(f.workspaceId,{name:'Second',role:'developer',designScope: {working:['new/metadata.json'],dependencies:[]}});
  const files=await f.team.memberWorkspace.files(second.memberId);
  const updatedFirst=await f.team.memberWorkspace.files(first.memberId);
  assert.match((await updatedFirst.read.readFile(join(updatedFirst.root,'.rsi/context/design/new/design/README.md'))).toString(),/Updated accepted/);

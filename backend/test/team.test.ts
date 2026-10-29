@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { DesignService } from '../src/core/workspace/design.js';
-import { emptyAssignment } from '../src/core/team/data/assignment.js';
+import { emptyDesignScope } from '../src/core/team/data/assignment.js';
 import { teamTools } from '../src/core/team/member-tools.js';
 import type { StepScope } from '../src/core/agent/runtime.js';
 import { maxMembers, newLead, TeamService } from '../src/core/team/data/members.js';
@@ -46,24 +46,24 @@ test('a failed lead leaves no workspace, and the startup step gives an older wor
 }));
 
 test('member names stay unique, and fields are checked', () => withTeam(async fixture => {
-  const backend = await fixture.team.service.create(fixture.workspaceId, { name: 'Backend', role: 'backend developer', responsibility: 'Own the API', harness: emptyAssignment(), settings: { prompt: 'Be brief' } });
-  assert.deepEqual([backend.lead, backend.harness, backend.settings.connectionId, backend.settings.modelId, backend.settings.prompt, backend.ready], [false, { ...emptyAssignment(), implementationScope: { paths: [], usePaths: [] } }, 'conn', 'model', 'Be brief', false]);
+  const backend = await fixture.team.service.create(fixture.workspaceId, { name: 'Backend', role: 'backend developer', responsibility: 'Own the API', designScope: emptyDesignScope(), settings: { prompt: 'Be brief' } });
+  assert.deepEqual([backend.lead, backend.designScope, backend.settings.connectionId, backend.settings.modelId, backend.settings.prompt, backend.ready], [false, emptyDesignScope(), 'conn', 'model', 'Be brief', false]);
   assert.deepEqual((await fixture.team.service.team(fixture.workspaceId)).members.map(member => member.name), ['Lead', 'Backend']);
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'backend', role: 'x' }), code('member_exists'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: ' Bad', role: 'x' }), code('invalid_input'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: '' }), code('invalid_input'));
-  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { ...emptyAssignment(), designScope: { working: ['../escape'], dependencies: [] }, allowedCommands: [] } }), code('invalid_path'));
-  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', harness: { ...emptyAssignment(), designScope: { working: ['a/metadata.json', 'A/metadata.json'], dependencies: [] }, allowedCommands: [] } }), code('invalid_config'));
+  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', designScope: { working: ['../escape'], dependencies: [] } }), code('invalid_path'));
+  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', designScope: { working: ['a/metadata.json', 'A/metadata.json'], dependencies: [] } }), code('invalid_config'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', extra: 1 }), code('invalid_config'));
   await assert.rejects(fixture.team.service.team('missing'), code('not_found'));
 }));
 
 test('changing a member checks the revision and keeps the lead flag', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend');
-  const changed = await fixture.team.service.update(fixture.workspaceId, backend.memberId, backend.revision, { name: 'Server', role: 'server developer', responsibility: '', harness: { designScope: backend.harness.designScope, allowedCommands: backend.harness.allowedCommands }, settings: { ...backend.settings, modelId: null } });
+  const changed = await fixture.team.service.update(fixture.workspaceId, backend.memberId, backend.revision, { name: 'Server', role: 'server developer', responsibility: '', designScope: backend.designScope, settings: { ...backend.settings, modelId: null } });
   assert.deepEqual([changed.name, changed.revision, changed.ready, changed.issues], ['Server', 1, false, ['Select a provider and model']]);
-  await assert.rejects(fixture.team.service.update(fixture.workspaceId, backend.memberId, backend.revision, { name: 'Late', role: 'x', responsibility: '', harness: emptyAssignment(), settings: backend.settings }), code('config_conflict'));
-  const lead = await fixture.team.service.update(fixture.workspaceId, fixture.lead.memberId, fixture.lead.revision, { name: 'Boss', role: 'Lead', responsibility: '', harness: emptyAssignment(), settings: fixture.lead.settings });
+  await assert.rejects(fixture.team.service.update(fixture.workspaceId, backend.memberId, backend.revision, { name: 'Late', role: 'x', responsibility: '', designScope: emptyDesignScope(), settings: backend.settings }), code('config_conflict'));
+  const lead = await fixture.team.service.update(fixture.workspaceId, fixture.lead.memberId, fixture.lead.revision, { name: 'Boss', role: 'Lead', responsibility: '', designScope: emptyDesignScope(), settings: fixture.lead.settings });
   assert.equal(lead.lead, true);
   await assert.rejects(fixture.team.service.get('other', backend.memberId), code('not_found'));
 }));
@@ -90,14 +90,14 @@ test('model discovery is available to all members; configuration changes use pen
   assert.match(await call(fixture.lead.memberId), /Workspace models/);
 }));
 
-test('startup replaces legacy scopes with empty harnesses once and preserves the member identity and settings', () => withTeam(async fixture => {
+test('startup removes obsolete unassigned scopes once and preserves the member identity and settings', () => withTeam(async fixture => {
   const backend = await worker(fixture, 'Backend');
   const saved = fixture.store.members.get(backend.memberId)!;
-  const { harness: _harness, ...other } = saved.member.value;
+  const { designScope: _harness, ...other } = saved.member.value;
   saved.member.value = { ...other, scope: ['agent/systems/backend'] } as never;
   await fixture.team.initialize();
   const migrated = await fixture.team.service.get(fixture.workspaceId, backend.memberId);
-  assert.deepEqual(migrated.harness, { ...emptyAssignment(), implementationScope: { paths: [], usePaths: [] } });
+  assert.deepEqual(migrated.designScope, emptyDesignScope());
   assert.deepEqual(migrated.settings, backend.settings);
   assert.equal(migrated.ready, false);
   assert.match(migrated.issues.join('; '), /Configure a design scope/);

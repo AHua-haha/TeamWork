@@ -29,8 +29,5 @@
       "frontend/shared/backend-client/metadata.json",
       "operations/metadata.json"
     ]
-  },
-  "execute": {
-    "allowedCommands": []
   }
 }

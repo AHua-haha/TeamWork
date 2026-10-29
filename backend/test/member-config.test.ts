@@ -7,15 +7,15 @@ import { TeamSystem } from '../src/core/team/team-system.js';
 import { sourceBundle } from '../src/core/team/data/member-config.js';
 import { code, stubConfig, withTeam, worker } from './team-fixture.js';
 
-const assignment = (member: Awaited<ReturnType<typeof worker>>) => ({ designScope: member.harness.designScope, allowedCommands: member.harness.allowedCommands });
+const assignment = (member: Awaited<ReturnType<typeof worker>>) => member.designScope;
 
 test('accepted bundle contains meaningful JSON and Markdown; identity, revisions and policy stay in backend records', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']);
   const source = await f.team.configuration.accepted(f.workspaceId, member.memberId);
   const manifest = JSON.parse(source.files['member.json']!);
-  assert.deepEqual(Object.keys(manifest).sort(), ['designScope', 'execute', 'name', 'promptFiles', 'responsibility', 'role', 'settings']);
-  assert.deepEqual(manifest.designScope, member.harness.designScope);
-  assert.equal(source.formatVersion, 4);
+  assert.deepEqual(Object.keys(manifest).sort(), ['designScope', 'name', 'promptFiles', 'responsibility', 'role', 'settings']);
+  assert.deepEqual(manifest.designScope, member.designScope);
+  assert.equal(source.formatVersion, 5);
   assert.equal(manifest.settings.prompt, undefined);
   assert.equal(manifest.implementationScope, undefined);
   const files = await f.team.memberWorkspace.files(f.lead.memberId);
@@ -51,7 +51,7 @@ test('materialization preserves intentional deletions after seeding rather than 
 test('runtime admission still rejects an actual concurrent backend configuration update', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']);
   f.runtime.prepareRun = async () => {
-    await f.team.service.update(f.workspaceId, member.memberId, member.revision, { name: member.name, role: member.role, responsibility: member.responsibility, harness: assignment(member), settings: { ...member.settings, prompt: 'new' } });
+    await f.team.service.update(f.workspaceId, member.memberId, member.revision, { name: member.name, role: member.role, responsibility: member.responsibility, designScope: assignment(member), settings: { ...member.settings, prompt: 'new' } });
     return {} as never;
   };
   await assert.rejects(f.team.runner.postUser(f.workspaceId, '@Backend start'), code('config_conflict'));

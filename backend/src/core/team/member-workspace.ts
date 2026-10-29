@@ -1,23 +1,20 @@
-import { mkdir, readFile, realpath, writeFile, access, readdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, access, readdir, stat } from 'node:fs/promises';
 import type { DesignService, ResolvedDesign } from '../workspace/design.js';
-import type { MemberAssignment } from './data/assignment.js';
+import type { DesignScope } from './data/assignment.js';
 import type { StoredMember } from './data/members.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
 import { AppError } from '../agent/data/model.js';
 import { OperationQueue, committedFiles, currentFiles, filesRevision, fileChanges } from '../workspace/workspace-git.js';
-import { implementationContextPath } from '../workspace/workspace-layout.js';
+import {currentMemberFormat} from './data/member-config-migration.js';
 
 export interface ResolvedAssignment {
   working: ResolvedDesign[]; dependencies: ResolvedDesign[];
-  readable: string[]; writable: string[]; readonly: string[];
 }
 /** Resolve design guidance and implementation mappings, never tool authority. */
-export async function resolveAssignment(designs: DesignService, workspaceId: string, config: MemberAssignment): Promise<ResolvedAssignment> {
-  const working = await designs.working(workspaceId, config.designScope.working);
-  const dependencies = await Promise.all(config.designScope.dependencies.map(path => designs.read(workspaceId, path)));
-  for (const design of [...working, ...dependencies]) implementationContextPath(design.path);
-  const writable = [...new Set(working.flatMap(d => d.implementation))], readonly = [...new Set(dependencies.flatMap(d => d.implementation))];
-  return {working, dependencies, readable: [...new Set([...writable, ...readonly])], writable, readonly};
+export async function resolveAssignment(designs: DesignService, workspaceId: string, config: DesignScope): Promise<ResolvedAssignment> {
+  const working = await designs.working(workspaceId, config.working);
+  const dependencies = await Promise.all(config.dependencies.map(path => designs.read(workspaceId, path)));
+  return {working, dependencies};
 }
 
 /** Team-owned project/configuration reads and review; no tool execution or permission policy. */
@@ -42,7 +39,8 @@ export class MemberWorkspace {
     const member = await this.active(id), root = await this.root(id);
     if (origin === 'pending') { const files = await currentFiles(root, prefix); return {files, revision: filesRevision(files)}; }
     const baseline = await this.workspaces.gitBaseline(member.workspaceId);
-    return committedFiles(root, prefix, prefix === '.rsi/members' ? baseline.members : baseline.design);
+    const result = await committedFiles(root, prefix, prefix === '.rsi/members' ? baseline.members : baseline.design);
+    return prefix === '.rsi/members' ? {...result, files: currentMemberFormat(result.files, member.value.configuration)} : result;
   }
   async changes(id: string) {
     const review = async (prefix: '.rsi/members' | '.rsi/context/design') => {
@@ -53,7 +51,7 @@ export class MemberWorkspace {
     return {design, members};
   }
   async guidance(id: string): Promise<string> {
-    const member = await this.active(id), resolved = await resolveAssignment(this.designs, member.workspaceId, member.value.harness);
+    const member = await this.active(id), resolved = await resolveAssignment(this.designs, member.workspaceId, member.value.designScope);
     const view = (parts: ResolvedDesign[]) => {
       let bytes = 0;
       return parts.map(part => {

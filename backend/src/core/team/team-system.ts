@@ -14,7 +14,7 @@ import type { ConfigService } from './data/config.js';
 import { currentMemberPaths } from './data/member-config.js';
 import { MemberConfigService } from './member-config.js';
 import { DesignService } from '../workspace/design.js';
-import { MemberWorkspace, resolveAssignment } from './member-workspace.js';
+import { MemberWorkspace } from './member-workspace.js';
 import { MemberInstructions } from './member-instructions.js';
 import { teamTools } from './member-tools.js';
 import type { RuntimePolicy, RuntimeTool } from '../agent/contracts.js';
@@ -193,14 +193,6 @@ export class TeamSystem {
     return { summary: await this.store.readGroupSummary?.(workspaceId) ?? null, retainedMessages: retainedGroupMessages };
   }
 
-  async inspect(workspaceId: string, memberId: string) {
-    const { stored, member } = await this.service.inspect(workspaceId, memberId);
-    let working: string[] = [];
-    try { working = (await resolveAssignment(this.designs, workspaceId, stored.value.harness)).working.map(design => design.path); }
-    catch (error) { if (!(error instanceof AppError) || error.status >= 500) throw error; }
-    return {member: this.status(member), configuration: stored.value.configuration ?? null, working, capabilities: ['File React Harness', 'Default React Harness']};
-  }
-
   async create(workspaceId: string, input: unknown): Promise<MemberStatus> {
     const member=await this.service.create(workspaceId,input);
     const files=await this.memberWorkspace.files(member.memberId);
@@ -211,7 +203,7 @@ export class TeamSystem {
 
   async update(workspaceId: string, memberId: string, revision: number, value: unknown): Promise<MemberStatus> {
     const current = await this.service.get(workspaceId, memberId);
-    if (this.runner.isRunning(memberId) && JSON.stringify((value as { harness?: unknown })?.harness) !== JSON.stringify({ designScope: current.harness.designScope, allowedCommands: current.harness.allowedCommands })) throw new AppError('member_busy', 'Wait for the member before changing harness scope', 409);
+    if (this.runner.isRunning(memberId) && JSON.stringify((value as {designScope?: unknown})?.designScope) !== JSON.stringify(current.designScope)) throw new AppError('member_busy', 'Wait for the member before changing design assignment', 409);
     return this.memberWorkspace.operation(memberId, async () => { const result = await this.service.update(workspaceId, memberId, revision, value); await this.closeShells([memberId]); return this.status(result); });
   }
 

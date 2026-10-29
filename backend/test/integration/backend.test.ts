@@ -7,7 +7,7 @@ import { acceptFiles,initGit } from '../git-fixture.js';
 import { gitText } from '../../src/core/workspace/workspace-git.js';
 import { seedDesign } from '../design-fixture.js';
 import { testModels, testModelValidator } from '../memory-store.js';
-import { emptyAssignment } from '../../src/core/team/data/assignment.js';
+import { emptyDesignScope } from '../../src/core/team/data/assignment.js';
 import { closeBashRuntime } from '../../src/core/agent/tools/bash.js';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import assert from 'node:assert/strict';
@@ -806,7 +806,7 @@ test('team members are stored with their conversation and kept out of the agent 
   const directory = join(await mkdtemp(join(tmpdir(), 'members-')), 'project');
   const { workspaceId } = await workspaces.create({ name: 'Members', directory, models: testModels(), adopt: false });
   try {
-    const record = (name: string, lead = false) => ({ workspaceId, name, role: 'developer', responsibility: '', harness: emptyAssignment(), lead, settings: { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, createdAt: 1, retiredAt: null });
+    const record = (name: string, lead = false) => ({ workspaceId, name, role: 'developer', responsibility: '', designScope: emptyDesignScope(), lead, settings: { connectionId: null, modelId: null, toolOptionIds: [], prompt: '', promptOptionIds: [], modelOptions: [] }, createdAt: 1, retiredAt: null });
     const add = (name: string, lead = false) => store.team.createMember({ id: randomUUID(), workspaceId, lead, nameKey: name.toLowerCase(), value: record(name, lead) });
     // Creating the workspace created its lead, in the same transaction.
     const [lead] = await store.team.listMembers(workspaceId);
@@ -1126,10 +1126,10 @@ test('React Harnesses execute shared project tools and native commits while memb
     await seedDesign(workspaceService,workspaceId,'metadata.json',design);
     const first = (await team.team(workspaceId)).members[0]!;
     const lead = await team.update(workspaceId, first.memberId, first.revision, {
-      name: first.name, role: first.role, responsibility: first.responsibility, harness: { designScope: first.harness.designScope, allowedCommands: [] },
+      name: first.name, role: first.role, responsibility: first.responsibility, designScope: first.designScope,
       settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' },
     });
-    await team.create(workspaceId, { name: 'Backend', role: 'developer', responsibility: 'Implement result', settings: { prompt: 'Keep the result concise.' }, harness: { designScope: { working: ['metadata.json'], dependencies: [] }, allowedCommands: [{ kind: 'executable', executable: 'bash' }] } });
+    await team.create(workspaceId, { name: 'Backend', role: 'developer', responsibility: 'Implement result', settings: { prompt: 'Keep the result concise.' }, designScope: { working: ['metadata.json'], dependencies: [] } });
     await runtime.open();
     const accepted = await team.runner.postUser(workspaceId, 'Propose a design refinement and ask Backend to implement the accepted design.');
     const run = accepted.runs[0]!;
@@ -1332,11 +1332,11 @@ async function groupFixture(basePolicy: RuntimePolicy = configuredPolicy(), opti
   await service.createConnection(connectionId, { label: 'Group test', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
   const { workspaceId } = await workspaceService.create({ name: 'Group', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: false });
   const first = (await team.team(workspaceId)).members[0]!;
-  const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, harness: { designScope: first.harness.designScope, allowedCommands: first.harness.allowedCommands }, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
+  const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, designScope: first.designScope, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
   await seedDesign(workspaceService, workspaceId, 'metadata.json', { content: 'Shared test design', implementation: ['.'] });
-  const harness = { designScope: { working: ['metadata.json'], dependencies: [] }, allowedCommands: [] };
-  const backend = await team.create(workspaceId, { name: 'Backend', role: 'developer', harness });
-  const frontend = await team.create(workspaceId, { name: 'Frontend', role: 'developer', harness });
+  const designScope = {working:['metadata.json'],dependencies:[]};
+  const backend = await team.create(workspaceId, { name: 'Backend', role: 'developer', designScope });
+  const frontend = await team.create(workspaceId, { name: 'Frontend', role: 'developer', designScope });
   await runtime.open();
   return { workspaceId, lead, backend, frontend, team, runtime, requests, async close() { await runtime.close(); team.runner.close(); await workspaceService.close(); await rm(folder, { recursive: true, force: true }); } };
 }
@@ -1790,7 +1790,7 @@ test('member file activation atomically replaces/updates the team, retains histo
     await rm(pathJoin(files.root, backendSource.path));
     await files.write.writeFile(pathJoin(files.root, frontendSource.path), JSON.stringify({ ...JSON.parse(frontendSource.files['member.json']!), responsibility: 'Updated atomically' }));
     await files.write.mkdir(pathJoin(files.root, '.rsi/members/Replacement/prompts'));
-    const manifest = { name:'Replacement',role:'developer',responsibility:'Replacement',settings:{},promptFiles:['prompts/member.md'],designScope:{working:['metadata.json'],dependencies:[]},execute:{allowedCommands:[]} };
+    const manifest = { name:'Replacement',role:'developer',responsibility:'Replacement',settings:{},promptFiles:['prompts/member.md'],designScope:{working:['metadata.json'],dependencies:[]} };
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/member.json'), JSON.stringify(manifest));
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/prompts/member.md'), 'Accepted prompt');
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
@@ -1855,7 +1855,7 @@ test('fresh bootstrap and administrative reset persist atomic baselines, preserv
     const workspace = await service.create({workspaceId:'fresh',name:'Fresh',directory,adopt:true,models:testModels()});
     assert.equal(workspace.context.seq,1); assert.equal(workspace.context.files,3);
     const lead = (await isolated.team.listMembers('fresh'))[0]!;
-    assert.deepEqual(lead.value.harness.designScope.working,['metadata.json']);
+    assert.deepEqual(lead.value.designScope.working,['metadata.json']);
     assert.equal((await isolated.team.getMemberActivation('fresh'))!.revision,lead.value.configuration!.acceptedRevision);
     const reopened = new CoreData(new MySqlStorage(url.toString()));
     try { assert.deepEqual(await reopened.team.getMemberActivation('fresh'),await isolated.team.getMemberActivation('fresh')); assert.deepEqual((await reopened.workspaces.loadContext('fresh')).files.map(f=>f.path).sort(),['design/design.md','design/metadata.json','implement/impl/README.md']);
@@ -2958,7 +2958,7 @@ test('adoption imports preserved context and fresh lead atomically after reviewe
     const members=await store.team.listMembers(created.workspaceId);
     assert.equal(members.length,1);
     assert.equal(members[0]!.value.name,'Lead');
-    assert.deepEqual(members[0]!.value.harness.designScope,{working:['metadata.json'],dependencies:[]});
+    assert.deepEqual(members[0]!.value.designScope,{working:['metadata.json'],dependencies:[]});
     assert.equal((await store.agents.getState(members[0]!.id)).historyPosition,0);
     assert.deepEqual(await readdir(join(root,'members')),[members[0]!.value.name]);
     const activation=await store.team.getMemberActivation(created.workspaceId);
@@ -3318,4 +3318,36 @@ test('large context inspection pages follow position order without sorting nativ
     assert.equal(plans.length, 5);
     assert.ok(plans.every(plan => !/filesort/i.test(plan.Extra)), JSON.stringify(plans));
   } finally {store.storage.transaction = transaction;}
+});
+
+test('member design-scope migration persists canonical rows and snapshots without changing private or group history', {timeout:30000}, async()=>{
+ const f=await groupFixture();
+ try {
+  const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend retain history');
+  answer((await f.requests.next()).events,message('Preserved final report.'));
+  await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
+  for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));
+  const context=await store.agents.getContext(f.backend.memberId),history=await store.agents.runMessages(f.backend.memberId,accepted.runs[0]!.runId),chat=await store.team.chatSnapshot(f.workspaceId);
+  const current=(await store.team.getMember(f.backend.memberId))!,source=current.value.configuration!;
+  const {sourceBundle}=await import('../../src/core/team/data/member-config.js');
+  const oldManifest={...JSON.parse(source.files['member.json']!),execute:{allowedCommands:[{kind:'exact',argv:['npm','test']}]}};
+  const oldText=JSON.stringify(oldManifest,null,2)+'\n';
+  const oldSource={...source,...sourceBundle(source.path,{...source.files,'member.json':oldText},'user'),formatVersion:4};
+  const {designScope,...rest}=current.value;
+  await store.team.updateMember(current.id,current.revision,'backend',{...rest,harness:{designScope,allowedCommands:oldManifest.execute.allowedCommands},configuration:oldSource} as never);
+  const root=await f.team.memberWorkspace.root(f.lead.memberId);await writeFile(join(root,source.path),oldText);
+  await initGit({...f,directory:root});await gitText(root,['add','-f','-A','--','.rsi/members']);await gitText(root,['commit','-m','Pre-migration member configuration']);
+  const head=await gitText(root,['rev-parse','HEAD']);
+  await f.team.service.initialize();
+  const migrated=(await store.team.getMember(current.id))!;
+  assert.equal('harness' in migrated.value,false);assert.deepEqual(migrated.value.designScope,designScope);assert.deepEqual(migrated.value.settings,current.value.settings);
+  assert.equal(migrated.value.configuration!.formatVersion,5);assert.equal(migrated.value.configuration!.previous!.files['member.json'],oldText);
+  assert.equal('execute' in JSON.parse(await readFile(join(root,source.path),'utf8')),false);
+  assert.deepEqual(await store.agents.getContext(current.id),context);assert.deepEqual(await store.agents.runMessages(current.id,accepted.runs[0]!.runId),history);assert.deepEqual(await store.team.chatSnapshot(f.workspaceId),chat);
+  assert.equal(await gitText(root,['rev-parse','HEAD']),head);
+  const review=await f.team.currentConfiguration(f.workspaceId);assert.equal(review.status.hasPending,false);assert.equal(review.activation.hasChanges,false);assert.equal(review.activation.valid,true,JSON.stringify(review.activation.issues));
+  await f.team.service.initialize();assert.deepEqual(await store.team.getMember(current.id),migrated);
+  const reopened=new CoreData(new MySqlStorage(databaseUrl!));
+  try {assert.deepEqual(await reopened.team.getMember(current.id),migrated);assert.deepEqual(await reopened.agents.getContext(current.id),context);}finally{await reopened.close();}
+ }finally{await f.close();}
 });

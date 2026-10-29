@@ -24,8 +24,5 @@
       "backend/core/harness/metadata.json"
     ],
     "dependencies": []
-  },
-  "execute": {
-    "allowedCommands": []
   }
 }

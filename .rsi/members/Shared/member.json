@@ -28,8 +28,5 @@
       "frontend/app/metadata.json",
       "frontend/features/metadata.json"
     ]
-  },
-  "execute": {
-    "allowedCommands": []
   }
 }

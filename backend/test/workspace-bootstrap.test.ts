@@ -1,3 +1,4 @@
+import {resolveAssignment} from '../src/core/team/member-workspace.js';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -8,8 +9,8 @@ import { code, stubConfig, withTeam } from './team-fixture.js';
 
 test('new workspace has a ready root-design lead, exact active files and clean bootstrap history before any agent runs', () => withTeam(async f => {
   const lead = await f.team.member(f.workspaceId, f.lead.memberId);
-  assert.equal(lead.ready,true); assert.deepEqual(lead.harness.designScope,{working:['metadata.json'],dependencies:[]});
-  assert.deepEqual(lead.harness.implementationScope,{paths:[],usePaths:[]}); assert.deepEqual(lead.harness.allowedCommands,[]);
+  assert.equal(lead.ready,true); assert.deepEqual(lead.designScope,{working:['metadata.json'],dependencies:[]});
+  assert.equal('harness' in lead,false); assert.equal('implementationScope' in lead,false);
   assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.map(d=>d.path),['metadata.json']);
   const source = await f.team.configuration.accepted(f.workspaceId,lead.memberId);
   for (const [path, content] of Object.entries(source.files)) assert.equal(await readFile(join(f.directory,'.rsi/members',lead.name,path),'utf8'),content);
@@ -46,8 +47,8 @@ test('adopted context gives the fresh lead its existing recursive design mapping
   assert.equal(roster.members.length,1);
   const lead=roster.members[0]!;
   assert.equal(lead.lead,true); assert.equal(lead.ready,true);
-  assert.deepEqual(lead.harness.designScope,{working:['metadata.json'],dependencies:[]});
-  assert.deepEqual([...lead.harness.implementationScope.paths].sort(),['src/api','src/root']);
+  assert.deepEqual(lead.designScope,{working:['metadata.json'],dependencies:[]});
+  assert.deepEqual([...(await resolveAssignment(f.team.designs,workspace.workspaceId,lead.designScope)).working.flatMap(d=>d.implementation)].sort(),['src/api','src/root']);
   const view=await f.team.currentConfiguration(workspace.workspaceId);
   assert.equal(view.status.valid,true);assert.equal(view.status.hasPending,false);
   assert.equal(view.activation.valid,true);assert.equal(view.activation.hasChanges,false);

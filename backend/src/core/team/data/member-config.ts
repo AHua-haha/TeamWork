@@ -3,11 +3,12 @@ import { dirname, join } from 'node:path';
 import { memberRoot } from '../../workspace/workspace-layout.js';
 import { createHash } from 'node:crypto';
 import type { RunSettings } from './config.js';
-import type { MemberAssignment } from './assignment.js';
+import type { DesignScope } from './assignment.js';
+import {upgradeMemberManifest} from './member-config-migration.js';
 import { AppError } from '../../agent/data/model.js';
 
 /** Schema control belongs to the backend envelope, not the editable JSON. */
-export const memberManifestVersion = 4;
+export const memberManifestVersion = 5;
 export interface MemberConfigSource {
   formatVersion?: number;
   acceptedRevision?: string;
@@ -15,27 +16,27 @@ export interface MemberConfigSource {
   previous?: MemberConfigSource;
   /** Backend-only aliases for reading commits made before directory relocation. */
   legacyPaths?: string[];
+  /** Backend-only hashes of actual pre-migration committed manifests. */
+  legacyManifestHashes?: string[];
 }
-export interface ConfigFields { name: string; role: string; responsibility: string; settings: RunSettings; harness: MemberAssignment }
+export interface ConfigFields { name: string; role: string; responsibility: string; settings: RunSettings; designScope: DesignScope }
 export function sourceBundle(path: string, files: Record<string, string>, submittedBy: string): MemberConfigSource {
   const digest = createHash('sha256').update(JSON.stringify(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)))).digest('hex');
   return { formatVersion: memberManifestVersion, path, files, digest, submittedBy, submittedAt: Date.now() };
 }
 export function generatedSource(fields: ConfigFields): MemberConfigSource {
   const { prompt, ...settings } = fields.settings;
-  const manifest = { name: fields.name, role: fields.role, responsibility: fields.responsibility, settings, promptFiles: ['prompts/member.md'], designScope: fields.harness.designScope, execute: { allowedCommands: fields.harness.allowedCommands } };
+  const manifest = { name: fields.name, role: fields.role, responsibility: fields.responsibility, settings, promptFiles: ['prompts/member.md'], designScope: fields.designScope };
   return sourceBundle(`${memberRoot}/${fields.name}/member.json`, { 'member.json': JSON.stringify(manifest, null, 2) + '\n', 'prompts/member.md': prompt }, 'user');
 }
 /** Startup-only conversion preserves the exact previous source and every prompt byte. */
-export function migrateMemberSource(source: MemberConfigSource, allowedCommands: MemberAssignment['allowedCommands'] = []): MemberConfigSource | null {
+export function migrateMemberSource(source: MemberConfigSource): MemberConfigSource | null {
   if (source.formatVersion === memberManifestVersion) return null;
-  let old: { name?: unknown; role?: unknown; responsibility?: unknown; settings?: unknown; promptFiles?: unknown; designScope?: unknown; execute?: unknown; harnesses?: { project?: { designScope?: unknown }; design?: unknown } };
-  try { old = JSON.parse(source.files['member.json']!); }
-  catch { throw new AppError('corrupt_data', 'Accepted member manifest cannot be read', 500); }
-  const designScope = old.designScope ?? old.harnesses?.project?.designScope ?? old.harnesses?.design;
-  if (!designScope) throw new AppError('corrupt_data', 'Accepted member manifest has no design assignment', 500);
-  const manifest = { name: old.name, role: old.role, responsibility: old.responsibility, settings: old.settings, promptFiles: old.promptFiles, designScope, execute: old.execute ?? { allowedCommands } };
-  return { ...sourceBundle(source.path, { ...source.files, 'member.json': JSON.stringify(manifest, null, 2) + '\n' }, 'harness'), previous: source, ...(source.legacyPaths ? {legacyPaths: source.legacyPaths} : {}) };
+  const raw = source.files['member.json'];
+  if (raw === undefined) throw new AppError('corrupt_data', 'Accepted member manifest cannot be read', 500);
+  try {JSON.parse(raw);} catch {throw new AppError('corrupt_data', 'Accepted member manifest cannot be read', 500);}
+  const files = {...source.files, 'member.json': upgradeMemberManifest(raw)};
+  return {...source, ...sourceBundle(source.path, files, 'backend-migration'), previous: source};
 }
 
 /** Relocate the complete bundle, including pending files. Never overwrite or recreate a deletion. */

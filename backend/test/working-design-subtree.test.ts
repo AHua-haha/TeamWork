@@ -5,18 +5,18 @@ import { test } from 'node:test';
 import { resolveAssignment } from '../src/core/team/member-workspace.js';
 import { seedDesign } from './design-fixture.js';
 import { acceptFiles } from './git-fixture.js';
-import { code, configureHarness, withTeam, worker } from './team-fixture.js';
+import { code, configureAssignment, withTeam, worker } from './team-fixture.js';
 
 test('working roots inherit recursive nodes once with canonical casing, implementation mappings and matching inspection', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['parent-src']);
-  const parent = member.harness.designScope.working[0]!;
+  const parent = member.designScope.working[0]!;
   const child = 'systems/backend/Auth/metadata.json', grandchild = 'systems/backend/Auth/cache/metadata.json';
   await seedDesign(f.workspaces, f.workspaceId, child, { content: '# Authentication', implementation: ['auth-src'] });
   await seedDesign(f.workspaces, f.workspaceId, grandchild, { content: '# Cache', implementation: ['cache-src'] });
   await seedDesign(f.workspaces, f.workspaceId, 'systems/backend-extra/metadata.json', { content: '# Sibling', implementation: ['other-src'] });
-  await configureHarness(f, 'Backend', { designScope: { working: [parent, child.toLowerCase()], dependencies: [] }, allowedCommands: [] });
+  await configureAssignment(f, 'Backend', { designScope: { working: [parent, child.toLowerCase()], dependencies: [] } });
   const stored = (await f.team.service.find(member.memberId))!;
-  const resolved = await resolveAssignment(f.team.designs, f.workspaceId, stored.value.harness);
+  const resolved = await resolveAssignment(f.team.designs, f.workspaceId, stored.value.designScope);
   assert.deepEqual(resolved.working.map(d => d.path).sort(), [parent, child, grandchild].sort());
   const files = await f.team.memberWorkspace.files(member.memberId);
   for (const path of ['auth-src/result.ts', 'cache-src/result.ts', '.rsi/context/implement/systems/backend/Auth/cache/impl/README.md']) {
@@ -28,10 +28,10 @@ test('working roots inherit recursive nodes once with canonical casing, implemen
   const context = await f.team.memberWorkspace.guidance(member.memberId);
   assert.match(context, /# Authentication/); assert.match(context, /# Cache/);
   assert.doesNotMatch(context, /# Sibling/);
-  const inspection = await f.team.inspect(f.workspaceId, member.memberId);
-  assert.deepEqual(inspection.member.harness.designScope.working, [parent, child.toLowerCase()]);
-  assert.deepEqual(new Set(inspection.member.harness.implementationScope.paths), new Set(['parent-src', 'auth-src', 'cache-src']));
-  assert.equal((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.find(f.lead.memberId))!.value.harness)).working.length,5);
+  const inspectedMember = await f.team.member(f.workspaceId, member.memberId);
+  assert.deepEqual(inspectedMember.designScope.working, [parent, child.toLowerCase()]);
+  assert.deepEqual(new Set(resolved.working.flatMap(d=>d.implementation)),new Set(['parent-src','auth-src','cache-src']));
+  assert.equal((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.find(f.lead.memberId))!.value.designScope)).working.length,5);
 }));
 
 test('pending child files grant nothing; accepting them extends the existing assignment without activation', () => withTeam(async f => {
@@ -41,13 +41,13 @@ test('pending child files grant nothing; accepting them extends the existing ass
   await writeFile(join(folder, 'metadata.json'), '{"implementation":["new-src"]}');
   await writeFile(join(folder, 'design.md'), '# New accepted subsystem');
   const before = await f.team.member(f.workspaceId, member.memberId);
-  assert.deepEqual(before.harness.implementationScope.paths, []);
+  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,before.designScope)).working.flatMap(d=>d.implementation), []);
   assert.doesNotMatch(await f.team.memberWorkspace.guidance(member.memberId),/# New accepted subsystem/);
   await acceptFiles(f, '.rsi/context/design', 'Accept child design');
   const after = await f.team.member(f.workspaceId, member.memberId);
   assert.equal(after.revision, before.revision);
-  assert.deepEqual(after.harness.designScope, before.harness.designScope);
-  assert.deepEqual(after.harness.implementationScope.paths, ['new-src']);
+  assert.deepEqual(after.designScope, before.designScope);
+  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,after.designScope)).working.flatMap(d=>d.implementation), ['new-src']);
   const context = await f.team.memberWorkspace.guidance(member.memberId);
   assert.match(context, new RegExp(child.replaceAll('.', '\\.')));
 }));
@@ -58,10 +58,10 @@ test('dependency guidance stays explicit even when a dependency node also belong
   await seedDesign(f.workspaces, f.workspaceId, overlap, { content: '# Shared', implementation: ['src/shared'] });
   await seedDesign(f.workspaces, f.workspaceId, 'contracts/metadata.json', { content: '# Contracts', implementation: ['contracts-src'] });
   await seedDesign(f.workspaces, f.workspaceId, 'contracts/child/metadata.json', { content: '# Dependency child', implementation: ['contract-child-src'] });
-  await configureHarness(f, 'Backend', { designScope: { working: member.harness.designScope.working, dependencies: [overlap, 'contracts/metadata.json'] }, allowedCommands: [] });
-  const resolved = await resolveAssignment(f.team.designs, f.workspaceId, (await f.team.service.find(member.memberId))!.value.harness);
+  await configureAssignment(f, 'Backend', { designScope: { working: member.designScope.working, dependencies: [overlap, 'contracts/metadata.json'] } });
+  const resolved = await resolveAssignment(f.team.designs, f.workspaceId, (await f.team.service.find(member.memberId))!.value.designScope);
   assert.deepEqual(resolved.dependencies.map(d => d.path), [overlap, 'contracts/metadata.json']);
-  assert.ok(!resolved.readable.includes('contract-child-src'));
+  assert.ok(!resolved.dependencies.flatMap(d=>d.implementation).includes('contract-child-src'));
   const files = await f.team.memberWorkspace.files(member.memberId);
   await files.write.mkdir(join(files.root, 'src/shared'));
   await files.write.mkdir(join(files.root, '.rsi/context/implement/systems/backend/shared/impl'));

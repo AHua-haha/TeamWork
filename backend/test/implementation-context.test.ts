@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { join } from 'node:path';
 import { contextPaths } from '../src/core/workspace/workspace-layout.js';
 import { memberContextPath } from '../src/core/workspace/workspace-layout.js';
-import { withTeam,worker,configureHarness,code } from './team-fixture.js';
+import { withTeam,worker,configureAssignment,code } from './team-fixture.js';
 import { initGit } from './git-fixture.js';
 
 test('implementation context resources preserve design identity and both document forms without Git scope identities',()=>{
@@ -19,8 +19,8 @@ test('bootstrap provides complete context templates; implementation context comm
   await files.write.writeFile(join(files.root,'source.txt'),'no mapping required');
 }));
 test('working context and dependency context are writable without permission enforcement; members share the same current documents',()=>withTeam(async f=>{
-  const a=await worker(f,'A',['src']),b=await worker(f,'B',['lib']);await configureHarness(f,'A',{designScope:{working:a.harness.designScope.working,dependencies:b.harness.designScope.working},allowedCommands:[]});
-  const af=await f.team.memberWorkspace.files(a.memberId),bf=await f.team.memberWorkspace.files(b.memberId),own=memberContextPath(a.harness.designScope.working[0]!),dependency=memberContextPath(b.harness.designScope.working[0]!);
+  const a=await worker(f,'A',['src']),b=await worker(f,'B',['lib']);await configureAssignment(f,'A',{designScope:{working:a.designScope.working,dependencies:b.designScope.working}});
+  const af=await f.team.memberWorkspace.files(a.memberId),bf=await f.team.memberWorkspace.files(b.memberId),own=memberContextPath(a.designScope.working[0]!),dependency=memberContextPath(b.designScope.working[0]!);
   await bf.write.mkdir(join(bf.root,dependency.slice(0,dependency.lastIndexOf('/'))));await bf.write.writeFile(join(bf.root,dependency),'Dependency context');
   assert.match((await af.read.readFile(join(af.root,dependency))).toString(),/Dependency/);await af.write.writeFile(join(af.root,dependency),'Updated dependency context');
   await af.write.mkdir(join(af.root,own.slice(0,own.lastIndexOf('/'))));await af.write.writeFile(join(af.root,own),'Current context');assert.equal(af.root,bf.root);

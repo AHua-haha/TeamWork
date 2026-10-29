@@ -1,3 +1,4 @@
+import {resolveAssignment} from '../src/core/team/member-workspace.js';
 import { memberBash } from './team-fixture.js';
 import { acceptFiles, initGit } from './git-fixture.js';
 import { execFile } from 'node:child_process';
@@ -9,9 +10,9 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { test } from 'node:test';
 import { designMetadata } from '../src/core/workspace/design.js';
-import { commandArgv, emptyAssignment, memberAssignment } from '../src/core/team/data/assignment.js';
+import { emptyDesignScope, parseDesignScope } from '../src/core/team/data/assignment.js';
 import { parseBashInput } from '../src/core/agent/tools/bash.js';
-import { code, configureHarness, withTeam, worker } from './team-fixture.js';
+import { code, configureAssignment, withTeam, worker } from './team-fixture.js';
 
 const signal = () => new AbortController().signal;
 const git = (scope: string, command: string) => ({ command });
@@ -19,11 +20,10 @@ const git = (scope: string, command: string) => ({ command });
 test('assignment accepts design references only and never agent-owned implementation paths or authority metadata', () => {
   assert.deepEqual(designMetadata({implementation:['backend/']}),{implementation:['backend']});
   for (const path of ['../outside','.rsi/context/design/metadata.json','.git/config','.rsi/members']) assert.throws(()=>designMetadata({implementation:[path]}));
-  const value={...emptyAssignment(),designScope:{working:['.rsi/context/design/api/metadata.json'],dependencies:['contracts/metadata.json']},allowedCommands:[{kind:'exact',argv:['bash','-c','npm test']}]};
-  assert.equal(memberAssignment(value).designScope.working[0],'api/metadata.json');
-  assert.throws(()=>memberAssignment({...value,implementationScope:{paths:['.'],usePaths:[]}}));
-  assert.throws(()=>memberAssignment({...value,designScope:{working:['user/a'],dependencies:['user/A']}}));
-  assert.throws(()=>commandArgv([]));
+  const value={working:['.rsi/context/design/api/metadata.json'],dependencies:['contracts/metadata.json']};
+  assert.equal(parseDesignScope(value).working[0],'api/metadata.json');
+  assert.throws(()=>parseDesignScope({...value,allowedCommands:[]}));
+  assert.throws(()=>parseDesignScope({working:['user/a'],dependencies:['user/A']}));
   assert.throws(()=>parseBashInput({command:'git status',metadata:{git:{scope:'design',approved:true}}}));
 });
 
@@ -44,12 +44,12 @@ test('Bash writes the whole workspace, reads member files and permits native pro
 test('accepted design Git commits update assignment guidance and discovery',()=>withTeam(async f=>{
   const member=await worker(f,'Backend',['old']);
   const lead=await f.team.memberWorkspace.files(f.lead.memberId);
-  const designPath=member.harness.designScope.working[0]!;
+  const designPath=member.designScope.working[0]!;
   await lead.write.mkdir(join(lead.root,'.rsi/context/design/systems/backend'));
   await lead.write.writeFile(join(lead.root,'.rsi/context/design/systems/backend/design.md'),'New accepted design');
   await lead.write.writeFile(join(lead.root,'.rsi/context/design',designPath),JSON.stringify({implementation:['new']}));
   await acceptFiles(f,'.rsi/context/design','Accept new mapping');
-  assert.deepEqual((await f.team.service.get(f.workspaceId,member.memberId)).harness.implementationScope.paths,['new']);
+  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.get(f.workspaceId,member.memberId)).designScope)).working.flatMap(d=>d.implementation),['new']);
   assert.equal((await f.team.designs.inspect(f.workspaceId,designPath)).design!.content,'New accepted design');
   assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.find(d=>d.path===designPath)!.implementation,['new']);
 }));
@@ -57,8 +57,7 @@ test('accepted design Git commits update assignment guidance and discovery',()=>
 test('every member receives broad Bash independently of historical command rules',()=>withTeam(async f=>{
   const plain=await memberBash(f.team, f.lead.memberId,{command:'printf arbitrary'},signal());
   assert.equal(plain.exitCode,0,plain.output);assert.equal(plain.output,'arbitrary');
-  const inspection=await f.team.inspect(f.workspaceId,f.lead.memberId);
-  assert.deepEqual(inspection.capabilities,['File React Harness','Default React Harness']);
+  assert.equal('harness' in await f.team.member(f.workspaceId,f.lead.memberId),false);
   const result=await memberBash(f.team, f.lead.memberId,git('design','git init -q && git status --short'),signal());
   assert.equal(result.exitCode,0,result.output);
 }));

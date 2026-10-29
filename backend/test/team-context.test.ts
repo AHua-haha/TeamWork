@@ -14,7 +14,7 @@ test('Team supplies identity/routing; React Harnesses own tools, instructions an
  assert.deepEqual(names,['bash','edit','find','grep','list_models','ls','read','validate_member_config','web_fetch','web_search','write']);
  const prompts=(await Promise.all(harnesses.map(h=>h.systemPrompt?.(scope(member.memberId))))).join('\n');
  assert.match(prompts,/Design for Backend/);assert.doesNotMatch(prompts,/Design for Frontend/);assert.match(prompts,/guidance, not access restrictions/);assert.match(prompts,/without design-scope/);
- assert.deepEqual((await f.team.inspect(f.workspaceId,member.memberId)).capabilities,['File React Harness','Default React Harness']);
+ assert.equal('harness' in await f.team.member(f.workspaceId,member.memberId),false);
  const lead=await policy.buildRequest(scope(f.lead.memberId),{revision:0,entries:[]});
  assert.match(lead.context.systemPrompt!,/offer concrete choices/);assert.match(lead.context.systemPrompt!,/Assign work in your final group response/);
  const plain=await policy.createReactHarnessFactories!('plain-agent');assert.deepEqual(plain,[]);

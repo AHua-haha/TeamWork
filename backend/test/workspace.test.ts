@@ -126,7 +126,7 @@ test('adoption preserves existing context bytes and document forms and imports t
   assert.deepEqual(baseline.design, Object.fromEntries(Object.entries(original).filter(([path])=>path.startsWith('design/')).map(([path,content])=>[`.rsi/context/${path}`,content])));
   assert.equal((await store.loadContext(workspace.workspaceId)).files.length, Object.keys(original).length);
   const lead = [...store.members.values()][0]!;
-  assert.deepEqual(lead.member.value.harness.designScope.working, ['metadata.json']);
+  assert.deepEqual(lead.member.value.designScope.working, ['metadata.json']);
   assert.equal(await readFile(join(directory, 'src/app.ts'), 'utf8'), 'source');
 }));
 

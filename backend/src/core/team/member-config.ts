@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { keys, obj, validateRunSettings } from './data/config.js';
 import { resolveAssignment, type MemberWorkspace } from './member-workspace.js';
-import { memberAssignment } from './data/assignment.js';
+import { parseDesignScope } from './data/assignment.js';
 import { sourceBundle, currentMemberPaths, type MemberConfigSource } from './data/member-config.js';
 import { memberFields, memberName, maxMembers, type MemberFields, type MemberActivationState, type NewMember, type StoredMember, type TeamService } from './data/members.js';
 import { modelRunSettings } from '../workspace/data/models.js';
@@ -22,7 +22,7 @@ export interface MemberConfigReview {
 }
 interface Plan { review: MemberConfigReview; active: StoredMember[]; modelsRevision: number; activation: MemberActivationState | null; configurations: { path: string; memberId?: string; fields: MemberFields }[] }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const assignment = (scope: MemberFields['harness']['designScope']) => ({ working: scope.working.map(p => p.toLowerCase()).sort(), dependencies: scope.dependencies.map(p => p.toLowerCase()).sort() });
+const assignment = (scope: MemberFields['designScope']) => ({ working: scope.working.map(p => p.toLowerCase()).sort(), dependencies: scope.dependencies.map(p => p.toLowerCase()).sort() });
 const withoutPrompt = (settings: MemberFields['settings']) => { const { prompt: _prompt, ...rest } = settings; return rest; };
 
 /** File validation, user-committed review and activation are distinct from active settings. */
@@ -117,11 +117,10 @@ export class MemberConfigService {
         const raw = await textAt(path);
         let value: unknown;
         try { value = JSON.parse(raw); } catch { throw new AppError('invalid_config', 'Member manifest must be valid JSON'); }
-        const data = obj(value, 'Member manifest'); keys(data, ['name', 'role', 'responsibility', 'settings', 'promptFiles', 'designScope', 'execute']);
+        const data = obj(value, 'Member manifest'); keys(data, ['name', 'role', 'responsibility', 'settings', 'promptFiles', 'designScope']);
         const settings = obj(data.settings, 'Member settings');
         if ('prompt' in settings) throw new AppError('invalid_config', 'Use referenced Markdown prompt files, not settings.prompt');
-        const execute = obj(data.execute, 'Execute assignment'); keys(execute, ['allowedCommands']);
-        const harness = memberAssignment({ designScope: data.designScope, allowedCommands: execute.allowedCommands });
+        const designScope = parseDesignScope(data.designScope);
         if (!Array.isArray(data.promptFiles) || data.promptFiles.length > 20 || data.promptFiles.some(p => typeof p !== 'string' || !/^prompts\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.md$/.test(p) || p.split('/').some((s: string) => s === '..' || s.startsWith('.')))) throw new AppError('invalid_config', 'promptFiles lists at most 20 safe bundle-relative prompts/*.md files');
         const refs = data.promptFiles as string[];
         if (new Set(refs.map(p => p.toLowerCase())).size !== refs.length) throw new AppError('invalid_config', 'Duplicate prompt reference');
@@ -137,15 +136,15 @@ export class MemberConfigService {
           if (!selected) throw new AppError('invalid_config', 'Choose a model from this workspace');
           defaults = modelRunSettings(selected);
         }
-        const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, harness, settings: validateRunSettings({ ...defaults, ...settings, prompt }) });
+        const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, designScope, settings: validateRunSettings({ ...defaults, ...settings, prompt }) });
         if (current) {
-          if (fields.name !== current.value.name || fields.role !== current.value.role || !same(withoutPrompt(fields.settings), withoutPrompt(current.value.settings)) || !same(assignment(fields.harness.designScope), assignment(current.value.harness.designScope))) throw new AppError('forbidden_update', 'Update may change only responsibility, supplementary prompts and execution rules');
-          fields.harness.designScope = current.value.harness.designScope;
-        } else if (!harness.designScope.working.length && !harness.designScope.dependencies.length) throw new AppError('invalid_config', 'A new worker needs a design assignment');
+          if (fields.name !== current.value.name || fields.role !== current.value.role || !same(withoutPrompt(fields.settings), withoutPrompt(current.value.settings)) || !same(assignment(fields.designScope), assignment(current.value.designScope))) throw new AppError('forbidden_update', 'Update may change only responsibility and supplementary prompts');
+          fields.designScope = current.value.designScope;
+        } else if (!designScope.working.length && !designScope.dependencies.length) throw new AppError('invalid_config', 'A new worker needs a design assignment');
         if (match[1] !== fields.name) throw new AppError('invalid_config', 'Member directory must exactly match its name');
-        const resolved = await resolveAssignment(this.workspace.designs, workspaceId, fields.harness);
+        const resolved = await resolveAssignment(this.workspace.designs, workspaceId, fields.designScope);
         for (const design of [...resolved.working, ...resolved.dependencies]) designs.set(design.path, design.revision);
-        const source = { ...sourceBundle(path, files, 'user'), ...(current?.value.configuration?.legacyPaths ? {legacyPaths: current.value.configuration.legacyPaths} : {}), acceptedRevision: origin === 'committed' ? revision : undefined, ...(current?.value.configuration?.previous ? { previous: current.value.configuration.previous } : {}) };
+        const source = { ...sourceBundle(path, files, 'user'), ...(current?.value.configuration?.legacyPaths ? {legacyPaths: current.value.configuration.legacyPaths} : {}), acceptedRevision: origin === 'committed' ? revision : undefined, ...(current?.value.configuration?.legacyManifestHashes ? {legacyManifestHashes: current.value.configuration.legacyManifestHashes} : {}), ...(current?.value.configuration?.previous ? { previous: current.value.configuration.previous } : {}) };
         const changed = !current || source.digest !== current.value.configuration?.digest;
         if (changed) {
           const [issues] = await this.team.settingsIssues([{ ...fields.settings, ...current?.value.modelSettings }]);
