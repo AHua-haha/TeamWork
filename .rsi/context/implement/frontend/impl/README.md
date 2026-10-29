@@ -110,3 +110,11 @@ The workspace panel is a named inline-size container. The Context tab overrides 
 `panel-size.ts` supplies bounds matching existing overlay breakpoints: a 320px minimum when space allows, up to available width minus 280px chat space when docked; overlays fit the viewport minus its navigation rail. A ResizeObserver and window resize listener clamp rendered width without losing the preferred width. `rsi.workspace-panel-width` in sessionStorage retains the preference with a storage-unavailable fallback. Expand hides the grip and uses the existing full-panel layout; Restore reapplies the preferred width.
 
 The handle applies a CSS custom width directly to its enclosing panel and rerenders only its own ARIA state. It does not rerender message history through parent state or request backend data. The existing Context container queries adapt source/list/detail to the new width. Tests cover sizing bounds; browser checks cover actual drag, keyboard resizing, session persistence, Expand/Restore, viewport clamping and unchanged context-read counts while dragging.
+
+## Scroll containment correction
+
+The app shell now establishes an explicit viewport boundary with `html`, `body`, and `#root` at full height, document scrolling disabled, and `.app-shell` overflow clipped. Chat and the Workspace panel use `overscroll-behavior: contain` so wheel/touch overscroll remains within the active pane instead of propagating to the document, especially while the fixed right panel is open.
+
+**Changed:** `frontend/src/app/styles.css`.
+
+**Verification:** `npm run check --prefix frontend`, `npm test --prefix frontend` (76 passed), `npm run build --prefix frontend`, and `git diff --check` pass. Browser reproduction remains useful for confirming the intermittent behavior across desktop and overlay breakpoints.
