@@ -27,8 +27,6 @@ import type { WorkspaceService } from '../workspace/workspace.js';
 
 const summaryInstructions = readFileSync(new URL('../../../prompts/team/group-summary.md', import.meta.url), 'utf8').trim();
 if (!summaryInstructions) throw new Error('Group summary instructions must not be empty');
-const fileToolInstructions = readFileSync(new URL('../../../prompts/team/file-tools.md', import.meta.url), 'utf8').trim();
-if (!fileToolInstructions) throw new Error('File tool instructions must not be empty');
 
 
 /** A member as the team's callers see it: its record, and whether it has a run in progress. */
@@ -298,7 +296,7 @@ export class TeamSystem {
           throw new AppError('image_not_supported', 'This context contains pictures; select a model with image input', 409);
         }
         const prepared = await this.harness.prepare(scope.agentId, member.value.lead || !this.harness.permissionsEnabled ? management : []);
-        const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context, fileToolInstructions].join('\n\n');
+        const systemPrompt = [await this.instructions.build(scope.agentId, scope.config.systemPrompt), prepared.context].join('\n\n');
         return { ...request, tools: prepared.tools, context: { ...request.context, tools: prepared.tools.map(tool => tool.definition), systemPrompt } };
       },
     };

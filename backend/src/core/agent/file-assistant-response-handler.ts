@@ -1,5 +1,6 @@
 import { dirname, isAbsolute, relative as relativePath, resolve, basename, join } from 'node:path';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { detectSupportedImageMimeTypeFromFile, resizeImage } from '@earendil-works/pi-coding-agent';
@@ -13,6 +14,8 @@ type State = { files: Record<string, FileState> };
 type EditChange = { start: number; oldEnd: number; newEnd: number; delta: number };
 
 const fileToolNames = new Set(['read', 'write', 'edit']);
+const fileToolInstructions = readFileSync(new URL('../../../prompts/agent/file-tools.md', import.meta.url), 'utf8').trim();
+if (!fileToolInstructions) throw new AppError('invalid_config', 'File handler instructions must not be empty', 500);
 
 function normalizeRanges(ranges: Range[]): Range[] {
   const sorted = ranges
@@ -43,34 +46,32 @@ function fileKey(root: string, absolute: string): string {
 }
 function safePath(path: string): string { return path.replace(/[\r\n\t]/g, ' '); }
 function lineAt(content: string, offset: number): number { return newlineCount(content.slice(0, offset)) + 1; }
-function lineNumber(value: number, totalLines: number): string {
-  const width = Math.max(6, String(totalLines).length);
-  return `${String(value).padStart(width)}\t`;
+function metadata(path: string, totalLines: number, operation: 'read' | 'write' | 'edit', editResult?: string, markerId?: string): string {
+  return `<metadata>\npath: ${safePath(path)}\ntotal_lines: ${totalLines}\noperation: ${operation}\nstatus: success${editResult ? `\nedit_result: ${editResult}` : ''}${markerId ? `\nfile_marker_id: ${markerId}` : ''}\n</metadata>`;
 }
-
-function metadata(path: string, totalLines: number, operation: 'read' | 'write' | 'edit', editResult?: string): string {
-  return `<metadata>\npath: ${safePath(path)}\ntotal_lines: ${totalLines}\noperation: ${operation}\nstatus: success${editResult ? `\nedit_result: ${editResult}` : ''}\n</metadata>`;
-}
-function formatAggregate(path: string, content: string, ranges: Range[], operation: 'read' | 'edit', editResult?: string): string {
-  const lines = fileLines(content);
+function formatAggregate(path: string, content: string, ranges: Range[], operation: 'read' | 'write' | 'edit', editResult?: string): string {
+  // Keep source whitespace and line endings; only marker boundaries may add a newline.
+  const lines = content.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const visible = normalizeRanges(ranges)
     .map(range => ({ start: range.start, end: Math.min(range.end, lines.length) }))
     .filter(range => range.start <= range.end);
-  const body = [operation === 'read'
-    ? 'Aggregated file view: combines ranges revealed by this and previous reads. Gaps are not shown.'
-    : 'Aggregated file view: combines previously revealed ranges with the current post-edit content for affected lines. Gaps are not shown.'];
+  // Disambiguate source that itself contains presentation-marker examples, without escaping it.
+  let markerId: string | undefined;
+  if (/^<<<(?:FILE_START|FILE_END|UNREVEALED_GAP)(?:\s|>>>)/m.test(content)) {
+    do { markerId = randomUUID(); } while (content.includes(markerId));
+  }
+  const marker = (name: string, attributes = '') => `<<<${name}${attributes}${markerId ? ` marker_id="${markerId}"` : ''}>>>\n`;
+  const body = [marker('FILE_START', ` path=${JSON.stringify(path)} total_lines=${lines.length}`)];
   let previousEnd = 0;
   for (const range of visible) {
-    if (range.start > previousEnd + 1) body.push(`--- Lines ${previousEnd + 1}-${range.start - 1} not shown ---`);
-    for (let number = range.start; number <= range.end; number++) body.push(`${lineNumber(number, lines.length)}${lines[number - 1]}`);
+    if (range.start > previousEnd + 1) body.push(marker('UNREVEALED_GAP', ` lines=${previousEnd + 1}-${range.start - 1}`));
+    const revealed = lines.slice(range.start - 1, range.end).join('');
+    body.push(revealed.endsWith('\n') ? revealed : `${revealed}\n`);
     previousEnd = range.end;
   }
-  body.push(metadata(path, lines.length, operation, editResult));
-  return body.join('\n');
-}
-function formatWholeFile(path: string, content: string): string {
-  const lines = fileLines(content);
-  return [...lines.map((line, index) => `${lineNumber(index + 1, lines.length)}${line}`), metadata(path, lines.length, 'write')].join('\n');
+  if (previousEnd < lines.length) body.push(marker('UNREVEALED_GAP', ` lines=${previousEnd + 1}-${lines.length}`));
+  body.push(marker('FILE_END'), '\n', metadata(path, lines.length, operation, editResult, markerId));
+  return body.join('');
 }
 
 /** Apply one successful exact-string replacement's effect to the tracked revealed line ranges. */
@@ -132,11 +133,13 @@ export class FileAssistantResponseHandler implements AssistantResponseHandler {
   tools(): HandlerTool[] {
     const path = Type.String({ minLength: 1, description: 'Relative to the workspace root, or an absolute filesystem path.' });
     return [
-      { definition: { name: 'read', description: 'Read text or an image directly from the filesystem. Text results show line numbers and the aggregate of all ranges revealed for this file. offset is 1-indexed; omit limit to reveal the remaining lines. The aggregate is not truncated. Images are returned as image blocks. Previous aggregates are hidden from future model context.', parameters: Type.Object({path, offset: Type.Optional(Type.Integer({minimum: 1})), limit: Type.Optional(Type.Integer({minimum: 1}))}, {additionalProperties: false}) } },
-      { definition: { name: 'write', description: 'Create or replace a UTF-8 text file, creating parent directories as needed. Returns the full post-write file with line numbers and metadata. The successful content argument is omitted from future model context.', parameters: Type.Object({path, content: Type.String()}, {additionalProperties: false}) } },
-      { definition: { name: 'edit', description: 'Edit a UTF-8 text file using one or more unique exact string replacements. All oldText matches must exist once in the original file and must not overlap. Returns the current aggregate including changed lines. Use original text without output line-number prefixes.', parameters: Type.Object({path, edits: Type.Array(Type.Object({oldText: Type.String({minLength: 1}), newText: Type.String()}, {additionalProperties: false}), {minItems: 1})}, {additionalProperties: false}) } },
+      { definition: { name: 'read', description: 'Read text or an image directly from the filesystem. Text results aggregate all revealed ranges as plain source text without line numbers, with FILE_START/FILE_END boundaries and UNREVEALED_GAP markers for every omitted range. offset is 1-indexed; omit limit to reveal the remaining lines. The aggregate is not truncated. Images are returned as image blocks. Previous aggregates are hidden from future model context.', parameters: Type.Object({path, offset: Type.Optional(Type.Integer({minimum: 1})), limit: Type.Optional(Type.Integer({minimum: 1}))}, {additionalProperties: false}) } },
+      { definition: { name: 'write', description: 'Create or replace a UTF-8 text file, creating parent directories as needed. Returns the full post-write file as plain source text within FILE_START/FILE_END boundaries, followed by metadata. The successful content argument is omitted from future model context.', parameters: Type.Object({path, content: Type.String()}, {additionalProperties: false}) } },
+      { definition: { name: 'edit', description: 'Edit a UTF-8 text file using one or more unique exact string replacements. All oldText matches must exist once in the original file and must not overlap. Returns the current aggregate including changed lines. Use actual source text, excluding presentation markers and metadata.', parameters: Type.Object({path, edits: Type.Array(Type.Object({oldText: Type.String({minLength: 1}), newText: Type.String()}, {additionalProperties: false}), {minItems: 1})}, {additionalProperties: false}) } },
     ];
   }
+
+  systemPrompt(): string { return fileToolInstructions; }
 
   overrideToolNames(): string[] { return ['read', 'write', 'edit']; }
   canHandle(response: AssistantMessage): boolean { return response.content.some(part => part.type === 'toolCall' && fileToolNames.has(part.name)); }
@@ -210,7 +213,7 @@ export class FileAssistantResponseHandler implements AssistantResponseHandler {
       content = textContent(await readFile(path));
       const count = lineCount(content);
       file.ranges = count ? [{start: 1, end: count}] : [];
-      view = formatWholeFile(label, content);
+      view = formatAggregate(label, content, file.ranges, 'write');
     } else {
       assertArguments(call, ['path', 'edits'], ['path', 'edits']);
       const edits = canonicalEditList(call.arguments.edits);

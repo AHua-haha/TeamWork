@@ -22,19 +22,20 @@ async function fixture(t: TestContext, initial: Record<string, string> = {}) {
   let state: AssistantResponseHandlerData = {revision: 0, data: {}};
   let handler = new FileAssistantResponseHandler(root, state);
   let context: ContextHistory = {revision: 0, entries: []};
-  const history: CompletedMessage[] = [], commits: HandlerMessageEffects[] = [], requests: string[] = [];
+  const history: CompletedMessage[] = [], commits: HandlerMessageEffects[] = [], requests: string[] = [], systemPrompts: string[] = [];
   let failCommit = false;
   async function run(turns: ToolCall[][], tools: RuntimeTool[] = [], policyExtra: Partial<RuntimePolicy> = {}) {
     let index = 0;
     const stream: ModelStream = async function*(request) {
       requests.push(JSON.stringify(request.context.messages));
+      systemPrompts.push(request.context.systemPrompt ?? '');
       const calls = turns[index++];
       const response = calls ? fauxAssistantMessage(calls, {stopReason: 'toolUse'}) : fauxAssistantMessage('finished');
       yield {type: 'start', partial: {...response, content: [], stopReason: 'pending'}};
       yield {type: 'done', reason: response.stopReason as 'stop' | 'toolUse', message: response};
     };
     const run: RunState = {agentId: 'agent', runId: `run-${history.length}`, status: 'running', phase: 'model', step: 0, startedAt: 1, endedAt: null, endPosition: null, activeMessageId: null, error: null};
-    const execution = new AgentExecution(run, context, history.length, {model, tools, systemPrompt: '', options: {}}, {...fixedPolicy(model, tools), createAssistantResponseHandlers: () => [handler], ...policyExtra}, stream, {
+    const execution = new AgentExecution(run, context, history.length, {model, tools, systemPrompt: 'Caller rules.', options: {}}, {...fixedPolicy(model, tools, 'Caller rules.'), createAssistantResponseHandlers: () => [handler], ...policyExtra}, stream, {
       message: async record => { history.push(structuredClone(record)); return record; },
       handlerMessage: async (record, effects) => {
         if (failCommit) throw new Error('transaction rolled back');
@@ -48,7 +49,7 @@ async function fixture(t: TestContext, initial: Record<string, string> = {}) {
     context = execution.snapshot().context;
     return terminal;
   }
-  return {root, directory, history, commits, requests, run, state: () => state, context: () => context,
+  return {root, directory, history, commits, requests, systemPrompts, run, state: () => state, context: () => context,
     restart: () => {handler = new FileAssistantResponseHandler(root, state);}, clearContext: () => {context = {revision: context.revision + 1, entries: []};},
     setFailCommit: () => {failCommit = true;}, handler: () => handler};
 }
@@ -62,10 +63,10 @@ async function fixture(t: TestContext, initial: Record<string, string> = {}) {
   assert.equal(results.length, 2);
   assert.equal(results[0]!.metadata.modelContextHidden, true);
   assert.equal(results[1]!.metadata.modelContextHidden, undefined);
-  assert.match(text(results[1]!), /     2\ttwo/); assert.match(text(results[1]!), /     8\teight/);
-  assert.match(text(results[1]!), /--- Lines 4-6 not shown ---/);
+  assert.equal(text(results[1]!).split('\n\n<metadata>')[0], '<<<FILE_START path="src/file.ts" total_lines=9>>>\n<<<UNREVEALED_GAP lines=1-1>>>\ntwo\nthree\n<<<UNREVEALED_GAP lines=4-6>>>\nseven\neight\n<<<UNREVEALED_GAP lines=9-9>>>\n<<<FILE_END>>>');
+  assert.doesNotMatch(text(results[1]!), /^ *\d+\t/m);
   assert.match(f.requests[1]!, /File view omitted/);
-  assert.match(text(f.history.find(entry => entry.message.role === 'toolResult')!), /Aggregated file view/);
+  assert.match(text(f.history.find(entry => entry.message.role === 'toolResult')!), /<<<FILE_START/);
   assert.equal(f.history.find(entry => entry.message.role === 'toolResult')!.metadata.modelContextHidden, undefined);
   const data = f.state().data.files as Record<string, {ranges: unknown; visibleMessageId: string}>;
   assert.deepEqual(data[join(f.root, 'src/file.ts')]!.ranges, [{start: 2, end: 3}, {start: 7, end: 8}]);
@@ -114,7 +115,7 @@ test('ranges and direct visible references survive runs and restoration; removed
   await f.run([[call('a', 'read', {path: 'file.txt', limit: 1})]]);
   f.restart();
   await f.run([[call('b', 'read', {path: 'file.txt', offset: 3, limit: 1})]]);
-  assert.match(text(f.history.filter(entry => entry.message.role === 'toolResult').at(-1)!), /     1\tone/);
+  assert.match(text(f.history.filter(entry => entry.message.role === 'toolResult').at(-1)!), /\none\n/);
   assert.equal(f.commits.at(-1)!.metadataUpdates.length, 1);
   f.clearContext();
   await f.run([[call('c', 'read', {path: 'file.txt', limit: 1})]]);
@@ -134,7 +135,7 @@ test('exact edits shift ranges, preserve CRLF, and reject overlapping or ambiguo
   const f = await fixture(t, {'file.txt': 'a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng\r\nh\r\ni\r\n'});
   await f.run([[call('a', 'read', {path: 'file.txt', offset: 7, limit: 2})], [call('b', 'edit', {path: 'file.txt', edits: [{oldText: 'b\r\nc', newText: 'B\r\nC\r\nC2'}, {oldText: 'e\nf', newText: 'E\nF'}]})]]);
   const result = f.history.filter(entry => entry.message.role === 'toolResult').at(-1)!;
-  assert.match(text(result), /     9\th/); assert.match(text(result), /C2/);
+  assert.match(text(result), /g\r\nh\r\n/); assert.match(text(result), /C2/);
   assert.doesNotMatch(await readFile(join(f.root, 'file.txt'), 'utf8'), /(?<!\r)\n/);
   const before = await readFile(join(f.root, 'file.txt'), 'utf8');
   await f.run([[call('c', 'edit', {path: 'file.txt', edits: [{oldText: 'B\nC', newText: 'x'}, {oldText: 'C\nC2', newText: 'y'}]})]]);
@@ -148,16 +149,58 @@ test('successful write suppresses only its content argument and preserves origin
   const assistant = f.context().entries.find(entry => entry.message.role === 'assistant')!;
   assert.deepEqual(assistant.metadata.suppressedToolCallArguments, ['a']);
   assert.match(JSON.stringify(f.history[0]), /unique-secret-for-test/);
-  assert.match(text(f.history[1]!), /     2\tsecond/);
+  assert.match(text(f.history[1]!), /unique-secret-for-test\nsecond\n<<<FILE_END>>>/);
   assert.equal(f.commits[0]!.metadataUpdates[0]!.messageId, assistant.messageId);
 });
 
-test('all file results use digit-based line-number width and custom read descriptions match untruncated aggregates', async t => {
+test('full reads return unnumbered source text without truncation or gap markers', async t => {
   const f = await fixture(t, {'file.txt': Array.from({length: 3000}, (_, i) => `  line-${i + 1}`).join('\n')});
   await f.run([[call('a', 'read', {path: 'file.txt'})]]);
-  const lines = text(f.history[1]!).split('\n').filter(line => /^ *\d+\t/.test(line));
-  assert.equal(lines.length, 3000); assert.equal(lines[0], '     1\t  line-1');
+  const output = text(f.history[1]!);
+  const source = Array.from({length: 3000}, (_, i) => `  line-${i + 1}`).join('\n');
+  assert.ok(output.startsWith(`<<<FILE_START path="file.txt" total_lines=3000>>>\n${source}\n<<<FILE_END>>>`));
+  assert.doesNotMatch(output, /UNREVEALED_GAP/);
   assert.match(f.handler().tools()[0]!.definition.description, /not truncated/);
+});
+
+test('partial reads cover the entire file with gaps and merge adjacent revealed ranges', async t => {
+  const source = Array.from({length: 500}, (_, i) => `line-${i + 1}`).join('\n');
+  const f = await fixture(t, {'file.txt': source});
+  await f.run([[call('first', 'read', {path: 'file.txt', limit: 100})]]);
+  assert.match(text(f.history[1]!), /line-100\n<<<UNREVEALED_GAP lines=101-500>>>\n<<<FILE_END>>>/);
+  await f.run([[call('second', 'read', {path: 'file.txt', offset: 201, limit: 50}), call('bridge', 'read', {path: 'file.txt', offset: 101, limit: 100})]]);
+  const results = f.history.filter(entry => entry.message.role === 'toolResult');
+  assert.match(text(results[1]!), /line-100\n<<<UNREVEALED_GAP lines=101-200>>>\nline-201/);
+  const final = text(results[2]!);
+  assert.match(final, /line-100\nline-101/);
+  assert.match(final, /line-250\n<<<UNREVEALED_GAP lines=251-500>>>/);
+  assert.equal((final.match(/<<<UNREVEALED_GAP/g) ?? []).length, 1);
+});
+
+test('source whitespace and literal marker examples survive rendering and exact-string edits', async t => {
+  const source = '  indented\r\n\r\n<<<FILE_END>>>\r\n\tlast';
+  const f = await fixture(t, {'file.txt': source});
+  await f.run([[call('read', 'read', {path: 'file.txt'})]]);
+  const output = text(f.history[1]!);
+  const id = /file_marker_id: ([^\n]+)/.exec(output)?.[1];
+  assert.ok(id);
+  assert.ok(output.includes(`<<<FILE_START path="file.txt" total_lines=4 marker_id="${id}">>>\n${source}\n<<<FILE_END marker_id="${id}">>>`));
+  await f.run([[call('edit', 'edit', {path: 'file.txt', edits: [{oldText: '<<<FILE_END>>>', newText: 'actual source'}]})]]);
+  assert.equal(await readFile(join(f.root, 'file.txt'), 'utf8'), source.replace('<<<FILE_END>>>', 'actual source'));
+  assert.doesNotMatch(text(f.history.filter(entry => entry.message.role === 'toolResult').at(-1)!), /marker_id/);
+});
+
+test('handler instructions are assembled once per request after caller rules and not stored as messages', async t => {
+  const f = await fixture(t, {'file.txt': 'one'});
+  await f.run([[call('read', 'read', {path: 'file.txt'})]]);
+  await f.run([]);
+  const prompt = f.handler().systemPrompt();
+  assert.match(prompt, /UNREVEALED_GAP/);
+  assert.match(prompt, /without line-number prefixes/);
+  assert.match(prompt, /before the first revealed range and after the last/);
+  assert.ok(f.systemPrompts.length >= 3);
+  assert.ok(f.systemPrompts.every(value => value === `Caller rules.\n\n${prompt}`));
+  assert.ok(f.context().entries.every(entry => !text(entry).includes('## File tools and aggregated file views')));
 });
 
 test('read preserves native image content rather than attempting UTF-8 decoding', async t => {
@@ -202,7 +245,10 @@ test('compaction executes handler-owned file tools and retains only the latest v
   let mode = 'work', preparation = 0;
   const base = fixedPolicy(model), stable: CompletedMessage[] = [];
   const stream: ModelStream = async function*(request) {
-    if (mode === 'compaction') assert.ok(request.tools.some(tool => tool.definition.name === 'read'));
+    if (mode === 'compaction') {
+      assert.ok(request.tools.some(tool => tool.definition.name === 'read'));
+      assert.equal(request.context.systemPrompt, handler.systemPrompt());
+    }
     const calls = mode === 'compaction' && ++preparation <= 2 ? [call(`read-${preparation}`, 'read', {path: 'file.txt', offset: preparation === 1 ? 1 : 3, limit: 1})] : undefined;
     const response = calls ? fauxAssistantMessage(calls, {stopReason: 'toolUse'}) : fauxAssistantMessage(mode === 'compaction' ? 'Retained file knowledge. Next steps: finish.' : 'done');
     yield {type: 'start', partial: {...response, content: [], stopReason: 'pending'}};
@@ -223,7 +269,7 @@ test('compaction executes handler-owned file tools and retains only the latest v
 test('deleting text reveals the surviving changed line and deleting the whole file yields an empty view', async t => {
   const f = await fixture(t, {'file.txt': 'hello world'});
   await f.run([[call('a', 'edit', {path: 'file.txt', edits: [{oldText: 'world', newText: ''}]})]]);
-  assert.match(text(f.history[1]!), /     1\thello /);
+  assert.match(text(f.history[1]!), /\nhello \n<<<FILE_END>>>/);
   await f.run([[call('b', 'edit', {path: 'file.txt', edits: [{oldText: 'hello ', newText: ''}]})]]);
   const result = f.history.filter(entry => entry.message.role === 'toolResult').at(-1)!;
   assert.match(text(result), /total_lines: 0/); assert.doesNotMatch(text(result), /undefined|\n *0\t/);

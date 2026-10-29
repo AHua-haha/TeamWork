@@ -70,6 +70,8 @@ export interface AssistantResponseHandler {
   restoreContext?(context: ContextHistory): void;
   /** Declarations owned and executed by this handler, independently of Harness tools. */
   tools?(scope: StepScope): Array<RuntimeTool | HandlerTool>;
+  /** Component-owned instructions appended to each model request, including compaction. */
+  systemPrompt?(scope: StepScope): string;
   /** Names whose configured implementations are replaced by this handler. */
   overrideToolNames?(scope: StepScope): string[];
 }

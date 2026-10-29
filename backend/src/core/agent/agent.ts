@@ -88,11 +88,14 @@ export class AgentExecution {
     for (const handler of this.responseHandlers) handler.restoreContext?.(history);
     const owned = this.responseHandlers.flatMap(handler => handler.tools?.(scope) ?? []);
     const overridden = new Set(this.responseHandlers.flatMap(handler => handler.overrideToolNames?.(scope) ?? []));
-    if (!owned.length && !overridden.size) return request;
+    const prompts = this.responseHandlers.map(handler => handler.systemPrompt?.(scope).trim()).filter((prompt): prompt is string => !!prompt);
+    if (!owned.length && !overridden.size && !prompts.length) return request;
     const ownedNames = new Set(owned.map(tool => tool.definition.name));
     const tools = [...request.tools.filter(tool => !overridden.has(tool.definition.name) && !ownedNames.has(tool.definition.name)), ...owned];
     const definitions = tools.map(tool => tool.definition);
-    request.tools = tools; request.context = {...request.context, tools: definitions};
+    request.tools = tools;
+    request.context = {...request.context, tools: definitions,
+      ...(prompts.length ? {systemPrompt: [request.context.systemPrompt, ...prompts].filter(Boolean).join('\n\n')} : {})};
     return request;
   }
 
