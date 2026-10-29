@@ -83,7 +83,13 @@ adoptLegacyContext and finishLegacyMigration keep the existing once-only context
 
 **Verification:** focused real-filesystem/Agent-loop tests cover declaration-only tools, outside paths/symlinks, mixed-tool ordering, aggregation and direct references across runs/restart, failed edits, empty files, CRLF, write suppression, line padding, image blocks, legacy restoration, compaction and fatal persistence failures, including deletion to a surviving line or an empty file. MySQL integration tests verify metadata-only SQL with a large old message, atomic rollback, preparation restart recovery, resident reuse and reset behavior.
 
-Verification for this change: backend build/type checks passed; 37 focused Agent/file/compaction/resident tests passed; the full backend unit suite passed with 264 tests and one skipped; all 94 disposable-MySQL integration tests passed. An existing immediate-background-job timing assertion failed once in the parallel unit run, then passed in isolation and in the serial full-suite run.
+Verification for the independent file-handler implementation: backend build/type checks passed; 37 focused Agent/file/compaction/resident tests passed; the full backend unit suite passed with 264 tests and one skipped; all 94 disposable-MySQL integration tests passed. An existing immediate-background-job timing assertion failed once in the parallel unit run, then passed in isolation and in the serial full-suite run.
+
+### Current reconciliation at `c8839d2`
+
+The accepted Agent design and current implementation agree on continuous private context, Agent-owned handler state, atomic handler-result persistence, direct message-ID metadata updates, compaction journaling, and position-key context inspection. `RuntimePolicy.createAssistantResponseHandlerFactories` remains the durable factory API; the legacy `createAssistantResponseHandlers` path is retained only for compatibility. The file handler is created with the Team-resolved workspace root, owns its declaration-only read/write/edit tools and direct filesystem effects, and receives no Harness file capability. Harness still owns Bash, web, approval, shell lifecycle and the original permission-checked file tools for callers that use them. Team still owns group content, scheduling, publication and the read-only group reference.
+
+Current verification: `npm run check` passed; the full backend unit suite passed with 266 tests and 0 skipped; `git diff --check` passed. The disposable-MySQL integration suite was not rerun in this reconciliation.
 
 
 `backend/test/group-summary.test.ts` verifies summary/tail reads at the Agent's consumed boundary without introducing future messages or changing normal incremental incorporation. `backend/test/team-summary.test.ts` exercises the real public maintenance runtime and full model/tool correction loop. Group summary persistence remains Team-owned.

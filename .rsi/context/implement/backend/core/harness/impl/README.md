@@ -48,7 +48,13 @@ The semantic-analysis Harness capability is implemented as `semanticSubmissionTo
 
 ### Semantic tool verification
 
-`npm run check` and the full backend suite pass (231/231). The maintenance-only `submit_group_semantic_information` tool is exposed by Harness and is not added to ordinary member tool sets. Team remains responsible for source, revision and involvement validation.
+`npm run check` and the full backend suite passed 231/231 at the original semantic-tool implementation point. The maintenance-only `submit_group_semantic_information` tool is exposed by Harness and is not added to ordinary member tools. Team remains responsible for source, revision and involvement validation.
+
+### Current reconciliation at `c8839d2`
+
+Harness remains the owner of reusable permission-checked tools, Bash execution and lifecycle resources. The Agent file response handler is an independent declaration-only capability installed by Team with the workspace root; it does not use `HarnessService.fileCapability` because that adapter was removed. Harness's original file tools remain available to callers without the Agent handler, and Bash keeps its configured permission and timeout behavior. Team supplies the release-owned `file-tools.md` instruction that explains this boundary.
+
+Current verification: `npm run check` passed and the full backend unit suite passed with 266 tests and 0 skipped. The disposable-MySQL integration suite was not rerun in this reconciliation.
 
 ## File lookup
 

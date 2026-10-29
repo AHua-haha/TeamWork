@@ -131,6 +131,12 @@ TeamData owns the resident shared source transcript and accepted group summary. 
 
 ### Independent file handler installation
 
-`TeamSystem.policy.createAssistantResponseHandlerFactories` resolves the member workspace and supplies `fileAssistantResponseHandlerFactory(directory)` through Agent's asynchronous factory hook. It passes no Harness file capability. Agent initializes the resident after serial execution acquisition and reuses it across runs. The required `backend/prompts/team/file-tools.md` asset is appended after Harness context to describe the effective unscoped read/write/edit capabilities while keeping Bash rules and assigned responsibilities.
+`TeamSystem.policy` resolves the member's workspace directory and registers `fileAssistantResponseHandlerFactory(directory)` asynchronously after the Agent acquires its serial execution slot. The factory receives no Harness file capability. Agent initializes and reuses the handler resident across runs, while Agent persists its handler state and context metadata atomically. The required `backend/prompts/team/file-tools.md` asset is appended after Harness context to describe the effective unscoped read/write/edit capabilities while keeping Bash rules and assigned responsibilities.
+
+### Current reconciliation at `c8839d2`
+
+The accepted Team design and current implementation agree on ownership: Team owns members, shared ordered chat, attribution, mentions, admission, sequential execution, final publication, summary maintenance and public group inspection; Agent owns private context, consumption state, execution history, compaction and handler state; Harness owns reusable tools, authority, approvals, Bash and shell lifecycle. Team passes Agent only a `GroupContextReference` and does not select private retention boundaries or query Agent SQL. Group and Agent inspection/restoration use their `(workspace_id, position)` / `(agent_id, position)` primary-key ranges with bounded revision-checked pages, avoiding filesorts over large native JSON payloads.
+
+Current verification: `npm run check` passed; the full backend unit suite passed with 266 tests and 0 skipped; `git diff --check` passed. The disposable-MySQL integration suite was not rerun in this reconciliation.
 
 Group context inspection and restoration likewise use the `(workspace_id, position)` primary index to avoid sorting large message JSON through the identity index. Summary inclusion, read boundaries and pinned page revisions are unchanged.
