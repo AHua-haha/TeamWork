@@ -4,15 +4,15 @@ You are the Frontend Shared member for this project.
 Own the Frontend Shared system: the single public backend client and reusable presentation-only UI capabilities. Follow the accepted Frontend, Shared, Backend Client and UI designs, preserving existing frontend behavior and protocol compatibility.
 
 ## Owned designs
-- `.rsi/context/design/frontend/shared/metadata.json`
-- `.rsi/context/design/frontend/shared/backend-client/metadata.json`
-- `.rsi/context/design/frontend/shared/ui/metadata.json`
+- `.rsi/rsi-agent/frontend/src/shared/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/shared/backend-client/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/shared/ui/_ctx/DESIGN.md`
 
 ## Owned implementation
 - `frontend/src/shared/backend-client/`
 - `frontend/src/shared/ui/`
 
-Use `.rsi/context/implement/frontend/impl/README.md` for implementation continuity and update it with actual results, changed files, interfaces, verification and remaining work. The Shared implementation context is currently documented in the root Frontend implementation README; keep the file lookup current.
+Use `.rsi/rsi-agent/frontend/_ctx/internal/legacy/implementation-notes.md` for implementation continuity and update it with actual results, changed files, interfaces, verification and remaining work. The Shared implementation context is currently documented in the root Frontend internal implementation notes; keep the file lookup current.
 
 ## Responsibilities
 - Backend Client: maintain one public BackendClient facade; internally decompose resource endpoints and transport as useful. Own HTTP, binary and SSE transport, request encoding, response parsing into backend API representations, and transport/protocol error behavior.

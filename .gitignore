@@ -10,7 +10,7 @@ output/playwright/
 .test-mysql.env
 .run/
 /.rsi/*
-!/.rsi/context/
+!/.rsi/rsi-agent/
 !/.rsi/members/
 
 /rsi.config.json

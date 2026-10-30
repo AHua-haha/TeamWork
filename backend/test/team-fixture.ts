@@ -147,7 +147,9 @@ export function withTeam(run: (fixture: Fixture) => Promise<void>, ): Promise<vo
     try {
       const root = await realpath(folder);
       const directory = join(root, 'project');
-      const { workspaceId } = await workspaces.create({ workspaceId: 'w1', name: 'Project', directory, models: testModels(), adopt: false });
+      // Existing legacy projects remain supported. New project-layout coverage lives in project-context.test.ts.
+      await mkdir(join(directory, '.rsi/context'), {recursive: true});
+      const { workspaceId } = await workspaces.create({ workspaceId: 'w1', name: 'Project', directory, models: testModels(), adopt: true });
       const lead = (await team.service.team(workspaceId)).members[0]!;
       await run({ folder: root, store, workspaces, team, runtime, workspaceId, directory, lead });
     } finally {

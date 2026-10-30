@@ -22,9 +22,9 @@ test('creating a workspace makes its folder and context base', () => withService
   const workspace = await service.create({ workspaceId: 'alpha', name: 'Alpha', directory, models: testModels(), adopt: false });
   assert.equal(workspace.workspaceId, 'alpha');
   assert.equal(workspace.directory, directory);
-  assert.equal(workspace.context.files, 3);
+  assert.equal(workspace.context.files, 1);
   assert.equal(workspace.context.seq, 1);
-  assert.deepEqual((await readdir(join(directory, '.rsi/context'))).sort(), ['design', 'implement']);
+  assert.deepEqual((await readdir(join(directory, '.rsi/alpha'))).sort(), ['_ctx']);
   assert.deepEqual((await service.list()).map(item => item.workspaceId), ['alpha']);
   await assert.rejects(service.create({ workspaceId: 'alpha', name: 'Again', directory: join(folder, 'other'), models: testModels(), adopt: false }), code('workspace_exists'));
   await assert.rejects(service.get('missing'), code('not_found'));
@@ -34,9 +34,9 @@ test('adopting initializes managed state while preserving project files', () => 
   await mkdir(join(folder, 'repo')); await writeFile(join(folder, 'repo', 'README.md'), 'readme');
   const workspace = await service.create({ name: 'Repo', directory: join(folder, 'repo'), models: testModels(), adopt: true });
   assert.match(workspace.workspaceId, /^[0-9a-f-]{36}$/);
-  assert.equal(workspace.context.files, 3);
+  assert.equal(workspace.context.files, 1);
   assert.equal((await (await service.files(workspace.workspaceId)).read('README.md')).content, 'readme');
-  assert.deepEqual(JSON.parse((await (await service.context(workspace.workspaceId)).read({ path: 'design/metadata.json' })).content).implementation, []);
+  assert.match((await (await service.context(workspace.workspaceId)).read({ path: '_ctx/DESIGN.md' })).content, /Repo/);
 }));
 
 test('folders must not overlap, and a new folder must be empty', () => withService(async (service, folder) => {

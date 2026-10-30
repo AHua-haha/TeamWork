@@ -6,6 +6,8 @@ import type { WorkspaceService } from '../workspace/workspace.js';
 import { AppError } from '../agent/data/model.js';
 import { OperationQueue, committedFiles, currentFiles, filesRevision, fileChanges } from '../workspace/workspace-git.js';
 import {currentMemberFormat} from './data/member-config-migration.js';
+import { migratedBaseline, workspaceContext } from '../workspace/project-context.js';
+import { workspacePrompt } from '../workspace/workspace-prompts.js';
 
 export interface ResolvedAssignment {
   working: ResolvedDesign[]; dependencies: ResolvedDesign[];
@@ -35,11 +37,13 @@ export class MemberWorkspace {
       write: {mkdir: async (path: string) => {await mkdir(path, {recursive: true});}, writeFile: async (path: string, content: string) => {await writeFile(path, content, 'utf8');}},
       ls: {exists: async (path: string) => {try {await access(path); return true;} catch {return false;}}, stat, readdir}};
   }
-  async controlFiles(id: string, origin: 'pending' | 'committed', prefix: '.rsi/members' | '.rsi/context/design') {
+  async controlFiles(id: string, origin: 'pending' | 'committed', prefix: string) {
     const member = await this.active(id), root = await this.root(id);
+    if (prefix === '.rsi/context/design') { const layout = await workspaceContext(root); if (layout.kind === 'project') prefix = layout.root; }
     if (origin === 'pending') { const files = await currentFiles(root, prefix); return {files, revision: filesRevision(files)}; }
     const baseline = await this.workspaces.gitBaseline(member.workspaceId);
-    const result = await committedFiles(root, prefix, prefix === '.rsi/members' ? baseline.members : baseline.design);
+    const layout = await workspaceContext(root);
+    const result = await committedFiles(root, prefix, prefix === '.rsi/members' ? baseline.members : await migratedBaseline(root,layout,baseline.design));
     return prefix === '.rsi/members' ? {...result, files: currentMemberFormat(result.files, member.value.configuration)} : result;
   }
   async changes(id: string) {
@@ -52,14 +56,15 @@ export class MemberWorkspace {
   }
   async guidance(id: string): Promise<string> {
     const member = await this.active(id), resolved = await resolveAssignment(this.designs, member.workspaceId, member.value.designScope);
+    const layout = await workspaceContext(await this.root(id));
     const view = (parts: ResolvedDesign[]) => {
       let bytes = 0;
       return parts.map(part => {
-        const heading = `### .rsi/context/design/${part.path} (revision ${part.revision})\nImplementation: ${part.implementation.join(', ') || '(none)'}`;
+        const heading = `### ${layout.root}/${layout.kind === 'legacy' ? 'design/' : ''}${part.path} (revision ${part.revision})\nImplementation: ${part.implementation.join(', ') || '(none)'}`;
         bytes += Buffer.byteLength(part.content);
         return heading + (bytes <= 64 * 1024 ? '\n' + part.content : '\nContent not loaded; read this design file with your tools.');
       }).join('\n\n') || '(none configured)';
     };
-    return ['## Design assignments (work guidance, not access restrictions)', '## Accepted working designs', view(resolved.working), '## Dependency designs', view(resolved.dependencies)].join('\n\n');
+    return ['## Design assignments (work guidance, not access restrictions)', ...(layout.kind === 'project' ? [workspacePrompt('context-maintenance', {root: layout.root})] : []), '## Accepted working designs', view(resolved.working), '## Dependency designs', view(resolved.dependencies)].join('\n\n');
   }
 }

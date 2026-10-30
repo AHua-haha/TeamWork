@@ -1120,7 +1120,8 @@ test('React Harnesses execute shared project tools and native commits while memb
   try {
     const connectionId = `harness-test-${randomUUID()}`;
     await service.createConnection(connectionId, { label: 'Test model', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
-    const { workspaceId } = await workspaceService.create({ name: 'Harness prototype', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: false });
+    await mkdir(join(folder, 'project/.rsi/context'), {recursive: true});
+    const { workspaceId } = await workspaceService.create({ name: 'Harness prototype', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: true });
     const base = await workspaceService.context(workspaceId);
     const design = { content: 'Create src/result.txt with Done.', implementation: ['src/result.txt'] };
     await seedDesign(workspaceService,workspaceId,'metadata.json',design);
@@ -1227,7 +1228,7 @@ test('workspace registry refuses duplicates; context commits reload with history
     await context.move('user/a.md', 'user/b.md', saved.revision, 'rename');
     const loaded = await reopened.workspaces.loadContext(workspaceId);
     assert.equal(loaded.seq, 3);
-    assert.deepEqual(loaded.files.filter(file=>!['design/metadata.json','design/design.md','implement/impl/README.md'].includes(file.path)).map(file => [file.path, file.size, file.author, file.reason]), [['user/b.md', 5, { type: 'user' }, 'rename']]);
+    assert.deepEqual(loaded.files.filter(file=>file.path!=='_ctx/DESIGN.md').map(file => [file.path, file.size, file.author, file.reason]), [['user/b.md', 5, { type: 'user' }, 'rename']]);
     const file = loaded.files.find(file=>file.path==='user/b.md')!;
     assert.deepEqual((await reopened.workspaces.history(workspaceId, file.fileId, null, 10)).map(version => [version.seq, version.action, version.path, version.fromPath]), [[3, 'move', 'user/b.md', 'user/a.md'], [2, 'create', 'user/a.md', null]]);
     assert.deepEqual((await reopened.workspaces.history(workspaceId, file.fileId, 3, 10)).map(version => version.revision), [saved.revision]);
@@ -1262,10 +1263,10 @@ test('workspace registry refuses duplicates; context commits reload with history
     };
     await reopened.workspaces.commitContext(workspaceId, 3, other);
     await assert.rejects(context.save('user/d.md', 'mine', null, null), code('backend_error'));
-    await assert.rejects(stat(join(directory, '.rsi/context', 'user', 'd.md')), code('ENOENT'));
+    await assert.rejects(stat(join(directory, '.rsi/project', 'user', 'd.md')), code('ENOENT'));
     await assert.rejects(reopened.workspaces.commitContext(workspaceId, 3, { ...other, versions: [], files: [], removeKeys: [] }), code('backend_error'));
     assert.deepEqual((await reopened.workspaces.records(workspaceId, 0, 10)).map(item => item.seq), [1, 2, 3, 4]);
-    assert.deepEqual((await reopened.workspaces.loadContext(workspaceId)).files.map(item => item.path).sort(), ['design/design.md','design/metadata.json','implement/impl/README.md','user/b.md','user/c.md']);
+    assert.deepEqual((await reopened.workspaces.loadContext(workspaceId)).files.map(item => item.path).sort(), ['_ctx/DESIGN.md','user/b.md','user/c.md']);
   } finally {
     await reopened.close();
     await rm(folder, { recursive: true, force: true });
@@ -1330,7 +1331,8 @@ async function groupFixture(basePolicy: RuntimePolicy = configuredPolicy(), opti
   team.attach(runtime);
   const connectionId = `group-${randomUUID()}`;
   await service.createConnection(connectionId, { label: 'Group test', provider: 'openai', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses' });
-  const { workspaceId } = await workspaceService.create({ name: 'Group', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: false });
+  await mkdir(join(folder, 'project/.rsi/context'), {recursive: true});
+  const { workspaceId } = await workspaceService.create({ name: 'Group', directory: join(folder, 'project'), models: testModels(connectionId, 'gpt-4.1-mini'), adopt: true });
   const first = (await team.team(workspaceId)).members[0]!;
   const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, designScope: first.designScope, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
   await seedDesign(workspaceService, workspaceId, 'metadata.json', { content: 'Shared test design', implementation: ['.'] });
@@ -1853,16 +1855,16 @@ test('fresh bootstrap and administrative reset persist atomic baselines, preserv
     const before = await isolated.pool.query('SELECT scope,id,revision,data FROM config_records WHERE scope <> ? ORDER BY scope,id',['agent']);
     const directory = join(folder,'project'); await mkdir(directory); await writeFile(join(directory,'code.ts'),'implementation');
     const workspace = await service.create({workspaceId:'fresh',name:'Fresh',directory,adopt:true,models:testModels()});
-    assert.equal(workspace.context.seq,1); assert.equal(workspace.context.files,3);
+    assert.equal(workspace.context.seq,1); assert.equal(workspace.context.files,1);
     const lead = (await isolated.team.listMembers('fresh'))[0]!;
-    assert.deepEqual(lead.value.designScope.working,['metadata.json']);
+    assert.deepEqual(lead.value.designScope.working,['_ctx/DESIGN.md']);
     assert.equal((await isolated.team.getMemberActivation('fresh'))!.revision,lead.value.configuration!.acceptedRevision);
     const reopened = new CoreData(new MySqlStorage(url.toString()));
-    try { assert.deepEqual(await reopened.team.getMemberActivation('fresh'),await isolated.team.getMemberActivation('fresh')); assert.deepEqual((await reopened.workspaces.loadContext('fresh')).files.map(f=>f.path).sort(),['design/design.md','design/metadata.json','implement/impl/README.md']);
+    try { assert.deepEqual(await reopened.team.getMemberActivation('fresh'),await isolated.team.getMemberActivation('fresh')); assert.deepEqual((await reopened.workspaces.loadContext('fresh')).files.map(f=>f.path).sort(),['_ctx/DESIGN.md']);
       const changes = await reopened.workspaces.records('fresh',0,10);
-      assert.equal(changes.length,1); assert.equal(changes[0]!.files.length,3);
+      assert.equal(changes.length,1); assert.equal(changes[0]!.files.length,1);
       const context = await service.context('fresh');
-      assert.match((await context.read({path:'implement/impl/README.md'})).content,/### Usage examples/); }
+      assert.match((await context.read({path:'_ctx/DESIGN.md'})).content,/Fresh/); }
     finally {await reopened.close();}
     const original = isolated.workspaces.createWorkspace.bind(isolated.workspaces);
     isolated.workspaces.createWorkspace = async (record,key,member,models,bootstrap) => { bootstrap!.context.files.push(bootstrap!.context.files[0]!); return original(record,key,member,models,bootstrap); };

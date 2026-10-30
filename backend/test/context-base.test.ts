@@ -10,6 +10,7 @@ import { MemoryStore, withFolder } from './memory-store.js';
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 
 async function workspace(store: MemoryStore, folder: string): Promise<WorkspaceRecord> {
+  await mkdir(join(folder, '.rsi/context'), {recursive: true});
   const record = { workspaceId: 'w1', name: 'Test', directory: await realpath(folder), createdAt: 1 };
   await store.createWorkspace(record, 'key', newLead(record.workspaceId));
   return record;

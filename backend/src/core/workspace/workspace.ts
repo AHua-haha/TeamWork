@@ -6,7 +6,7 @@ import { ContextBase, type ContextOverview, type ContextStore, type WorkspaceRec
 import { ProjectFiles } from './project-files.js';
 import { inspectManagedState, type WorkspaceInitialization } from './workspace-initialization.js';
 import { prepareWorkspace } from '../workspace-bootstrap.js';
-import { rootDesignPath } from './workspace-layout.js';
+import { workspaceContext } from './project-context.js';
 import { missing, sha256 } from '../text.js';
 import { AppError, identity } from '../agent/data/model.js';
 import type { RunSettings } from '../team/data/config.js';
@@ -32,14 +32,15 @@ export class WorkspaceService {
     const previous = await this.store.getGitBaseline(workspaceId);
     if(previous)return previous;
     const record=await this.record(workspaceId), legacy=await legacyBaseline(record.directory);
+    const layout = await workspaceContext(record.directory);
     // Import accepted bytes once, never materialize them over pending files.
     const design=legacy?.design ?? {};
     if(!legacy){
       const state=await this.store.loadContext(workspaceId);
-      for(const file of state.files)if(file.path.startsWith('design/')){
+      for(const file of state.files)if(layout.kind === 'project' || file.path.startsWith('design/')){
         let before:number|null=null;
         do {const versions=await this.store.history(workspaceId,file.fileId,before,100);const user=versions.find(v=>v.author.type==='user');
-          if(user){if(user.hash){const content=await this.store.blob(workspaceId,user.hash);if(content!==null)design[`.rsi/context/${user.path}`]=content;}break;}
+          if(user){if(user.hash){const content=await this.store.blob(workspaceId,user.hash);if(content!==null)design[`${layout.root}/${user.path}`]=content;}break;}
           before=versions.length===100?versions.at(-1)!.seq:null;
         }while(before!==null);
       }

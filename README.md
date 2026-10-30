@@ -121,3 +121,7 @@ Lifecycle tests use isolated Git repositories, temporary state and a fake Docker
 - [Frontend](frontend/README.md): React and assistant-ui client.
 
 System contracts and task records live under [docs](docs).
+
+## Project context
+
+Project-path context lives under [`.rsi/rsi-agent/`](.rsi/rsi-agent/). Start with the [project design](.rsi/rsi-agent/_ctx/DESIGN.md) and optional [usage contract](.rsi/rsi-agent/_ctx/README.md). Each directory design part owns `_ctx/`; a file design part owns `<file-name>.ctx/`. `DESIGN.md` records user intent, an optional `README.md` describes actual usable behavior, and internal notes remain separate. Ordinary source README files keep their existing purpose. The [migration record](.rsi/rsi-agent/_ctx/internal/CONTEXT-MIGRATION.md) explains preservation and legacy references.

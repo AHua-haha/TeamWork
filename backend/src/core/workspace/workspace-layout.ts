@@ -1,6 +1,8 @@
 import { AppError } from '../agent/data/model.js';
 import { contextPath } from './data/paths.js';
+import { projectDesignReference, projectNode } from './project-context.js';
 export const managedRoot = '.rsi';
+/** Legacy constants/helpers remain for existing workspaces; new roots use workspaceContext. */
 export const contextRoot = `${managedRoot}/context`;
 export const designRoot = `${contextRoot}/design`;
 export const implementRoot = `${contextRoot}/implement`;
@@ -9,6 +11,7 @@ export const rootDesignPath = 'metadata.json';
 
 /** System references are relative to the design root, independently of document form. */
 export function nodeReference(value: string): string {
+  if (projectDesignReference(value)) { const path = contextPath(value); projectNode(path); return path; }
   const path = contextPath(value.replace(/^\.rsi\/context\/design\//i, '').replace(/^design\//i, ''));
   const segments = path.split('/');
   if (segments.at(-1)?.toLowerCase() !== 'metadata.json' || segments.slice(0,-1).some(s => ['design','impl'].includes(s.toLowerCase()) || /\.(md|json)$/i.test(s))) throw new AppError('invalid_path', 'A system reference names metadata.json beneath system-node folders');

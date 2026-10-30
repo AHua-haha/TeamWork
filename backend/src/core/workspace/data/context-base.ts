@@ -12,6 +12,7 @@ import { AppError, identity } from '../../agent/data/model.js';
 
 import { contextPath, validSegment, maxContextSegments as maxSegments } from './paths.js';
 import { implementationContextFile } from '../workspace-layout.js';
+import { workspaceContext } from '../project-context.js';
 export { contextPath, validSegment } from './paths.js';
 export interface LeadAuthor { type: 'lead'; memberId: string; runId: string }
 export type Author = { type: 'user' } | { type: 'external' } | LeadAuthor;
@@ -103,8 +104,8 @@ const byPath = (a: { path: string }, b: { path: string }) => compare(keyOf(a.pat
 const notFound = (path: string) => new AppError('not_found', `${path} not found`, 404);
 const stale = (path: string) => new AppError('stale_revision', `${path} changed since it was read`, 409);
 
-function writable(path: string): void {
-  if (implementationContextFile(path)) throw new AppError('read_only', 'Implementation context is agent-maintained and read-only through this API', 403);
+function writable(path: string, root: string): void {
+  if (root === '.rsi/context' && implementationContextFile(path)) throw new AppError('read_only', 'Implementation context is agent-maintained and read-only through this API', 403);
 }
 
 function checkReason(reason: string | null): void {
@@ -213,7 +214,7 @@ class DiskChange {
 
 
 /**
- * One workspace's context base. Current files are the files under `.rsi/context/` on disk, and the store
+ * One workspace's context base. Current files are beneath its selected project context root, and the store
  * holds every version and change record. Operations run one at a time; each first records the
  * changes made outside the application.
  */
@@ -233,16 +234,16 @@ export class ContextBase {
   private watchedIno?: number;
   private timer?: ReturnType<typeof setTimeout>;
 
-  private constructor(private readonly store: ContextStore, workspace: WorkspaceRecord) {
+  private constructor(private readonly store: ContextStore, workspace: WorkspaceRecord, readonly contextRoot: string) {
     this.workspaceId = workspace.workspaceId;
     this.root = workspace.directory;
-    this.contextDir = join(workspace.directory, '.rsi/context');
+    this.contextDir = join(workspace.directory, contextRoot);
     this.roots = [this.contextDir];
   }
 
   /** Loads the index and records the changes made while the backend was not watching. */
   static async open(store: ContextStore, workspace: WorkspaceRecord): Promise<ContextBase> {
-    const base = new ContextBase(store, workspace);
+    const base = new ContextBase(store, workspace, (await workspaceContext(workspace.directory)).root);
     const loaded = await store.loadContext(workspace.workspaceId);
     base.seq = loaded.seq;
     for (const file of loaded.files) base.files.set(keyOf(file.path), file);
@@ -328,7 +329,7 @@ export class ContextBase {
 
   private async saveFile(path: string, content: string, baseRevision: string | null, reason: string | null, author: Author): Promise<DesignSave> {
     contextPath(path);
-    writable(path);
+    writable(path, this.contextRoot);
     checkReason(reason);
     const bytes = encodeText(content);
     const hash = sha256(bytes);
@@ -360,8 +361,8 @@ export class ContextBase {
   async move(from: string, to: string, baseRevision: string | undefined, reason: string | null): Promise<{ seq: number; moved: { from: string; to: string; revision: string }[] }> {
     contextPath(from);
     contextPath(to);
-    writable(from);
-    writable(to);
+    writable(from, this.contextRoot);
+    writable(to, this.contextRoot);
     checkReason(reason);
     const fromKey = keyOf(from);
     const toKey = keyOf(to);
@@ -370,7 +371,7 @@ export class ContextBase {
       const file = this.files.get(fromKey);
       const members = file ? [file] : this.under(fromKey);
       if (!members.length) throw notFound(from);
-      for (const member of members) { writable(member.path); writable(to + member.path.slice(from.length)); }
+      for (const member of members) { writable(member.path, this.contextRoot); writable(to + member.path.slice(from.length), this.contextRoot); }
       this.checkBase(file, baseRevision);
       const source = file ? file.path : members[0]!.path.slice(0, fromKey.length);
       let target: string;
@@ -401,13 +402,13 @@ export class ContextBase {
 
   async delete(path: string, baseRevision: string | undefined, reason: string | null): Promise<{ seq: number; deleted: string[] }> {
     contextPath(path);
-    writable(path);
+    writable(path, this.contextRoot);
     checkReason(reason);
     return this.current(async () => {
       const file = this.files.get(keyOf(path));
       const members = file ? [file] : this.under(keyOf(path));
       if (!members.length) throw notFound(path);
-      for (const member of members) writable(member.path);
+      for (const member of members) writable(member.path, this.contextRoot);
       this.checkBase(file, baseRevision);
       const disk = new DiskChange(this.roots);
       try {
@@ -600,7 +601,7 @@ export class ContextBase {
       const info = await lstat(this.contextDir);
       ino = info.ino;
     } catch {
-      throw unavailable('has no usable .rsi/context folder');
+      throw unavailable(`has no usable ${this.contextRoot} folder`);
     }
     this.watch(ino);
 

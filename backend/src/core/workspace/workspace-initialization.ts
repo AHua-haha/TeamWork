@@ -4,6 +4,7 @@ import { AppError } from '../errors.js';
 import { decodeText, maxFileBytes, missing, sha256 } from '../text.js';
 import { scanContextFiles } from './data/context-scan.js';
 import { contextRoot, managedRoot } from './workspace-layout.js';
+import { workspaceContext } from './project-context.js';
 
 export interface WorkspaceInitialization {
   directory: string;
@@ -31,6 +32,9 @@ export async function inspectManagedState(directory: string): Promise<WorkspaceI
   const root = join(directory, managedRoot);
   if (!await info(root)) return {directory, cleanupPaths: [], cleanupRevision: null};
   await reserved(root, 'context');
+  const context = await workspaceContext(directory);
+  const contextName = context.root.slice(managedRoot.length + 1);
+  await reserved(root, contextName);
   const records: unknown[] = [];
   const visit = async (path: string): Promise<boolean> => {
     const entry = await lstat(join(root, path), {bigint: true});
@@ -42,7 +46,7 @@ export async function inspectManagedState(directory: string): Promise<WorkspaceI
   };
   const cleanupPaths: string[] = [];
   for (const name of (await readdir(root)).sort()) {
-    if (name === 'context') continue;
+    if (name === contextName) continue;
     if (await visit(name)) cleanupPaths.push(`${managedRoot}/${name}`);
   }
   const rootInfo = await lstat(root);
@@ -64,7 +68,8 @@ export class PreparedWorkspaceFiles {
     const prepared = new PreparedWorkspaceFiles(directory);
     try {
       await prepared.mkdir(managedRoot);
-      const names = (await readdir(join(directory, managedRoot))).filter(name => name !== 'context');
+      const contextName = (await workspaceContext(directory)).root.slice(managedRoot.length + 1);
+      const names = (await readdir(join(directory, managedRoot))).filter(name => name !== contextName);
       if (names.length) {
         prepared.backup = await mkdtemp(join(directory, managedRoot, '.initialization-'));
         for (const name of names) {
@@ -114,11 +119,11 @@ export class PreparedWorkspaceFiles {
     finally { await handle.close(); }
   }
 
-  async contextFiles(): Promise<{path: string; content: string; mtimeMs: number}[]> {
-    const {files} = await scanContextFiles(join(this.directory, contextRoot));
+  async contextFiles(contextDirectory = contextRoot): Promise<{path: string; content: string; mtimeMs: number}[]> {
+    const {files} = await scanContextFiles(join(this.directory, contextDirectory));
     const result: {path: string; content: string; mtimeMs: number}[] = [];
     for (const file of files) {
-      const bytes = await readFile(join(this.directory, contextRoot, file.path));
+      const bytes = await readFile(join(this.directory, contextDirectory, file.path));
       const content = decodeText(bytes);
       if (content !== null && bytes.length <= maxFileBytes) result.push({path: file.path, content, mtimeMs: file.mtimeMs});
     }

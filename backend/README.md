@@ -70,7 +70,7 @@ Both return a single text block containing Markdown core information followed by
 
 Requests have a 30-second deadline and a 4 MiB response-body limit. Core Markdown is capped at 64 KiB of UTF-8 text with visible truncation. No matches is successful; missing credentials, invalid input and provider failures return recoverable error tool results for the agent to handle without stopping its loop. No automatic retry is performed. Cancellation aborts HTTP. Credentials and raw provider error bodies are excluded from results.
 
-[Web tool contract](../.rsi/context/implement/backend/core/agent/impl/README.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
+[Web tool contract](../.rsi/rsi-agent/backend/src/core/agent/_ctx/internal/legacy/implementation-notes.md) · [DeepSeek API documentation](https://api-docs.deepseek.com/guides/search/)
 
 ## Workspace models
 
@@ -126,7 +126,7 @@ Commands execute directly without a sandbox, path/design/command checks or netwo
 
 The backend registers `modelflare` at startup alongside Pi's built-in providers. Select it in the existing provider connection form and supply your API key. No model-definition UI or discovery refresh is required for its 32 predefined agent chat models, including Claude Haiku 5.5, Sonnet 5.5 and GPT-6.1 Sol.
 
-Use `https://modelflare.dev` for Anthropic Messages, or `https://modelflare.dev/v1` for OpenAI Chat Completions / Responses. Model choices are filtered by the model's documented protocol support; use separate connections for different protocols. Use Responses for GPT-6.1 tool calling. Catalog metadata does not establish your key's routing-group access. The dated [complete inventory and metadata sources](../.rsi/context/implement/backend/core/agent/impl/reference/modelflare-inventory.md) covers all 76 observed IDs, including media and specialized models outside the agent chat runtime. Gateway cost rates are unpriced, not copied from upstream billing.
+Use `https://modelflare.dev` for Anthropic Messages, or `https://modelflare.dev/v1` for OpenAI Chat Completions / Responses. Model choices are filtered by the model's documented protocol support; use separate connections for different protocols. Use Responses for GPT-6.1 tool calling. Catalog metadata does not establish your key's routing-group access. The dated [complete inventory and metadata sources](../.rsi/rsi-agent/backend/src/core/agent/_ctx/internal/legacy/reference/modelflare-inventory.md) covers all 76 observed IDs, including media and specialized models outside the agent chat runtime. Gateway cost rates are unpriced, not copied from upstream billing.
 
 Existing connections are preserved: a connection whose provider is still `anthropic` uses that catalog until you explicitly change it to `modelflare`.
 
@@ -145,7 +145,7 @@ Existing connections are preserved: a connection whose provider is still `anthro
 
 `configuredPolicy()` is the default policy. It uses the config snapshot resolved before each run and the Agent working context for each model call. `fixedPolicy(model, tools, systemPrompt?, options?)` remains available for custom in-process policies. Tool handlers use Pi's `Tool` schema and receive validated arguments, the call identity, and a run-scoped abort signal. `piModelStream(models)` connects to a Pi provider collection. The stream function is injectable for custom model dispatch or tests. Solo agents have no built-in catalog tools; register them in a custom entry point. Workspace members receive File and Default React Harness tools, including Team-supplied model discovery and member validation.
 
-`AgentExecution` is also usable without persistence: supply run/context/settings, policy and model stream, then call `run(signal)` and inspect `snapshot()`. Its optional `AgentObserver` lets a caller acknowledge message start, completed messages, context changes and completion. AgentRuntime uses that interface with AgentData for Agent-owned persistence; the reusable execution mechanism remains usable without a database. See the [Agent implemented contract](../.rsi/context/implement/backend/core/agent/impl/README.md).
+`AgentExecution` is also usable without persistence: supply run/context/settings, policy and model stream, then call `run(signal)` and inspect `snapshot()`. Its optional `AgentObserver` lets a caller acknowledge message start, completed messages, context changes and completion. AgentRuntime uses that interface with AgentData for Agent-owned persistence; the reusable execution mechanism remains usable without a database. See the [Agent internal implementation notes](../.rsi/rsi-agent/backend/src/core/agent/_ctx/internal/legacy/implementation-notes.md).
 
 Example durable-host policy customization:
 
@@ -218,11 +218,11 @@ Integration tests create agents, write data, and intentionally corrupt one test 
 
 ## Contracts and implementation
 
-- [Backend design](../.rsi/context/design/backend/design.md) and [implementation context](../.rsi/context/implement/backend/impl/README.md).
-- [Core](../.rsi/context/design/backend/core/design.md) owns business behavior, data models, SQL and migrations. Its child systems are Agent, React Harness, Workspace and Team. Each business owns its related memory and durable models; React Harness owns capabilities, instructions and purpose-related state meaning, and directly uses Agent data operations.
-- [API](../.rsi/context/design/backend/api/design.md) owns HTTP/SSE/multipart transport.
-- [Storage](../.rsi/context/design/backend/storage/design.md) supplies MySQL resources and generic transactions, with no business schema.
-- [Runtime](../.rsi/context/design/backend/runtime/design.md) hosts and wires the backend; the agent loop is inside Core.
+- [Backend design](../.rsi/rsi-agent/backend/_ctx/DESIGN.md) and [implementation context](../.rsi/rsi-agent/backend/_ctx/internal/legacy/implementation-notes.md).
+- [Core](../.rsi/rsi-agent/backend/src/core/_ctx/DESIGN.md) owns business behavior, data models, SQL and migrations. Its child systems are Agent, React Harness, Workspace and Team. Each business owns its related memory and durable models; React Harness owns capabilities, instructions and purpose-related state meaning, and directly uses Agent data operations.
+- [API](../.rsi/rsi-agent/backend/src/api/_ctx/DESIGN.md) owns HTTP/SSE/multipart transport.
+- [Storage](../.rsi/rsi-agent/backend/src/storage/_ctx/DESIGN.md) supplies MySQL resources and generic transactions, with no business schema.
+- [Runtime](../.rsi/rsi-agent/backend/src/runtime/_ctx/DESIGN.md) hosts and wires the backend; the agent loop is inside Core.
 - [Task and verification](../.rsi/work/tasks/2026-10-23-core-systems/task.md).
 
 ### Group response timeline for the frontend
@@ -244,7 +244,7 @@ Private `/agents/:id/follow` synchronizes SQL completed history and version-2 co
 
 ### Fresh workspace initialization and local reset
 
-Create/adopt prepares .rsi/context/design/metadata.json, .rsi/context/design/design.md and .rsi/context/implement/impl/README.md, exact lead JSON/Markdown under .rsi/members/<lead-id>/, and a static SQL bootstrap control baseline. The lead works on root metadata.json, uses the workspace model default and starts without dependencies or project-code mappings, with File and Default React Harnesses. All three initial context files share sequence 1. Source/history is clean and active; later design/member changes still require normal user commit/activation. Existing .rsi entries are refused and project implementation/Git is preserved. Old layout is not silently migrated; safe unresolved active references remain inspectable but cannot run.
+Create/adopt initializes `.rsi/<project-directory-name>/_ctx/DESIGN.md` and the exact lead bundle under `.rsi/members/<name>/`. Existing new-format context is preserved; a contract README is optional, and no internal-context format is initialized. The lead is assigned `_ctx/DESIGN.md`, uses the workspace model default and has File and Default React Harnesses. Bootstrap context shares sequence 1. Existing legacy `.rsi/context/` workspaces continue using their existing format; no automatic directory migration or conversation reset occurs. Nonempty non-context RSI state requires reviewed cleanup consent. Project implementation and Git are preserved.
 
 For a deliberate local clean slate, stop the backend and run `npm --prefix backend run reset:workspace-data -- --apply`. The npm command uses the development section of rsi.config.json and refuses a database owned by a running backend. It removes all workspace/agent/chat/runtime/context records, agent configs and registered-workspace managed directories (new .rsi, legacy .context/.team and exact legacy harness stores). It retains provider connections/encrypted credentials, app settings, catalogs/model caches and project implementation/Git checkouts. It does not unregister provider connections or drop the database. Paths are quarantined during the transaction and restored if deletion fails; committed cleanup removes the quarantines. Start the backend afterward and create/adopt workspaces afresh. Track intended design/member/implementation-context files in project Git (use git add -f if ignored); never track legacy .rsi/harness; initialization does not edit its Git settings or ignore files.
 
@@ -301,7 +301,7 @@ curl -X POST http://127.0.0.1:3100/workspaces/WORKSPACE_ID/team/chat/messages \
 
 An image-only multipart submission sets text to an empty string. Accepted user records include optional attachments [{id,name,mimeType,width,height,size}]. GET /workspaces/:id/team/chat/attachments/:imageId serves the prepared binary; history and SSE contain references rather than base64. Invalid images and unsupported triggered models refuse the entire publication. Stored pictures survive restart; resetting group chat removes them with its history. Later model requests that contain shared or tool-read images fail explicitly if their selected model lacks image input.
 
-Working design assignments include the named node and all accepted descendant design nodes recursively, using the design folder hierarchy. The root metadata.json includes all accepted nodes. Effective design prompts, implementation-context resources, mapped-source permissions and member README retrieval use that expansion without rewriting the member configuration. Dependencies remain explicit and read-only on overlaps. Pending child designs grant no authority; accepting them extends existing assignments on the next resolution.
+Working design assignments include the named design part and accepted descendant design parts at real project-path boundaries. New references name `_ctx/DESIGN.md` or `<file-name>.ctx/DESIGN.md` relative to the project context root. The root includes every accepted design part; internal documents and optional README contracts create no child parts. Dependencies remain explicit. Assignments are work guidance, not tool permission gates. Explicit migration aliases can preserve legacy member references and re-key accepted baseline bytes without rewriting member records or accepting pending edits.
 
 ## Harness permission switch
 

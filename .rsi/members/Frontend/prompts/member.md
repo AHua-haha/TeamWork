@@ -4,25 +4,25 @@ You are the Frontend Features member for this project.
 Develop and maintain only the frontend Features system following its accepted designs. Own the Home, Providers, Chat and Workspace user experiences while consuming App and Shared capabilities and preserving backend boundaries.
 
 ## Owned designs
-- `.rsi/context/design/frontend/features/metadata.json`
-- `.rsi/context/design/frontend/features/home/metadata.json`
-- `.rsi/context/design/frontend/features/providers/metadata.json`
-- `.rsi/context/design/frontend/features/chat/metadata.json`
-- `.rsi/context/design/frontend/features/workspace/metadata.json`
+- `.rsi/rsi-agent/frontend/src/features/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/features/home/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/features/providers/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/features/chat/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/features/workspace/_ctx/DESIGN.md`
 
 Dependencies, not owned:
-- `.rsi/context/design/frontend/metadata.json`
-- `.rsi/context/design/frontend/app/metadata.json`
-- `.rsi/context/design/frontend/shared/metadata.json`
-- `.rsi/context/design/frontend/shared/backend-client/metadata.json`
-- `.rsi/context/design/frontend/shared/ui/metadata.json`
+- `.rsi/rsi-agent/frontend/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/app/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/shared/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/shared/backend-client/_ctx/DESIGN.md`
+- `.rsi/rsi-agent/frontend/src/shared/ui/_ctx/DESIGN.md`
 
 ## Owned implementation
 - `frontend/src/features/`
 
 App composition under `frontend/src/app/` is outside this member's scope. Shared backend-client and UI implementation belongs to the Shared member.
 
-Use `.rsi/context/implement/frontend/impl/README.md` for implementation continuity. Update it with actual results, changed files, interfaces, verification and remaining work. Shared backend-client and UI implementation belongs to the Shared member.
+Use `.rsi/rsi-agent/frontend/_ctx/internal/legacy/implementation-notes.md` for implementation continuity. Update it with actual results, changed files, interfaces, verification and remaining work. Shared backend-client and UI implementation belongs to the Shared member.
 
 ## Responsibilities
 - Home: landing experience, workspace overview/list and quick actions.

@@ -8,25 +8,31 @@ import type { NewMember, MemberActivationState } from './team/data/members.js';
 import { sha256 } from './text.js';
 import { PreparedWorkspaceFiles } from './workspace/workspace-initialization.js';
 import { contextRoot, rootDesignPath, metadataPath, contextPaths, memberContextPath } from './workspace/workspace-layout.js';
+import { workspaceContext, type ProjectContext } from './workspace/project-context.js';
 
 export interface WorkspaceBootstrap { baseline: GitBaseline; activation: MemberActivationState; context: ContextCommit }
 /** Prepare files and their imported baseline; the caller owns registration/rollback. */
-async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMember, files: PreparedWorkspaceFiles): Promise<WorkspaceBootstrap> {
-  await files.mkdir(contextRoot);
-  await files.create(`${contextRoot}/${metadataPath(rootDesignPath)}`, JSON.stringify({ implementation: [] }, null, 2) + '\n');
-  const [designFile, designDirectory] = contextPaths(rootDesignPath, 'design');
-  if (!await files.exists(`${contextRoot}/${designFile}`, 'file')) {
-    const path = await files.exists(`${contextRoot}/${designDirectory}`, 'directory') ? `${designDirectory}/README.md` : designFile;
-    await files.create(`${contextRoot}/${path}`, workspacePrompt('design-template', { project: workspace.name }) + '\n');
+async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMember, files: PreparedWorkspaceFiles, layout: ProjectContext): Promise<WorkspaceBootstrap> {
+  if (layout.kind === 'project') {
+    await files.mkdir(`${layout.root}/_ctx`);
+    await files.create(`${layout.root}/${layout.rootDesign}`, workspacePrompt('project-design-template', {project: workspace.name}) + '\n');
+  } else {
+    await files.mkdir(contextRoot);
+    await files.create(`${contextRoot}/${metadataPath(rootDesignPath)}`, JSON.stringify({ implementation: [] }, null, 2) + '\n');
+    const [designFile, designDirectory] = contextPaths(rootDesignPath, 'design');
+    if (!await files.exists(`${contextRoot}/${designFile}`, 'file')) {
+      const path = await files.exists(`${contextRoot}/${designDirectory}`, 'directory') ? `${designDirectory}/README.md` : designFile;
+      await files.create(`${contextRoot}/${path}`, workspacePrompt('design-template', { project: workspace.name }) + '\n');
+    }
+    const [implFile] = contextPaths(rootDesignPath, 'impl');
+    if (!await files.exists(`${contextRoot}/${implFile}`, 'file'))
+      await files.create(memberContextPath(rootDesignPath), workspacePrompt('implementation-context-template', { design: rootDesignPath }) + '\n');
   }
-  const [implFile] = contextPaths(rootDesignPath, 'impl');
-  if (!await files.exists(`${contextRoot}/${implFile}`, 'file'))
-    await files.create(memberContextPath(rootDesignPath), workspacePrompt('implementation-context-template', { design: rootDesignPath }) + '\n');
   for (const [path, content] of Object.entries(lead.value.configuration!.files))
     await files.create(join(dirname(lead.value.configuration!.path), path), content);
-  const initial = await files.contextFiles();
+  const initial = await files.contextFiles(layout.root);
   const baseline: GitBaseline = { time:workspace.createdAt, design: {}, members: {} };
-  for(const {path,content} of initial) if(path.startsWith('design/'))baseline.design[`${contextRoot}/${path}`]=content;
+  for(const {path,content} of initial) if(layout.kind === 'project' || path.startsWith('design/'))baseline.design[`${layout.root}/${path}`]=content;
   for(const [path,content] of Object.entries(lead.value.configuration!.files))baseline.members[join(dirname(lead.value.configuration!.path),path)]=content;
   const memberRevision = filesRevision(baseline.members);
   lead.value.configuration!.acceptedRevision = memberRevision;
@@ -47,8 +53,9 @@ async function bootstrapWorkspace(workspace: WorkspaceRecord, lead: NewMember, f
 export async function prepareWorkspace(workspace: WorkspaceRecord, settings: import('./team/data/config.js').RunSettings, cleanupRevision?: string) {
   const files = await PreparedWorkspaceFiles.begin(workspace.directory, cleanupRevision);
   try {
-    const lead = newLead(workspace.workspaceId, settings, [rootDesignPath]);
-    const bootstrap = await bootstrapWorkspace(workspace, lead, files);
+    const layout = await workspaceContext(workspace.directory);
+    const lead = newLead(workspace.workspaceId, settings, [layout.rootDesign]);
+    const bootstrap = await bootstrapWorkspace(workspace, lead, files, layout);
     return { lead, bootstrap, files };
   } catch (error) { await files.rollback(); throw error; }
 }
