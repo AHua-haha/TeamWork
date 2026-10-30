@@ -1,35 +1,26 @@
-# Base harness prompts
+# Agent prompt ownership
 
-Fixed team response/routing rules live in `team/group-chat.md`. MemberContext loads this required file at startup and the backend build packages `team/` alongside the harness assets. Agent final responses use an optional leading `<mentions>` JSON-array block; body @ text has no routing meaning. User composer mentions retain their existing behavior.
+System prompts hold stable rules and instructions. Changing information and runtime-generated private instructions are conceptually separate dynamic inputs. React Harnesses supply fixed systemPrompt contributions and can react through Agent turn data to append private instructions after paired tool results. The timing, role, position, refresh and persistence of future member/design-context injection remain deferred.
 
-Maintain harness rule text in the Markdown files under `harness/`:
+| Owner | Prompt | Delivery |
+| --- | --- | --- |
+| Team | team/instructions.md | Fixed cooperation and member-management system rules |
+| Team | team/group-chat.md | Fixed publication and mention-routing system rules |
+| Team member configuration | .rsi/members/<name>/agent.md | Activated supplementary system instructions |
+| File React Harness | src/core/react-harness/file/instructions.md | Fixed read/write/edit and aggregated-view system rules |
+| File React Harness | src/core/react-harness/file/context-maintenance.md | Fixed DESIGN, optional README/consumer contract and internal-context maintenance rules |
+| Default React Harness | src/core/react-harness/default/prompts/instructions.md | Fixed Bash, native search, web and ordinary Git tool-use rules |
+| Default React Harness | colocated bash-timeout.md and bash-background-timeout.md | Tool-result metadata hints on the corresponding timeout |
+| Agent | agent/context-compaction.md | Private user-role control message at a compaction boundary |
+| Team | team/group-summary.md | Separate maintenance agent system prompt for shared summarization |
+| Workspace | workspace/project-design-template.md | Initial DESIGN document template, not an automatic run instruction |
 
-- `common.md`: shared workspace, ordinary project Git and approval instructions.
-- `management.md`: design and member maintenance rules.
-- `management-design.md` and `management-members.md`: design/member resource maintenance instructions.
-- `implementation.md`, `implementation-scope.md` and `implementation-context.md`: implementation-code/context maintenance and ordinary Git history rules.
-- `design-template.md` and `implementation-context-template.md`: initial root context content rendered at workspace bootstrap.
-- `execute.md`: persistent Bash shell/job and broad sandbox resource rules, and reusable web-search/fetch usage rules.
+Member bundles have one member.json and one agent.md. Manifests do not select prompt files or catalog prompts, and inline settings.prompt is rejected. Explicit user activation validates the current file set and saves the active instruction snapshot; file edits alone do not change active runs or future runs. Run preparation uses the active snapshot, not current draft bytes. General catalog options remain a separate solo-agent configuration feature and are not selectable for members.
 
-`{{workspace}}` in common is replaced with a backend-owned value. Execute permissions are fixed by the base harness, independently of historical command-rule fields. `{{design}}` and `{{context}}` render each implementation-context resource; `{{project}}` renders the initial design title and `{{design}}` also renders the initial implementation-context reference. Other text is delivered as written to runtime/inspection. Unknown template values fail assembly. Required files are loaded once; missing/empty files fail backend startup. There are no hardcoded fallback rules.
+Startup converts old member prompt selections to the single-file format. Active instruction text and draft files are preserved separately; selected legacy catalog text is flattened once, so later catalog changes no longer affect that member. Missing or malformed drafts remain for repair rather than being overwritten with active instructions. No project Git changes or implicit activation occur during conversion.
 
-Restart development mode after editing prompts. For compiled use, run the backend build and restart: the build copies the files into `dist/prompts/harness/`. Loading is relative to the module, independent of the shell's working directory. Deploy the complete `dist/` directory.
+Normal member requests combine fixed Team rules, activated agent.md, File system instructions and Default system instructions. Team does not embed generated member identity, responsibility, roster or file locations in the system prompt. Team owns that changing information for future injection. File React Harness owns working-design and dependency consumer-context responsibility; DESIGN documents, dependency README bodies and included source are no longer embedded in system prompts. Workspace continues to own filesystem discovery and document-loading APIs.
 
-These are backend-maintained base rules, separate from member Markdown prompts. Enforced tools, path boundaries, sandboxing and approval policies remain in backend code; editing a prompt does not change authority.
+Prompt assets are resolved relative to their owning module. Required rule files must exist and be nonempty. After changing backend rule assets, rebuild compiled deployments and restart the backend. The backend build copies team/agent/workspace assets and colocated File/Default instructions to corresponding dist paths. Editing agent.md instead requires member activation, not a backend restart.
 
-Design uses purpose/responsibilities/boundaries, Interface contract and constraints/specifications/requirements. Implementation context documents exact Input, Output, Effect and Usage examples for actual interfaces. These content requirements are instructions to the agent; storage accepts ordinary text without a semantic heading validator. Reusable knowledge is outside context and deferred.
-
-New workspaces initialize `.rsi/<project-directory-name>/_ctx/DESIGN.md` from `project-design-template.md`. `context-maintenance.md` supplies the project-path hierarchy and DESIGN/optional README/internal-context responsibilities in member guidance. Neither contract README nor internal-context schema is generated by default. The old context templates and SQL file-history subsystem are removed. An existing `.rsi/context/` layout is reported as unsupported without changing its files. A design part requires DESIGN.md; historical member-reference aliases do not create old-format context support.
-
-Management/implementation prompts describe working and dependency permissions, each with design context, implementation context and project implementation. Only the lead edits designs; implementation context/code for every member follows accepted assignments.
-
-Pi read/ls/grep/find use default operations for workspace reads. write/edit retain input-based assignment checks. Pi content, details and native truncation are preserved. Bash has its own per-member persistent shell, native jobs and whole-workspace write sandbox; these broader permissions are distinct from file-tool input checks.
-
-## Private context preparation
-
-`harness/context-compaction.md` is the release-owned instruction passed by Runtime to Agent. Agent uses one configured token threshold before ordinary model calls and after work ends. Every new preparation message after the control prompt is retained. The instruction strictly prohibits continuing the original task during compaction: use tools to read useful content, inspect workspace state and verify existing conclusions, then retain conclusions, evidence, work already performed and Next steps without executing them. Runtime resumes ordinary work only after successful cutover when the checkpoint calls for it. Agent durably hosts preparation/cutover; Team preserves original shared history. No extra routing tool or group response is introduced.
-
-
-`harness/bash-timeout.md` supplies model-facing foreground timeout recovery guidance in the Bash result metadata. `harness/bash-background-timeout.md` describes the separate background-launch acknowledgment deadline. These release-owned prompts identify tool-enforced limits, preserve shell/job-reset semantics and never request an automatic retry.
-
-`agent/file-tools.md` is owned by the Agent file response handler and explains its effective read/write/edit capabilities, plain source content, FILE_START/FILE_END boundaries, inclusive UNREVEALED_GAP markers, aggregation, view replacement and exact-string edit rules. Agent appends handler instructions to each model request after caller policy assembly, including compaction, before token estimation. Team does not append these instructions. This required release-owned prompt is packaged into `dist/prompts/agent/`; missing/empty files fail loading. The handler executes direct filesystem operations without Harness file permission checks; Bash and other Harness rules still apply.
+Private compaction retains its current lifecycle: the instruction prohibits continuing the original task, permits inspection/verification to preserve evidence, and requests conclusions and next steps. Publication-refusal feedback remains a Team-generated private user-role message. These existing reactive inputs do not define the deferred dynamic member/design-context mechanism.

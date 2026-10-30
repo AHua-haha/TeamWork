@@ -53,7 +53,7 @@ export class TeamSystem {
     this.service = new TeamService(store, workspaces, config, this.designs);
     this.memberWorkspace = new MemberWorkspace(workspaces, this.designs, id => this.service.find(id));
     this.web = web;
-    this.instructions = new MemberInstructions(this.service, workspaces, id => this.runner.isRunning(id));
+    this.instructions = new MemberInstructions();
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
@@ -217,7 +217,7 @@ export class TeamSystem {
   }
 
   /**
-   * Wraps a policy so that a team member's model calls get its instructions, assembled from the team and the context base
+   * Wraps a policy so member model calls get fixed Team rules and activated agent.md instructions
    * just before the call, and its tools. Every other agent is unchanged.
    */
   policy(base: RuntimePolicy): RuntimePolicy {
@@ -229,12 +229,7 @@ export class TeamSystem {
         const member = await this.service.find(agentId);
         if (!member) return factories;
         const workspace = await this.workspaces.record(member.workspaceId);
-        let guidance: {runId:string;promise:Promise<string>} | undefined;
-        return [...factories, fileReactHarnessFactory(workspace.directory), defaultReactHarnessFactory(workspace.directory, [...this.web, ...management], scope => {
-          if (!scope) return this.memberWorkspace.guidance(agentId);
-          if (guidance?.runId !== scope.runId) guidance = {runId:scope.runId,promise:this.memberWorkspace.guidance(agentId)};
-          return guidance.promise;
-        })];
+        return [...factories, fileReactHarnessFactory(workspace.directory), defaultReactHarnessFactory(workspace.directory, [...this.web, ...management])];
       },
       groupContext: async agentId => {
         const member = await this.service.find(agentId);
@@ -278,7 +273,7 @@ export class TeamSystem {
         if (request.context.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image')) && !request.model.input.includes('image')) {
           throw new AppError('image_not_supported', 'This context contains pictures; select a model with image input', 409);
         }
-        const systemPrompt = await this.instructions.build(scope.agentId, scope.config.systemPrompt);
+        const systemPrompt = this.instructions.build(scope.config.systemPrompt);
         return {...request, context: {...request.context, systemPrompt: systemPrompt ?? ''}};
       },
     };

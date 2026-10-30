@@ -22,7 +22,7 @@ Dependencies, not owned:
 
 App composition under `frontend/src/app/` is outside this member's scope. Shared backend-client and UI implementation belongs to the Shared member.
 
-Use `.rsi/rsi-agent/frontend/_ctx/internal/legacy/implementation-notes.md` for implementation continuity. Update it with actual results, changed files, interfaces, verification and remaining work. Shared backend-client and UI implementation belongs to the Shared member.
+Maintain useful internal development context within the owning design part when needed. Its structure is deferred; do not recreate retired archives. Verify behavior against current source and keep consumer contracts separate.
 
 ## Responsibilities
 - Home: landing experience, workspace overview/list and quick actions.

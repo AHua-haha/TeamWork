@@ -28,7 +28,7 @@ test('members expose design assignment directly and reject legacy Harness config
  const fields={name:member.name,role:member.role,responsibility:member.responsibility,settings:member.settings,designScope:member.designScope};
  assert.deepEqual(JSON.parse(generatedSource(fields).files['member.json']!).designScope,member.designScope);
  assert.throws(()=>memberFields({...fields,harness:{designScope:member.designScope}}));
- const text=JSON.stringify({name:'Old',harnesses:{project:{designScope:member.designScope}},execute:{allowedCommands:[]},promptFiles:['prompts/member.md']});
+ const text=JSON.stringify({name:'Old',harnesses:{project:{designScope:member.designScope}},execute:{allowedCommands:[]},promptFiles:['agent.md']});
  const upgraded=JSON.parse(upgradeMemberManifest(text));assert.deepEqual(upgraded.designScope,member.designScope);assert.equal('harnesses' in upgraded,false);assert.equal('execute' in upgraded,false);
  assert.equal('inspect' in f.team,false);assert.equal('inspect' in f.team.service,false);
 }));
@@ -40,14 +40,14 @@ test('startup migrates records and manifests without activating pending edits, r
  const retained=[{messageId:'retained',message:{role:'user' as const,content:'Existing context',timestamp:1},metadata:{source:'test'}}];
  f.store.agentContexts.set(member.memberId,retained);
  await writeFile(join(f.directory,old.source.path),JSON.stringify({...old.manifest,responsibility:'Pending responsibility'}));
- await writeFile(join(f.directory,dirname(old.source.path),'prompts/member.md'),'Pending prompt');
+ await writeFile(join(f.directory,dirname(old.source.path),'agent.md'),'Pending prompt');
  await f.team.initialize();
  const active=(await f.team.service.find(member.memberId))!,source=active.value.configuration!;
  assert.equal(active.id,member.memberId);assert.deepEqual(active.value.designScope,member.designScope);assert.equal('harness' in active.value,false);assert.equal('execute' in JSON.parse(source.files['member.json']!),false);
- assert.equal(source.formatVersion,5);assert.equal('previous' in source,false);assert.equal(source.files['prompts/member.md'],old.source.files['prompts/member.md']);
+ assert.equal(source.formatVersion,6);assert.equal('previous' in source,false);assert.equal(source.files['agent.md'],old.source.files['agent.md']);
  assert.equal(active.value.responsibility,member.responsibility);assert.deepEqual(f.store.agentContexts.get(member.memberId),retained);
  const pending=JSON.parse(await readFile(join(f.directory,source.path),'utf8'));assert.equal(pending.responsibility,'Pending responsibility');assert.equal('execute' in pending,false);
- assert.equal(await readFile(join(f.directory,dirname(source.path),'prompts/member.md'),'utf8'),'Pending prompt');
+ assert.equal(await readFile(join(f.directory,dirname(source.path),'agent.md'),'utf8'),'Pending prompt');
  assert.equal(await gitText(f.directory,['rev-parse','HEAD']),head);assert.match(await gitText(f.directory,['show',`HEAD:${source.path}`]),/allowedCommands/);
  const review=await f.team.configuration.validate(f.lead.memberId,'.rsi/members');assert.equal(review.valid,true);assert.equal(review.changes.length,1);
  const before=await f.team.service.all(f.workspaceId);await f.team.initialize();assert.deepEqual(await f.team.service.all(f.workspaceId),before);

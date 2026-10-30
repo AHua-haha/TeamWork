@@ -13,9 +13,9 @@ test('accepted bundle contains meaningful JSON and Markdown; identity, revisions
   const member = await worker(f, 'Backend', ['src']);
   const source = await f.team.configuration.activeSource(f.workspaceId, member.memberId);
   const manifest = JSON.parse(source.files['member.json']!);
-  assert.deepEqual(Object.keys(manifest).sort(), ['designScope', 'name', 'promptFiles', 'responsibility', 'role', 'settings']);
+  assert.deepEqual(Object.keys(manifest).sort(), ['designScope', 'name', 'responsibility', 'role', 'settings']);
   assert.deepEqual(manifest.designScope, member.designScope);
-  assert.equal(source.formatVersion, 5);
+  assert.equal(source.formatVersion, 6);
   assert.equal(manifest.settings.prompt, undefined);
   assert.equal(manifest.implementationScope, undefined);
   const files = await f.team.memberWorkspace.files(f.lead.memberId);
@@ -30,7 +30,7 @@ test('invalid pending JSON and prompts never replace stable configuration, inclu
   const stored = await f.team.service.find(member.memberId);
   const files = await f.team.memberWorkspace.files(f.lead.memberId);
   await files.write.writeFile(join(files.root, accepted.path), '{invalid JSON');
-  await files.write.writeFile(join(files.root, dirname(accepted.path), 'prompts/member.md'), 'Unaccepted prompt');
+  await files.write.writeFile(join(files.root, dirname(accepted.path), 'agent.md'), 'Unaccepted prompt');
   assert.equal(await readFile(join(files.root, accepted.path), 'utf8'), '{invalid JSON');
   assert.deepEqual(await f.team.service.find(member.memberId), stored);
   const reopened = new TeamSystem(f.store, f.workspaces, stubConfig); reopened.attach(f.runtime);
@@ -100,14 +100,14 @@ test('startup relocates legacy bundles with pending edits and preserves active i
   await gitText(f.directory, ['config', 'user.name', 'Test']); await gitText(f.directory, ['config', 'user.email', 'test@example.invalid']);
   await gitText(f.directory, ['add', '-f', '-A', '--', '.rsi/members']); await gitText(f.directory, ['commit', '-m', 'Legacy member bundle']);
   const head = await gitText(f.directory, ['rev-parse', 'HEAD']);
-  await writeFile(join(f.directory, dirname(legacy), 'prompts/member.md'), 'Pending prompt survives migration');
+  await writeFile(join(f.directory, dirname(legacy), 'agent.md'), 'Pending prompt survives migration');
   await writeFile(join(f.directory, dirname(legacy), 'pending.txt'), 'Untracked pending file');
   await f.team.initialize();
   const migrated = (await f.team.service.find(stored.id))!;
   assert.equal(migrated.id, stored.id); assert.equal(migrated.value.configuration!.path, source.path);
   assert.equal('legacyPaths' in migrated.value.configuration!, false);
   assert.deepEqual(migrated.value.configuration!.files, source.files, 'active prompt snapshot remains accepted bytes');
-  assert.equal(await readFile(join(f.directory, dirname(source.path), 'prompts/member.md'), 'utf8'), 'Pending prompt survives migration');
+  assert.equal(await readFile(join(f.directory, dirname(source.path), 'agent.md'), 'utf8'), 'Pending prompt survives migration');
   assert.equal(await readFile(join(f.directory, dirname(source.path), 'pending.txt'), 'utf8'), 'Untracked pending file');
   assert.equal(await gitText(f.directory, ['rev-parse', 'HEAD']), head, 'migration makes no Git commit');
   const reviewed = await f.team.configuration.validate(f.lead.memberId,'.rsi/members');

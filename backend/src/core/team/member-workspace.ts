@@ -6,8 +6,6 @@ import type { WorkspaceService } from '../workspace/workspace.js';
 import { AppError } from '../agent/data/model.js';
 import {OperationQueue} from '../operation-queue.js';
 import {currentFiles} from './member-files.js';
-import { projectNode, workspaceContext } from '../workspace/project-context.js';
-import { workspacePrompt } from '../workspace/workspace-prompts.js';
 
 export interface ResolvedAssignment {
   working: ResolvedDesign[]; dependencies: ResolvedDesign[];
@@ -39,27 +37,5 @@ export class MemberWorkspace {
   }
   async configurationFiles(id: string) {
     return currentFiles(await this.root(id), '.rsi/members');
-  }
-  async guidance(id: string): Promise<string> {
-    const member = await this.active(id), resolved = await resolveAssignment(this.designs, member.workspaceId, member.value.designScope);
-    const layout = await workspaceContext(await this.root(id));
-      const manager = await this.workspaces.contextManager(member.workspaceId), snapshot = manager.snapshot()!;
-      const sections = ['## Design assignments (work guidance, not access restrictions)',workspacePrompt('context-maintenance',{root:layout.root}),'## Working designs'];
-      let bytes = 0;
-      const append = (path:string,content:string) => {
-        bytes += Buffer.byteLength(content);
-        sections.push(`### ${path}\n${bytes <= 64*1024 ? content : 'Content not loaded into instructions; read this file with your tools.'}`);
-      };
-      for (const part of resolved.working) append(`${layout.root}/${part.path}`,part.content);
-      sections.push('## Dependency consumer context');
-      for (const part of resolved.dependencies) {
-        const system = manager.design(projectNode(part.path),snapshot);
-        if (system.metadata.summary) sections.push(system.metadata.summary);
-        if (!system.documents.readme) {append(`${layout.root}/${part.path}`,part.content);continue;}
-        const context = await manager.loadConsumerContext(system.projectPath,snapshot);
-        append(context.readme.path,context.readme.content);
-        for (const file of context.files) append(file.path,file.content);
-      }
-    return sections.join('\n\n');
   }
 }

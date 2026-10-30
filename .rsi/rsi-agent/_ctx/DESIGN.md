@@ -31,3 +31,5 @@ The context-base manager uses the filesystem as its sole current-state authority
 - Child system: desktop.
 
 Project Git is operated directly by agents and users. The backend maintains no additional Git state, accepted-file baseline or Git-dependent member activation. Member configuration activation validates current files and atomically stores the active workspace-team snapshot; configuration-file inspection/history/diff APIs are removed.
+
+Prompt ownership separates fixed instructions from dynamic information. A member uses one agent.md, without catalog or prompt-file selection. Team owns team rules and member information. File React Harness owns file/context maintenance rules and working/dependency context; Default React Harness owns its other tool instructions. Stable rules and agent.md contribute system text. Automatic system-prompt embedding of designs, dependency documents and member identity/responsibility is removed; dynamic injection details are deferred.

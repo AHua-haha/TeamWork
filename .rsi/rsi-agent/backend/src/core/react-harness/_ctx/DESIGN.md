@@ -46,3 +46,9 @@ Reuse instances across runs, restore their small state once from Agent's compone
 Keep this dependency direction: React Harness depends on public Agent data-model types/operations; Agent data does not import concrete React Harness implementations. Agent runtime imports React Harness's public integration interface. Business tools may be supplied by other owners without giving React Harness foreign schema knowledge. Context maintenance must use acknowledged data operations rather than mutating raw collections before persistence. Purpose-owned model projections operate on detached copies.
 
 Member designScope remains Team-owned assignment guidance, with recursive working roots and explicit dependencies. There is no member Harness configuration or legacy resource inspection. Future permission and member-specific Harness configuration require separate design.
+
+### Fixed instructions and dynamic context
+
+React Harnesses have two conceptual prompt contributions: stable system instructions, and changing context or runtime-generated private instructions produced while reacting to execution. Agent assembles fixed system contributions. Purpose-owned reactions can append private instructions through Agent turn data after paired tool results; no new dynamic injection lifecycle is prescribed here.
+
+File React Harness owns file-tool instructions, project-context organization/maintenance rules, and the working-design/dependency consumer-context responsibility. Fixed context-maintenance rules belong in its system contribution. Working DESIGN documents and dependency README/included source are changing information: remove their current system-prompt embedding. The dynamic injection role, position, timing, refresh and persistence will be designed later; do not invent a replacement now. Default React Harness owns only instructions about its capabilities, tool behavior and execution lifecycle, without Team configuration rules or Workspace guidance assembly.

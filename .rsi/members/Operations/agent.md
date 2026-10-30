@@ -10,7 +10,7 @@ Your working design and implementation scope is the accepted Operations design. 
 - backend/compose.yaml
 - rsi.config.example.json
 
-Use the Operations implementation context under .rsi/rsi-agent/scripts/_ctx/internal/legacy/implementation-notes.md for continuity and update it with actual results, changed files, interfaces, and remaining work.
+Maintain useful internal development context within the owning design part when needed. Its structure is deferred; do not recreate retired archives. Verify behavior against current source and keep consumer contracts separate.
 
 ## Responsibilities
 - Manage development start/stop/status behavior and isolated child-process environments.

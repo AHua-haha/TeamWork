@@ -15,7 +15,7 @@ export interface ReactHarnessContext {
   validateToolCall(call: ToolCall): JsonObject;
   /** Completes earlier calls in this assistant turn, except explicitly deferred call identities. */
   beforeToolCall(call: ToolCall, deferCallIds?: string[]): Promise<void>;
-  /** The actual Agent data model for this turn, including preparation context when compacting. */
+  /** Agent turn data, including paired results and deferred private instructions; also used during compaction. */
   data: AgentTurnData;
 }
 
@@ -30,7 +30,7 @@ export interface ReactHarness {
   restoreContext?(context: AgentContextState): void;
   /** Declarations owned and executed by this harness, without a separate permission layer. */
   tools?(scope: StepScope): Array<RuntimeTool | ReactHarnessTool>;
-  /** Component-owned instructions appended to each model request, including compaction. */
+  /** Fixed purpose-owned rules appended to each model request, including compaction. Changing context is separate. */
   systemPrompt?(scope: StepScope): string | Promise<string>;
   /** Purpose-owned model projection; stable history and stored message bytes remain intact. */
   projectContextEntry?(entry: ContextEntry): ContextEntry;

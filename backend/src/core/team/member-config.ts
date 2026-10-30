@@ -89,18 +89,12 @@ export class MemberConfigService {
         const raw = await textAt(path);
         let value: unknown;
         try { value = JSON.parse(raw); } catch { throw new AppError('invalid_config', 'Member manifest must be valid JSON'); }
-        const data = obj(value, 'Member manifest'); keys(data, ['name', 'role', 'responsibility', 'settings', 'promptFiles', 'designScope']);
+        const data = obj(value, 'Member manifest'); keys(data, ['name', 'role', 'responsibility', 'settings', 'designScope']);
         const settings = obj(data.settings, 'Member settings');
-        if ('prompt' in settings) throw new AppError('invalid_config', 'Use referenced Markdown prompt files, not settings.prompt');
-        const designScope = parseDesignScope(data.designScope);
-        if (!Array.isArray(data.promptFiles) || data.promptFiles.length > 20 || data.promptFiles.some(p => typeof p !== 'string' || !/^prompts\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.md$/.test(p) || p.split('/').some((s: string) => s === '..' || s.startsWith('.')))) throw new AppError('invalid_config', 'promptFiles lists at most 20 safe bundle-relative prompts/*.md files');
-        const refs = data.promptFiles as string[];
-        if (new Set(refs.map(p => p.toLowerCase())).size !== refs.length) throw new AppError('invalid_config', 'Duplicate prompt reference');
-        const files: Record<string, string> = { 'member.json': raw };
-        for (const ref of refs) {
-          files[ref] = await textAt(`${dirname(path)}/${ref}`);
-        }
-        const prompt = refs.map(ref => files[ref]!).join('\n\n');
+        if('prompt' in settings||'promptOptionIds' in settings)throw new AppError('invalid_config','Member instructions come only from agent.md; inline prompts and catalog selections are not supported');
+        const designScope=parseDesignScope(data.designScope);
+        const prompt=await textAt(`${dirname(path)}/agent.md`);
+        const files:Record<string,string>={'member.json':raw,'agent.md':prompt};
         let defaults;
         if (current) defaults = current.value.settings;
         else {
@@ -110,7 +104,7 @@ export class MemberConfigService {
         }
         const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, designScope, settings: validateRunSettings({ ...defaults, ...settings, prompt }) });
         if (current) {
-          if (fields.name !== current.value.name || fields.role !== current.value.role || !same(withoutPrompt(fields.settings), withoutPrompt(current.value.settings)) || !same(assignment(fields.designScope), assignment(current.value.designScope))) throw new AppError('forbidden_update', 'Update may change only responsibility and supplementary prompts');
+          if (fields.name !== current.value.name || fields.role !== current.value.role || !same(withoutPrompt(fields.settings), withoutPrompt(current.value.settings)) || !same(assignment(fields.designScope), assignment(current.value.designScope))) throw new AppError('forbidden_update', 'Update may change only responsibility and agent.md');
           fields.designScope = current.value.designScope;
         } else if (!designScope.working.length && !designScope.dependencies.length) throw new AppError('invalid_config', 'A new worker needs a design assignment');
         if (match[1] !== fields.name) throw new AppError('invalid_config', 'Member directory must exactly match its name');

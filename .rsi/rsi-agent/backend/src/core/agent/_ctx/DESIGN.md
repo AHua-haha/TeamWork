@@ -116,3 +116,7 @@ Inspection is detached and read-only. It works while idle or running and does no
 5. A member sees `sender: Lead` inside one plain-text `<metadata>` area in the group message content, not only in hidden metadata, even when the model protocol encodes it as a user-role input.
 6. Below the configured threshold, run boundaries preserve the interleaved context. Above it, private preparation retains the complete new trace, reads the shared group summary/tail at cutover, and never publishes a preparation answer.
 7. During compaction, read the shared summary/tail through the Agent-owned consumed boundary. If the latest summary covers future positions, retain archived original messages for this checkpoint instead.
+
+### Prompt contribution boundary
+
+System prompts contain stable instructions from Team, activated member agent.md, and the purpose-owned React Harnesses. Dynamic information and runtime-generated private instructions are separate conceptual inputs. Agent provides prompt assembly and acknowledged private-message operations; it does not decide Team identity/roster information or File context content. Current compaction and publication-refusal inputs keep their existing private lifecycle. Future dynamic member/design-context injection is deferred; remove automatic system-prompt embedding rather than introducing another snapshot mechanism.

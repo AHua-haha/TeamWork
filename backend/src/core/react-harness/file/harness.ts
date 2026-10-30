@@ -19,6 +19,8 @@ type EditChange = { start: number; oldEnd: number; newEnd: number; delta: number
 const fileToolNames = new Set(['read', 'write', 'edit']);
 const fileToolInstructions = readFileSync(new URL('./instructions.md', import.meta.url), 'utf8').trim();
 if (!fileToolInstructions) throw new AppError('invalid_config', 'File handler instructions must not be empty', 500);
+const contextInstructions=readFileSync(new URL('./context-maintenance.md',import.meta.url),'utf8').trim();
+if(!contextInstructions)throw new AppError('invalid_config','File context-maintenance instructions must not be empty',500);
 
 function normalizeRanges(ranges: Range[]): Range[] {
   const sorted = ranges
@@ -144,7 +146,7 @@ export class FileReactHarness implements ReactHarness {
 
   projectContextEntry = projectFileContextEntry;
 
-  systemPrompt(): string { return fileToolInstructions; }
+  systemPrompt(): string { return [fileToolInstructions,contextInstructions].join('\n\n'); }
 
   overrideToolNames(): string[] { return ['read', 'write', 'edit']; }
   canHandle(response: AssistantMessage): boolean { return response.content.some(part => part.type === 'toolCall' && fileToolNames.has(part.name)); }

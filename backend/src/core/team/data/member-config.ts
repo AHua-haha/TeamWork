@@ -4,15 +4,14 @@ import { memberRoot } from '../../workspace/workspace-layout.js';
 import { createHash } from 'node:crypto';
 import type { RunSettings } from './config.js';
 import type { DesignScope } from './assignment.js';
-import {upgradeMemberManifest} from './member-config-migration.js';
+import {currentMemberManifest,legacyPromptFiles} from './member-config-migration.js';
 import { AppError } from '../../agent/data/model.js';
 
 /** Schema control belongs to the backend envelope, not the editable JSON. */
-export const memberManifestVersion = 5;
+export const memberManifestVersion = 6;
 export interface MemberConfigSource {
   formatVersion?: number;
   path: string; files: Record<string, string>; digest: string; submittedBy: string; submittedAt: number;
-
 }
 export interface ConfigFields { name: string; role: string; responsibility: string; settings: RunSettings; designScope: DesignScope }
 export function sourceBundle(path: string, files: Record<string, string>, submittedBy: string): MemberConfigSource {
@@ -20,20 +19,25 @@ export function sourceBundle(path: string, files: Record<string, string>, submit
   return { formatVersion: memberManifestVersion, path, files, digest, submittedBy, submittedAt: Date.now() };
 }
 export function generatedSource(fields: ConfigFields): MemberConfigSource {
-  const { prompt, ...settings } = fields.settings;
-  const manifest = { name: fields.name, role: fields.role, responsibility: fields.responsibility, settings, promptFiles: ['prompts/member.md'], designScope: fields.designScope };
-  return sourceBundle(`${memberRoot}/${fields.name}/member.json`, { 'member.json': JSON.stringify(manifest, null, 2) + '\n', 'prompts/member.md': prompt }, 'user');
+  const { prompt, promptOptionIds, ...settings } = fields.settings;
+  const manifest = { name: fields.name, role: fields.role, responsibility: fields.responsibility, settings, designScope: fields.designScope };
+  return sourceBundle(`${memberRoot}/${fields.name}/member.json`, { 'member.json': JSON.stringify(manifest, null, 2) + '\n', 'agent.md': prompt }, 'user');
 }
-/** Convert active records only; discard retired Git/history metadata without reading Git. */
-export function migrateMemberSource(source: MemberConfigSource): MemberConfigSource | null {
-  const data = source as MemberConfigSource & {acceptedRevision?: unknown; previous?: unknown; legacyPaths?: unknown; legacyManifestHashes?: unknown};
-  const {acceptedRevision, previous, legacyPaths, legacyManifestHashes, ...current} = data;
-  const retired = ['acceptedRevision','previous','legacyPaths','legacyManifestHashes'].some(key => Object.hasOwn(source,key));
-  if (source.formatVersion === memberManifestVersion) return retired ? current : null;
-  const raw = source.files['member.json'];
-  if (raw === undefined) throw new AppError('corrupt_data', 'Active member manifest cannot be read', 500);
-  try {JSON.parse(raw);} catch {throw new AppError('corrupt_data', 'Active member manifest cannot be read', 500);}
-  return {...current, ...sourceBundle(source.path, {...source.files, 'member.json': upgradeMemberManifest(raw)}, 'backend-migration')};
+/** Flatten legacy selections once; only agent.md remains in the active snapshot. */
+export function migrateMemberSource(source:MemberConfigSource,catalogText=''):MemberConfigSource|null {
+  const data=source as MemberConfigSource & {acceptedRevision?:unknown;previous?:unknown;legacyPaths?:unknown;legacyManifestHashes?:unknown};
+  const {acceptedRevision,previous,legacyPaths,legacyManifestHashes,...current}=data;
+  const retired=['acceptedRevision','previous','legacyPaths','legacyManifestHashes'].some(key=>Object.hasOwn(source,key));
+  if(source.formatVersion===memberManifestVersion&&!catalogText)return retired?current:null;
+  const raw=source.files['member.json'];if(raw===undefined)throw new AppError('corrupt_data','Active member manifest cannot be read',500);
+  let manifest:Record<string,unknown>;try{manifest=JSON.parse(raw);}catch{throw new AppError('corrupt_data','Active member manifest cannot be read',500);}
+  if(!manifest||typeof manifest!=='object'||Array.isArray(manifest))throw new AppError('corrupt_data','Active member manifest must be an object',500);
+  const refs=legacyPromptFiles(manifest.promptFiles);
+  const own=source.files['agent.md']??refs.map(ref=>{
+    const text=source.files[ref];if(text===undefined)throw new AppError('corrupt_data',`Active member prompt is missing: ${ref}`,500);return text;
+  }).join('\n\n');
+  const files={'member.json':currentMemberManifest(raw),'agent.md':[catalogText,own].filter(Boolean).join('\n\n')};
+  return {...current,...sourceBundle(source.path,files,'backend-migration')};
 }
 
 /** Relocate the complete bundle, including pending files. Never overwrite or recreate a deletion. */

@@ -8,7 +8,7 @@ import { TeamSystem } from '../src/core/team/team-system.js';
 import { code, settle, stubConfig, withTeam, worker, type Fixture } from './team-fixture.js';
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
-const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['work/metadata.json'], dependencies: [] } });
+const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, designScope: { working: ['work/metadata.json'], dependencies: [] } });
 async function setup(f: Fixture) {
   await seedDesign(f.workspaces, f.workspaceId, 'work/metadata.json', { content: 'Work', implementation: ['src'] });
   }
@@ -16,7 +16,7 @@ async function draft(f: Fixture, path: string, value: unknown, prompt = 'Member 
   const files = await f.team.memberWorkspace.files(f.lead.memberId);
   await files.write.mkdir(join(files.root, dirname(path), 'prompts'));
   await files.write.writeFile(join(files.root, path), JSON.stringify(value));
-  await files.write.writeFile(join(files.root, dirname(path), 'prompts/member.md'), prompt);
+  await files.write.writeFile(join(files.root, dirname(path), 'agent.md'), prompt);
   return files;
 }
 const validate=(f:Fixture)=>f.team.configuration.validate(f.lead.memberId,'.rsi/members');
@@ -27,14 +27,14 @@ test('activation reads current files without a repository; later edits stay inac
   const files=await draft(f,path,manifest('Backend'),'First prompt');
   assert.equal((await validate(f)).valid,true);
   assert.equal((await f.team.service.active(f.workspaceId)).length,1,'validation does not activate');
-  await files.write.writeFile(join(files.root,dirname(path),'prompts/member.md'),'Latest file prompt');
+  await files.write.writeFile(join(files.root,dirname(path),'agent.md'),'Latest file prompt');
   const result=await f.team.activateConfiguration(f.workspaceId);
   assert.equal(result.changes.length,1);assert.match(result.revision,/^[0-9a-f-]{36}$/);
   const member=(await f.team.service.byName(f.workspaceId,'Backend'))!;
   assert.equal(member.value.settings.prompt,'Latest file prompt');
   assert.equal('acceptedRevision' in member.value.configuration!,false);
   await assert.rejects(readFile(join(f.directory,'.git/HEAD')),code('ENOENT'));
-  await files.write.writeFile(join(files.root,dirname(path),'prompts/member.md'),'Not activated');
+  await files.write.writeFile(join(files.root,dirname(path),'agent.md'),'Not activated');
   const reopened=new TeamSystem(f.store,f.workspaces,stubConfig);reopened.attach(f.runtime);
   try {await reopened.initialize();assert.equal((await reopened.service.find(member.id))!.value.settings.prompt,'Latest file prompt');}
   finally {await reopened.runner.close();}
@@ -79,7 +79,7 @@ test('filesystem deletion persists through materialization/restart and activatio
 
 test('malformed references, lead deletion, duplicate names and base-policy overrides refuse activation without changing active state', () => withTeam(async f => {
   await setup(f); const path = '.rsi/members/Backend/member.json', original = await f.team.service.team(f.workspaceId);
-  for (const change of [{ promptFiles: ['../escape.md'] }, { promptFiles: ['prompts/missing.md'] }, { designScope: { working: ['missing/metadata.json'], dependencies: [] } }, { name: 'Lead' }, { extra: true }, { execute: {allowedCommands: []} }]) {
+  for (const change of [{ promptFiles: [] }, { settings: {promptOptionIds: []} }, { designScope: { working: ['missing/metadata.json'], dependencies: [] } }, { name: 'Lead' }, { extra: true }, { execute: {allowedCommands: []} }]) {
     await draft(f, path, { ...manifest('Backend'), ...change });
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, false);
     const review = await validate(f); await assert.rejects(f.team.activateConfiguration(f.workspaceId), code('invalid_config'));
@@ -161,7 +161,7 @@ test('admission already in progress takes precedence and activation refuses afte
 test('binary prompt bytes and concurrent active changes are rejected without activation', () => withTeam(async f => {
   await setup(f); const path = '.rsi/members/Backend/member.json'; const files = await draft(f, path, manifest('Backend'));
   const { writeFile } = await import('node:fs/promises');
-  await writeFile(join(files.root, '.rsi/members/Backend/prompts/member.md'), Buffer.from([0xff, 0xfe]));
+  await writeFile(join(files.root, '.rsi/members/Backend/agent.md'), Buffer.from([0xff, 0xfe]));
   await assert.rejects(f.team.configuration.validate(f.lead.memberId,'.rsi/members'),/UTF-8/);
   await draft(f, path, manifest('Backend')); const review = await validate(f);
   const original=f.store.activateMembers.bind(f.store);

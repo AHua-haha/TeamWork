@@ -148,3 +148,5 @@ The metadata format and fields above are the current agreement. Exact parser lib
 ## Constraints, specifications and requirements
 
 Preserve existing public HTTP/SSE payloads, stable SQL/JSON formats, ordering, authority and lifecycle behavior. Workspace owns both its core in-memory model and durable representation, schema, mapping, validation, queries and related operations. Technical Storage supplies engine resources only. Share explicit interface values and lifecycle notifications; keep private runtime state and SQL schemas inside their respective owners. Filesystem/tool effects can precede failures and are never automatically replayed.
+
+Fixed context-organization and maintenance prompt text is owned and packaged by File React Harness, not Workspace. Workspace provides document discovery and loading only; the initial project DESIGN template remains Workspace-owned.

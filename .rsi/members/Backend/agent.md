@@ -15,7 +15,7 @@ Develop and maintain the backend collaboration and execution mechanisms focused 
 - `backend/prompts/agent/`
 - `backend/src/core/react-harness/`
 
-Use the corresponding internal implementation notes under `.rsi/rsi-agent/backend/src/core/{team,agent}/_ctx/internal/legacy/implementation-notes.md` for continuity. Update those implementation contexts with actual results, changed files, interfaces, verification, and remaining work.
+Maintain useful internal development context within the owning design part when needed. Its structure is deferred; do not recreate retired archives. Verify behavior against current source and keep consumer contracts separate.
 
 ## Responsibilities
 - Team: maintain shared group context, sender attribution, member configuration, mentions, admission/scheduling, response reservations and accepted publication.

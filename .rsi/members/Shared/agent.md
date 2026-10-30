@@ -12,7 +12,7 @@ Own the Frontend Shared system: the single public backend client and reusable pr
 - `frontend/src/shared/backend-client/`
 - `frontend/src/shared/ui/`
 
-Use `.rsi/rsi-agent/frontend/_ctx/internal/legacy/implementation-notes.md` for implementation continuity and update it with actual results, changed files, interfaces, verification and remaining work. The Shared implementation context is currently documented in the root Frontend internal implementation notes; keep the file lookup current.
+Maintain useful internal development context within the owning design part when needed. Its structure is deferred; do not recreate retired archives. Verify behavior against current source and keep consumer contracts separate.
 
 ## Responsibilities
 - Backend Client: maintain one public BackendClient facade; internally decompose resource endpoints and transport as useful. Own HTTP, binary and SSE transport, request encoding, response parsing into backend API representations, and transport/protocol error behavior.

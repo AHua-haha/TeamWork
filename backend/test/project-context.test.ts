@@ -32,9 +32,7 @@ test('fresh initialization creates project-named context with DESIGN only and a 
     const lead = (await team.service.team(f.workspaceId)).members[0]!;
     assert.equal(lead.ready,true); assert.deepEqual(lead.designScope.working,['_ctx/DESIGN.md']);
     assert.equal((await team.configuration.validate(lead.memberId,'.rsi/members')).valid,true);
-    const guidance = await team.memberWorkspace.guidance(lead.memberId);
-    assert.match(guidance,/\.rsi\/my-project\/_ctx\/DESIGN.md/);
-    assert.match(guidance,/optional `README.md`/);
+    assert.equal('guidance' in team.memberWorkspace,false);
   } finally {await team.closeMaintenance();await team.runner.close();}
 }));
 
@@ -127,26 +125,23 @@ test('project context APIs use one resident filesystem index without SQL history
   assert.equal(manager.snapshot(),snapshot);
 }));
 
-test('member activation explicitly refreshes metadata, while repeated run prompt requests reuse the assembled guidance',()=>withProject(async f=>{
+test('admission refreshes metadata without embedding changing documents in harness system prompts',()=>withProject(async f=>{
   const manager=await f.service.contextManager(f.workspaceId),first=await manager.refresh();
   const team=new TeamSystem(f.store,f.service,stubConfig),runtime=new FakeRuntime(f.store);team.attach(runtime);
   try{
     const lead=(await team.service.team(f.workspaceId)).members[0]!;
-    await writeFile(join(f.directory,'.rsi/my-project/_ctx/README.md'),'---\nsummary: Updated before activation\n---\nContract');
+    await writeFile(join(f.directory,'.rsi/my-project/_ctx/README.md'),'---\nsummary: Not system information\n---\nCONSUMER_SENTINEL');
     const accepted=await team.runner.postUser(f.workspaceId,'Hello');
     assert.notEqual(manager.snapshot()!.revision,first.revision);
-    assert.equal(manager.snapshot()!.designSystems['.']!.metadata.summary,'Updated before activation');
-    const policy=team.policy({buildRequest:()=>{throw new Error('Not used');}});
-    const factories=await policy.createReactHarnessFactories!(lead.memberId);
-    const factory=factories.find(factory=>factory.harnessId==='default')!;
-    const harness=factory.create({revision:0,data:{}},async()=>{throw new Error('Not used');});
-    const original=team.memberWorkspace.guidance.bind(team.memberWorkspace);let calls=0;
-    team.memberWorkspace.guidance=async id=>{calls++;return original(id);};
-    const scope={runId:accepted.runs[0]!.runId} as Parameters<NonNullable<typeof harness.systemPrompt>>[0];
-    const initial=await harness.systemPrompt!(scope);
-    await writeFile(join(f.directory,'.rsi/my-project/_ctx/DESIGN.md'),'# Next activation only');
-    assert.equal(await harness.systemPrompt!(scope),initial);assert.equal(calls,1);
-    await harness.systemPrompt!({...scope,runId:'next-run'});assert.equal(calls,2);
+    const factories=await team.policy({buildRequest:()=>{throw Error('Not used');}}).createReactHarnessFactories!(lead.memberId);
+    const harnesses=factories.map(factory=>factory.create({revision:0,data:{}},async()=>{throw Error('Not used');}));
+    const scope={runId:accepted.runs[0]!.runId} as any;
+    const before=(await Promise.all(harnesses.map(h=>h.systemPrompt?.(scope)))).join('\n\n');
+    assert.match(before,/Project context organization/);assert.match(before,/optional `README.md`/);
+    assert.doesNotMatch(before,/CONSUMER_SENTINEL|Not system information|A display name|my-project/);
+    await writeFile(join(f.directory,'.rsi/my-project/_ctx/DESIGN.md'),'CHANGING_DESIGN_SENTINEL');
+    const after=(await Promise.all(harnesses.map(h=>h.systemPrompt?.({...scope,runId:'next-run'})))).join('\n\n');
+    assert.equal(after,before);assert.equal('guidance' in team.memberWorkspace,false);
     runtime.end(lead.memberId,'Done');
   }finally{await team.closeMaintenance();await team.runner.close();}
 }));

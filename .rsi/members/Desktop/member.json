@@ -6,7 +6,6 @@
     "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
     "modelId": "gpt-6.1-sol",
     "toolOptionIds": [],
-    "promptOptionIds": [],
     "modelOptions": [
       {
         "connectionId": "connection-31d5e9a2-b7f2-43d7-992a-29c0a08d0eca",
@@ -14,9 +13,6 @@
       }
     ]
   },
-  "promptFiles": [
-    "prompts/member.md"
-  ],
   "designScope": {
     "working": [
       "desktop/metadata.json"

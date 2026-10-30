@@ -14,7 +14,6 @@ test('working source subtrees contain descendant design systems exactly once and
  await configureAssignment(f,'Backend',{designScope:{working:[parent,child],dependencies:[]}});
  const resolved=await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.find(member.memberId))!.value.designScope);
  assert.deepEqual(resolved.working.map(d=>d.path),['systems/backend/_ctx/DESIGN.md',child,grandchild]);
- const prompt=await f.team.memberWorkspace.guidance(member.memberId);assert.match(prompt,/# Auth/);assert.match(prompt,/# Cache/);assert.doesNotMatch(prompt,/# Sibling/);
 }));
 
 test('an explicit refresh sees new filesystem designs without Git acceptance or member reactivation',()=>withTeam(async f=>{

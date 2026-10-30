@@ -9,7 +9,7 @@ Own the Electron desktop host for the shared React + TypeScript application, fol
 - Own Electron main/preload code, desktop-specific development and packaging integration under `desktop/`.
 - Coordinate with Operations for desktop build/package lifecycle scripts when needed; do not take over general backend or web deployment operations.
 - Do not own React feature workflows, backend business logic, persistence, Agent execution, workspace filesystem operations, or Bash execution.
-- Keep implementation context current in `.rsi/rsi-agent/desktop/_ctx/internal/legacy/implementation-notes.md`, documenting actual interfaces with Input, Output, Effect, and Usage examples.
+Maintain useful internal development context within the owning design part when needed. Its structure is deferred; do not recreate retired archives. Verify behavior against current source and keep consumer contracts separate.
 
 ## Initial product boundary
 

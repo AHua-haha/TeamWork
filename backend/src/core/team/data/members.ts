@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { emptyRunSettings, keys, obj, validateRunSettings, type ConfigService, type ResolvedRunConfig, type RunSettings } from './config.js';
 import type { DesignService } from '../../workspace/design.js';
 import {emptyDesignScope, parseDesignScope, type DesignScope} from './assignment.js';
-import {restoredDesignScope, upgradeMemberManifestFile, upgradeMemberDirectory} from './member-config-migration.js';
+import {restoredDesignScope, upgradeMemberManifestFile, upgradeMemberDirectory, legacyCatalogIds} from './member-config-migration.js';
 import { AppError } from '../../agent/data/model.js';
-import { generatedSource, migrateMemberSource, relocateMemberSource, type MemberConfigSource } from './member-config.js';
+import { generatedSource, migrateMemberSource, relocateMemberSource, memberManifestVersion, type MemberConfigSource } from './member-config.js';
 import type { RunConfigSource } from './config.js';
 import type { WorkspaceService } from '../../workspace/workspace.js';
 import { defaultRunSettings } from '../../workspace/data/models.js';
@@ -95,14 +95,16 @@ export function memberName(value: unknown): string {
 export function memberFields(value: unknown): MemberFields {
   const data = obj(value, 'Member');
   keys(data, ['name', 'role', 'responsibility', 'designScope', 'settings']);
-  return { name: memberName(data.name), role: text(data.role, 'role', 80, true), responsibility: text(data.responsibility, 'responsibility', 4000, false, true), designScope: parseDesignScope(data.designScope), settings: validateRunSettings(data.settings, 'Settings') };
+  const settings=validateRunSettings(data.settings,'Settings');
+  if(settings.promptOptionIds.length)throw new AppError('invalid_input','Members use agent.md rather than catalog prompt selections');
+  return { name: memberName(data.name), role: text(data.role, 'role', 80, true), responsibility: text(data.responsibility, 'responsibility', 4000, false, true), designScope: parseDesignScope(data.designScope), settings };
 }
 
 function stored(member: StoredMember): StoredMember {
   const value = member.value as unknown;
   try {
     const data = obj(value, 'Member record');
-    const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, designScope: restoredDesignScope(data), settings: data.settings });
+    const fields = memberFields({ name: data.name, role: data.role, responsibility: data.responsibility, designScope: restoredDesignScope(data), settings: {...validateRunSettings(data.settings,'Stored settings'),promptOptionIds:[]} });
     if (typeof data.workspaceId !== 'string' || typeof data.lead !== 'boolean' || !Number.isSafeInteger(data.createdAt) || !(data.retiredAt === null || Number.isSafeInteger(data.retiredAt))) throw new Error('shape');
     return { ...member, value: { ...fields, configuration: data.configuration as MemberConfigSource | undefined, ...(data.modelSettings === undefined ? {} : { modelSettings: memberModelSettings(data.modelSettings) }), workspaceId: data.workspaceId, lead: data.lead, createdAt: data.createdAt as number, retiredAt: data.retiredAt as number | null } };
   } catch { throw new AppError('corrupt_data', `Stored member ${member.id} cannot be read`, 500); }
@@ -116,24 +118,33 @@ export class TeamService {
   constructor(
     private readonly store: TeamStore,
     private readonly workspaces: Pick<WorkspaceService, 'record' | 'list' | 'models' | 'defaultSettings' | 'initializeModels'>,
-    private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> },
+    private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]>; getCatalog?: ConfigService['getCatalog'] },
     private readonly designs: DesignService,
   ) {}
+
+  private async catalogInstructions(ids:readonly string[]):Promise<string>{
+    if(!ids.length)return '';
+    if(!this.config.getCatalog)throw new AppError('invalid_config','Cannot resolve legacy member catalog instructions');
+    const prompts=await Promise.all(ids.map(id=>this.config.getCatalog!(id)));
+    return prompts.map(option=>{if(option.value.kind!=='prompt')throw new AppError('invalid_config','Legacy member prompt selection is unavailable');return option.value.text;}).join('\n\n');
+  }
 
   /** Gives each workspace that has no lead one, so workspaces registered before teams existed get theirs. Safe to repeat. */
   async initialize(): Promise<void> {
     for (const workspace of await this.workspaces.list()) {
       const records = await this.store.listMembers(workspace.workspaceId);
-      const needsMigration = records.some(raw => Object.hasOwn(raw.value, 'harness') || Object.hasOwn(raw.value, 'scope') || (raw.value.configuration?.formatVersion ?? 0) < 5);
-      if (needsMigration) await upgradeMemberDirectory(workspace.directory);
+      const needsMigration = records.some(raw => Object.hasOwn(raw.value, 'harness') || Object.hasOwn(raw.value, 'scope') || (raw.value.configuration?.formatVersion ?? 0) < memberManifestVersion);
+      if (needsMigration) await upgradeMemberDirectory(workspace.directory,ids=>this.catalogInstructions(ids));
       for (const raw of records) {
         const data = raw.value as unknown as Record<string, unknown>, member = stored(raw).value;
-        let converted = member.configuration ? migrateMemberSource(member.configuration) : generatedSource(member);
+        const selected=await this.catalogInstructions(legacyCatalogIds(raw.value.settings.promptOptionIds));
+        let converted = member.configuration ? migrateMemberSource(member.configuration,selected) : generatedSource({...member,settings:{...member.settings,prompt:[selected,member.settings.prompt].filter(Boolean).join('\n\n')}});
+        if(converted)member.settings=validateRunSettings({...member.settings,prompt:converted.files['agent.md']!,promptOptionIds:[]},'Migrated member settings');
         if (member.retiredAt === null) {
           const root = (await this.workspaces.record(workspace.workspaceId)).directory;
           const relocated = await relocateMemberSource(root, converted ?? member.configuration!, memberName(member.name));
           converted = relocated ?? converted;
-          if (converted || Object.hasOwn(data, 'harness')) await upgradeMemberManifestFile(root, (converted ?? member.configuration!).path);
+          if (converted || Object.hasOwn(data, 'harness')) await upgradeMemberManifestFile(root, (converted ?? member.configuration!).path,ids=>this.catalogInstructions(ids));
         }
         if (Object.hasOwn(data, 'harness') || Object.hasOwn(data, 'scope') || !Object.hasOwn(data, 'designScope') || converted) {
           await this.store.updateMember(raw.id, raw.revision, member.retiredAt === null ? member.name.toLowerCase() : null, {...member, configuration: converted ?? member.configuration});

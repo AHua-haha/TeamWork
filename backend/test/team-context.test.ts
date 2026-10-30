@@ -4,18 +4,22 @@ import type {RuntimePolicy,StepScope} from '../src/core/agent/contracts.js';
 import {withTeam,worker} from './team-fixture.js';
 const scope=(agentId:string)=>({agentId,runId:'r',step:1,signal:new AbortController().signal,config:{systemPrompt:'standing words'}} as StepScope);
 const base:RuntimePolicy={buildRequest:()=>({model:{} as never,tools:[],context:{messages:[],systemPrompt:'base'}})};
-test('Team supplies identity/routing; React Harnesses own tools, instructions and accepted assignment guidance',()=>withTeam(async f=>{
+test('Team supplies fixed cooperation rules; File owns context-maintenance rules without changing information',()=>withTeam(async f=>{
  const member=await worker(f,'Backend',['backend'],'backend developer');await worker(f,'Frontend',['frontend']);
  const policy=f.team.policy(base),request=await policy.buildRequest(scope(member.memberId),{revision:0,entries:[]});
- assert.match(request.context.systemPrompt!,/You are Backend, backend developer/);assert.match(request.context.systemPrompt!,/standing words/);assert.match(request.context.systemPrompt!,/<mentions>/);
+ assert.doesNotMatch(request.context.systemPrompt!,/You are Backend|Your responsibility:|## Team\n|backend developer|Design for Backend/);assert.match(request.context.systemPrompt!,/standing words/);assert.match(request.context.systemPrompt!,/<mentions>/);
  const factories=await policy.createReactHarnessFactories!(member.memberId);assert.deepEqual(factories.map(f=>f.harnessId),['file-content','default']);
  const harnesses=factories.map(f=>f.create({revision:0,data:{}},async()=>({revision:1,data:{}})));
  const names=harnesses.flatMap(h=>h.tools?.(scope(member.memberId))??[]).map(t=>t.definition.name).sort();
  assert.deepEqual(names,['bash','edit','find','grep','list_models','ls','read','validate_member_config','web_fetch','web_search','write']);
  const prompts=(await Promise.all(harnesses.map(h=>h.systemPrompt?.(scope(member.memberId))))).join('\n');
- assert.match(prompts,/Design for Backend/);assert.doesNotMatch(prompts,/Design for Frontend/);assert.match(prompts,/guidance, not access restrictions/);assert.match(prompts,/without design-scope/);
+ assert.doesNotMatch(prompts,/Design for Backend|Design for Frontend|## Working designs|## Dependency consumer context/);assert.match(prompts,/Project context organization/);assert.match(prompts,/without design-scope/);
  assert.equal('harness' in await f.team.member(f.workspaceId,member.memberId),false);
  const lead=await policy.buildRequest(scope(f.lead.memberId),{revision:0,entries:[]});
- assert.match(lead.context.systemPrompt!,/offer concrete choices/);assert.match(lead.context.systemPrompt!,/Assign work in your final group response/);
+ assert.match(lead.context.systemPrompt!,/explain concrete options/);assert.match(lead.context.systemPrompt!,/objective and expected result/);assert.equal(lead.context.systemPrompt,request.context.systemPrompt);
+ const filePrompt=await harnesses[0]!.systemPrompt!(scope(member.memberId));
+ const defaultPrompt=await harnesses[1]!.systemPrompt!(scope(member.memberId));
+ assert.match(filePrompt,/Project context organization/);assert.doesNotMatch(defaultPrompt,/Project context organization|Member configuration lives/);
+ assert.doesNotMatch(filePrompt,/Existing member file locations/);
  const plain=await policy.createReactHarnessFactories!('plain-agent');assert.deepEqual(plain,[]);
 }));

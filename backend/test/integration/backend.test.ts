@@ -1143,8 +1143,8 @@ test('React Harnesses execute shared project tools and native commits while memb
     answer(secondStep.events, call('bash', { command: 'git add -f .rsi/project && git commit -m "Design refinement"' }));
     const thirdStep = await requests.next();
     assert.match(JSON.stringify(thirdStep.request.context.messages), /Design refinement/);
-    const manifest = { name: 'Pending new member', role: 'developer', responsibility: 'Future member', settings: {}, promptFiles: ['prompts/member.md'], designScope: { working: ['metadata.json'], dependencies: [] } };
-    answer(thirdStep.events, call('write', { path: '.rsi/members/pending/prompts/member.md', content: 'Pending prompt.' }));
+    const manifest = { name: 'Pending new member', role: 'developer', responsibility: 'Future member', settings: {}, designScope: { working: ['metadata.json'], dependencies: [] } };
+    answer(thirdStep.events, call('write', { path: '.rsi/members/pending/agent.md', content: 'Pending prompt.' }));
     const manifestStep = await requests.next();
     answer(manifestStep.events, call('write', { path: '.rsi/members/pending/member.json', content: JSON.stringify(manifest) }));
     const fourthStep = await requests.next();
@@ -1152,18 +1152,18 @@ test('React Harnesses execute shared project tools and native commits while memb
     assert.ok(!fourthStep.request.tools.some(t => t.definition.name === 'submit_member_config'));
     answer(fourthStep.events, message('<mentions>["Backend"]</mentions>\n\nImplement the accepted design.'));
     const workerStep = await requests.next();
-    assert.match(workerStep.request.context.systemPrompt!, /You are Backend/);
+    assert.doesNotMatch(workerStep.request.context.systemPrompt!, /You are Backend|Your responsibility:|Design for Backend|## Working designs/);
     assert.match(workerStep.request.context.systemPrompt!, /Keep the result concise/);
     const activeWorker = (await team.service.byName(workspaceId, 'Backend'))!;
     await assert.rejects(store.team.updateMember(activeWorker.id, activeWorker.revision, 'backend', activeWorker.value, true), code('member_busy'));
     const storedBundle = (await store.team.getMember(activeWorker.id))!.value.configuration!;
-    assert.equal(storedBundle.files['prompts/member.md'], 'Keep the result concise.');
+    assert.equal(storedBundle.files['agent.md'], 'Keep the result concise.');
     assert.deepEqual(JSON.parse(storedBundle.files['member.json']!).designScope, { working: ['metadata.json'], dependencies: [] });
     const leadFiles = await team.memberWorkspace.files(lead.memberId);
-    await writeFile(join(leadFiles.root, '.rsi/members/pending/prompts/member.md'), 'UNSUBMITTED prompt');
+    await writeFile(join(leadFiles.root, '.rsi/members/pending/agent.md'), 'UNSUBMITTED prompt');
     assert.equal((await team.configuration.activeSource(workspaceId, activeWorker.id)).digest, storedBundle.digest);
     assert.ok(!workerStep.request.tools.some(tool => ['read_design', 'save_design', 'assign_member', 'create_member'].includes(tool.definition.name)));
-    assert.match(workerStep.request.context.systemPrompt!, /Pending design refinement/);
+    assert.doesNotMatch(workerStep.request.context.systemPrompt!, /Pending design refinement/);
 
     answer(workerStep.events, call('write', { path: 'src/result.txt', content: 'Done' }));
     const workerCommit = await requests.next();
@@ -1438,7 +1438,7 @@ test('group chat SQL/runtime: sequential execution, private feedback and continu
   try {
     const start = await f.team.runner.postUser(f.workspaceId, '@Backend @Frontend build');
     const backendStep = await f.requests.next();
-    assert.match(backendStep.request.context.systemPrompt!, /You are Backend,/);
+    assert.doesNotMatch(backendStep.request.context.systemPrompt!, /You are Backend,/);
     const backendRun = start.runs.find(run => run.agentId === f.backend.memberId)!;
     const frontendRun = start.runs.find(run => run.agentId === f.frontend.memberId)!;
     assert.equal((await f.runtime.getState(f.backend.memberId)).run?.status, 'running');
@@ -1448,7 +1448,7 @@ test('group chat SQL/runtime: sequential execution, private feedback and continu
     assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 1, 'only admitted shared input is incorporated during work');
     answer(backendStep.events, message('<mentions>["Lead"]</mentions>\n\nPRIVATE CANDIDATE: please review'));
     const revision = await f.requests.next();
-    assert.match(revision.request.context.systemPrompt!, /You are Backend,/);
+    assert.doesNotMatch(revision.request.context.systemPrompt!, /You are Backend,/);
     assert.ok(revision.request.context.messages.some(item => item.role === 'user' && typeof item.content === 'string' && item.content.includes('Group publication refused (member_busy)')));
     assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 2);
     assert.equal((await store.agents.getContext(f.frontend.memberId)).entries.length, 0, 'waiting runs have not constructed context');
@@ -1460,13 +1460,13 @@ test('group chat SQL/runtime: sequential execution, private feedback and continu
     assert.equal(JSON.stringify(entries).split('Backend finished without mentions.').length - 1, 1, 'sender sees its accepted final once');
     assert.deepEqual((await store.agents.runMessages(f.backend.memberId, backendRun.runId)).map(record => record.metadata.source ?? record.message.role), ['assistant', 'publication-feedback', 'assistant']);
     const frontendStep = await f.requests.next();
-    assert.match(frontendStep.request.context.systemPrompt!, /You are Frontend,/);
+    assert.doesNotMatch(frontendStep.request.context.systemPrompt!, /You are Frontend,/);
     assert.match(JSON.stringify(frontendStep.request.context.messages), /Backend finished without mentions/);
     assert.match(JSON.stringify(frontendStep.request.context.messages), /@Lead discuss/, 'queued member chooses current shared input itself');
     answer(frontendStep.events, message('Frontend finished.'));
     await f.runtime.finished(f.frontend.memberId, frontendRun.runId);
     const leadStep = await f.requests.next();
-    assert.match(leadStep.request.context.systemPrompt!, /You are Lead,/);
+    assert.doesNotMatch(leadStep.request.context.systemPrompt!, /You are Lead,/);
     answer(leadStep.events, message('Lead finished.'));
     await f.runtime.finished(f.lead.memberId, user.runs[0]!.runId);
     const transcript = await f.team.runner.snapshot(f.workspaceId);
@@ -1529,7 +1529,7 @@ test('group SQL publication is atomic; restart preserves shared history without 
     assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
     assert.equal((await f.team.runner.snapshot(f.workspaceId)).position, 1);
     const step = await f.requests.next();
-    assert.match(step.request.context.systemPrompt!, /You are Backend,/);
+    assert.doesNotMatch(step.request.context.systemPrompt!, /You are Backend,/);
     await f.team.runner.stop(f.workspaceId);
     const activity = (await f.team.runner.snapshot(f.workspaceId)).runs[0]!;
     await f.runtime.finished(f.backend.memberId, activity.run.runId);
@@ -1732,14 +1732,14 @@ test('member file activation atomically replaces/updates the team using current 
     await rm(pathJoin(files.root, backendSource.path));
     await files.write.writeFile(pathJoin(files.root, frontendSource.path), JSON.stringify({ ...JSON.parse(frontendSource.files['member.json']!), responsibility: 'Updated atomically' }));
     await files.write.mkdir(pathJoin(files.root, '.rsi/members/Replacement/prompts'));
-    const manifest = { name:'Replacement',role:'developer',responsibility:'Replacement',settings:{},promptFiles:['prompts/member.md'],designScope:{working:['metadata.json'],dependencies:[]} };
+    const manifest = { name:'Replacement',role:'developer',responsibility:'Replacement',settings:{},designScope:{working:['metadata.json'],dependencies:[]} };
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/member.json'), JSON.stringify(manifest));
-    await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/prompts/member.md'), 'Accepted prompt');
+    await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/agent.md'), 'Accepted prompt');
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
     await acceptFiles(f);
     const review = await f.team.configuration.validate(f.lead.memberId,'.rsi/members');
     assert.deepEqual(review.changes.map(c => c.type).sort(), ['create','delete','update']);
-    await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/prompts/member.md'), 'Pending after commit');
+    await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/agent.md'), 'Pending after commit');
     await f.team.activateConfiguration(f.workspaceId);
     const replacement = (await f.team.service.byName(f.workspaceId, 'Replacement'))!;
     const marker = await store.team.getMemberActivation(f.workspaceId);
@@ -3102,11 +3102,11 @@ test('group envelope migration preserves stable records and identities, refreshe
     await rename(join(root,dirname(source.path)),join(root,dirname(legacy)));
     await store.team.updateMember(stored.id,stored.revision,stored.value.name.toLowerCase(),{...stored.value,configuration:{...source,path:legacy}});
     await initGit({...f,directory:root});await gitText(root,['add','-f','-A','--','.rsi/members']);await gitText(root,['commit','-m','Legacy paths']);
-    await writeFile(join(root,dirname(legacy),'prompts/member.md'),'Unaccepted prompt');
+    await writeFile(join(root,dirname(legacy),'agent.md'),'Unaccepted prompt');
     await f.team.initialize();
     const member=(await store.team.getMember(stored.id))!;
     assert.equal(member.value.configuration!.path,source.path);assert.equal('legacyPaths' in member.value.configuration!,false);
-    assert.equal(await readFile(join(root,dirname(source.path),'prompts/member.md'),'utf8'),'Unaccepted prompt');
+    assert.equal(await readFile(join(root,dirname(source.path),'agent.md'),'utf8'),'Unaccepted prompt');
     assert.equal((await f.team.configuration.validate(f.lead.memberId,'.rsi/members')).changes.length,1,'current prompt files are validated independently of old commits');
     const reopened=new CoreData(new MySqlStorage(databaseUrl!));
     try{assert.deepEqual((await reopened.team.inspectGroupContext(f.workspaceId)).entries,original);assert.deepEqual(await reopened.agents.getContext(f.backend.memberId),refreshed);assert.deepEqual(await reopened.team.getMember(stored.id),member);}
@@ -3274,7 +3274,7 @@ test('member design-scope migration persists canonical rows and snapshots withou
   await f.team.service.initialize();
   const migrated=(await store.team.getMember(current.id))!;
   assert.equal('harness' in migrated.value,false);assert.deepEqual(migrated.value.designScope,designScope);assert.deepEqual(migrated.value.settings,current.value.settings);
-  assert.equal(migrated.value.configuration!.formatVersion,5);assert.equal('previous' in migrated.value.configuration!,false);
+  assert.equal(migrated.value.configuration!.formatVersion,6);assert.equal('previous' in migrated.value.configuration!,false);
   assert.equal('execute' in JSON.parse(await readFile(join(root,source.path),'utf8')),false);
   assert.deepEqual(await store.agents.getContext(current.id),context);assert.deepEqual(await store.agents.runMessages(current.id,accepted.runs[0]!.runId),history);assert.deepEqual(await store.team.chatSnapshot(f.workspaceId),chat);
   assert.equal(await gitText(root,['rev-parse','HEAD']),head);
@@ -3315,7 +3315,7 @@ test('current-file activation persists the active snapshot without Git and later
   const source=await f.team.configuration.activeSource(f.workspaceId,f.backend.memberId);
   const manifest=JSON.parse(source.files['member.json']!);
   await writeFile(join(root,source.path),JSON.stringify({...manifest,responsibility:'Current files, no commit'}));
-  const prompt=join(root,source.path.replace('member.json','prompts/member.md'));
+  const prompt=join(root,source.path.replace('member.json','agent.md'));
   await writeFile(prompt,'Current file prompt');
   const result=await f.team.activateConfiguration(f.workspaceId);assert.match(result.revision,/^[0-9a-f-]{36}$/);
   const active=(await store.team.getMember(f.backend.memberId))!;
@@ -3328,5 +3328,36 @@ test('current-file activation persists the active snapshot without Git and later
   await assert.rejects(f.team.activateConfiguration(f.workspaceId),code('invalid_config'));
   assert.deepEqual(await store.team.getMember(f.backend.memberId),active);
   await assert.rejects(stat(join(root,'.git')),code('ENOENT'));
+ }finally{await f.close();}
+});
+
+test('member instruction migration durably separates active and draft agent.md and removes live catalog selection',async()=>{
+ const f=await groupFixture();
+ try{
+  const member=(await store.team.getMember(f.backend.memberId))!,source=member.value.configuration!;
+  const manifest=JSON.parse(source.files['member.json']!);
+  const config=new ConfigService(store.config,builtinModels()),catalogId=`prompt-${randomUUID()}`;
+  const option=await config.createCatalog(catalogId,{kind:'prompt',label:'Shared instruction',text:'Original shared rule'});
+  const raw=JSON.stringify({...manifest,settings:{...manifest.settings,promptOptionIds:[catalogId]},promptFiles:['prompts/first.md','prompts/second.md']});
+  const {sourceBundle}=await import('../../src/core/team/data/member-config.js');
+  const files={'member.json':raw,'prompts/first.md':'Active first','prompts/second.md':'Active second'};
+  await store.team.updateMember(member.id,member.revision,member.value.name.toLowerCase(),{...member.value,settings:{...member.value.settings,prompt:'Active first\n\nActive second',promptOptionIds:[catalogId]},configuration:{...sourceBundle(source.path,files,'user'),formatVersion:5}});
+  const root=await f.team.memberWorkspace.root(f.lead.memberId),directory=join(root,source.path.slice(0,-'/member.json'.length));
+  await rm(join(directory,'agent.md'));await mkdir(join(directory,'prompts'),{recursive:true});
+  await writeFile(join(directory,'member.json'),raw);await writeFile(join(directory,'prompts/first.md'),'Draft first');await writeFile(join(directory,'prompts/second.md'),'Draft second');
+  const history=await store.agents.getContext(member.id),chat=await store.team.chatSnapshot(f.workspaceId);
+  await f.team.initialize();
+  const active=(await store.team.getMember(member.id))!;
+  assert.equal(active.value.settings.prompt,'Original shared rule\n\nActive first\n\nActive second');
+  assert.deepEqual(active.value.settings.promptOptionIds,[]);assert.deepEqual(Object.keys(active.value.configuration!.files).sort(),['agent.md','member.json']);
+  assert.equal(await readFile(join(directory,'agent.md'),'utf8'),'Original shared rule\n\nDraft first\n\nDraft second');
+  const reopened=new CoreData(new MySqlStorage(databaseUrl!));
+  try{assert.deepEqual(await reopened.team.getMember(member.id),active);}finally{await reopened.close();}
+  await config.updateCatalog(catalogId,option.revision,{kind:'prompt',label:'Shared instruction',text:'Later catalog rule'});
+  assert.equal((await f.team.runConfig.resolveForRun(member.id)).systemPrompt,active.value.settings.prompt);
+  await f.team.initialize();assert.deepEqual(await store.team.getMember(member.id),active);
+  await f.team.activateConfiguration(f.workspaceId);
+  assert.equal((await store.team.getMember(member.id))!.value.settings.prompt,'Original shared rule\n\nDraft first\n\nDraft second');
+  assert.deepEqual(await store.agents.getContext(member.id),history);assert.deepEqual(await store.team.chatSnapshot(f.workspaceId),chat);
  }finally{await f.close();}
 });

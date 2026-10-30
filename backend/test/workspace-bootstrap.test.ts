@@ -15,7 +15,7 @@ test('fresh workspace has exact active lead files and application activation ide
  assert.deepEqual((await readdir(join(f.directory,'.rsi'))).sort(),['members','project']);
  const marker=await f.team.service.activation(f.workspaceId);assert.match(marker!.revision,/^[0-9a-f-]{36}$/);assert.equal('acceptedRevision' in source,false);assert.equal(f.runtime.runs.length,0);
  assert.equal('getMemberBaseline' in f.store,false);
- await writeFile(join(f.directory,'.rsi/members/Lead/prompts/member.md'),'Not activated');
+ await writeFile(join(f.directory,'.rsi/members/Lead/agent.md'),'Not activated');
  const restarted=new TeamSystem(f.store,f.workspaces,stubConfig);restarted.attach(f.runtime);
  try{await restarted.initialize();assert.equal((await restarted.configuration.activeSource(f.workspaceId,lead.memberId)).digest,source.digest);assert.deepEqual(await restarted.service.activation(f.workspaceId),marker);}finally{await restarted.runner.close();}
 }));
