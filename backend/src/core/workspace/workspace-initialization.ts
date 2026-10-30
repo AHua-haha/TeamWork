@@ -1,9 +1,8 @@
-import { lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, readdir, rename, rm, rmdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { AppError } from '../errors.js';
-import { decodeText, maxFileBytes, missing, sha256 } from '../text.js';
-import { scanContextFiles } from './data/context-scan.js';
-import { contextRoot, managedRoot } from './workspace-layout.js';
+import { missing, sha256 } from '../text.js';
+import { managedRoot } from './workspace-layout.js';
 import { workspaceContext } from './project-context.js';
 
 export interface WorkspaceInitialization {
@@ -117,17 +116,6 @@ export class PreparedWorkspaceFiles {
     this.files.push(file);
     try { await handle.writeFile(content); }
     finally { await handle.close(); }
-  }
-
-  async contextFiles(contextDirectory = contextRoot): Promise<{path: string; content: string; mtimeMs: number}[]> {
-    const {files} = await scanContextFiles(join(this.directory, contextDirectory));
-    const result: {path: string; content: string; mtimeMs: number}[] = [];
-    for (const file of files) {
-      const bytes = await readFile(join(this.directory, contextDirectory, file.path));
-      const content = decodeText(bytes);
-      if (content !== null && bytes.length <= maxFileBytes) result.push({path: file.path, content, mtimeMs: file.mtimeMs});
-    }
-    return result;
   }
 
   async finish(): Promise<void> {

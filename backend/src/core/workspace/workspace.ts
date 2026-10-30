@@ -1,58 +1,35 @@
-import { legacyBaseline, type GitBaseline } from './workspace-git.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
-import { ContextBase, type ContextOverview, type ContextStore, type WorkspaceRecord } from './data/context-base.js';
+import type {WorkspaceStore,WorkspaceRecord,MemberBaseline} from './data/model.js';
 import { ProjectFiles } from './project-files.js';
 import { inspectManagedState, type WorkspaceInitialization } from './workspace-initialization.js';
 import { prepareWorkspace } from '../workspace-bootstrap.js';
-import { workspaceContext } from './project-context.js';
 import { ContextBaseManager } from './context-base/index.js';
 import { missing, sha256 } from '../text.js';
 import { AppError, identity } from '../agent/data/model.js';
 import type { RunSettings } from '../team/data/config.js';
 import { defaultRunSettings, emptyWorkspaceModels, modelRunSettings, workspaceModels, type WorkspaceModelsView } from './data/models.js';
 
-export interface Workspace extends WorkspaceRecord { context: ContextOverview }
+export type Workspace = WorkspaceRecord;
 export interface WorkspaceInput { workspaceId?: unknown; name: unknown; directory: unknown; adopt: unknown; models: unknown; cleanupRevision?: unknown }
 
 const controlCharacter = /[\u0000-\u001f\u007f-\u009f]/;
 const folderKey = (directory: string) => directory.toLowerCase();
 const within = (folder: string, path: string) => path === folder || path.startsWith(folder.endsWith(sep) ? folder : folder + sep);
 
-/** Registers workspaces and opens each one's context base on first use. */
+/** Registers workspaces and provides explicitly refreshed filesystem context metadata. */
 export class WorkspaceService {
-  private readonly bases = new Map<string, Promise<ContextBase>>();
   private readonly contextManagers = new Map<string, ContextBaseManager>();
   private readonly records = new Map<string, WorkspaceRecord>();
   private creating: Promise<unknown> = Promise.resolve();
   private closed = false;
 
-  constructor(private readonly store: ContextStore, private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> }) {}
+  constructor(private readonly store: WorkspaceStore, private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> }) {}
 
-  async gitBaseline(workspaceId: string): Promise<GitBaseline> {
-    const previous = await this.store.getGitBaseline(workspaceId);
-    if(previous)return previous;
-    const record=await this.record(workspaceId), legacy=await legacyBaseline(record.directory);
-    const layout = await workspaceContext(record.directory);
-    // Import accepted bytes once, never materialize them over pending files.
-    const design=legacy?.design ?? {};
-    if(!legacy){
-      const state=await this.store.loadContext(workspaceId);
-      for(const file of state.files)if(layout.kind === 'project' || file.path.startsWith('design/')){
-        let before:number|null=null;
-        do {const versions=await this.store.history(workspaceId,file.fileId,before,100);const user=versions.find(v=>v.author.type==='user');
-          if(user){if(user.hash){const content=await this.store.blob(workspaceId,user.hash);if(content!==null)design[`${layout.root}/${user.path}`]=content;}break;}
-          before=versions.length===100?versions.at(-1)!.seq:null;
-        }while(before!==null);
-      }
-    }
-    const members=legacy?.members ?? {};
-    if(!Object.keys(members).length){
-      // Existing active bundles are a bootstrap fallback, not a live mirror.
-      Object.assign(members,await this.store.initialMemberFiles?.(workspaceId)??{});
-    }
-    return this.store.initializeGitBaseline(workspaceId,{time:legacy?.time??record.createdAt,design,members});
+  async memberBaseline(workspaceId: string): Promise<MemberBaseline> {
+    await this.record(workspaceId);
+    return await this.store.getMemberBaseline(workspaceId) ?? this.store.initializeMemberBaseline(workspaceId,{members:await this.store.initialMemberFiles?.(workspaceId)??{}});
   }
 
   async models(workspaceId: string): Promise<WorkspaceModelsView> {
@@ -95,23 +72,7 @@ export class WorkspaceService {
     return this.store.listWorkspaces();
   }
 
-  async get(workspaceId: string): Promise<Workspace> {
-    const record = await this.record(workspaceId);
-    return { ...record, context: await (await this.context(workspaceId)).overview() };
-  }
-
-  async context(workspaceId: string): Promise<ContextBase> {
-    this.assertOpen();
-    let opening = this.bases.get(workspaceId);
-    if (!opening) {
-      const started = this.record(workspaceId).then(record => ContextBase.open(this.store, record));
-      // A failed open is retried by the next request, for example after the folder returns.
-      started.catch(() => { if (this.bases.get(workspaceId) === started) this.bases.delete(workspaceId); });
-      this.bases.set(workspaceId, started);
-      opening = started;
-    }
-    return opening;
-  }
+  get(workspaceId: string): Promise<Workspace> {return this.record(workspaceId);}
 
   /** Filesystem-owned metadata index; callers explicitly refresh it. No file-history/SQL initialization. */
   async contextManager(workspaceId: string): Promise<ContextBaseManager> {
@@ -181,15 +142,13 @@ export class WorkspaceService {
     this.creating = created.catch(() => undefined);
     return created.then(async () => {
       const record = await this.record(workspaceId);
-      return { ...record, context: await (await this.context(workspaceId)).overview() };
+      return record;
     });
   }
 
   async close(): Promise<void> {
     this.closed = true;
     await this.creating;
-    await Promise.allSettled([...this.bases.values()].map(async opening => (await opening).close()));
-    this.bases.clear();
     await Promise.all([...this.contextManagers.values()].map(manager=>manager.close()));
     this.contextManagers.clear();
   }

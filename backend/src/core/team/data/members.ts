@@ -116,7 +116,7 @@ const nameKey = (name: string) => name.toLowerCase();
 export class TeamService {
   constructor(
     private readonly store: TeamStore,
-    private readonly workspaces: Pick<WorkspaceService, 'record' | 'list' | 'models' | 'defaultSettings' | 'initializeModels' | 'gitBaseline'>,
+    private readonly workspaces: Pick<WorkspaceService, 'record' | 'list' | 'models' | 'defaultSettings' | 'initializeModels' | 'memberBaseline'>,
     private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> },
     private readonly designs: DesignService,
   ) {}
@@ -128,7 +128,7 @@ export class TeamService {
       const needsMigration = records.some(raw => Object.hasOwn(raw.value, 'harness') || Object.hasOwn(raw.value, 'scope') || (raw.value.configuration?.formatVersion ?? 0) < 5);
       let legacyManifestHashes: string[] = [];
       if (needsMigration) {
-        const baseline = await this.workspaces.gitBaseline(workspace.workspaceId);
+        const baseline = await this.workspaces.memberBaseline(workspace.workspaceId);
         const committed = await committedFiles(workspace.directory, '.rsi/members', baseline.members);
         await upgradeMemberDirectory(workspace.directory);
         legacyManifestHashes = Object.entries(committed.files).filter(([path, text]) => path.endsWith('/member.json') && upgradeMemberManifest(text) !== text).map(([, text]) => sha256(text));

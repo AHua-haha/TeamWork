@@ -14,7 +14,6 @@ import type { ConfigService } from './data/config.js';
 import { currentMemberPaths } from './data/member-config.js';
 import { MemberConfigService } from './member-config.js';
 import { DesignService } from '../workspace/design.js';
-import {workspaceContext} from '../workspace/project-context.js';
 import { MemberWorkspace } from './member-workspace.js';
 import { MemberInstructions } from './member-instructions.js';
 import { teamTools } from './member-tools.js';
@@ -252,10 +251,9 @@ export class TeamSystem {
         const member = await this.service.find(agentId);
         if (!member) return factories;
         const workspace = await this.workspaces.record(member.workspaceId);
-        const project = (await workspaceContext(workspace.directory)).kind === 'project';
         let guidance: {runId:string;promise:Promise<string>} | undefined;
         return [...factories, fileReactHarnessFactory(workspace.directory), defaultReactHarnessFactory(workspace.directory, [...this.web, ...management], scope => {
-          if (!project || !scope) return this.memberWorkspace.guidance(agentId);
+          if (!scope) return this.memberWorkspace.guidance(agentId);
           if (guidance?.runId !== scope.runId) guidance = {runId:scope.runId,promise:this.memberWorkspace.guidance(agentId)};
           return guidance.promise;
         })];

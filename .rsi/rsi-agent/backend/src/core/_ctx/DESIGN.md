@@ -16,7 +16,7 @@ Team admits/schedules a member and provides a group-context read reference. Agen
 
 Shared group inputs and private execution messages extend the Agent context chronologically. Every incorporated group message retains sender-visible content and source identity. Incoming shared messages are incorporated at safe boundaries after current work finishes, not between an in-flight tool call and its result. Agent persists its consumption state and context together through its own acknowledged data-model operations. It reuses a resident context model across runs, appends new durable message rows during normal work and replaces active rows for compaction or explicit replacement/reset.
 
-Team owns its resident shared context as Pi messages plus metadata, persists one new context row per accepted publication and includes authoritative sender attribution in content. Existing shared frontend history/final references remain separate. Team continues to own mention routing, scheduling, publication, response reservations and shared stable history/presentation. Agent context changes do not rewrite shared or private stable message history. Workspace documents remain independently maintained project information. React Harnesses own purpose-specific reaction and operation rules; Agent runtime coordinates their execution and acknowledged state. The initial development policy has no tool-permission gating, while external effects and failures retain explicit lifecycle semantics.
+Team owns its resident shared context as Pi messages plus metadata, persists one new context row per accepted publication and includes authoritative sender attribution in content. Existing shared frontend history/final references remain separate. Team continues to own mention routing, scheduling, publication, response reservations and shared stable history/presentation. Agent context changes do not rewrite shared or private stable message history. Workspace documents remain independently maintained project information. Their current state is filesystem-authoritative; no SQL file history or context watcher remains. React Harnesses own purpose-specific reaction and operation rules; Agent runtime coordinates their execution and acknowledged state. The initial development policy has no tool-permission gating, while external effects and failures retain explicit lifecycle semantics.
 
 ### Cross-system atomicity
 
@@ -24,7 +24,7 @@ Core composes owner data-model operations on one technical transaction. Workspac
 
 ### Workspace initialization coordination
 
-Workspace inspects and prepares filesystem state while preserving existing context. Core creates a fresh root-design Team lead and registers its initial configuration, activation, context history and accepted baseline atomically through owner operations. Nonempty metadata cleanup requires explicit revision-bound user confirmation. Registration failure rolls back prepared filesystem additions and restores staged metadata; original context and project source are preserved.
+Workspace inspects and prepares filesystem state while preserving existing context. Core creates a fresh root-design Team lead and registers its initial configuration, activation and member-only acceptance baseline atomically through owner operations. Nonempty metadata cleanup requires explicit revision-bound user confirmation. Registration failure rolls back prepared filesystem additions and restores staged metadata; original context and project source are preserved.
 
 ### Read-only context inspection coordination
 

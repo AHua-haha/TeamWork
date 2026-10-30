@@ -20,7 +20,7 @@ export function projectNode(path: string): string {
 
 export interface ProjectContext {
   root: string;
-  kind: 'project' | 'legacy';
+  kind: 'project';
   rootDesign: string;
 }
 
@@ -53,33 +53,14 @@ export async function workspaceContext(directoryPath: string): Promise<ProjectCo
     if (await directory(join(directoryPath, '.rsi/context'))) throw new AppError('invalid_path', 'Both legacy and project context roots exist; finish the context migration before opening');
     return {root: roots[0]!, kind: 'project', rootDesign: projectRootDesign};
   }
-  if (await directory(join(directoryPath, '.rsi/context'))) return {root: '.rsi/context', kind: 'legacy', rootDesign: 'metadata.json'};
+  if (await directory(join(directoryPath, '.rsi/context'))) throw new AppError('unsupported_context_layout', 'The old .rsi/context layout is no longer supported; existing files were not changed', 409);
   if (['members', 'context', '_ctx'].includes(name.toLowerCase())) throw new AppError('invalid_path', 'Project directory name conflicts with a reserved RSI context name');
   return {root: preferred, kind: 'project', rootDesign: projectRootDesign};
 }
 
-/** Re-key accepted old bytes, never replace them with uncommitted current documents. */
-export async function migratedBaseline(directoryPath: string, layout: ProjectContext, files: Record<string, string>): Promise<Record<string, string>> {
-  if (layout.kind !== 'project' || !Object.keys(files).some(path => path.startsWith('.rsi/context/'))) return files;
-  let data: {files?: unknown};
-  try { data = JSON.parse(await readFile(join(directoryPath, layout.root, '_ctx/internal/context-migration.json'), 'utf8')); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return files; throw new AppError('invalid_design', 'Cannot read context migration mapping'); }
-  if (!data || typeof data !== 'object' || !data.files || typeof data.files !== 'object' || Array.isArray(data.files)) throw new AppError('invalid_design', 'Invalid context migration file mapping');
-  const mapping = data.files as Record<string, unknown>, result: Record<string, string> = {};
-  for (const [path, content] of Object.entries(files)) {
-    const target = mapping[path];
-    if (target === undefined) { result[path] = content; continue; }
-    if (typeof target !== 'string' || !target.startsWith(layout.root+'/')) throw new AppError('invalid_design', 'Migrated file must remain inside its project context root');
-    contextPath(target.slice(layout.root.length+1));
-    if (Object.hasOwn(result, target)) throw new AppError('invalid_design', 'Migrated context paths collide');
-    result[target] = content;
-  }
-  return result;
-}
-
 /** Explicit migration aliases preserve active member references without modifying SQL/config history. */
 export async function migratedReference(directoryPath: string, layout: ProjectContext, reference: string): Promise<string> {
-  if (layout.kind !== 'project' || projectDesignReference(reference)) return reference;
+  if (projectDesignReference(reference)) return reference;
   const file = join(directoryPath, layout.root, '_ctx/internal/context-migration.json');
   let data: unknown;
   try { data = JSON.parse(await readFile(file, 'utf8')); }

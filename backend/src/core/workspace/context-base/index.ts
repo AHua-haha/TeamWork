@@ -55,7 +55,6 @@ export class ContextBaseManager {
     const layout = await workspaceContext(this.directory), diagnostics: ContextDiagnostic[] = [];
     const {tree,nodes} = await this.files.tree(this.limits.maxProjectEntries,diagnostics);
     const systems: Record<string,DesignSystemMetadata> = Object.create(null);
-    if (layout.kind === 'project') {
       const pending = [layout.root]; let examined = 0;
       while (pending.length) {
         const directory = pending.pop()!;
@@ -97,7 +96,6 @@ export class ContextBaseManager {
           systems[projectPath] = system; node.designSystemPath = projectPath;
         }
       }
-    } else diagnostics.push({path:layout.root,code:'legacy_context',message:'Legacy context is unchanged; this index binds new-format design systems only',severity:'warning'});
     const snapshot = freezeContextIndex({revision:`${this.epoch}:${++this.generation}`,refreshedAt:Date.now(),contextRoot:layout.root,format:layout.kind,tree,designSystems:systems,diagnostics});
     this.current = snapshot;
     return snapshot;

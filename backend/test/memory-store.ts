@@ -3,7 +3,7 @@ import { imageContent, type PreparedChatImage } from '../src/core/team/data/chat
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ChangeRecord, ContextCommit, ContextStore, IndexedFile, StoredVersion, WorkspaceRecord } from '../src/core/workspace/data/context-base.js';
+import type {WorkspaceStore,WorkspaceRecord,MemberBaseline} from '../src/core/workspace/data/model.js';
 import type { WorkspaceBootstrap } from '../src/core/workspace-bootstrap.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../src/core/team/data/members.js';
 import { randomUUID } from 'node:crypto';
@@ -18,22 +18,21 @@ import type { RunSettings } from '../src/core/team/data/config.js';
 export const testModels = (connectionId = 'conn', modelId = 'model'): WorkspaceModels => ({ models: [{ connectionId, modelId }], defaultModel: { connectionId, modelId } });
 export const testModelValidator = { issuesFor: async (settings: readonly RunSettings[]) => settings.map(s => s.connectionId && s.modelId ? [] : ['Select a provider and model']) };
 
-interface Stored { record: WorkspaceRecord; key: string; seq: number; blobs: Map<string, string>; versions: StoredVersion[]; files: Map<string, IndexedFile>; records: ChangeRecord[] }
+interface Stored {record:WorkspaceRecord;key:string}
 
-/** The MySQL store's context semantics in memory. `failNextCommit` makes the next commit fail before it applies. */
-export class MemoryStore implements ContextStore, TeamStore, ChatStore {
+/** Workspace, member and conversation persistence used by tests; project context stays in files. */
+export class MemoryStore implements WorkspaceStore, TeamStore, ChatStore {
   async initialMemberFiles(id:string){const files:Record<string,string>={};for(const member of await this.listMembers(id))if(member.value.retiredAt===null&&member.value.configuration){const source=member.value.configuration;for(const [path,text]of Object.entries(source.files))files[`${source.path.slice(0,source.path.lastIndexOf('/'))}/${path}`]=text;}return files;}
 
-  readonly gitBaselines = new Map<string, import('../src/core/workspace/workspace-git.js').GitBaseline>();
-  async getGitBaseline(id: string) { return structuredClone(this.gitBaselines.get(id) ?? null); }
-  async initializeGitBaseline(id: string, value: import('../src/core/workspace/workspace-git.js').GitBaseline) { if(!this.gitBaselines.has(id))this.gitBaselines.set(id,structuredClone(value));return (await this.getGitBaseline(id))!; }
+  readonly memberBaselines = new Map<string, MemberBaseline>();
+  async getMemberBaseline(id: string) { return structuredClone(this.memberBaselines.get(id) ?? null); }
+  async initializeMemberBaseline(id: string, value: MemberBaseline) { if(!this.memberBaselines.has(id))this.memberBaselines.set(id,structuredClone(value));return (await this.getMemberBaseline(id))!; }
   readonly workspaces = new Map<string, Stored>();
   readonly members = new Map<string, { member: StoredMember; lead: boolean; nameKey: string | null; ordinal: number }>();
   readonly workspaceModels = new Map<string, StoredWorkspaceModels>();
   readonly memberActivations = new Map<string, MemberActivationState>();
   async getMemberActivation(workspaceId: string) { return structuredClone(this.memberActivations.get(workspaceId) ?? null); }
   private ordinal = 0;
-  failNextCommit = false;
 
   readonly timelineChanges = new Map<string, { cursor: number; entry: TimelineEntry }[]>();
   private resets = new Map<string, { resetCursor: number; resetPosition: number }>();
@@ -182,14 +181,14 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
   async createWorkspace(record: WorkspaceRecord, key: string, lead: NewMember, models?: WorkspaceModels, bootstrap?: WorkspaceBootstrap): Promise<void> {
     if (this.workspaces.has(record.workspaceId) || [...this.workspaces.values()].some(stored => stored.key === key)) throw new AppError('workspace_exists', 'A workspace with this ID or folder already exists', 409);
     const members = structuredClone(this.members), contexts = structuredClone(this.agentContexts), ordinal = this.ordinal;
-    this.workspaces.set(record.workspaceId, { record, key, seq: 0, blobs: new Map(), versions: [], files: new Map(), records: [] });
+    this.workspaces.set(record.workspaceId, {record,key});
     try { await this.createMember(lead); if (models) this.workspaceModels.set(record.workspaceId, { revision: 0, value: structuredClone(models) });
       if (bootstrap) {
-      this.gitBaselines.set(record.workspaceId, structuredClone(bootstrap.baseline)); await this.commitContext(record.workspaceId, 0, bootstrap.context); this.memberActivations.set(record.workspaceId, structuredClone(bootstrap.activation)); }
+      this.memberBaselines.set(record.workspaceId, structuredClone(bootstrap.baseline)); this.memberActivations.set(record.workspaceId, structuredClone(bootstrap.activation)); }
     }
     catch (error) {
       // Like the real store's transaction: a workspace is never stored without its lead.
-      this.workspaces.delete(record.workspaceId);this.gitBaselines.delete(record.workspaceId);
+      this.workspaces.delete(record.workspaceId);this.memberBaselines.delete(record.workspaceId);
       this.workspaceModels.delete(record.workspaceId); this.memberActivations.delete(record.workspaceId);
       this.members.clear(); for (const [key,value] of members) this.members.set(key,value);
       this.agentContexts.clear(); for (const [key,value] of contexts) this.agentContexts.set(key,value); this.ordinal = ordinal;
@@ -215,26 +214,6 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     }
     this.workspaceModels.set(id, next);
     return structuredClone(next);
-  }
-
-  async loadContext(workspaceId: string): Promise<{ seq: number; files: IndexedFile[] }> {
-    const stored = this.stored(workspaceId);
-    return { seq: stored.seq, files: [...stored.files.values()].map(file => ({ ...file })) };
-  }
-
-  async commitContext(workspaceId: string, expectedSeq: number, commit: ContextCommit): Promise<void> {
-    const stored = this.stored(workspaceId);
-    if (this.failNextCommit) {
-      this.failNextCommit = false;
-      throw new Error('injected commit failure');
-    }
-    if (stored.seq !== expectedSeq) throw new AppError('backend_error', 'The context base changed outside this process', 503);
-    for (const blob of commit.blobs) if (!stored.blobs.has(blob.hash)) stored.blobs.set(blob.hash, blob.content);
-    stored.versions.push(...structuredClone(commit.versions));
-    for (const key of commit.removeKeys) stored.files.delete(key);
-    for (const file of commit.files) stored.files.set(file.path.toLowerCase(), { ...file });
-    stored.records.push(structuredClone(commit.record));
-    stored.seq = commit.seq;
   }
 
   async listMembers(workspaceId: string): Promise<StoredMember[]> {
@@ -289,28 +268,6 @@ export class MemoryStore implements ContextStore, TeamStore, ChatStore {
     item.nameKey = nameKey;
     item.member = { ...item.member, revision: revision + 1, value: structuredClone(value) };
     return structuredClone(item.member);
-  }
-
-  async blob(workspaceId: string, hash: string): Promise<string | null> {
-    return this.stored(workspaceId).blobs.get(hash) ?? null;
-  }
-
-  async version(workspaceId: string, revision: string): Promise<StoredVersion | null> {
-    return this.stored(workspaceId).versions.find(version => version.revision === revision) ?? null;
-  }
-
-  async history(workspaceId: string, fileId: string, before: number | null, limit: number): Promise<StoredVersion[]> {
-    return this.stored(workspaceId).versions.filter(version => version.fileId === fileId && (before === null || version.seq < before)).sort((a, b) => b.seq - a.seq).slice(0, limit);
-  }
-
-  async lastFileId(workspaceId: string, pathKey: string): Promise<string | null> {
-    const versions = this.stored(workspaceId).versions.filter(version => version.path.toLowerCase() === pathKey);
-    versions.sort((a, b) => b.seq - a.seq || Number(a.action === 'delete') - Number(b.action === 'delete'));
-    return versions[0]?.fileId ?? null;
-  }
-
-  async records(workspaceId: string, after: number, limit: number): Promise<ChangeRecord[]> {
-    return this.stored(workspaceId).records.filter(record => record.seq > after).slice(0, limit);
   }
 
   private stored(workspaceId: string): Stored {

@@ -119,8 +119,8 @@ test('workspace initialization HTTP contract reviews metadata before explicitly 
   const directory=join(folder,'existing'), root=join(directory,'.rsi');
   await mkdir(join(root,'members'),{recursive:true});
   await writeFile(join(root,'members/old.json'),'old');
-  await mkdir(join(root,'context/design'),{recursive:true});
-  await writeFile(join(root,'context/design/design.md'),'# Retained');
+  await mkdir(join(root,'existing/_ctx'),{recursive:true});
+  await writeFile(join(root,'existing/_ctx/DESIGN.md'),'# Retained');
   const review=await call('/workspaces/initialization',{method:'POST',data:{directory,adopt:true}});
   assert.deepEqual(review.cleanupPaths,['.rsi/members']); assert.ok(review.cleanupRevision);
   const input={name:'Existing',directory,adopt:true,models:testModels()};
@@ -129,8 +129,8 @@ test('workspace initialization HTTP contract reviews metadata before explicitly 
   await call('/workspaces',{method:'POST',data:{...input,cleanupRevision:true},status:400});
   await call('/workspaces/initialization',{method:'POST',data:{directory,adopt:true,cleanup:true},status:400});
   const created=await call('/workspaces',{method:'POST',data:{...input,cleanupRevision:review.cleanupRevision},status:201});
-  assert.equal(created.context.seq,1);
-  assert.equal(await readFile(join(root,'context/design/design.md'),'utf8'),'# Retained');
+  assert.equal('context' in created,false);
+  assert.equal(await readFile(join(root,'existing/_ctx/DESIGN.md'),'utf8'),'# Retained');
   await assert.rejects(stat(join(root,'members/old.json')));
   assert.equal((await call('/workspaces/initialization',{method:'POST',data:{directory,adopt:true},status:409})).error.code,'workspace_exists');
 }));

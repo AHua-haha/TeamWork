@@ -190,7 +190,7 @@ test('Changes endpoint returns only protected reviews and activation references 
   const review = await call(path);
   assert.equal(review.leadId, f.lead.memberId);
   assert.equal(review.activation.hasChanges, false);
-  assert.deepEqual(review.design.changes, []);
+  assert.equal(review.design.changes.length,1);assert.equal(review.design.changes[0].action,'add');
   assert.deepEqual(review.members.changes, []);
   assert.equal(review.current, undefined);
   assert.equal(review.activation.digest, undefined);

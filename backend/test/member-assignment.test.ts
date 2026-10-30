@@ -9,7 +9,6 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { test } from 'node:test';
-import { designMetadata } from '../src/core/workspace/design.js';
 import { emptyDesignScope, parseDesignScope } from '../src/core/team/data/assignment.js';
 import { parseBashInput } from '../src/core/react-harness/default/bash.js';
 import { code, configureAssignment, withTeam, worker } from './team-fixture.js';
@@ -18,10 +17,8 @@ const signal = () => new AbortController().signal;
 const git = (scope: string, command: string) => ({ command });
 
 test('assignment accepts design references only and never agent-owned implementation paths or authority metadata', () => {
-  assert.deepEqual(designMetadata({implementation:['backend/']}),{implementation:['backend']});
-  for (const path of ['../outside','.rsi/context/design/metadata.json','.git/config','.rsi/members']) assert.throws(()=>designMetadata({implementation:[path]}));
-  const value={working:['.rsi/context/design/api/metadata.json'],dependencies:['contracts/metadata.json']};
-  assert.equal(parseDesignScope(value).working[0],'api/metadata.json');
+  const value={working:['api/_ctx/DESIGN.md'],dependencies:['contracts/metadata.json']};
+  assert.equal(parseDesignScope(value).working[0],'api/_ctx/DESIGN.md');
   assert.throws(()=>parseDesignScope({...value,allowedCommands:[]}));
   assert.throws(()=>parseDesignScope({working:['user/a'],dependencies:['user/A']}));
   assert.throws(()=>parseBashInput({command:'git status',metadata:{git:{scope:'design',approved:true}}}));
@@ -45,13 +42,14 @@ test('accepted design Git commits update assignment guidance and discovery',()=>
   const member=await worker(f,'Backend',['old']);
   const lead=await f.team.memberWorkspace.files(f.lead.memberId);
   const designPath=member.designScope.working[0]!;
-  await lead.write.mkdir(join(lead.root,'.rsi/context/design/systems/backend'));
-  await lead.write.writeFile(join(lead.root,'.rsi/context/design/systems/backend/design.md'),'New accepted design');
-  await lead.write.writeFile(join(lead.root,'.rsi/context/design',designPath),JSON.stringify({implementation:['new']}));
-  await acceptFiles(f,'.rsi/context/design','Accept new mapping');
-  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.get(f.workspaceId,member.memberId)).designScope)).working.flatMap(d=>d.implementation),['new']);
+  await lead.write.mkdir(join(lead.root,'.rsi/project/systems/backend'));
+  await lead.write.mkdir(join(lead.root,'.rsi/project/systems/backend/_ctx'));
+  await lead.write.writeFile(join(lead.root,'.rsi/project/systems/backend/_ctx/DESIGN.md'),'New accepted design');
+
+  await acceptFiles(f,'.rsi/project','Accept new mapping');
+  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.get(f.workspaceId,member.memberId)).designScope)).working.flatMap(d=>d.implementation),['systems/backend']);
   assert.equal((await f.team.designs.inspect(f.workspaceId,designPath)).design!.content,'New accepted design');
-  assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.find(d=>d.path===designPath)!.implementation,['new']);
+  assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.find(d=>d.path==='systems/backend/_ctx/DESIGN.md')!.implementation,['systems/backend']);
 }));
 
 test('every member receives broad Bash independently of historical command rules',()=>withTeam(async f=>{

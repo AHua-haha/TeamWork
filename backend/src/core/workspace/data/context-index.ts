@@ -31,7 +31,7 @@ export interface ContextIndexSnapshot {
   revision: string;
   refreshedAt: number;
   contextRoot: string;
-  format: 'project' | 'legacy';
+  format: 'project';
   tree: ProjectContextNode;
   designSystems: Readonly<Record<string, DesignSystemMetadata>>;
   diagnostics: readonly ContextDiagnostic[];

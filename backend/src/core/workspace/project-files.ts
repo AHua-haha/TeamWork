@@ -32,7 +32,7 @@ const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const byPath = (a: { path: string }, b: { path: string }) => compare(a.path.toLowerCase(), b.path.toLowerCase()) || compare(a.path, b.path);
 const updatedAt = (info: Stats) => Math.floor(info.mtimeMs);
 
-/** The files of one workspace directory, outside `.git` and `.rsi/context`. Paths never pass through a link. */
+/** The files of one workspace directory, outside `.git` and `.rsi`. Paths never pass through a link. */
 export class ProjectFiles {
   constructor(private readonly root: string) {}
 

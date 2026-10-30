@@ -1,22 +1,19 @@
 import {resolveAssignment} from '../src/core/team/member-workspace.js';
-import {acceptFiles} from './git-fixture.js';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import type { StepScope } from '../src/core/agent/runtime.js';
-import { withTeam } from './team-fixture.js';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {test} from 'node:test';
+import {withTeam} from './team-fixture.js';
 
-const scope = (agentId: string) => ({ agentId, runId: 'lead-run', signal: new AbortController().signal } as StepScope);
-
-test('lead bootstraps pending designs and member files through common tools; file edits remain separate from design acceptance and member activation', () => withTeam(async f => {
-  const {writeFile, mkdir} = await import('node:fs/promises');
-  const {join, dirname} = await import('node:path');
-  const call = async (_name: string, args: {path: string; content: string}) => {const target=join(f.directory,args.path); await mkdir(dirname(target),{recursive:true}); await writeFile(target,args.content);};
-  await call('write', { path: '.rsi/context/design/new/metadata.json', content: JSON.stringify({ implementation: ['src'] }) });
-  await call('write', { path: '.rsi/context/design/new/design.md', content: 'Pending project' });
-  await call('write', { path: '.rsi/members/example/member.json', content: '{"name":"Example"}' });
-  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.get(f.workspaceId,f.lead.memberId)).designScope)).working.flatMap(d=>d.implementation), [], 'pending child does not expand the root assignment');
-  await acceptFiles(f,'.rsi/context/design','Accept project');
-  assert.equal((await f.team.designs.read(f.workspaceId, 'new/metadata.json')).content, 'Pending project');
-  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.get(f.workspaceId,f.lead.memberId)).designScope)).working.flatMap(d=>d.implementation), ['src'], 'root-assigned lead inherits the accepted child mapping');
-  assert.equal((await f.team.service.team(f.workspaceId)).members.length, 1, 'member file edits do not activate settings');
+test('lead sees new filesystem design parts after refresh while member-file edits still require activation',()=>withTeam(async f=>{
+ await mkdir(join(f.directory,'src/new'),{recursive:true});
+ await mkdir(join(f.directory,'.rsi/project/src/new/_ctx'),{recursive:true});
+ const assignment=(await f.team.service.get(f.workspaceId,f.lead.memberId)).designScope;
+ await writeFile(join(f.directory,'.rsi/project/src/new/_ctx/DESIGN.md'),'New design');
+ await mkdir(join(f.directory,'.rsi/members/Example'),{recursive:true});
+ await writeFile(join(f.directory,'.rsi/members/Example/member.json'),'{"name":"Example"}');
+ assert.equal((await resolveAssignment(f.team.designs,f.workspaceId,assignment)).working.length,1);
+ await f.team.designs.refresh(f.workspaceId);
+ assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,assignment)).working.flatMap(d=>d.implementation),['.','src/new']);
+ assert.equal((await f.team.service.team(f.workspaceId)).members.length,1);
 }));

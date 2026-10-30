@@ -41,7 +41,7 @@ test('file validation and user commit do not activate; separate activation consu
   assert.equal(member.value.settings.prompt, 'Accepted prompt');
   assert.equal(member.value.configuration!.acceptedRevision, review.revision);
   assert.equal(await readFile(join(files.root, dirname(path), 'prompts/member.md'), 'utf8'), 'Uncommitted prompt');
-  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.get(f.workspaceId,member.id)).designScope)).working.flatMap(d=>d.implementation), ['src']);
+  assert.deepEqual((await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.get(f.workspaceId,member.id)).designScope)).working.flatMap(d=>d.implementation), ['work']);
   await assert.rejects(f.team.activateConfiguration(f.workspaceId, review.revision, review.digest), code('stale_revision'));
 }));
 

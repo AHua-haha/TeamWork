@@ -43,7 +43,7 @@ test('backend source follows the four agreed boundaries and imports only permitt
     assert.doesNotMatch(text,/from ['"][^'"]*agent\/(?:agent|runtime|contracts)\.js/,'React Harness depends on Agent data models, not execution internals');
   }
   assert.doesNotMatch(await readFile(join(source,'core/agent/agent.ts'),'utf8'),/modelContextHidden|suppressedToolCallArguments|hideMessageId/,'File context policy belongs to File React Harness');
-  const owned: Record<string,string[]>={'react-harness':[],agent:['agents','agent_context_entries','agent_assistant_response_handler_state','runs','messages','context_compactions'],team:['members','member_activation','config_records','chat_images','chat_settings','chat_context_summaries','chat_exchanges','chat_messages','chat_context_entries','chat_runs','chat_clock','chat_entries','chat_changes'],workspace:['workspaces','workspace_models','workspace_git_baselines','context_blobs','context_versions','context_files','context_records']};
+  const owned: Record<string,string[]>={'react-harness':[],agent:['agents','agent_context_entries','agent_assistant_response_handler_state','runs','messages','context_compactions'],team:['members','member_activation','config_records','chat_images','chat_settings','chat_context_summaries','chat_exchanges','chat_messages','chat_context_entries','chat_runs','chat_clock','chat_entries','chat_changes'],workspace:['workspaces','workspace_models','workspace_member_baselines','workspace_git_baselines']};
   for(const [owner,tables]of Object.entries(owned)){
     for(const path of await files(join(source,`core/${owner}/data`))){
       const text=await readFile(path,'utf8');

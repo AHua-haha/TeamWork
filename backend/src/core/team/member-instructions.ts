@@ -1,6 +1,5 @@
 import type { TeamService } from './data/members.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
-import {workspaceContext} from '../workspace/project-context.js';
 import { readFileSync } from 'node:fs';
 import { AppError } from '../agent/data/model.js';
 
@@ -17,7 +16,6 @@ export class MemberInstructions {
     if (!member) return null;
     const { name, role, responsibility, lead } = member.value;
     const workspace = await this.workspaces.record(member.workspaceId);
-    const projectContext = (await workspaceContext(workspace.directory)).kind === 'project';
     const roster = await this.team.active(member.workspaceId);
     const issues = await this.team.issues(roster);
     const rules = [
@@ -29,10 +27,7 @@ export class MemberInstructions {
       responseRules,
       '- Only one member executes at a time in this workspace. Your final response can mention at most one distinct member. Publication is refused as a whole if any recipient is busy, missing or unready, or the exchange mention limit would be exceeded. Private refusal feedback lets you revise or retry within your current run. A refused attempt delivered no task. Busy mentions are not queued or retried automatically.',
       '- Team owns original shared group context. Your context continues chronologically across runs: shared messages have one plain-text <metadata> area naming the sender and mentions, and your private model/tool work remains yours. New group messages are appended before work or after it finishes, never in the middle of ongoing work. Only accepted final responses are shared. Team maintains the shared summary independently; your runtime manages private compaction using its configured policy.',
-      (projectContext
-        ? '- Maintain user design in DESIGN.md and consumer context in an optional README.md with summary and project-root-relative include metadata. Included source files or directories can contain implementation details. Keep internal development notes separate. Context metadata is refreshed explicitly on activation; dependency consumer content may be loaded from README and its inclusions. No document commands execute automatically.'
-        : '- Maintain your assigned implementation-context impl/README.md with current results and file lookup. Read relevant documents using ordinary tools when needed; README files and their retrieval commands are not automatically loaded or executed on activation.')
-        + ' End with what was done, which files changed, and what is still open. Both successful and unsuccessful runs retain recorded private context across restart; run completion does not clear or reconstruct it.',
+      '- Maintain user design in DESIGN.md and consumer context in an optional README.md with summary and project-root-relative include metadata. Included source files or directories can contain implementation details. Keep internal development notes separate. Context metadata is refreshed explicitly on activation; dependency consumer content may be loaded from README and its inclusions. No document commands execute automatically. End with what was done, which files changed, and what is still open. Both successful and unsuccessful runs retain recorded private context across restart; run completion does not clear or reconstruct it.',
       lead
         ? [
             '- User messages without mentions trigger you. Help the user create, update, and maintain the whole project design and its subdesigns. Use common read/write/edit tools in the shared workspace. Explain pending changes and request user review; use ordinary Git directly and keep the user aware of design changes.',

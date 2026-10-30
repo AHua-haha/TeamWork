@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { AppError } from '../agent/data/model.js';
 import { decodeText, sha256 } from '../text.js';
 
-export interface GitBaseline { time?: number; design: Record<string,string>; members: Record<string,string> }
 export interface FileChange { path: string; action: 'add'|'modify'|'delete'; patch: string; truncated: boolean }
 export const coversPath = (scope: string, path: string) => scope === '.' || path === scope || path.startsWith(scope + '/');
 export {OperationQueue} from '../operation-queue.js';
@@ -68,24 +67,6 @@ export async function fileChanges(before:Record<string,string>,after:Record<stri
     const patches=result.output.split(/(?=^diff --git )/m).filter(Boolean);
     return paths.map((path,i)=>({path,action:before[path]===undefined?'add':after[path]===undefined?'delete':'modify',patch:(patches[i]??'').slice(0,256*1024),truncated:(patches[i]?.length??0)>256*1024}));
   }finally{await rm(temp,{recursive:true,force:true});}
-}
-/** Read-only, one-time import. Never stage, commit, restore or write legacy history. */
-export async function legacyBaseline(root:string):Promise<GitBaseline|null>{
-  const directory=join(root,'.rsi/harness/repository.git');
-  try{await lstat(join(directory,'HEAD'));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;}
-  const command=(args:string[])=>gitText(root,['--git-dir',directory,...args]);
-  const design:Record<string,string>={},members:Record<string,string>={};
-  for(const line of (await command(['for-each-ref','--format=%(refname) %(objectname)','refs/harness/designs/'])).split('\n').filter(Boolean)){
-    const [ref,revision]=line.split(' ');
-    const paths=(await command(['ls-tree','-r','--name-only',revision!,'--','.rsi/context/design'])).split('\n').filter(Boolean);
-    for(const path of paths)if(ref===`refs/harness/designs/${sha256(path.toLowerCase())}`)design[path]=(await git(root,['--git-dir',directory,'show',`${revision}:${path}`])).output;
-  }
-  const key=sha256(JSON.stringify({paths:['.rsi/members'],exclude:[]}));
-  const ref=`refs/harness/scopes/${key}/committed`;
-  const found=await command(['for-each-ref','--format=%(objectname)',ref]);
-  if(found)for(const path of (await command(['ls-tree','-r','--name-only',found,'--','.rsi/members'])).split('\n').filter(Boolean))members[path]=(await git(root,['--git-dir',directory,'show',`${found}:${path}`])).output;
-  const latest=await command(['log','--all','-1','--format=%ct']);
-  return {design,members,time:latest?Number(latest)*1000+999:0};
 }
 /** Read-only native history for configuration inspection, never a second history. */
 export async function configurationCommits(root:string,active:string|null){

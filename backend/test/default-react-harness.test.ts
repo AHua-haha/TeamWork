@@ -57,7 +57,7 @@ test('native Git commits mixed files, honors hooks, amends and runs in backgroun
  const call=(command:string,background=false)=>tool.execute({command,background},scope(f.lead.memberId),{id:'git'} as never);
  await writeFile(join(f.directory,'source.txt'),'source');
  const hook=join(f.directory,'.git/hooks/pre-commit');await writeFile(hook,'#!/bin/sh\nprintf hook-ran > hook-result\n',{mode:0o755});
- const committed=await call('git add -f source.txt .rsi/context/design .rsi/members; git commit -m "Mixed native commit"');
+ const committed=await call('git add -f source.txt .rsi/project .rsi/members; git commit -m "Mixed native commit"');
  assert.equal(committed.isError,false,text(committed));assert.match(text(committed),/Mixed native commit/);
  assert.equal(await readFile(join(f.directory,'hook-result'),'utf8'),'hook-ran');
  const amended=await call('git commit --amend --no-edit');assert.equal(amended.isError,false,text(amended));
