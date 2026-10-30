@@ -59,10 +59,89 @@ The example illustrates naming and location; it does not assign new design bound
 Each design part has three conceptual kinds of context:
 
 1. **Design — `DESIGN.md`.** Maintain the user's design intent, requests, purpose, responsibilities, boundaries, requirements, constraints and architectural mental model. This is conceptual design guidance, not a requirement to specify a complete concrete protocol. It may leave implementation choices open. Agents implement based on this design; a change to the user's intent or constraints is a design change that must be visible to the user.
-2. **Usage contract — optional `README.md`.** The agent maintains a clear, concrete description of the implemented design part from its consumer's perspective. Describe what it provides and how to use it: supported interactions/interfaces, required inputs, returned information, observable effects, failure behavior, relevant lifecycle rules and guarantees, and usage examples. A consumer may be a person or another component. The contract must describe the actual implementation consistently with the user's design and enable use without requiring knowledge of internal implementation details. README is the entry document for this purpose, not a miscellaneous collection of internal development notes. A design part may have no README for now; do not synthesize one from incomplete or mixed notes merely to fill the structure.
+2. **Consumer context — optional `README.md` plus included source files.** The agent maintains README as the entry document describing the implemented design system, what it does and what it provides, with a clear usage contract and interaction protocol. A consumer may be a person or another component. Include relevant source files or directories to supplement the explanation; these may contain actual implementation, not only public types or entry points. The choice of supporting source is flexible, while the consumer-facing contract must be clear. README is not a miscellaneous collection of internal development notes. A design part may have no README for now; do not synthesize one from incomplete or mixed notes merely to fill the structure. Detailed content and metadata rules are defined below.
 3. **Internal context.** The agent maintains information for reuse and consistency across long-term development, including implementation understanding and quick lookup of relevant files. Its detailed contents, filenames, structure and maintenance mechanisms remain deferred. Do not prescribe a new internal-context schema as part of this agreement.
 
 These responsibilities apply equally to directory and file design parts. Documentation for non-design children is maintained by their enclosing owner within these context parts rather than by creating independent `.ctx/` entries.
+
+### Context base manager: authority and lifecycle
+
+This is the settled next design for context-base management, not a declaration that the existing SQL-backed context index or initialization templates already implement it. Implementing the new manager and adopting README metadata are separate from recording this agreement. Do not reset existing workspace, member, Agent or Team data while persisting this design.
+
+The filesystem is the sole source of truth for current project context. The manager constructs a lightweight, derived in-memory model from it. Memory is disposable and reconstructed after restart; SQL snapshots, accepted Git baselines and cached document bodies must not become alternate authorities for the current context model. Historical records, if retained, are distinct from current filesystem truth. This context base is project information, not Agent working-message context or Team group-message context.
+
+Agent file tools continue editing files directly. Editing does not require a special context-management tool, manager-owned filesystem operation layer or write-through database API.
+
+Use explicit refresh, with no filesystem monitor and no background watcher-driven or periodic synchronization. A consumer asks the manager to refresh when it needs a current index, for example at the start of an agent activation. Do not refresh before every model call. Consumers may reuse one published model between refreshes, and an explicit refresh can be requested again when necessary. The index represents filesystem state observed during the last refresh; it does not promise live updates or an atomic filesystem snapshot across arbitrary external multi-file edits.
+
+A refresh enumerates the relevant project source tree and context tree, discovers design systems, reads/parses the required metadata, constructs bindings and publishes the completed in-memory model. Retain paths, relationships, document existence, parsed metadata and diagnostics, not README bodies, DESIGN prose or included source contents. Parsing document metadata necessarily reads its header, but does not require retaining the document body or reading included source files during refresh. Source bodies are read only when a consumer requests their content. Exact source-tree filtering, size limits, caching, refresh concurrency and error/revision API mechanics remain implementation details to settle; avoid expanding a metadata refresh into eager content assembly.
+
+### Project tree and explicit design-system bindings
+
+The primary tree represents actual project directories and files. A design system is a separate entity bound to the project node represented by its design context directory:
+
+- A directory node can bind to its mirrored `_ctx/` entry.
+- A file node can bind to its mirrored `<full-file-name>.ctx/` entry.
+- `DESIGN.md` is the required design document; README is optional. An incomplete context entry can be diagnosed rather than treated as a complete valid design system.
+- Nodes without their own design system remain structural source nodes. Do not store or display an inherited binding to their enclosing design system.
+- Context ownership by the nearest enclosing design system still applies to non-design files and directories, but it is not a binding on every source node.
+- Internal context documents and supporting README inclusions do not create additional design systems.
+
+For example:
+
+```text
+Project                         -> Project design
+└── backend/                    -> Backend design
+    └── src/
+        └── agent/              -> Agent design
+            ├── agent.ts        -> Agent-file design, if separately defined
+            └── helpers.ts
+```
+
+Keep each design system's parsed metadata and document references once in the model; source tree nodes reference their bound design system rather than copying it. Structural identity, represented project path, parent/child relationships, context location and document existence are derived from filesystem structure, not overridden by agent-maintained metadata. Directory/file bindings refer to actual source nodes; inconsistent context entries should be inspectable through diagnostics rather than silently inventing source nodes.
+
+### README content and metadata format
+
+README is the consumer-context entry document. Its Markdown body describes the design system and its actual usable behavior. For each relevant endpoint, function, class, tool or other interaction, clearly explain:
+
+- Purpose: what it does, what it provides, and when to use it.
+- Input: parameters/data, formats and preconditions.
+- Output: returned information and its meaning.
+- Effects: observable changes to files, durable storage, runtime state or external systems.
+- Guarantees: what consumers may rely on, including relevant ordering, consistency and lifecycle behavior.
+- Expectations: responsibilities, assumptions and obligations placed on the consumer.
+- Failures: errors, partial effects, and recovery or retry behavior.
+- Usage examples: concrete ways to use the implemented behavior.
+
+These are content responsibilities, not a requirement for a mechanically enforced heading template. The explanation can use prose and actual source to convey details. Included implementation files are allowed; do not enforce a public-interface-only restriction. Document actual behavior consistently with DESIGN rather than presenting planned behavior as implemented. Normal source README files and migrated internal implementation READMEs do not automatically become consumer-context documents.
+
+Place agent-maintained metadata in a YAML front-matter header at the beginning of the context README, delimited by standalone `---` lines, followed by the Markdown body. The settled fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `summary` | A concise textual description of the design system for discovery, listing and display without loading its body. |
+| `include` | A list of project-root-relative file or directory paths supplementing README as consumer context. |
+
+For example:
+
+```markdown
+---
+summary: Runs an agent's model and tool loop and maintains its execution context.
+include:
+  - backend/src/core/agent/
+  - backend/prompts/agent/context-compaction.md
+---
+
+# Agent
+
+Describe what the system does, the capabilities it provides, and its usage contract.
+```
+
+All include paths are relative to the project root, not the README directory, `_ctx/`, `.rsi/` or the project context root. A file includes that file. A directory recursively includes its files. Overlapping directory/file references are deduplicated. A trailing slash is a readability convention, not the authority for whether a referenced entry is a directory; inspect the filesystem. Detailed directory filtering, missing-path behavior and content-size handling remain deferred. Do not add an executable retrieval-command mechanism or a restriction to particular kinds of source files as part of this agreement.
+
+The manager retains the parsed summary and include references as metadata. When consumer context is requested, load the README content and the included source contents from the filesystem. Referenced paths are not eagerly opened for content during metadata refresh. The consumer context is the README and its inclusions together; DESIGN expresses user intent, and internal context supports continued development. Neither is silently folded into consumer context merely because it shares the same context directory.
+
+The metadata format and fields above are the current agreement. Exact parser library, validation limits, additional fields, DESIGN metadata schema, and metadata composition across documents remain deferred. Existing optional READMEs are not rewritten or claimed compliant merely by recording these rules.
 
 ## Constraints, specifications and requirements
 

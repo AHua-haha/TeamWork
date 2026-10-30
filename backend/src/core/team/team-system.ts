@@ -14,6 +14,7 @@ import type { ConfigService } from './data/config.js';
 import { currentMemberPaths } from './data/member-config.js';
 import { MemberConfigService } from './member-config.js';
 import { DesignService } from '../workspace/design.js';
+import {workspaceContext} from '../workspace/project-context.js';
 import { MemberWorkspace } from './member-workspace.js';
 import { MemberInstructions } from './member-instructions.js';
 import { teamTools } from './member-tools.js';
@@ -59,7 +60,7 @@ export class TeamSystem {
     this.runner = new TeamRunner(this.service, store, () => {
       if (!this.runtime) throw new Error('The team is not attached to a runtime');
       return this.runtime;
-    }, ids => this.closeShells(ids), workspaceId => { void this.scheduleSummary(workspaceId); });
+    }, ids => this.closeShells(ids), workspaceId => { void this.scheduleSummary(workspaceId); }, workspaceId=>this.designs.refresh(workspaceId));
     this.configuration = new MemberConfigService(this.service, this.memberWorkspace);
     this.runConfig = teamRunConfig(this.service, config);
   }
@@ -251,7 +252,13 @@ export class TeamSystem {
         const member = await this.service.find(agentId);
         if (!member) return factories;
         const workspace = await this.workspaces.record(member.workspaceId);
-        return [...factories, fileReactHarnessFactory(workspace.directory), defaultReactHarnessFactory(workspace.directory, [...this.web, ...management], () => this.memberWorkspace.guidance(agentId))];
+        const project = (await workspaceContext(workspace.directory)).kind === 'project';
+        let guidance: {runId:string;promise:Promise<string>} | undefined;
+        return [...factories, fileReactHarnessFactory(workspace.directory), defaultReactHarnessFactory(workspace.directory, [...this.web, ...management], scope => {
+          if (!project || !scope) return this.memberWorkspace.guidance(agentId);
+          if (guidance?.runId !== scope.runId) guidance = {runId:scope.runId,promise:this.memberWorkspace.guidance(agentId)};
+          return guidance.promise;
+        })];
       },
       groupContext: async agentId => {
         const member = await this.service.find(agentId);

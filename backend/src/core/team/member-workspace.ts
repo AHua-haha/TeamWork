@@ -6,7 +6,7 @@ import type { WorkspaceService } from '../workspace/workspace.js';
 import { AppError } from '../agent/data/model.js';
 import { OperationQueue, committedFiles, currentFiles, filesRevision, fileChanges } from '../workspace/workspace-git.js';
 import {currentMemberFormat} from './data/member-config-migration.js';
-import { migratedBaseline, workspaceContext } from '../workspace/project-context.js';
+import { migratedBaseline, projectNode, workspaceContext } from '../workspace/project-context.js';
 import { workspacePrompt } from '../workspace/workspace-prompts.js';
 
 export interface ResolvedAssignment {
@@ -57,6 +57,26 @@ export class MemberWorkspace {
   async guidance(id: string): Promise<string> {
     const member = await this.active(id), resolved = await resolveAssignment(this.designs, member.workspaceId, member.value.designScope);
     const layout = await workspaceContext(await this.root(id));
+    if (layout.kind === 'project') {
+      const manager = await this.workspaces.contextManager(member.workspaceId), snapshot = manager.snapshot()!;
+      const sections = ['## Design assignments (work guidance, not access restrictions)',workspacePrompt('context-maintenance',{root:layout.root}),'## Working designs'];
+      let bytes = 0;
+      const append = (path:string,content:string) => {
+        bytes += Buffer.byteLength(content);
+        sections.push(`### ${path}\n${bytes <= 64*1024 ? content : 'Content not loaded into instructions; read this file with your tools.'}`);
+      };
+      for (const part of resolved.working) append(`${layout.root}/${part.path}`,part.content);
+      sections.push('## Dependency consumer context');
+      for (const part of resolved.dependencies) {
+        const system = manager.design(projectNode(part.path),snapshot);
+        if (system.metadata.summary) sections.push(system.metadata.summary);
+        if (!system.documents.readme) {append(`${layout.root}/${part.path}`,part.content);continue;}
+        const context = await manager.loadConsumerContext(system.projectPath,snapshot);
+        append(context.readme.path,context.readme.content);
+        for (const file of context.files) append(file.path,file.content);
+      }
+      return sections.join('\n\n');
+    }
     const view = (parts: ResolvedDesign[]) => {
       let bytes = 0;
       return parts.map(part => {
@@ -65,6 +85,6 @@ export class MemberWorkspace {
         return heading + (bytes <= 64 * 1024 ? '\n' + part.content : '\nContent not loaded; read this design file with your tools.');
       }).join('\n\n') || '(none configured)';
     };
-    return ['## Design assignments (work guidance, not access restrictions)', ...(layout.kind === 'project' ? [workspacePrompt('context-maintenance', {root: layout.root})] : []), '## Accepted working designs', view(resolved.working), '## Dependency designs', view(resolved.dependencies)].join('\n\n');
+    return ['## Design assignments (work guidance, not access restrictions)', '## Accepted working designs', view(resolved.working), '## Dependency designs', view(resolved.dependencies)].join('\n\n');
   }
 }

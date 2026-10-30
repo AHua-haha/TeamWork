@@ -318,3 +318,38 @@ Member records and member.json use a direct `designScope: {working: string[], de
 ### React Harness directory and Agent data model
 
 React Harness lives at `src/core/react-harness/`, beside agent/team/workspace. Its public index exports factories/contracts; file/ and default/ keep purpose-owned implementation and Markdown instructions together; data/ holds residency and state restoration. Agent data/messages.ts exposes acknowledged AgentMessageData and AgentTurnData directly to harnesses. Context mutation callbacks formerly constructed by AgentExecution are removed. Generic component-state persistence retains the existing SQL schema and identities. Build copies colocated prompts into the same compiled paths; compaction instructions remain under prompts/agent.
+
+## Filesystem context metadata manager
+
+`core/workspace/context-base/index.ts` exports `ContextBaseManager`. WorkspaceService keeps one instance per workspace through `await workspaces.contextManager(workspaceId)`. This is separate from the legacy `workspaces.context(...)` SQL file-history/review API.
+
+```typescript
+const manager = await workspaces.contextManager(workspaceId);
+const index = await manager.refresh(); // Explicit filesystem enumeration and metadata parsing.
+const sameIndex = manager.snapshot();  // No filesystem reads or implicit synchronization.
+const context = await manager.loadConsumerContext('backend/src/core/agent');
+// context.readme and context.files contain content only in this returned value.
+```
+
+A standalone manager accepts the canonical project directory and optional limits/excluded directory names. It has no SQL dependency, watcher, periodic scan, automatic command execution or file writes. Refresh publishes a frozen project tree with bindings only on nodes owning a valid `_ctx/DESIGN.md` or `<file-name>.ctx/DESIGN.md`. Ordinary nodes do not inherit a binding. Each bound system stores references plus parsed README metadata, never document/source bodies. Incomplete/orphan context and invalid metadata are reported through `diagnostics`; invalid README metadata does not erase its design binding. A design can have no README. Existing plain READMEs remain usable without migration.
+
+Context README front matter uses YAML, for example:
+
+```markdown
+---
+summary: Runs agents and tools.
+include:
+  - backend/src/core/agent/
+  - backend/prompts/agent/context-compaction.md
+---
+
+# Agent
+
+Describe purpose, inputs, outputs, effects, guarantees, expectations, failures and usage.
+```
+
+Includes are relative to the project root. Directories expand recursively; overlapping file/directory entries are deduplicated. Source selection is unrestricted to public interfaces: implementation files are valid consumer context. Content loads on demand and is not cached in the manager. If README metadata changed since refresh, loading returns `context_changed`; refresh explicitly and retry. Missing includes, non-text files and limit violations fail explicitly rather than returning silently incomplete context. No README yields `consumer_context_unavailable`.
+
+Default enumeration omits Git/RSI state, dependency directories and common generated/runtime directories. `excludedDirectories` can customize non-reserved exclusions. Default bounds are 50,000 project entries, 10,000 context entries, 64 KiB per metadata header, 1 MiB per loaded file, 200 included files and 4 MiB total consumer content. All limit options are positive integers; source paths and directory references are validated, and symbolic links are not traversed. A failed refresh leaves the prior published view intact. Concurrent refreshes are serialized. Close discards resident memory; a new manager reconstructs it from files with a new revision epoch.
+
+Team explicitly refreshes project-format context before recipient admission. New-format design lookup reads current filesystem documents without SQL/Git accepted-state fallback; metadata-only assignment checks avoid body loading. Purpose guidance assembles working designs and dependency consumer context once per run, with explicit file-reference hints when prompt content exceeds its display budget. Existing legacy workspace behavior remains supported separately. This implementation does not migrate or rewrite context documents, member snapshots or application databases.

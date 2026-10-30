@@ -21,7 +21,7 @@ export class TeamRunner {
   private readonly publications = new Set<Promise<unknown>>();
   private readonly gate = new OperationQueue();
   private readonly execution = new OperationQueue();
-  constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost, private readonly resetShells: (ids?: string[]) => Promise<void> = async () => {}, private readonly publicationHook: (workspaceId: string) => void = () => {}) {}
+  constructor(private readonly team: TeamService, private readonly store: ChatStore & Pick<TeamStore, 'listMembers'>, private readonly runtime: () => RunHost, private readonly resetShells: (ids?: string[]) => Promise<void> = async () => {}, private readonly publicationHook: (workspaceId: string) => void = () => {}, private readonly refreshContext: (workspaceId: string) => Promise<unknown> = async()=>{}) {}
 
   isRunning(memberId: string): boolean { return this.executionData.isRunning(memberId); }
 
@@ -80,6 +80,7 @@ export class TeamRunner {
       if (!lead) throw new AppError('not_found', 'Workspace lead not found', 404);
       recipients.push(lead);
     }
+    if (recipients.length) await this.refreshContext(workspaceId);
     const issues = await this.team.issues(recipients);
     for (const [index, member] of recipients.entries()) {
       if (issues[index]!.length) throw new AppError('member_unavailable', `${member.value.name} cannot run: ${issues[index]!.join('; ')}`, 409);

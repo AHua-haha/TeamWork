@@ -7,6 +7,7 @@ import type { WorkspaceService } from './workspace.js';
 import { committedFiles, gitText } from './workspace-git.js';
 import { contextPaths, contextRoot, nodeReference, nodePrefix, metadataPath } from './workspace-layout.js';
 import { migratedBaseline, migratedReference, projectDesignReference, projectNode, workspaceContext } from './project-context.js';
+import type {ContextIndexSnapshot} from './context-base/index.js';
 
 export interface DesignMetadata { implementation: string[] }
 export interface DesignDocument { path: string; content: string }
@@ -49,6 +50,40 @@ export function resolveDesign(path: string, files: ReadonlyMap<string,string>): 
 /** DESIGN.md identifies project design parts; legacy metadata references remain readable. */
 export class DesignService {
   constructor(private readonly workspaces: WorkspaceService) {}
+  /** Explicit metadata refresh for project-format consumers; legacy file-history behavior is separate. */
+  async refresh(workspaceId: string): Promise<ContextIndexSnapshot | null> {
+    const root = (await this.workspaces.record(workspaceId)).directory;
+    if ((await workspaceContext(root)).kind === 'legacy') return null;
+    return (await this.workspaces.contextManager(workspaceId)).refresh();
+  }
+  private async project(workspaceId: string) {
+    const root = (await this.workspaces.record(workspaceId)).directory, layout = await workspaceContext(root);
+    if (layout.kind === 'legacy') return null;
+    const manager = await this.workspaces.contextManager(workspaceId);
+    // Initial discovery is requested by this consumer once; subsequent reads reuse the published metadata.
+    const snapshot = manager.snapshot() ?? await manager.refresh();
+    return {root,layout,manager,snapshot};
+  }
+  private async projectRead(workspaceId:string,input:unknown,project:NonNullable<Awaited<ReturnType<DesignService['project']>>>):Promise<ResolvedDesign> {
+    const reference = await migratedReference(project.root,project.layout,designPath(input));
+    const system = project.manager.design(projectNode(reference),project.snapshot);
+    const document = await project.manager.loadDesign(system.projectPath,project.snapshot);
+    if (!document.content.trim()) throw new AppError('invalid_design',`${document.path} is empty`);
+    return {path:system.designReference,revision:sha256(document.content),implementation:[system.projectPath],documents:[{path:system.designReference,content:document.content}],content:document.content};
+  }
+  /** Readiness needs references, not every assigned document body on each model call. */
+  async checkAssignment(workspaceId:string,working:readonly string[],dependencies:readonly string[]):Promise<void> {
+    const project = await this.project(workspaceId);
+    if (project) {
+      for (const input of [...working,...dependencies]) {
+        const reference = await migratedReference(project.root,project.layout,designPath(input));
+        project.manager.design(projectNode(reference),project.snapshot);
+      }
+      return;
+    }
+    await this.working(workspaceId,working);
+    await Promise.all(dependencies.map(reference=>this.read(workspaceId,reference)));
+  }
   private async accepted(workspaceId:string) {
     const root=(await this.workspaces.record(workspaceId)).directory;
     const layout = await workspaceContext(root);
@@ -74,6 +109,8 @@ export class DesignService {
     return {path:entry[0].slice(accepted.layout.root.length+1),content:entry[1],size:Buffer.byteLength(entry[1]),revision:accepted.revision,updatedAt:accepted.time,current:true,author:{type:'user'},reason:'Committed project design'};
   }
   async list(workspaceId:string):Promise<{designs:Omit<ResolvedDesign,'content'|'documents'>[];truncated:boolean}>{
+    const project = await this.project(workspaceId);
+    if (project) return {designs:Object.values(project.snapshot.designSystems).map(system=>({path:system.designReference,revision:project.snapshot.revision,implementation:[system.projectPath]})).sort((a,b)=>a.path.localeCompare(b.path)),truncated:false};
     const base=await this.workspaces.context(workspaceId),listing=await base.tree('',16),history=await this.accepted(workspaceId);
     const paths=new Set([...listing.entries.filter(e=>e.type==='file').map(e=>e.path),...Object.keys(history.files).filter(p=>p.startsWith(history.layout.root+'/')).map(p=>p.slice(history.layout.root.length+1))]);
     const designs:Omit<ResolvedDesign,'content'|'documents'>[]=[];
@@ -85,6 +122,11 @@ export class DesignService {
     return {designs:designs.sort((a,b)=>a.path.localeCompare(b.path)),truncated:listing.truncated};
   }
   async inspect(workspaceId:string,input:unknown):Promise<ContextFile & {design:DesignPart|null;designIssue:string|null}>{
+    const project = await this.project(workspaceId);
+    if (project) {
+      const resolved = await this.projectRead(workspaceId,input,project);
+      return {path:resolved.path,content:resolved.content,size:Buffer.byteLength(resolved.content),revision:resolved.revision,updatedAt:project.snapshot.refreshedAt,current:true,author:{type:'external'},reason:'Current filesystem design',design:resolved,designIssue:null};
+    }
     return this.inspectAccepted(workspaceId,input,await this.accepted(workspaceId));
   }
   private async inspectAccepted(workspaceId:string,input:unknown,history:Awaited<ReturnType<DesignService['accepted']>>):Promise<ContextFile & {design:DesignPart|null;designIssue:string|null}>{
@@ -113,6 +155,8 @@ export class DesignService {
     }catch(error){if(!(error instanceof AppError)||error.status>=500)throw error;return {...metadata,design:null,designIssue:error.message};}
   }
   async read(workspaceId:string,input:unknown):Promise<ResolvedDesign>{
+    const project = await this.project(workspaceId);
+    if (project) return this.projectRead(workspaceId,input,project);
     return this.readAccepted(workspaceId,input,await this.accepted(workspaceId));
   }
   private async readAccepted(workspaceId:string,input:unknown,history:Awaited<ReturnType<DesignService['accepted']>>):Promise<ResolvedDesign>{
@@ -124,6 +168,13 @@ export class DesignService {
   /** Working roots include all accepted descendant nodes, never Markdown topic directories. */
   async working(workspaceId:string,references:readonly string[]):Promise<ResolvedDesign[]>{
     if(!references.length)return [];
+    const project = await this.project(workspaceId);
+    if (project) {
+      const roots = await Promise.all(references.map(reference=>this.projectRead(workspaceId,reference,project)));
+      const paths = roots.map(root=>projectNode(root.path));
+      const selected = Object.values(project.snapshot.designSystems).filter(system=>paths.some(path=>path === '.' || system.projectPath === path || system.projectPath.startsWith(path+'/')));
+      return Promise.all(selected.sort((a,b)=>a.designReference.localeCompare(b.designReference)).map(system=>this.projectRead(workspaceId,system.designReference,project)));
+    }
     const history=await this.accepted(workspaceId);
     const roots=await Promise.all(references.map(path=>this.readAccepted(workspaceId,path,history)));
     const selected=new Map(roots.map(design=>[design.path.toLowerCase(),design]));

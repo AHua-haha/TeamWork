@@ -94,6 +94,7 @@ export class MemberConfigService {
     });
   }
   private async plan(workspaceId: string, leadId: string, origin: 'pending' | 'committed'): Promise<Plan> {
+    await this.workspace.designs.refresh(workspaceId);
     const all = await this.team.all(workspaceId), active = all.filter(member => member.value.retiredAt === null);
     const activation = await this.team.activation(workspaceId);
     const configurations: Plan['configurations'] = [];

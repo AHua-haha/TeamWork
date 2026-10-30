@@ -7,6 +7,7 @@ import { ProjectFiles } from './project-files.js';
 import { inspectManagedState, type WorkspaceInitialization } from './workspace-initialization.js';
 import { prepareWorkspace } from '../workspace-bootstrap.js';
 import { workspaceContext } from './project-context.js';
+import { ContextBaseManager } from './context-base/index.js';
 import { missing, sha256 } from '../text.js';
 import { AppError, identity } from '../agent/data/model.js';
 import type { RunSettings } from '../team/data/config.js';
@@ -22,6 +23,7 @@ const within = (folder: string, path: string) => path === folder || path.startsW
 /** Registers workspaces and opens each one's context base on first use. */
 export class WorkspaceService {
   private readonly bases = new Map<string, Promise<ContextBase>>();
+  private readonly contextManagers = new Map<string, ContextBaseManager>();
   private readonly records = new Map<string, WorkspaceRecord>();
   private creating: Promise<unknown> = Promise.resolve();
   private closed = false;
@@ -111,6 +113,14 @@ export class WorkspaceService {
     return opening;
   }
 
+  /** Filesystem-owned metadata index; callers explicitly refresh it. No file-history/SQL initialization. */
+  async contextManager(workspaceId: string): Promise<ContextBaseManager> {
+    const record = await this.record(workspaceId);
+    let manager = this.contextManagers.get(workspaceId);
+    if (!manager) {manager = new ContextBaseManager(record.directory);this.contextManagers.set(workspaceId,manager);}
+    return manager;
+  }
+
   async files(workspaceId: string): Promise<ProjectFiles> {
     return new ProjectFiles((await this.record(workspaceId)).directory);
   }
@@ -180,6 +190,8 @@ export class WorkspaceService {
     await this.creating;
     await Promise.allSettled([...this.bases.values()].map(async opening => (await opening).close()));
     this.bases.clear();
+    await Promise.all([...this.contextManagers.values()].map(manager=>manager.close()));
+    this.contextManagers.clear();
   }
 
   private assertOpen(): void {

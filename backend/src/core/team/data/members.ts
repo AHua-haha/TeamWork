@@ -3,7 +3,6 @@ import { emptyRunSettings, keys, obj, validateRunSettings, type ConfigService, t
 import type { DesignService } from '../../workspace/design.js';
 import {emptyDesignScope, parseDesignScope, type DesignScope} from './assignment.js';
 import {restoredDesignScope, upgradeMemberManifestFile, upgradeMemberManifest, upgradeMemberDirectory} from './member-config-migration.js';
-import { resolveAssignment } from '../member-workspace.js';
 import { AppError } from '../../agent/data/model.js';
 import { generatedSource, migrateMemberSource, relocateMemberSource, type MemberConfigSource } from './member-config.js';
 import type { RunConfigSource } from './config.js';
@@ -258,7 +257,7 @@ export class TeamService {
       if (member.value.settings.toolOptionIds.length) issues[index]!.push('Workspace member tools are supplied by React Harnesses; clear catalog tool selections');
       const scope = member.value.designScope;
       if (!member.value.lead && !scope.working.length && !scope.dependencies.length) issues[index]!.push('Configure a design scope for this member');
-      try { await resolveAssignment(this.designs, member.workspaceId, member.value.designScope); }
+      try { await this.designs.checkAssignment(member.workspaceId,scope.working,scope.dependencies); }
       catch (error) {
         if (!(error instanceof AppError) || error.status >= 500) throw error;
         issues[index]!.push(`Assigned design is unavailable: ${error.message}`);

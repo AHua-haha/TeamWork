@@ -7,7 +7,7 @@ import {WorkspaceService} from '../src/core/workspace/workspace.js';
 import {migratedBaseline, migratedReference, projectNode, workspaceContext} from '../src/core/workspace/project-context.js';
 import {TeamSystem} from '../src/core/team/team-system.js';
 import {MemoryStore, testModels, testModelValidator, withFolder} from './memory-store.js';
-import {stubConfig} from './team-fixture.js';
+import {FakeRuntime,stubConfig} from './team-fixture.js';
 const code = (expected: string) => (error: unknown) => (error as {code?: string}).code === expected;
 
 async function withProject(action: (f: {directory:string; workspaceId:string; store:MemoryStore; service:WorkspaceService; designs:DesignService})=>Promise<void>) {
@@ -39,6 +39,9 @@ test('fresh initialization creates project-named context with DESIGN only and a 
 }));
 
 test('only DESIGN entries define parts; contracts and internal notes are optional and do not create children',()=>withProject(async f=>{
+  await mkdir(join(f.directory,'backend/src/agents'),{recursive:true});
+  await mkdir(join(f.directory,'backend/src/agent'),{recursive:true});
+  await writeFile(join(f.directory,'backend/src/agent/agent.ts'),'Agent source');
   const base = await f.service.context(f.workspaceId);
   for(const [path,content] of Object.entries({
     'backend/src/agent/_ctx/DESIGN.md':'# Agent design',
@@ -65,6 +68,7 @@ test('initialization preserves existing project context bytes, optional missing 
   const content = '# Existing user design\n';
   await mkdir(join(root,'_ctx'),{recursive:true}); await writeFile(join(root,'_ctx/DESIGN.md'),content);
   await mkdir(join(root,'src/foo.ts.ctx'),{recursive:true});await writeFile(join(root,'src/foo.ts.ctx/DESIGN.md'),'# File');
+  await mkdir(join(directory,'src'),{recursive:true});await writeFile(join(directory,'src/foo.ts'),'Source');
   await mkdir(join(directory,'.rsi/members'),{recursive:true});await writeFile(join(directory,'.rsi/members/old.json'),'old');
   const store = new MemoryStore(), service = new WorkspaceService(store,testModelValidator);
   try {
@@ -126,7 +130,7 @@ test('failed registration restores non-context metadata and preserves pre-existi
   } finally {await service.close();}
 }));
 
-test('an existing workspace reopens after physical migration with old assignments, original acceptance and durable context history intact',()=>withFolder(async folder=>{
+test('current filesystem design supersedes old accepted bytes without rewriting assignments or prior file history',()=>withFolder(async folder=>{
   const directory=join(folder,'project'),store=new MemoryStore();
   await mkdir(join(directory,'.rsi/context/design'),{recursive:true});
   await writeFile(join(directory,'.rsi/context/design/design.md'),'# Accepted user design');
@@ -143,11 +147,47 @@ test('an existing workspace reopens after physical migration with old assignment
   const second=new WorkspaceService(store,testModelValidator);
   try {
     const designs=new DesignService(second);
-    assert.equal((await designs.read(workspaceId,'metadata.json')).content,'# Accepted user design');
-    assert.equal((await designs.read(workspaceId,'_ctx/DESIGN.md')).content,'# Accepted user design');
+    assert.equal((await designs.read(workspaceId,'metadata.json')).content,'# Pending user design');
+    assert.equal((await designs.read(workspaceId,'_ctx/DESIGN.md')).content,'# Pending user design');
     const base=await second.context(workspaceId);
     assert.equal((await base.read({path:'_ctx/DESIGN.md'})).content,'# Pending user design');
     assert.equal((await base.read({revision:prior.revision})).content,'# Accepted user design');
     assert.deepEqual([...store.members.values()][0],leadBefore);
   } finally {await second.close();}
+}));
+
+test('project context APIs use one resident filesystem index without SQL history or accepted baselines',()=>withProject(async f=>{
+  const manager=await f.service.contextManager(f.workspaceId);
+  assert.equal(await f.service.contextManager(f.workspaceId),manager);
+  f.store.loadContext=async()=>{throw new Error('Unexpected SQL context load');};
+  f.store.getGitBaseline=async()=>{throw new Error('Unexpected SQL Git baseline');};
+  const snapshot=await manager.refresh();
+  manager.loadDesign=async()=>{throw new Error('Unexpected document body load for readiness');};
+  assert.equal((await f.designs.list(f.workspaceId)).designs.length,1);
+  await f.designs.checkAssignment(f.workspaceId,['_ctx/DESIGN.md'],[]);
+  assert.equal(manager.snapshot(),snapshot);
+}));
+
+test('member activation explicitly refreshes metadata, while repeated run prompt requests reuse the assembled guidance',()=>withProject(async f=>{
+  const manager=await f.service.contextManager(f.workspaceId),first=await manager.refresh();
+  const team=new TeamSystem(f.store,f.service,stubConfig),runtime=new FakeRuntime(f.store);team.attach(runtime);
+  try{
+    const lead=(await team.service.team(f.workspaceId)).members[0]!;
+    await writeFile(join(f.directory,'.rsi/my-project/_ctx/README.md'),'---\nsummary: Updated before activation\n---\nContract');
+    const accepted=await team.runner.postUser(f.workspaceId,'Hello');
+    assert.notEqual(manager.snapshot()!.revision,first.revision);
+    assert.equal(manager.snapshot()!.designSystems['.']!.metadata.summary,'Updated before activation');
+    const policy=team.policy({buildRequest:()=>{throw new Error('Not used');}});
+    const factories=await policy.createReactHarnessFactories!(lead.memberId);
+    const factory=factories.find(factory=>factory.harnessId==='default')!;
+    const harness=factory.create({revision:0,data:{}},async()=>{throw new Error('Not used');});
+    const original=team.memberWorkspace.guidance.bind(team.memberWorkspace);let calls=0;
+    team.memberWorkspace.guidance=async id=>{calls++;return original(id);};
+    const scope={runId:accepted.runs[0]!.runId} as Parameters<NonNullable<typeof harness.systemPrompt>>[0];
+    const initial=await harness.systemPrompt!(scope);
+    await writeFile(join(f.directory,'.rsi/my-project/_ctx/DESIGN.md'),'# Next activation only');
+    assert.equal(await harness.systemPrompt!(scope),initial);assert.equal(calls,1);
+    await harness.systemPrompt!({...scope,runId:'next-run'});assert.equal(calls,2);
+    runtime.end(lead.memberId,'Done');
+  }finally{await team.closeMaintenance();await team.runner.close();}
 }));
