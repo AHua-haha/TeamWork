@@ -4,7 +4,7 @@ import { AgentMessageContext } from '../../src/core/agent/data/context.js';
 import { decode, encode } from '../../src/core/codec.js';
 import { MySqlStorage } from '../../src/storage/mysql.js';
 import { acceptFiles,initGit } from '../git-fixture.js';
-import { gitText } from '../../src/core/workspace/workspace-git.js';
+import { gitText } from '../native-git.js';
 import { seedDesign } from '../design-fixture.js';
 import { testModels, testModelValidator } from '../memory-store.js';
 import { emptyDesignScope } from '../../src/core/team/data/assignment.js';
@@ -1161,7 +1161,7 @@ test('React Harnesses execute shared project tools and native commits while memb
     assert.deepEqual(JSON.parse(storedBundle.files['member.json']!).designScope, { working: ['metadata.json'], dependencies: [] });
     const leadFiles = await team.memberWorkspace.files(lead.memberId);
     await writeFile(join(leadFiles.root, '.rsi/members/pending/prompts/member.md'), 'UNSUBMITTED prompt');
-    assert.equal((await team.configuration.accepted(workspaceId, activeWorker.id)).digest, storedBundle.digest);
+    assert.equal((await team.configuration.activeSource(workspaceId, activeWorker.id)).digest, storedBundle.digest);
     assert.ok(!workerStep.request.tools.some(tool => ['read_design', 'save_design', 'assign_member', 'create_member'].includes(tool.definition.name)));
     assert.match(workerStep.request.context.systemPrompt!, /Pending design refinement/);
 
@@ -1187,7 +1187,6 @@ test('React Harnesses execute shared project tools and native commits while memb
     assert.equal(await readFile(join(env.root, 'src/result.txt'), 'utf8'), 'Done');
     assert.equal(await readFile(join(folder, 'project/src/result.txt'),'utf8'),'Done');
     assert.match(await gitText(env.root,['log','--oneline']),/Implement/);
-    const pending=await team.changes(workspaceId);assert.deepEqual(pending.design.changes,[]);
     await gitText(env.root,['reset']);await acceptFiles({team,workspaceId,lead},'.rsi/project','User accepted refinement');
     const followed = await collect(runtime.follow(lead.memberId, { runId: run.runId }));
     assert.equal(followed.at(-1)?.type, 'end');
@@ -1211,7 +1210,7 @@ test('workspace registry survives reopening without context SQL state and refuse
   await assert.rejects(store.workspaces.createWorkspace(created,sha256('different'),newLead(created.workspaceId)),code('workspace_exists'));
   assert.equal((await reopened.team.listMembers(created.workspaceId)).length,1);
   assert.deepEqual(await reopened.team.getMemberActivation(created.workspaceId),await store.team.getMemberActivation(created.workspaceId));
-  const baseline=await reopened.workspaces.getMemberBaseline(created.workspaceId);assert.ok(baseline!.members[lead.value.configuration!.path]);assert.equal('design' in baseline!,false);
+  assert.equal('getMemberBaseline' in reopened.workspaces,false);
  }finally{await reopened.close();await rm(folder,{recursive:true,force:true});}
 });
 
@@ -1718,7 +1717,7 @@ test('old prototype group history imports once in publication order using the ol
   } finally { await f.close(); }
 });
 
-test('member file activation atomically replaces/updates the team, retains history and leaves pending bytes inactive', { timeout: 30_000 }, async () => {
+test('member file activation atomically replaces/updates the team using current bytes while retaining message history', { timeout: 30_000 }, async () => {
   const f = await groupFixture();
   try {
     const accepted = await f.team.runner.postUser(f.workspaceId, '@Backend establish history');
@@ -1727,8 +1726,8 @@ test('member file activation atomically replaces/updates the team, retains histo
     for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve));
     const oldContext = await store.agents.getContext(f.backend.memberId);
     const files = await f.team.memberWorkspace.files(f.lead.memberId);
-    const backendSource = await f.team.configuration.accepted(f.workspaceId, f.backend.memberId);
-    const frontendSource = await f.team.configuration.accepted(f.workspaceId, f.frontend.memberId);
+    const backendSource = await f.team.configuration.activeSource(f.workspaceId, f.backend.memberId);
+    const frontendSource = await f.team.configuration.activeSource(f.workspaceId, f.frontend.memberId);
     const { dirname, join: pathJoin } = await import('node:path');
     await rm(pathJoin(files.root, backendSource.path));
     await files.write.writeFile(pathJoin(files.root, frontendSource.path), JSON.stringify({ ...JSON.parse(frontendSource.files['member.json']!), responsibility: 'Updated atomically' }));
@@ -1738,24 +1737,24 @@ test('member file activation atomically replaces/updates the team, retains histo
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/prompts/member.md'), 'Accepted prompt');
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
     await acceptFiles(f);
-    const review = await f.team.reviewConfiguration(f.workspaceId);
+    const review = await f.team.configuration.validate(f.lead.memberId,'.rsi/members');
     assert.deepEqual(review.changes.map(c => c.type).sort(), ['create','delete','update']);
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/prompts/member.md'), 'Pending after commit');
-    await f.team.activateConfiguration(f.workspaceId, review.revision, review.digest);
+    await f.team.activateConfiguration(f.workspaceId);
     const replacement = (await f.team.service.byName(f.workspaceId, 'Replacement'))!;
     const marker = await store.team.getMemberActivation(f.workspaceId);
-    assert.equal(marker!.revision, review.revision);
+    assert.match(marker!.revision,/^[0-9a-f-]{36}$/);
     const reopenedStore = new CoreData(new MySqlStorage(databaseUrl!));
     try { assert.deepEqual(await reopenedStore.team.getMemberActivation(f.workspaceId), marker); }
     finally { await reopenedStore.close(); }
-    assert.notEqual(replacement.id, f.backend.memberId); assert.equal(replacement.value.settings.prompt, 'Accepted prompt');
+    assert.notEqual(replacement.id, f.backend.memberId); assert.equal(replacement.value.settings.prompt, 'Pending after commit');
     assert.equal((await f.team.member(f.workspaceId, f.frontend.memberId)).responsibility, 'Updated atomically');
     assert.ok((await store.team.getMember(f.backend.memberId))!.value.retiredAt !== null);
     assert.deepEqual(await store.agents.getContext(f.backend.memberId), oldContext);
     assert.equal((await store.agents.getContext(replacement.id)).entries.length, 0);
     assert.equal((await f.team.runner.snapshot(f.workspaceId)).runs.length, 1, 'activation starts no runs');
     const reopened = new TeamSystem(store.team, workspaces, config); reopened.attach(f.runtime);
-    try { assert.equal((await reopened.configuration.accepted(f.workspaceId, replacement.id)).acceptedRevision, review.revision); }
+    try { assert.equal((await reopened.configuration.activeSource(f.workspaceId, replacement.id)).digest,replacement.value.configuration!.digest); }
     finally { await reopened.runner.close(); }
   } finally { await f.close(); }
 });
@@ -1799,7 +1798,7 @@ test('fresh bootstrap and administrative reset persist atomic baselines, preserv
     assert.equal('context' in workspace,false);
     const lead = (await isolated.team.listMembers('fresh'))[0]!;
     assert.deepEqual(lead.value.designScope.working,['_ctx/DESIGN.md']);
-    assert.equal((await isolated.team.getMemberActivation('fresh'))!.revision,lead.value.configuration!.acceptedRevision);
+    assert.match((await isolated.team.getMemberActivation('fresh'))!.revision,/^[0-9a-f-]{36}$/);
     const reopened = new CoreData(new MySqlStorage(url.toString()));
     try {
       assert.deepEqual(await reopened.team.getMemberActivation('fresh'),await isolated.team.getMemberActivation('fresh'));
@@ -2897,8 +2896,8 @@ test('adoption preserves filesystem context and fresh lead atomically after revi
     assert.equal((await store.agents.getState(members[0]!.id)).historyPosition,0);
     assert.deepEqual(await readdir(join(root,'members')),[members[0]!.value.name]);
     const activation=await store.team.getMemberActivation(created.workspaceId);
-    assert.equal(activation?.revision,members[0]!.value.configuration?.acceptedRevision);
-    const baseline=await store.workspaces.getMemberBaseline(created.workspaceId);assert.equal('design' in baseline!,false);
+    assert.match(activation!.revision,/^[0-9a-f-]{36}$/);
+    assert.equal('getMemberBaseline' in store.workspaces,false);
     assert.equal(await readFile(join(directory,'src/api/index.ts'),'utf8'),'implementation');
   }finally{await rm(directory,{recursive:true,force:true});}
 });
@@ -3106,9 +3105,9 @@ test('group envelope migration preserves stable records and identities, refreshe
     await writeFile(join(root,dirname(legacy),'prompts/member.md'),'Unaccepted prompt');
     await f.team.initialize();
     const member=(await store.team.getMember(stored.id))!;
-    assert.equal(member.value.configuration!.path,source.path);assert.deepEqual(member.value.configuration!.legacyPaths,[legacy]);
+    assert.equal(member.value.configuration!.path,source.path);assert.equal('legacyPaths' in member.value.configuration!,false);
     assert.equal(await readFile(join(root,dirname(source.path),'prompts/member.md'),'utf8'),'Unaccepted prompt');
-    assert.deepEqual((await f.team.reviewConfiguration(f.workspaceId)).changes,[],'old committed paths resolve to the same members');
+    assert.equal((await f.team.configuration.validate(f.lead.memberId,'.rsi/members')).changes.length,1,'current prompt files are validated independently of old commits');
     const reopened=new CoreData(new MySqlStorage(databaseUrl!));
     try{assert.deepEqual((await reopened.team.inspectGroupContext(f.workspaceId)).entries,original);assert.deepEqual(await reopened.agents.getContext(f.backend.memberId),refreshed);assert.deepEqual(await reopened.team.getMember(stored.id),member);}
     finally{await reopened.close();}
@@ -3275,11 +3274,11 @@ test('member design-scope migration persists canonical rows and snapshots withou
   await f.team.service.initialize();
   const migrated=(await store.team.getMember(current.id))!;
   assert.equal('harness' in migrated.value,false);assert.deepEqual(migrated.value.designScope,designScope);assert.deepEqual(migrated.value.settings,current.value.settings);
-  assert.equal(migrated.value.configuration!.formatVersion,5);assert.equal(migrated.value.configuration!.previous!.files['member.json'],oldText);
+  assert.equal(migrated.value.configuration!.formatVersion,5);assert.equal('previous' in migrated.value.configuration!,false);
   assert.equal('execute' in JSON.parse(await readFile(join(root,source.path),'utf8')),false);
   assert.deepEqual(await store.agents.getContext(current.id),context);assert.deepEqual(await store.agents.runMessages(current.id,accepted.runs[0]!.runId),history);assert.deepEqual(await store.team.chatSnapshot(f.workspaceId),chat);
   assert.equal(await gitText(root,['rev-parse','HEAD']),head);
-  const review=await f.team.currentConfiguration(f.workspaceId);assert.equal(review.status.hasPending,false);assert.equal(review.activation.hasChanges,false);assert.equal(review.activation.valid,true,JSON.stringify(review.activation.issues));
+  const review=await f.team.configuration.validate(f.lead.memberId,'.rsi/members');assert.equal(review.valid,true,JSON.stringify(review.issues));assert.deepEqual(review.changes,[]);
   await f.team.service.initialize();assert.deepEqual(await store.team.getMember(current.id),migrated);
   const reopened=new CoreData(new MySqlStorage(databaseUrl!));
   try {assert.deepEqual(await reopened.team.getMember(current.id),migrated);assert.deepEqual(await reopened.agents.getContext(current.id),context);}finally{await reopened.close();}
@@ -3306,4 +3305,28 @@ test('direct preparation metadata updates journal independently and recover with
   await assert.rejects(reopened.agents.patchCompactionMetadata(agentId,state.id,updates),code('context_conflict'));
  }finally{await reopened.agents.releaseRuntime();await reopened.close();}
  await store.agents.finishRun(agentId,run.runId,'failed');
+});
+
+test('current-file activation persists the active snapshot without Git and later invalid edits leave it unchanged',async()=>{
+ const f=await groupFixture();
+ try{
+  const root=await f.team.memberWorkspace.root(f.lead.memberId);
+  await assert.rejects(stat(join(root,'.git')),code('ENOENT'));
+  const source=await f.team.configuration.activeSource(f.workspaceId,f.backend.memberId);
+  const manifest=JSON.parse(source.files['member.json']!);
+  await writeFile(join(root,source.path),JSON.stringify({...manifest,responsibility:'Current files, no commit'}));
+  const prompt=join(root,source.path.replace('member.json','prompts/member.md'));
+  await writeFile(prompt,'Current file prompt');
+  const result=await f.team.activateConfiguration(f.workspaceId);assert.match(result.revision,/^[0-9a-f-]{36}$/);
+  const active=(await store.team.getMember(f.backend.memberId))!;
+  assert.equal(active.value.responsibility,'Current files, no commit');assert.equal(active.value.settings.prompt,'Current file prompt');
+  assert.equal('acceptedRevision' in active.value.configuration!,false);
+  await writeFile(prompt,'Not activated');
+  const reopened=new CoreData(new MySqlStorage(databaseUrl!));
+  try{assert.deepEqual(await reopened.team.getMember(f.backend.memberId),active);}finally{await reopened.close();}
+  await writeFile(join(root,source.path),'{invalid');
+  await assert.rejects(f.team.activateConfiguration(f.workspaceId),code('invalid_config'));
+  assert.deepEqual(await store.team.getMember(f.backend.memberId),active);
+  await assert.rejects(stat(join(root,'.git')),code('ENOENT'));
+ }finally{await f.close();}
 });

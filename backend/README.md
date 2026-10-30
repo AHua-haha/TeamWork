@@ -86,7 +86,7 @@ curl -s http://127.0.0.1:3100/workspaces -H 'Content-Type: application/json' -d 
 
 Workspace, models and initialized lead persist atomically; invalid model settings create no directory. `GET /workspaces/:id/models` returns `{revision,value,issues}`; `PUT` takes `{revision,value}` and rejects stale writes. **Team → Workspace models** edits this record. Changing the default preserves existing member selections. New members use the workspace default rather than copying the lead, and `list_models` exposes workspace choices to the lead. A file submission can select these models or retain an existing selection removed from the list. Provider validation still applies.
 
-Startup initializes legacy workspace choices once from existing member selections. Saving a default initializes a legacy lead only when it has no assigned provider/model. Member inspection remains read-only. Group-chat avatars provide user model settings; inspect current member files/status through the separate configuration review operations. Separate user commit and activation controls are available in **Configuration changes**. Existing file review/history/acceptance APIs retain their behavior.
+Startup initializes legacy workspace choices once from existing member selections. Saving a default initializes a legacy lead only when it has no assigned provider/model. Active-member inspection remains read-only. Group-chat avatars provide user model settings. The Member activation panel validates current files and stores the active configuration directly, independently of Git. Configuration-file inspection and history APIs are removed.
 
 
 ### User model settings for a member
@@ -109,10 +109,7 @@ Git commits do not activate member files. Configuration validation/review and us
 
 | Endpoint | Result |
 | --- | --- |
-| GET `/workspaces/:id/team/changes` | Committed-to-current design/member file groups |
-| GET `/workspaces/:id/team/configuration/current` | Current configuration/status and active-to-current diff |
-| GET `/workspaces/:id/team/configuration?source=pending|committed` | Validation/change plan |
-| POST `/workspaces/:id/team/configuration/activate` with `{revision,digest}` | Atomic valid committed-member activation while the whole team is idle |
+| POST `/workspaces/:id/team/configuration/activate` with `{}` | Validate current member files and atomically store the active configuration while the whole team is idle |
 
 Newer pending files are excluded from activation. The old commit-approvals routes and scope commit/restore/history operations are unavailable.
 
@@ -256,7 +253,7 @@ Complete design context describes purpose/responsibilities/boundaries, Interface
 
 Working/dependency design assignments remain responsibility and context guidance. Every active member can use the available file, search, Bash, web and business tools without permission gates; design and dependency labels do not constrain filesystem access. Git history is ordinary project history.
 
-Raw user context mutation can edit design/metadata, but refuses implementation context and mutations under implement/. Semantic design inspection returns metadata plus ordered Markdown documents, aggregate content and a revision covering all design bytes. Members see the same implementation context directly. Accepted design snapshots supply assignment guidance; neither accepted nor pending mappings control tool permission. Prompt changes require restart (and rebuild for compiled deployments). Existing old-layout data needs explicit repair/reset before new node assignments can run.
+Design discovery uses current filesystem metadata and documents; neither a SQL snapshot nor project Git decides the current context. Assignments are guidance rather than tool permission rules. Prompt changes require restart (and rebuild for compiled deployments).
 
 ### Reset a workspace conversation
 
@@ -264,21 +261,17 @@ The group-chat header's trash control confirms `POST /workspaces/:id/team/chat/r
 
 Timeline reads add `resetCursor`; shared-history reads add `resetPosition` (initially 0). Follow streams emit a version-1 `reset` before new data when the supplied cursor precedes the durable boundary, then synchronize again. Timeline reset payloads carry `cursor`; shared-message reset payloads carry `position`. Discard records at/before the boundary and ignore delayed old acknowledgements. Shared counters remain monotonic; fresh private member history starts at zero. Backend startup adds the boundary columns to existing databases.
 
-### Unified pending change review
+### Direct member activation
 
-Changes contains read-only committed-to-current design/member diffs and separate idle member activation. Commit approval lives above the composer; Review opens the exact candidate in the right panel.
+The Member activation panel provides one explicit Activate members action. `POST /workspaces/:workspaceId/team/configuration/activate` accepts `{}`. The backend captures the complete current `.rsi/members/` files and referenced prompts, validates create/update/delete semantics and stores the active configuration atomically. The entire team must be idle, including admission and finalization. Invalid files leave the active team unchanged; a later file edit has no effect until another activation. Existing identity, assignment/update constraints and independent user model preferences remain intact.
 
-The old Harness resource inspection, scope review/commit/history/restore and Git approval routes are removed. Member designScope is direct responsibility guidance; current configuration review and separate activation remain.
+The response contains `{revision,changes,memberIds}`. `revision` is an opaque application activation UUID, never a Git commit/hash. Opening the panel performs no inspection or polling. The old configuration/current, pending/committed review and Changes inspection endpoints are removed. Active-member metadata/context/model settings remain available. Agents may use `validate_member_config` to check current files without activating them.
+
+Git belongs exclusively to the project and is operated directly by agents or users. There is no backend Git read/write layer, extra repository, scoped index/ref, checkpoint, accepted-file baseline, commit approval or Git-dependent activation rule. A workspace does not need a Git repository. Initialization persists the lead and initial active configuration, without a second file snapshot. Schema initialization drops obsolete context-history and baseline stores; startup discards historical Git revision/alias/history metadata from member snapshots while preserving their active configuration and message data.
 
 ### Sequential execution
 
 User routing and busy-recipient refusal are unchanged. User multi-mentions admit recipients in order, but only one executes at a time. Agent final responses may name at most one distinct member in the leading routing header; more than one is refused with private feedback. Waiting admitted runs keep the existing running state with step zero until execution. Stop/shutdown cancel waiting runs without tools or Git history. Different workspaces may run independently.
-
-### Fast Changes review
-
-GET /workspaces/:workspaceId/team/changes returns ordinary committed-to-current design/member file groups and committed-versus-active member status. It preserves staging and files, creates no checkpoints, and avoids full member validation/history enumeration. Per-file patches are bounded; invalid/binary/link/over-limit control files fail explicitly.
-
-Changes displays files immediately, coalesces overlapping refreshes and retains old content during refresh. When approved members differ from active, GET team/configuration?source=committed loads validation/digest separately; files do not wait for it. Approval and idle-team activation use the existing exact-state control endpoints. GET configuration/current remains the comprehensive inspection API for callers needing that data.
 
 ### Member conversation context
 
@@ -301,7 +294,7 @@ curl -X POST http://127.0.0.1:3100/workspaces/WORKSPACE_ID/team/chat/messages \
 
 An image-only multipart submission sets text to an empty string. Accepted user records include optional attachments [{id,name,mimeType,width,height,size}]. GET /workspaces/:id/team/chat/attachments/:imageId serves the prepared binary; history and SSE contain references rather than base64. Invalid images and unsupported triggered models refuse the entire publication. Stored pictures survive restart; resetting group chat removes them with its history. Later model requests that contain shared or tool-read images fail explicitly if their selected model lacks image input.
 
-Working design assignments include the named design part and accepted descendant design parts at real project-path boundaries. New references name `_ctx/DESIGN.md` or `<file-name>.ctx/DESIGN.md` relative to the project context root. The root includes every accepted design part; internal documents and optional README contracts create no child parts. Dependencies remain explicit. Assignments are work guidance, not tool permission gates. Explicit aliases can preserve existing member references without rewriting member records. Context files on disk are authoritative, without accepted-content baselines.
+Working design assignments include the named design part and descendant design parts at real project-path boundaries. New references name `_ctx/DESIGN.md` or `<file-name>.ctx/DESIGN.md` relative to the project context root. The root includes every design part; internal documents and optional README contracts create no child parts. Dependencies remain explicit. Assignments are work guidance, not tool permission gates. Explicit aliases can preserve existing member references without rewriting member records. Context files on disk are authoritative, without accepted-content baselines.
 
 ## Harness permission switch
 
@@ -313,7 +306,7 @@ Each Core business aggregates its in-memory schema, durable representation and r
 
 ### Member design assignment
 
-Member records and member.json use a direct `designScope: {working: string[], dependencies: string[]}` field. There is no member Harness configuration, command allowlist or derived implementation permission view. Startup migrates historical records/manifests without changing assignments, model preferences, prompts, Git history or message history; recorded old committed blobs remain readable for review. Newly authored obsolete fields are rejected. Detailed Harness inspection methods and routes are removed; member metadata/context/model settings and configuration review/activation remain.
+Member records and member.json use a direct `designScope: {working: string[], dependencies: string[]}` field. There is no member Harness configuration, command allowlist or derived implementation permission view. Startup migrates historical records/manifests without changing assignments, model preferences, prompts, Git history or message history; old Git revision/alias/history fields are discarded from active source metadata. Newly authored obsolete fields are rejected. Detailed Harness inspection methods and routes are removed; member metadata/context/model settings and direct current-file activation remains.
 
 ### React Harness directory and Agent data model
 
@@ -352,4 +345,4 @@ Includes are relative to the project root. Directories expand recursively; overl
 
 Default enumeration omits Git/RSI state, dependency directories and common generated/runtime directories. `excludedDirectories` can customize non-reserved exclusions. Default bounds are 50,000 project entries, 10,000 context entries, 64 KiB per metadata header, 1 MiB per loaded file, 200 included files and 4 MiB total consumer content. All limit options are positive integers; source paths and directory references are validated, and symbolic links are not traversed. A failed refresh leaves the prior published view intact. Concurrent refreshes are serialized. Close discards resident memory; a new manager reconstructs it from files with a new revision epoch.
 
-Team explicitly refreshes project-format context before recipient admission. New-format design lookup reads current filesystem documents without SQL/Git accepted-state fallback; metadata-only assignment checks avoid body loading. Purpose guidance assembles working designs and dependency consumer context once per run, with explicit file-reference hints when prompt content exceeds its display budget. Old context layouts are unsupported. The manager does not migrate or rewrite context documents or member snapshots. On backend schema initialization, obsolete context-history SQL tables and the old workspace sequence column are retired; member acceptance data is transferred to `workspace_member_baselines` before removing the mixed old baseline table. Workspace registrations/models, members/activation, Agent message/context/history and Team chat data remain intact. An unreadable old member baseline stops retirement before deleting its source table. No schema migration is executed merely by using the in-memory manager.
+Team explicitly refreshes project-format context before recipient admission. New-format design lookup reads current filesystem documents without SQL/Git accepted-state fallback; metadata-only assignment checks avoid body loading. Purpose guidance assembles working designs and dependency consumer context once per run, with explicit file-reference hints when prompt content exceeds its display budget. Old context layouts are unsupported. The manager does not migrate or rewrite context documents or member snapshots. On backend schema initialization, obsolete context-history SQL tables and the old workspace sequence column are retired; the old `workspace_git_baselines` and `workspace_member_baselines` tables are removed without another baseline store. Workspace registrations/models, members/activation, Agent message/context/history and Team chat data remain intact. No schema migration is executed merely by using the in-memory manager.

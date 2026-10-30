@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
-import type {WorkspaceStore,WorkspaceRecord,MemberBaseline} from './data/model.js';
+import type {WorkspaceStore,WorkspaceRecord} from './data/model.js';
 import { ProjectFiles } from './project-files.js';
 import { inspectManagedState, type WorkspaceInitialization } from './workspace-initialization.js';
 import { prepareWorkspace } from '../workspace-bootstrap.js';
@@ -26,11 +26,6 @@ export class WorkspaceService {
   private closed = false;
 
   constructor(private readonly store: WorkspaceStore, private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> }) {}
-
-  async memberBaseline(workspaceId: string): Promise<MemberBaseline> {
-    await this.record(workspaceId);
-    return await this.store.getMemberBaseline(workspaceId) ?? this.store.initializeMemberBaseline(workspaceId,{members:await this.store.initialMemberFiles?.(workspaceId)??{}});
-  }
 
   async models(workspaceId: string): Promise<WorkspaceModelsView> {
     await this.record(workspaceId);

@@ -5,7 +5,7 @@ import {dirname,join} from 'node:path';
 import {generatedSource,sourceBundle} from '../src/core/team/data/member-config.js';
 import {memberFields,type MemberRecord,type MemberView} from '../src/core/team/data/members.js';
 import {upgradeMemberManifest} from '../src/core/team/data/member-config-migration.js';
-import {gitText} from '../src/core/workspace/workspace-git.js';
+import {gitText} from './native-git.js';
 import {initGit} from './git-fixture.js';
 import {withTeam,worker,code,type Fixture} from './team-fixture.js';
 
@@ -44,18 +44,18 @@ test('startup migrates records and manifests without activating pending edits, r
  await f.team.initialize();
  const active=(await f.team.service.find(member.memberId))!,source=active.value.configuration!;
  assert.equal(active.id,member.memberId);assert.deepEqual(active.value.designScope,member.designScope);assert.equal('harness' in active.value,false);assert.equal('execute' in JSON.parse(source.files['member.json']!),false);
- assert.equal(source.formatVersion,5);assert.equal(source.previous!.files['member.json'],old.raw);assert.equal(source.files['prompts/member.md'],old.source.files['prompts/member.md']);
+ assert.equal(source.formatVersion,5);assert.equal('previous' in source,false);assert.equal(source.files['prompts/member.md'],old.source.files['prompts/member.md']);
  assert.equal(active.value.responsibility,member.responsibility);assert.deepEqual(f.store.agentContexts.get(member.memberId),retained);
  const pending=JSON.parse(await readFile(join(f.directory,source.path),'utf8'));assert.equal(pending.responsibility,'Pending responsibility');assert.equal('execute' in pending,false);
  assert.equal(await readFile(join(f.directory,dirname(source.path),'prompts/member.md'),'utf8'),'Pending prompt');
  assert.equal(await gitText(f.directory,['rev-parse','HEAD']),head);assert.match(await gitText(f.directory,['show',`HEAD:${source.path}`]),/allowedCommands/);
- const review=await f.team.currentConfiguration(f.workspaceId);assert.equal(review.status.valid,true);assert.equal(review.status.hasPending,true);assert.equal(review.activation.valid,true);assert.equal(review.activation.hasChanges,false);
+ const review=await f.team.configuration.validate(f.lead.memberId,'.rsi/members');assert.equal(review.valid,true);assert.equal(review.changes.length,1);
  const before=await f.team.service.all(f.workspaceId);await f.team.initialize();assert.deepEqual(await f.team.service.all(f.workspaceId),before);
  // The historical converter only accepts recorded old blobs, not newly authored obsolete config.
  await writeFile(join(f.directory,source.path),JSON.stringify({...pending,responsibility:'New change',execute:{allowedCommands:[]}}));
  assert.equal((await f.team.configuration.validate(f.lead.memberId,'.rsi/members')).valid,false);
  await gitText(f.directory,['add','-f','-A','--','.rsi/members']);await gitText(f.directory,['commit','-m','Invalid new legacy field']);
- assert.equal((await f.team.reviewConfiguration(f.workspaceId)).valid,false);
+ assert.equal((await f.team.configuration.validate(f.lead.memberId,'.rsi/members')).valid,false);
 }));
 
 test('pre-upgrade committed new member remains reviewable and requires explicit activation',()=>withTeam(async f=>{
@@ -66,9 +66,9 @@ test('pre-upgrade committed new member remains reviewable and requires explicit 
  await initGit(f);await gitText(f.directory,['add','-f','-A','--','.rsi/members']);await gitText(f.directory,['commit','-m','Old pending new member']);
  await f.team.initialize();
  assert.equal(await f.team.service.byName(f.workspaceId,'Planned'),undefined);
- const review=await f.team.reviewConfiguration(f.workspaceId);assert.equal(review.valid,true,JSON.stringify(review.issues));
+ const review=await f.team.configuration.validate(f.lead.memberId,'.rsi/members');assert.equal(review.valid,true,JSON.stringify(review.issues));
  assert.deepEqual(review.changes.map(change=>[change.type,change.name]),[['create','Planned']]);
- await f.team.activateConfiguration(f.workspaceId,review.revision,review.digest);
+ await f.team.activateConfiguration(f.workspaceId);
  const activated=(await f.team.service.byName(f.workspaceId,'Planned'))!;assert.deepEqual(activated.value.designScope,planned.designScope);assert.equal('execute' in JSON.parse(activated.value.configuration!.files['member.json']!),false);
  assert.equal('execute' in JSON.parse(await readFile(join(f.directory,plannedOld.source.path),'utf8')),false);
  assert.match(await gitText(f.directory,['show',`HEAD:${plannedOld.source.path}`]),/allowedCommands/);

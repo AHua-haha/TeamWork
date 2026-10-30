@@ -2,13 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { emptyRunSettings, keys, obj, validateRunSettings, type ConfigService, type ResolvedRunConfig, type RunSettings } from './config.js';
 import type { DesignService } from '../../workspace/design.js';
 import {emptyDesignScope, parseDesignScope, type DesignScope} from './assignment.js';
-import {restoredDesignScope, upgradeMemberManifestFile, upgradeMemberManifest, upgradeMemberDirectory} from './member-config-migration.js';
+import {restoredDesignScope, upgradeMemberManifestFile, upgradeMemberDirectory} from './member-config-migration.js';
 import { AppError } from '../../agent/data/model.js';
 import { generatedSource, migrateMemberSource, relocateMemberSource, type MemberConfigSource } from './member-config.js';
 import type { RunConfigSource } from './config.js';
 import type { WorkspaceService } from '../../workspace/workspace.js';
-import {committedFiles} from '../../workspace/workspace-git.js';
-import {sha256} from '../../text.js';
 import { defaultRunSettings } from '../../workspace/data/models.js';
 
 export const maxMembers = 20;
@@ -54,6 +52,7 @@ export interface MemberActivation {
   expectedActivation: MemberActivationState | null;
   activation: MemberActivationState;
 }
+/** Opaque application activation identity, independent of project Git. */
 export interface MemberActivationState { revision: string; time: number }
 export interface TeamStore {
   getMemberActivation(workspaceId: string): Promise<MemberActivationState | null>;
@@ -116,7 +115,7 @@ const nameKey = (name: string) => name.toLowerCase();
 export class TeamService {
   constructor(
     private readonly store: TeamStore,
-    private readonly workspaces: Pick<WorkspaceService, 'record' | 'list' | 'models' | 'defaultSettings' | 'initializeModels' | 'memberBaseline'>,
+    private readonly workspaces: Pick<WorkspaceService, 'record' | 'list' | 'models' | 'defaultSettings' | 'initializeModels'>,
     private readonly config: { issuesFor(settings: readonly RunSettings[]): Promise<string[][]> },
     private readonly designs: DesignService,
   ) {}
@@ -126,18 +125,10 @@ export class TeamService {
     for (const workspace of await this.workspaces.list()) {
       const records = await this.store.listMembers(workspace.workspaceId);
       const needsMigration = records.some(raw => Object.hasOwn(raw.value, 'harness') || Object.hasOwn(raw.value, 'scope') || (raw.value.configuration?.formatVersion ?? 0) < 5);
-      let legacyManifestHashes: string[] = [];
-      if (needsMigration) {
-        const baseline = await this.workspaces.memberBaseline(workspace.workspaceId);
-        const committed = await committedFiles(workspace.directory, '.rsi/members', baseline.members);
-        await upgradeMemberDirectory(workspace.directory);
-        legacyManifestHashes = Object.entries(committed.files).filter(([path, text]) => path.endsWith('/member.json') && upgradeMemberManifest(text) !== text).map(([, text]) => sha256(text));
-      }
+      if (needsMigration) await upgradeMemberDirectory(workspace.directory);
       for (const raw of records) {
         const data = raw.value as unknown as Record<string, unknown>, member = stored(raw).value;
         let converted = member.configuration ? migrateMemberSource(member.configuration) : generatedSource(member);
-        if (member.lead && legacyManifestHashes.some(hash => !member.configuration?.legacyManifestHashes?.includes(hash))) converted ??= {...member.configuration!};
-        if (converted && legacyManifestHashes.length) converted = {...converted, legacyManifestHashes: [...new Set([...(converted.legacyManifestHashes ?? []), ...legacyManifestHashes])]};
         if (member.retiredAt === null) {
           const root = (await this.workspaces.record(workspace.workspaceId)).directory;
           const relocated = await relocateMemberSource(root, converted ?? member.configuration!, memberName(member.name));
@@ -237,7 +228,7 @@ export class TeamService {
     const current = await this.member(workspaceId, memberId);
     const fields = memberFields(value);
     const generated = generatedSource(fields);
-    if (current.value.configuration) { generated.path = current.value.configuration.path; generated.legacyPaths = current.value.configuration.legacyPaths; generated.legacyManifestHashes = current.value.configuration.legacyManifestHashes; }
+    if (current.value.configuration) { generated.path = current.value.configuration.path; }
     const next: MemberRecord = { ...current.value, ...fields, configuration: source ?? generated };
     const changedScope = JSON.stringify(fields.designScope) !== JSON.stringify(current.value.designScope);
     return this.view(await this.store.updateMember(memberId, revision, nameKey(fields.name), next, Boolean(source) || changedScope));

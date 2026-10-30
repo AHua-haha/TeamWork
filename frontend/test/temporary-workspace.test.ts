@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { WorkspaceClient, BackendError, type TeamRoster, type MemberConfigurationReview } from '../src/shared/backend-client/index.js';
+import { WorkspaceClient, BackendError, type TeamRoster } from '../src/shared/backend-client/index.js';
 import { ChatRoster } from '../src/features/workspace/chat-roster.js';
 import { MemberActivation } from '../src/features/workspace/member-activation.js';
 import { MemberActivationView } from '../src/features/workspace/MemberActivationPanel.js';
 const roster: TeamRoster = {workspaceId: 'w1', members: [{memberId:'lead',workspaceId:'w1',revision:0,name:'Lead',role:'Lead',responsibility:'Help',lead:true,running:false}]};
-const review: MemberConfigurationReview = {revision:'commit',digest:'digest',valid:true,issues:[],changes:[{type:'create',path:'.rsi/members/b/member.json',name:'Builder'}]};
+
 
 test('chat roster uses its narrow endpoint and coalesces concurrent refreshes', async () => {
   const calls: string[] = [];
@@ -30,30 +30,25 @@ test('disposed roster ignores a late result; failures remain retryable', async (
   await retry.refresh();assert.equal(retry.getSnapshot().error,'offline');
   await retry.refresh();assert.deepEqual(retry.getSnapshot().team,roster);retry.dispose();
 });
-test('temporary activation is manual and sends exactly the reviewed revision and digest', async () => {
-  const calls:unknown[]=[];
-  const model = new MemberActivation('w1',{
-    committedMemberReview:async id=>{calls.push(['check',id]);return review;},
-    activateMemberConfiguration:async(id,value)=>{calls.push(['activate',id,value]);return {} as any;},
-  });
-  assert.deepEqual(calls,[]);assert.equal(await model.activate(),false);
-  const pending=model.check();await model.check();await pending;
-  assert.deepEqual(calls,[['check','w1']]);assert.equal(await model.activate(),true);
-  assert.deepEqual(calls,[['check','w1'],['activate','w1',{revision:'commit',digest:'digest'}]]);
-  assert.equal(model.getSnapshot().review,null);assert.match(model.getSnapshot().notice!,/activated/);
-  model.dispose();await model.check();assert.equal(calls.length,2);
+test('activation is manual, coalesces clicks and sends no Git revision or review request',async()=>{
+ const calls:unknown[]=[];let finish!:(value:any)=>void;
+ const api=new WorkspaceClient((async (input,options)=>{calls.push([String(input),options?.body]);return new Promise(resolve=>{finish=resolve;});}) as typeof fetch);
+ const model=new MemberActivation('w1',api);assert.deepEqual(calls,[]);
+ const pending=model.activate();assert.equal(await model.activate(),false);
+ assert.deepEqual(calls,[['/workspaces/w1/team/configuration/activate','{}']]);
+ finish(new Response(JSON.stringify({revision:'application-id',memberIds:['lead']})));assert.equal(await pending,true);
+ assert.match(model.getSnapshot().notice!,/activated/);model.dispose();assert.equal(await model.activate(),false);
 });
-test('invalid or unchanged activation is refused and conflicts require another explicit check', async () => {
-  for(const response of [{...review,valid:false},{...review,changes:[]}]) {
-    const model=new MemberActivation('w1',{committedMemberReview:async()=>response,activateMemberConfiguration:async()=>{throw Error('must not run');}});
-    await model.check();assert.equal(await model.activate(),false);model.dispose();
-  }
-  const model=new MemberActivation('w1',{committedMemberReview:async()=>review,activateMemberConfiguration:async()=>{throw new BackendError('Workspace is busy',409,'workspace_busy');}});
-  await model.check();assert.equal(await model.activate(),false);
-  assert.equal(model.getSnapshot().review,null);assert.equal(model.getSnapshot().error,'Workspace is busy');model.dispose();
+test('activation failures are shown and can be retried without configuration inspection',async()=>{
+ let calls=0;
+ const model=new MemberActivation('w1',{activateMemberConfiguration:async()=>{if(!calls++)throw new BackendError('Workspace is busy',409,'workspace_busy');return {revision:'id',memberIds:[]};}});
+ assert.equal(await model.activate(),false);assert.equal(model.getSnapshot().error,'Workspace is busy');
+ assert.equal(await model.activate(),true);assert.equal(model.getSnapshot().error,null);model.dispose();
 });
-test('activation view exposes only explicit activation actions', () => {
-  const markup=renderToStaticMarkup(createElement(MemberActivationView,{state:{review:null,busy:null,error:null,notice:null},running:false,onCheck:()=>{},onActivate:async()=>{}}));
-  assert.match(markup,/Check committed members/);assert.match(markup,/disabled=""[^>]*>Activate members/);
-  assert.doesNotMatch(markup,/FileDiff|Reading changes|DesignTab|TeamTab/);
+test('activation view exposes one action and disables it while busy or members are working',()=>{
+ for(const running of [false,true]){
+  const markup=renderToStaticMarkup(createElement(MemberActivationView,{state:{busy:false,error:null,notice:null},running,onActivate:async()=>{}}));
+  assert.match(markup,/Activate members/);assert.equal(markup.includes('disabled=""'),running);
+  assert.doesNotMatch(markup,/Check committed|reviewed revision|FileDiff|DesignTab|TeamTab/);
+ }
 });

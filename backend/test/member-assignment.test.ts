@@ -27,7 +27,7 @@ test('assignment accepts design references only and never agent-owned implementa
 
 test('Bash writes the whole workspace, reads member files and permits native project Git',()=>withTeam(async f=>{
   const member=await worker(f,'Backend',['src']);
-  const manifest=(await f.team.configuration.accepted(f.workspaceId,f.lead.memberId)).path;
+  const manifest=(await f.team.configuration.activeSource(f.workspaceId,f.lead.memberId)).path;
   const command=`mkdir -p unrelated; printf broad > unrelated/result.txt; printf pending > .rsi/bash-test; cat ${JSON.stringify(manifest)}; /usr/bin/git init -q; /usr/bin/git status --porcelain`;
   const result=await memberBash(f.team, member.memberId,{command},signal());
   assert.equal(result.exitCode,0,result.output);

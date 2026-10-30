@@ -11,7 +11,7 @@ import { stat } from 'node:fs/promises';
 import { createAgentServer } from '../src/api/http.js';
 import type { AgentRuntime } from '../src/core/agent/runtime.js';
 import { emptyDesignScope } from '../src/core/team/data/assignment.js';
-import { stubConfig, withTeam, worker, configureAssignment, type Fixture } from './team-fixture.js';
+import { stubConfig, withTeam, worker, configureAssignment, settle, type Fixture } from './team-fixture.js';
 
 type Body = Record<string, any>;
 
@@ -116,25 +116,24 @@ test('group history pages current entries separately from changes and guard olde
   assert.deepEqual((await call(`${base}/history`)).entries, []);
 }));
 
-test('configuration review and separate user activation enforce exact input and whole-workspace idle state', () => withServer(async (call, f) => {
-  const member = await worker(f, 'Backend', ['src']);
-  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId), files = await f.team.memberWorkspace.files(f.lead.memberId);
-  const { writeFile } = await import('node:fs/promises');
-  await writeFile(join(files.root, source.path), JSON.stringify({ ...JSON.parse(source.files['member.json']!), responsibility: 'Validated update' }));
-  const base = `/workspaces/${f.workspaceId}/team/configuration`;
-  const pending = await call(base + '?source=pending'); assert.equal(pending.valid, true); assert.equal(pending.changes[0].type, 'update');
-  await call(base + '?source=bad', {status:400});
-  await acceptFiles(f);
-  assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,member.responsibility);
-  const accepted = await call(base), input = { revision:accepted.revision,digest:accepted.digest };
-  await call(base+'/activate',{method:'POST',data:{...input,actor:'user'},status:400});
-  await f.team.runner.postUser(f.workspaceId,'@Backend work');
-  assert.equal((await call(base+'/activate',{method:'POST',data:input,status:409})).error.code,'workspace_busy');
-  f.runtime.end(member.memberId);
-  const { settle } = await import('./team-fixture.js'); await settle();
-  const activated = await call(base+'/activate',{method:'POST',data:input}); assert.ok(activated.memberIds.includes(member.memberId));
-  assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,'Validated update');
-  assert.equal((await call(base+'/activate',{method:'POST',data:input,status:409})).error.code,'stale_revision');
+test('activation accepts current files without Git; configuration inspection and review APIs are removed', () => withServer(async (call,f) => {
+  const member=await worker(f,'Backend',['src']);
+  const source=await f.team.configuration.activeSource(f.workspaceId,member.memberId);
+  const files=await f.team.memberWorkspace.files(f.lead.memberId);
+  await files.write.writeFile(join(files.root,source.path),JSON.stringify({...JSON.parse(source.files['member.json']!),responsibility:'Activated from current files'}));
+  const base=`/workspaces/${f.workspaceId}/team/configuration`;
+  for(const path of [base,base+'?source=pending',base+'/current',`/workspaces/${f.workspaceId}/team/changes`])await call(path,{status:404});
+  await call(base+'/activate',{method:'POST',data:{revision:'obsolete',digest:'obsolete'},status:400});
+  await f.team.runner.postUser(f.workspaceId,'Work');
+  await call(base+'/activate',{method:'POST',data:{},status:409});
+  f.runtime.end(f.lead.memberId);await settle();
+  const activated=await call(base+'/activate',{method:'POST',data:{}});
+  assert.ok(activated.memberIds.includes(member.memberId));assert.match(activated.revision,/^[0-9a-f-]{36}$/);
+  assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,'Activated from current files');
+  const repeated=await call(base+'/activate',{method:'POST',data:{}});assert.deepEqual(repeated.changes,[]);
+  await files.write.writeFile(join(files.root,source.path),'{invalid');
+  await call(base+'/activate',{method:'POST',data:{},status:400});
+  assert.equal((await f.team.service.get(f.workspaceId,member.memberId)).responsibility,'Activated from current files');
 }));
 
 test('user model settings persist independently of member files, reject stale/foreign/extra writes and allow busy saves', () => withServer(async (call, f) => {
@@ -182,21 +181,6 @@ test('user reset endpoint clears idle conversations and rejects busy, unknown an
   await call(`${base}/reset?unexpected=1`, { method: 'POST', status: 400 });
   await call('/workspaces/missing/chat/reset', { method: 'POST', status: 404 });
   assert.equal((await call(`/workspaces/${f.workspaceId}/members`)).members.length, 1);
-}));
-
-test('Changes endpoint returns only protected reviews and activation references without full configuration inspection', () => withServer(async (call, f) => {
-  const path = `/workspaces/${f.workspaceId}/team/changes`;
-  f.team.configuration.current = async () => { throw new Error('Comprehensive inspection must not run'); };
-  const review = await call(path);
-  assert.equal(review.leadId, f.lead.memberId);
-  assert.equal(review.activation.hasChanges, false);
-  assert.equal(review.design.changes.length,1);assert.equal(review.design.changes[0].action,'add');
-  assert.deepEqual(review.members.changes, []);
-  assert.equal(review.current, undefined);
-  assert.equal(review.activation.digest, undefined);
-  await call(path + '?unknown=1', { status: 400 });
-  await call(path, { method: 'POST', status: 404 });
-  await call('/workspaces/missing/team/changes', { status: 404 });
 }));
 
 test('multipart HTTP publication stores scoped pictures, preserves image-only input and refuses atomically', () => withTeam(async fixture => {

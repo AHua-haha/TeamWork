@@ -11,8 +11,8 @@ The workspace page may provide these sections:
 - **Overview** — workspace identity and summary.
 - **Files** — browse and inspect workspace files.
 - **Design** — inspect and manage design documents.
-- **Team/Members** — inspect members and configuration, and expose existing review/activation controls.
-- **Changes** — inspect changes and supported review/commit approval workflows.
+- **Team/Members** — inspect active members and expose direct activation.
+- Configuration-file Changes/review inspection is removed. Git remains agent/user-operated.
 - **Settings** — workspace-specific settings supported by the backend.
 - **Context** — one read-only inspection tab for the current shared Group context and each workspace member's current persisted Agent context. The source list selects Group or a member; the selected source is paginated at one pinned revision and displayed as a chronological message list with detail. Text, thinking, images, tool calls/results and unknown/raw message data remain inspectable. On `context_changed`, discard the mixed revision and explicitly reload from offset zero. These reads do not start or cancel Agent work.
 
@@ -47,9 +47,9 @@ Workspace creation/adoption must use the existing review flow: inspect the targe
 
 ## Temporary lightweight mode
 
-`workspaceDetailsEnabled` is temporarily false. Workspace composes group chat with a narrow member roster and a manually opened panel for Context, activation and commit review. Existing Design, Team, Changes and Files implementations remain available in source but are not mounted, including after closing/reopening the panel. Their context feeds, design/harness inspection, full team polling and file diffs must not start while this mode is off. Context inspection is the explicit exception: it is available on demand, read-only, and uses the narrow roster plus the dedicated group/member context endpoints. Re-enable the switch to restore the existing detailed composition.
+`workspaceDetailsEnabled` is temporarily false. Workspace composes group chat with a narrow member roster and a manually opened panel for Context, member activation and workspace model settings. Context inspection is on demand and read-only, using dedicated group/member context endpoints. No design/member file diff or Git/configuration history inspection is mounted or queried.
 
-Activation checks run only when the user selects Check committed members, and activation sends the exact reviewed revision/digest through the existing idle-team validation. Opening the panel, focus and elapsed time do not request activation review. Explicit commit approval/review remains available. Backend run and activation permission/configuration validation remains mandatory.
+Activation is one explicit Activate members action. It sends an empty body and lets the backend read and validate current member files and store the active workspace configuration. There is no separate check, reviewed revision/digest or Git dependency. Disable activation while the team is running or a request is in flight; show validation/failure text and permit a direct retry. Opening the panel, focus and elapsed time make no configuration-inspection requests. Refresh the roster after activation succeeds.
 
 ### Context sidebar interaction and rendering
 

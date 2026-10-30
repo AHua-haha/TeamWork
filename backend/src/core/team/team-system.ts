@@ -2,7 +2,6 @@ import type { ContextPageInput } from '../context-page.js';
 import type { RunConfigSource } from './data/config.js';
 import { mkdir,writeFile } from 'node:fs/promises';
 import { dirname,join } from 'node:path';
-import { filesRevision } from '../workspace/workspace-git.js';
 import { finalAnswer, textPhase } from '../agent/final-answer.js';
 import {defaultReactHarnessFactory} from '../react-harness/index.js';
 import {resetMemberShell, closeBashRuntime} from '../react-harness/index.js';
@@ -11,7 +10,6 @@ import { fileReactHarnessFactory } from '../react-harness/index.js';
 import type { ChatStore } from './data/group-chat.js';
 import { AppError } from '../agent/data/model.js';
 import type { ConfigService } from './data/config.js';
-import { currentMemberPaths } from './data/member-config.js';
 import { MemberConfigService } from './member-config.js';
 import { DesignService } from '../workspace/design.js';
 import { MemberWorkspace } from './member-workspace.js';
@@ -207,28 +205,8 @@ export class TeamSystem {
     return this.memberWorkspace.operation(memberId, async () => { const result = await this.service.update(workspaceId, memberId, revision, value); await this.closeShells([memberId]); return this.status(result); });
   }
 
-  async reviewConfiguration(workspaceId: string, origin: 'pending' | 'committed' = 'committed') {
-    return this.runner.workspaceOperation(workspaceId, async () => {
-      if (origin === 'committed') return this.configuration.review(workspaceId);
-      const lead = (await this.service.active(workspaceId)).find(m => m.value.lead)!;
-      return this.configuration.validate(lead.id, '.rsi/members');
-    });
-  }
-  activateConfiguration(workspaceId: string, revision: string, digest: string) {
-    return this.runner.idleWorkspace(workspaceId, () => this.configuration.activate(workspaceId, revision, digest));
-  }
-  currentConfiguration(workspaceId: string) {
-    return this.runner.workspaceOperation(workspaceId, () => this.configuration.current(workspaceId));
-  }
-  changes(workspaceId: string) {
-    return this.runner.workspaceOperation(workspaceId, async () => {
-      const lead = (await this.service.active(workspaceId)).find(member => member.value.lead);
-      if (!lead) throw new AppError('not_found', 'Workspace lead is unavailable', 404);
-      const scopes = await this.memberWorkspace.changes(lead.id), active = await this.service.activation(workspaceId);
-      const committed = await this.memberWorkspace.controlFiles(lead.id,'committed','.rsi/members');
-      const activeFiles:Record<string,string>={};for(const member of await this.service.active(workspaceId))if(member.value.configuration)for(const [path,text]of Object.entries(member.value.configuration.files))activeFiles[`${member.value.configuration.path.slice(0,-'member.json'.length)}${path}`]=text;
-      return { workspaceId, leadId: lead.id, ...scopes, activation: { revision: scopes.members.base, activeRevision: active?.revision ?? null, hasChanges: filesRevision(currentMemberPaths(committed.files, (await this.service.active(workspaceId)).map(member => member.value.configuration!))) !== filesRevision(activeFiles) } };
-    });
+  activateConfiguration(workspaceId: string) {
+    return this.runner.idleWorkspace(workspaceId, () => this.configuration.activate(workspaceId));
   }
   async closeShells(ids?: string[]): Promise<void> {
     if (!ids) return closeBashRuntime();

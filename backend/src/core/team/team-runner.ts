@@ -1,6 +1,6 @@
 import { TeamExecutionData } from './data/execution.js';
 import type { PreparedChatImage } from './data/chat-images.js';
-import { OperationQueue } from '../workspace/workspace-git.js';
+import { OperationQueue } from '../operation-queue.js';
 import type { AgentRuntime } from '../agent/runtime.js';
 import type { TeamService, TeamStore } from './data/members.js';
 import { Changes } from '../changes.js';

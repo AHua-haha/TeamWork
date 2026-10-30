@@ -4,8 +4,8 @@ import type { DesignScope } from './data/assignment.js';
 import type { StoredMember } from './data/members.js';
 import type { WorkspaceService } from '../workspace/workspace.js';
 import { AppError } from '../agent/data/model.js';
-import { OperationQueue, committedFiles, currentFiles, filesRevision, fileChanges } from '../workspace/workspace-git.js';
-import {currentMemberFormat} from './data/member-config-migration.js';
+import {OperationQueue} from '../operation-queue.js';
+import {currentFiles} from './member-files.js';
 import { projectNode, workspaceContext } from '../workspace/project-context.js';
 import { workspacePrompt } from '../workspace/workspace-prompts.js';
 
@@ -19,7 +19,7 @@ export async function resolveAssignment(designs: DesignService, workspaceId: str
   return {working, dependencies};
 }
 
-/** Team-owned project/configuration reads and review; no tool execution or permission policy. */
+/** Team-owned project/configuration reads; no tool execution or permission policy. */
 export class MemberWorkspace {
   private readonly operations = new OperationQueue();
   constructor(private readonly workspaces: WorkspaceService, readonly designs: DesignService, private readonly member: (id: string) => Promise<StoredMember | null>) {}
@@ -37,21 +37,8 @@ export class MemberWorkspace {
       write: {mkdir: async (path: string) => {await mkdir(path, {recursive: true});}, writeFile: async (path: string, content: string) => {await writeFile(path, content, 'utf8');}},
       ls: {exists: async (path: string) => {try {await access(path); return true;} catch {return false;}}, stat, readdir}};
   }
-  async controlFiles(id: string, origin: 'pending' | 'committed', prefix: string) {
-    const member = await this.active(id), root = await this.root(id);
-    if (origin === 'pending') { const files = await currentFiles(root, prefix); return {files, revision: filesRevision(files)}; }
-    const baseline = prefix === '.rsi/members' ? (await this.workspaces.memberBaseline(member.workspaceId)).members : {};
-    const result = await committedFiles(root, prefix, baseline);
-    return prefix === '.rsi/members' ? {...result, files: currentMemberFormat(result.files, member.value.configuration)} : result;
-  }
-  async changes(id: string) {
-    const review = async (prefix: string) => {
-      const [before, after] = await Promise.all([this.controlFiles(id, 'committed', prefix), this.controlFiles(id, 'pending', prefix)]);
-      return {base: before.revision, revision: after.revision, changes: await fileChanges(before.files, after.files)};
-    };
-    const contextRoot = (await workspaceContext(await this.root(id))).root;
-    const [design, members] = await Promise.all([review(contextRoot), review('.rsi/members')]);
-    return {design, members};
+  async configurationFiles(id: string) {
+    return currentFiles(await this.root(id), '.rsi/members');
   }
   async guidance(id: string): Promise<string> {
     const member = await this.active(id), resolved = await resolveAssignment(this.designs, member.workspaceId, member.value.designScope);

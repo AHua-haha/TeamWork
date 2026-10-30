@@ -4,14 +4,14 @@ import { readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { TeamSystem } from '../src/core/team/team-system.js';
-import { sourceBundle } from '../src/core/team/data/member-config.js';
+import { sourceBundle, migrateMemberSource } from '../src/core/team/data/member-config.js';
 import { code, stubConfig, withTeam, worker } from './team-fixture.js';
 
 const assignment = (member: Awaited<ReturnType<typeof worker>>) => member.designScope;
 
 test('accepted bundle contains meaningful JSON and Markdown; identity, revisions and policy stay in backend records', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']);
-  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId);
+  const source = await f.team.configuration.activeSource(f.workspaceId, member.memberId);
   const manifest = JSON.parse(source.files['member.json']!);
   assert.deepEqual(Object.keys(manifest).sort(), ['designScope', 'name', 'promptFiles', 'responsibility', 'role', 'settings']);
   assert.deepEqual(manifest.designScope, member.designScope);
@@ -26,7 +26,7 @@ test('accepted bundle contains meaningful JSON and Markdown; identity, revisions
 
 test('invalid pending JSON and prompts never replace stable configuration, including after restart', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']);
-  const accepted = await f.team.configuration.accepted(f.workspaceId, member.memberId);
+  const accepted = await f.team.configuration.activeSource(f.workspaceId, member.memberId);
   const stored = await f.team.service.find(member.memberId);
   const files = await f.team.memberWorkspace.files(f.lead.memberId);
   await files.write.writeFile(join(files.root, accepted.path), '{invalid JSON');
@@ -34,13 +34,13 @@ test('invalid pending JSON and prompts never replace stable configuration, inclu
   assert.equal(await readFile(join(files.root, accepted.path), 'utf8'), '{invalid JSON');
   assert.deepEqual(await f.team.service.find(member.memberId), stored);
   const reopened = new TeamSystem(f.store, f.workspaces, stubConfig); reopened.attach(f.runtime);
-  try { await reopened.initialize(); assert.deepEqual(await reopened.configuration.accepted(f.workspaceId, member.memberId), accepted); }
+  try { await reopened.initialize(); assert.deepEqual(await reopened.configuration.activeSource(f.workspaceId, member.memberId), accepted); }
   finally { await reopened.runner.close(); }
 }));
 
 test('materialization preserves intentional deletions after seeding rather than inventing metadata', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']);
-  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId);
+  const source = await f.team.configuration.activeSource(f.workspaceId, member.memberId);
   const files = await f.team.memberWorkspace.files(f.lead.memberId);
   await rm(join(files.root, dirname(source.path)), { recursive: true });
   await assert.rejects(readFile(join(files.root, source.path), 'utf8'), code('ENOENT'));
@@ -61,19 +61,14 @@ test('runtime admission still rejects an actual concurrent backend configuration
 
 test('user model preferences survive file activation and do not create pending member changes', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']);
-  const initial = await f.team.currentConfiguration(f.workspaceId);
+  const initial = (await f.team.service.find(member.memberId))!.value.configuration!;
   const preference = { connectionId: 'conn', modelId: 'user-choice', modelOptions: [{ connectionId: 'conn', modelId: 'user-choice', reasoning: 'high' as const }] };
   await f.team.updateModelSettings(f.workspaceId, member.memberId, member.revision, preference);
-  const current = await f.team.currentConfiguration(f.workspaceId);
-  assert.deepEqual(current.changes,initial.changes);
-  const source = await f.team.configuration.accepted(f.workspaceId,member.memberId);
-  const files = await f.team.memberWorkspace.files(f.lead.memberId);
+  assert.equal((await f.team.service.find(member.memberId))!.value.configuration!.digest,initial.digest);
+  const source=await f.team.configuration.activeSource(f.workspaceId,member.memberId);
+  const files=await f.team.memberWorkspace.files(f.lead.memberId);
   await files.write.writeFile(join(files.root, source.path),JSON.stringify({...JSON.parse(source.files['member.json']!),responsibility:'Updated responsibility'}));
-  const pending = await f.team.currentConfiguration(f.workspaceId);
-  assert.equal(pending.status.valid,true);
-  await acceptFiles(f,'.rsi/members','Accept responsibility');
-  const review = await f.team.currentConfiguration(f.workspaceId);
-  await f.team.activateConfiguration(f.workspaceId,review.activation.revision,review.activation.digest);
+  await f.team.activateConfiguration(f.workspaceId);
   const active = await f.team.service.get(f.workspaceId,member.memberId);
   assert.equal(active.responsibility,'Updated responsibility'); assert.equal(active.settings.modelId,'user-choice');
   assert.equal((await f.team.service.find(member.memberId))!.value.settings.modelId,'model','manifest model remains unchanged');
@@ -81,7 +76,7 @@ test('user model preferences survive file activation and do not create pending m
 
 test('unified member names are the directory names, including supported spaces', () => withTeam(async f => {
   const member = await worker(f, 'Backend Worker', ['src']);
-  const source = await f.team.configuration.accepted(f.workspaceId, member.memberId);
+  const source = await f.team.configuration.activeSource(f.workspaceId, member.memberId);
   assert.equal(source.path, '.rsi/members/Backend Worker/member.json');
   assert.equal(JSON.parse(source.files['member.json']!).name, 'Backend Worker');
   const valid = await f.team.configuration.validate(f.lead.memberId, '.rsi/members');
@@ -93,10 +88,10 @@ test('unified member names are the directory names, including supported spaces',
   assert.equal(invalid.valid, false); assert.ok(invalid.issues.some(issue => /exactly match/.test(issue.message)));
 }));
 
-test('startup relocates legacy bundles with pending edits and preserves identity and old committed review', () => withTeam(async f => {
+test('startup relocates legacy bundles with pending edits and preserves active identity without retaining Git aliases', () => withTeam(async f => {
   const member = await worker(f, 'Backend', ['src']);
   const {rename, writeFile} = await import('node:fs/promises');
-  const {gitText} = await import('../src/core/workspace/workspace-git.js');
+  const {gitText} = await import('./native-git.js');
   const stored = (await f.team.service.find(member.memberId))!;
   const source = stored.value.configuration!, legacy = `.rsi/members/${stored.id}/member.json`;
   await rename(join(f.directory, dirname(source.path)), join(f.directory, dirname(legacy)));
@@ -110,13 +105,13 @@ test('startup relocates legacy bundles with pending edits and preserves identity
   await f.team.initialize();
   const migrated = (await f.team.service.find(stored.id))!;
   assert.equal(migrated.id, stored.id); assert.equal(migrated.value.configuration!.path, source.path);
-  assert.deepEqual(migrated.value.configuration!.legacyPaths, [legacy]);
+  assert.equal('legacyPaths' in migrated.value.configuration!, false);
   assert.deepEqual(migrated.value.configuration!.files, source.files, 'active prompt snapshot remains accepted bytes');
   assert.equal(await readFile(join(f.directory, dirname(source.path), 'prompts/member.md'), 'utf8'), 'Pending prompt survives migration');
   assert.equal(await readFile(join(f.directory, dirname(source.path), 'pending.txt'), 'utf8'), 'Untracked pending file');
   assert.equal(await gitText(f.directory, ['rev-parse', 'HEAD']), head, 'migration makes no Git commit');
-  const reviewed = await f.team.reviewConfiguration(f.workspaceId);
-  assert.equal(reviewed.valid, true, JSON.stringify(reviewed.issues)); assert.deepEqual(reviewed.changes, [], 'old commit does not recreate members');
+  const reviewed = await f.team.configuration.validate(f.lead.memberId,'.rsi/members');
+  assert.equal(reviewed.valid, true, JSON.stringify(reviewed.issues)); assert.equal(reviewed.changes.length,1,'validation reads the current files, not the old commit');
   const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members');
   assert.equal(pending.valid, true, JSON.stringify(pending.issues));
   assert.equal(pending.changes.length, 1); assert.equal(pending.changes[0]!.memberId, stored.id); assert.equal(pending.changes[0]!.type, 'update');
@@ -136,4 +131,16 @@ test('legacy directory migration refuses a conflicting destination without overw
   assert.deepEqual(await f.team.service.find(stored.id), before);
   assert.equal(await readFile(join(f.directory, legacy), 'utf8'), source.files['member.json']);
   assert.equal(await readFile(join(f.directory, dirname(source.path), 'keep.txt'), 'utf8'), 'Unrelated content');
+}));
+
+test('old Git acceptance and chained source history are discarded without changing active snapshot bytes', () => withTeam(async f => {
+  const member=await worker(f,'Backend',['src']);
+  const stored=(await f.team.service.find(member.memberId))!,source=stored.value.configuration!;
+  const retired={...source,acceptedRevision:'old-git-hash',previous:{...source,files:{old:'Retired history'}},legacyPaths:['.rsi/members/old/member.json'],legacyManifestHashes:['old-blob-hash']};
+  await f.store.updateMember(stored.id,stored.revision,'backend',{...stored.value,configuration:retired});
+  await f.team.initialize();
+  const current=(await f.team.service.find(member.memberId))!.value.configuration!;
+  for(const field of ['acceptedRevision','previous','legacyPaths','legacyManifestHashes'])assert.equal(field in current,false);
+  assert.deepEqual(current.files,source.files);assert.equal(current.digest,source.digest);
+  assert.equal(migrateMemberSource(current),null,'cleanup is idempotent');
 }));

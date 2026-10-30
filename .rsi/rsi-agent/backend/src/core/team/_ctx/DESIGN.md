@@ -8,7 +8,7 @@ Agent owns its assembled model-facing context and its tracking of incorporated s
 
 ## Interface contract
 
-Manage member inspection, file validation and user-triggered atomic idle activation through existing interfaces. Member configuration bundles under `.rsi/members/` must be tracked by project Git, including the lead, existing workers and referenced prompt files. Commit directory relocations with their replacement bundles so the committed configuration retains the complete intended team. Activation reads committed configuration; removing a bundle represents member retirement, not an implicit directory migration. Own durable provider/application settings. Workspace owns its registry/context/models/baseline persistence; Team obtains workspace identity, locks and model revisions through Workspace public operations.
+Manage active-member inspection, current-file validation and user-triggered atomic idle activation. Member files are activation inputs; the active configuration is a durable workspace-team snapshot. Activation reads the complete current `.rsi/members/` directory and referenced prompt files, validates them, and stores create/update/delete changes together only while the entire workspace is idle. No Git commit is required. Later file edits do not affect active members until activation. Remove configuration-file inspection, diffs, commit history, pending/committed status and accepted-file baselines. The project Git repository belongs entirely to agents and users; the backend maintains no Git state or Git-dependent lifecycle. Active-member inspection and model preferences remain available.
 
 ### Authoritative group context
 
@@ -91,7 +91,7 @@ Member context is owned and read by Agent. Team validates that the requested act
 
 - Preserve existing HTTP/SSE message presentation, durable final references, reservation ordering and delta-stream recovery.
 - Preserve user-default Lead routing, mention header parsing/limits, whole-publication refusal and shared-workspace execution scheduling.
-- Preserve member config review/activation and explicit reset behavior. Tool capabilities and the unrestricted development permission policy belong to React Harnesses, not the superseded Harness system.
+- Preserve active-member inspection and direct file activation and explicit reset behavior. Tool capabilities and the unrestricted development permission policy belong to React Harnesses, not the superseded Harness system.
 - Agent retains no dependency on Team's SQL format or concrete implementation.
 - Replace old per-activation reconstruction/terminal clearing at their ownership boundary; do not retain them underneath a new append layer.
 - Do not reset real user data implicitly to implement this transition. Decide any durable schema/data migration during implementation planning.
@@ -109,7 +109,7 @@ Member context is owned and read by Agent. Team validates that the requested act
 
 The public HTTP surface uses workspace resources rather than exposing Team's internal inspection hierarchy. `GET /workspaces/:workspaceId` returns only the registered workspace metadata (`workspaceId`, `name`, `directory`, `createdAt`) and never loads the managed context overview. Active member metadata is exposed by `GET /workspaces/:workspaceId/members`; one active member is exposed by `GET /workspaces/:workspaceId/members/:memberId`. These responses contain identity, role, responsibility, lead, revision and running state only. They do not resolve designs, React Harnesses, provider availability, private context or group messages.
 
-The old public roster and detailed member-inspection routes are retired. The Team-owned member metadata operation remains internal and is the source for the REST resources. Configuration review/activation and model-settings operations remain separate Team capabilities because they are user-controlled configuration workflows, not metadata reads.
+The old public roster and detailed member-inspection routes are retired. The Team-owned member metadata operation remains internal and is the source for the REST resources. Current-file activation and model-settings operations remain separate Team capabilities because they are user-controlled configuration workflows, not metadata reads.
 
 Agent context is a member subresource at `GET /workspaces/:workspaceId/members/:memberId/context`, preserving bounded Pi-message pagination, revision checks, `context_changed`, no-store behavior and read-only execution semantics. Group chat is a workspace resource at `/workspaces/:workspaceId/chat`; its snapshot, timeline, follow, message, stop, reset and settings operations retain their existing payloads and effects. Group summary and effective group context are read-only chat subresources at `/chat/summary` and `/chat/context`.
 
@@ -127,6 +127,6 @@ Member records and editable manifests expose `designScope: {working: string[], d
 
 Remove member `harness`/`harnesses`, execution allowlists, effective permission/resource projections and the old detailed Harness inspection methods/route fallback. Available capabilities are assembled by Agent's File and Default React Harnesses and are not configured through member files. Preserve lightweight member metadata, model settings, context inspection, configuration file review and separate idle user activation.
 
-Backend-owned startup migration converts existing durable records and source snapshots, and removes obsolete fields from existing valid member manifests while preserving design assignments, pending meaningful edits, prompt files, identity, model preferences and history. Normalize old committed source at the configuration read boundary so a format-only migration cannot retire/recreate members or require activating semantic changes. Do not rewrite Git history or recreate intentionally deleted files. Current configuration validation accepts only the new shape; updates to existing members still preserve identity/models/design assignment and may change responsibility or supplementary prompts. Migration remains idempotent and malformed pending files stay available for review.
+Backend-owned startup migration converts existing durable records and valid member manifests while preserving active assignments, prompts, model preferences, member identity and message history. Filesystem edits remain inactive until activation. Discard old Git acceptance revisions, directory-history aliases and chained previous snapshots from member source metadata. Do not inspect, change or reconstruct project Git history. Replace an old Git/hash activation marker with an opaque application UUID once; repeated startup leaves it unchanged.
 
 React Harness assembly imports the public Core React Harness module. Team supplies factories, tools and assignment guidance; React Harness residency/state loading operates directly on public Agent data models. No direct Agent execution dependency is required by React Harness.

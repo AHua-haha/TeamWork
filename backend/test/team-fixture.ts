@@ -163,7 +163,7 @@ export async function worker(fixture: Fixture, name: string, implementation: str
   const path = `systems/${name.toLowerCase()}/metadata.json`;
   await seedDesign(fixture.workspaces, fixture.workspaceId, path, { content: `Design for ${name}`, implementation });
   const created=await fixture.team.service.create(fixture.workspaceId, { name, role, responsibility: `Owns ${name}`, designScope: { working: [path], dependencies: [] } });
-  const source=(await fixture.team.configuration.accepted(fixture.workspaceId,created.memberId));
+  const source=(await fixture.team.configuration.activeSource(fixture.workspaceId,created.memberId));
   for(const [path,content]of Object.entries(source.files)){const target=join(fixture.directory,source.path.slice(0,-'member.json'.length),path);await mkdir(target.slice(0,target.lastIndexOf('/')),{recursive:true});await writeFile(target,content);}
   return created;
 }

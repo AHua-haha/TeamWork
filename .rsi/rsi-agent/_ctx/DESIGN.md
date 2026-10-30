@@ -6,7 +6,7 @@ The project is a local single-user application for developing software with agen
 
 ## Interface contract
 
-Users register workspaces, configure provider/model choices, communicate with a workspace team, inspect members/design/context, follow live work, review proposed Git commits and separately activate validated committed member changes. Solo agents remain supported. Operators configure and manage development/deployment through project commands.
+Users register workspaces, configure provider/model choices, communicate with a workspace team, inspect active members/context, follow live work and activate validated current member files independently of project Git. Solo agents remain supported. Operators configure and manage development/deployment through project commands.
 
 Inputs include workspace directories and model settings, user text/images, revisions/cursors and explicit user decisions. Outputs include persistent records, shared chat, private work history, progress, review results and lifecycle status. Core runs agents and tools; effects include durable records, ordinary project files/Git and permitted external calls.
 
@@ -29,3 +29,5 @@ The context-base manager uses the filesystem as its sole current-state authority
 - Child system: backend.
 - Child system: operations.
 - Child system: desktop.
+
+Project Git is operated directly by agents and users. The backend maintains no additional Git state, accepted-file baseline or Git-dependent member activation. Member configuration activation validates current files and atomically stores the active workspace-team snapshot; configuration-file inspection/history/diff APIs are removed.

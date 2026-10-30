@@ -31,7 +31,7 @@ test('fresh initialization creates project-named context with DESIGN only and a 
   try {
     const lead = (await team.service.team(f.workspaceId)).members[0]!;
     assert.equal(lead.ready,true); assert.deepEqual(lead.designScope.working,['_ctx/DESIGN.md']);
-    assert.equal((await team.currentConfiguration(f.workspaceId)).status.valid,true);
+    assert.equal((await team.configuration.validate(lead.memberId,'.rsi/members')).valid,true);
     const guidance = await team.memberWorkspace.guidance(lead.memberId);
     assert.match(guidance,/\.rsi\/my-project\/_ctx\/DESIGN.md/);
     assert.match(guidance,/optional `README.md`/);

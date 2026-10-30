@@ -3,7 +3,7 @@ import { imageContent, type PreparedChatImage } from '../src/core/team/data/chat
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type {WorkspaceStore,WorkspaceRecord,MemberBaseline} from '../src/core/workspace/data/model.js';
+import type {WorkspaceStore,WorkspaceRecord} from '../src/core/workspace/data/model.js';
 import type { WorkspaceBootstrap } from '../src/core/workspace-bootstrap.js';
 import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation, MemberActivationState } from '../src/core/team/data/members.js';
 import { randomUUID } from 'node:crypto';
@@ -22,11 +22,6 @@ interface Stored {record:WorkspaceRecord;key:string}
 
 /** Workspace, member and conversation persistence used by tests; project context stays in files. */
 export class MemoryStore implements WorkspaceStore, TeamStore, ChatStore {
-  async initialMemberFiles(id:string){const files:Record<string,string>={};for(const member of await this.listMembers(id))if(member.value.retiredAt===null&&member.value.configuration){const source=member.value.configuration;for(const [path,text]of Object.entries(source.files))files[`${source.path.slice(0,source.path.lastIndexOf('/'))}/${path}`]=text;}return files;}
-
-  readonly memberBaselines = new Map<string, MemberBaseline>();
-  async getMemberBaseline(id: string) { return structuredClone(this.memberBaselines.get(id) ?? null); }
-  async initializeMemberBaseline(id: string, value: MemberBaseline) { if(!this.memberBaselines.has(id))this.memberBaselines.set(id,structuredClone(value));return (await this.getMemberBaseline(id))!; }
   readonly workspaces = new Map<string, Stored>();
   readonly members = new Map<string, { member: StoredMember; lead: boolean; nameKey: string | null; ordinal: number }>();
   readonly workspaceModels = new Map<string, StoredWorkspaceModels>();
@@ -184,11 +179,11 @@ export class MemoryStore implements WorkspaceStore, TeamStore, ChatStore {
     this.workspaces.set(record.workspaceId, {record,key});
     try { await this.createMember(lead); if (models) this.workspaceModels.set(record.workspaceId, { revision: 0, value: structuredClone(models) });
       if (bootstrap) {
-      this.memberBaselines.set(record.workspaceId, structuredClone(bootstrap.baseline)); this.memberActivations.set(record.workspaceId, structuredClone(bootstrap.activation)); }
+      this.memberActivations.set(record.workspaceId, structuredClone(bootstrap.activation)); }
     }
     catch (error) {
       // Like the real store's transaction: a workspace is never stored without its lead.
-      this.workspaces.delete(record.workspaceId);this.memberBaselines.delete(record.workspaceId);
+      this.workspaces.delete(record.workspaceId);
       this.workspaceModels.delete(record.workspaceId); this.memberActivations.delete(record.workspaceId);
       this.members.clear(); for (const [key,value] of members) this.members.set(key,value);
       this.agentContexts.clear(); for (const [key,value] of contexts) this.agentContexts.set(key,value); this.ordinal = ordinal;

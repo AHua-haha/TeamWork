@@ -26,7 +26,7 @@ Application startup creates one configured client instance and makes it availabl
 
 ## Chat roster transport
 
-Expose the backend's narrow roster separately from full team inspection. The frontend feature owns refresh coalescing and temporary-mode policy; transport does not synthesize missing readiness/harness fields. Member activation continues to use the committed-review and revision/digest activation endpoints.
+Expose the backend's narrow roster separately from full team inspection. The frontend feature owns refresh coalescing and temporary-mode policy; transport does not synthesize missing readiness/harness fields. Member activation sends an empty body to the current-file activation endpoint. It exposes no configuration-file inspection, diff/history, committed-review or revision/digest handshake. The feature refreshes the roster after success.
 
 ## Group-history transport contract
 

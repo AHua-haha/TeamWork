@@ -1,7 +1,7 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { MySqlStorage } from '../../../storage/mysql.js';
 import { decode, encode } from '../../codec.js';
-import type {WorkspaceStore,WorkspaceRecord,MemberBaseline} from './model.js';
+import type {WorkspaceStore,WorkspaceRecord} from './model.js';
 import type { NewMember } from '../../team/data/members.js';
 import { workspaceModels, type WorkspaceModels, type StoredWorkspaceModels } from './models.js';
 import type { WorkspaceBootstrap } from '../../workspace-bootstrap.js';
@@ -12,7 +12,6 @@ const workspaceRow = (row: RowDataPacket): WorkspaceRecord => ({ workspaceId: ro
 export interface WorkspaceDataHooks {
     created(db: PoolConnection, lead: NewMember, bootstrap?: WorkspaceBootstrap): Promise<void>;
     modelsChanged?(db: PoolConnection, workspaceId: string, value: WorkspaceModels): Promise<void>;
-    memberFiles?(workspaceId: string): Promise<Record<string, string>>;
 }
 export class WorkspaceData implements WorkspaceStore {
     readonly pool: Db;
@@ -27,15 +26,6 @@ export class WorkspaceData implements WorkspaceStore {
     async requireWorkspace(id: string, lock = false): Promise<void> {
         if (!(await rows(this.pool, `SELECT id FROM workspaces WHERE id = ?${lock ? ' FOR UPDATE' : ''}`, [id])).length)
             throw new AppError('not_found', 'Workspace not found', 404);
-    }
-    initialMemberFiles(id: string): Promise<Record<string, string>> { return this.hooks.memberFiles?.(id) ?? Promise.resolve({}); }
-    async getMemberBaseline(workspaceId: string): Promise<MemberBaseline | null> {
-        const [row] = await rows(this.pool, 'SELECT data FROM workspace_member_baselines WHERE workspace_id = ?', [workspaceId]);
-        return row ? decode(row.data, () => undefined) : null;
-    }
-    async initializeMemberBaseline(workspaceId: string, baseline: MemberBaseline) {
-        await this.pool.execute('INSERT IGNORE INTO workspace_member_baselines (workspace_id, data) VALUES (?, ?)', [workspaceId, encode(baseline)]);
-        return (await this.getMemberBaseline(workspaceId))!;
     }
     async listWorkspaces(): Promise<WorkspaceRecord[]> {
         return (await rows(this.pool, 'SELECT id, name, directory, created_at FROM workspaces ORDER BY name, id')).map(workspaceRow);
@@ -58,9 +48,6 @@ export class WorkspaceData implements WorkspaceStore {
             await this.hooks.created(db, lead, bootstrap);
             if (models)
                 await db.execute('INSERT INTO workspace_models (workspace_id, data) VALUES (?, ?)', [workspace.workspaceId, encode(models)]);
-            if (bootstrap) {
-                await db.execute('INSERT INTO workspace_member_baselines (workspace_id, data) VALUES (?, ?)', [workspace.workspaceId, encode(bootstrap.baseline)]);
-            }
         });
     }
     async getWorkspaceModels(workspaceId: string): Promise<StoredWorkspaceModels | null> {
@@ -84,5 +71,5 @@ export class WorkspaceData implements WorkspaceStore {
             return { revision, value };
         });
     }
-    async clearRecords(): Promise<void> { await clearTables(this.pool, ['workspace_member_baselines','workspace_models','workspaces']); }
+    async clearRecords(): Promise<void> { await clearTables(this.pool, ['workspace_models','workspaces']); }
 }

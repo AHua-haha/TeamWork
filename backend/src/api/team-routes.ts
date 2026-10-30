@@ -56,28 +56,11 @@ export function teamRoutes(team: TeamSystem, runtime: AgentRuntime): (route: Rou
       json(response, 200, await team.roster(workspaceId));
       return;
     }
-    if (area === 'changes') {
-      if (method !== 'GET' || memberId !== undefined || extra.length) throw notFound();
-      query(url, []);
-      json(response, 200, await team.changes(workspaceId));
-      return;
-    }
     if (area === 'configuration') {
-      if (extra.length) throw notFound();
-      if (method === 'GET' && memberId === 'current') {
-        query(url, []);
-        json(response, 200, await team.currentConfiguration(workspaceId));
-      } else if (method === 'GET' && memberId === undefined) {
-        query(url, ['source']);
-        const origin = url.searchParams.get('source') ?? 'committed';
-        if (origin !== 'committed' && origin !== 'pending') throw new AppError('invalid_input', 'source must be pending or committed');
-        json(response, 200, await team.reviewConfiguration(workspaceId, origin));
-      } else if (method === 'POST' && memberId === 'activate') {
-        query(url, []);
-        const input = await body(request, maxBodyBytes); fields(input, ['revision', 'digest']);
-        if (typeof input.revision !== 'string' || typeof input.digest !== 'string') throw new AppError('invalid_input', 'Name the exact reviewed committed revision and digest');
-        json(response, 200, await team.activateConfiguration(workspaceId, input.revision, input.digest));
-      } else throw notFound();
+      if (method !== 'POST' || memberId !== 'activate' || extra.length) throw notFound();
+      query(url, []);
+      const input = await body(request, maxBodyBytes); fields(input, []);
+      json(response, 200, await team.activateConfiguration(workspaceId));
       return;
     }
     if (area === 'members' && memberId && extra.length === 1 && extra[0] === 'model-settings') {

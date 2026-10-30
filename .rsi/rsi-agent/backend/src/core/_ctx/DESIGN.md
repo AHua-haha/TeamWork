@@ -8,7 +8,7 @@ For member conversations, Team owns authoritative shared group context; Agent ow
 
 ### React Harness transition
 
-The React Harness responsibility and unrestricted development policy are settled in [React Harness design](../react-harness/_ctx/DESIGN.md). The legacy Harness design is superseded. The separate React Harness directory implements File and Default React Harnesses and directly uses Agent data-model operations. Team owns assignment guidance and member review/activation; Workspace owns initialization templates. The separate Harness source tree and permission mechanisms are removed. Member-facing harness configuration and future permission enforcement remain deferred.
+The React Harness responsibility and unrestricted development policy are settled in [React Harness design](../react-harness/_ctx/DESIGN.md). The legacy Harness design is superseded. The separate React Harness directory implements File and Default React Harnesses and directly uses Agent data-model operations. Team owns assignment guidance and member validation/activation; Workspace owns initialization templates. The separate Harness source tree and permission mechanisms are removed. Member-facing harness configuration and future permission enforcement remain deferred.
 
 ## Interface contract
 
@@ -24,7 +24,7 @@ Core composes owner data-model operations on one technical transaction. Workspac
 
 ### Workspace initialization coordination
 
-Workspace inspects and prepares filesystem state while preserving existing context. Core creates a fresh root-design Team lead and registers its initial configuration, activation and member-only acceptance baseline atomically through owner operations. Nonempty metadata cleanup requires explicit revision-bound user confirmation. Registration failure rolls back prepared filesystem additions and restores staged metadata; original context and project source are preserved.
+Workspace inspects and prepares filesystem state while preserving existing context. Core creates a fresh root-design Team lead and registers its initial configuration, activation atomically through owner operations. Nonempty metadata cleanup requires explicit revision-bound user confirmation. Registration failure rolls back prepared filesystem additions and restores staged metadata; original context and project source are preserved.
 
 ### Read-only context inspection coordination
 

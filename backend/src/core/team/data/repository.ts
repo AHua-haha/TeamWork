@@ -41,6 +41,8 @@ export class TeamData implements TeamStore, ChatStore {
     async migrate(): Promise<void> {
         for (const statement of schema)
             await this.pool.query(statement);
+        // Activation identity is application-owned; retire old Git/hash markers without touching the repository.
+        await this.pool.query("UPDATE member_activation SET revision = UUID() WHERE revision NOT REGEXP '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'");
         const columns = await rows(this.pool, 'SHOW COLUMNS FROM chat_settings');
         if (String(columns.find(row => row.Field === 'context_format')?.Default) !== '2') await this.pool.query('ALTER TABLE chat_settings ALTER COLUMN context_format SET DEFAULT 2');
         for (const column of ['reset_cursor', 'reset_position'])
@@ -533,15 +535,15 @@ export class TeamData implements TeamStore, ChatStore {
             await this.workspaces.inTransaction(db).requireWorkspace(workspaceId, true);
             const [activation] = await rows(db, 'SELECT revision, time FROM member_activation WHERE workspace_id = ? FOR UPDATE', [workspaceId]);
             if ((activation?.revision ?? null) !== (input.expectedActivation?.revision ?? null) || (activation ? Number(activation.time) : null) !== (input.expectedActivation?.time ?? null))
-                throw new AppError('stale_revision', 'Configuration activation changed after review', 409);
+                throw new AppError('stale_revision', 'Configuration activation changed during validation', 409);
             const current = (await rows(db, 'SELECT id, workspace_id, revision, data FROM members WHERE workspace_id = ? ORDER BY ordinal FOR UPDATE', [workspaceId])).map(memberRow);
             const active = current.filter(m => m.value.retiredAt === null);
             const expected = new Map(input.expected.map(m => [m.id, m.revision]));
             if (active.length !== expected.size || active.some(m => expected.get(m.id) !== m.revision))
-                throw new AppError('config_conflict', 'Team changed after review; review again', 409);
+                throw new AppError('config_conflict', 'Team changed during validation; retry activation', 409);
             const models = await this.workspaces.inTransaction(db).getWorkspaceModels(workspaceId);
             if (!models || Number(models.revision) !== input.modelsRevision)
-                throw new AppError('config_conflict', 'Workspace models changed after review', 409);
+                throw new AppError('config_conflict', 'Workspace models changed during validation', 409);
             for (const member of active.slice().sort((a, b) => a.id.localeCompare(b.id)))
                 if ((await this.agents.inTransaction(db).executionState(member.id, true)).activeRunId)
                     throw new AppError('workspace_busy', 'All workspace members must be idle', 409);
@@ -606,23 +608,13 @@ export class TeamData implements TeamStore, ChatStore {
         const defaults = defaultRunSettings(value), next = { ...lead.value, settings: { ...lead.value.settings, connectionId: defaults.connectionId, modelId: defaults.modelId, modelOptions: defaults.modelOptions } };
         next.configuration = generatedSource(next);
         if (lead.value.configuration)
-            { next.configuration.path = lead.value.configuration.path; next.configuration.legacyPaths = lead.value.configuration.legacyPaths; }
+            next.configuration.path = lead.value.configuration.path;
         await this.pool.execute('UPDATE members SET data = ?, revision = revision + 1 WHERE id = ?', [encode(next), lead.id]);
     }
     async contextMembers(): Promise<{
         id: string;
         workspaceId: string;
     }[]> { return (await rows(this.pool, 'SELECT id,workspace_id FROM members')).map(row => ({ id: row.id, workspaceId: row.workspace_id })); }
-    async initialMemberFiles(workspaceId: string): Promise<Record<string, string>> {
-        const files: Record<string, string> = {};
-        for (const member of await this.listMembers(workspaceId))
-            if (member.value.retiredAt === null && member.value.configuration) {
-                const source = member.value.configuration;
-                for (const [path, text] of Object.entries(source.files))
-                    files[`${source.path.slice(0, source.path.lastIndexOf('/'))}/${path}`] = text;
-            }
-        return files;
-    }
     async clearConversations(): Promise<void> {
         await clearTables(this.pool, ['chat_changes', 'chat_entries', 'chat_clock', 'chat_runs', 'chat_context_entries', 'chat_messages', 'chat_images', 'chat_exchanges', 'chat_context_summaries', 'chat_settings']);
         if (this.connection) this.storage.afterCommit(this.connection, () => this.contexts.clear(), () => this.contexts.clear());

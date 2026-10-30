@@ -1,8 +1,7 @@
 import {lstat, readFile, writeFile, readdir} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {AppError} from '../../agent/data/model.js';
-import {sha256, decodeText} from '../../text.js';
-import type {MemberConfigSource} from './member-config.js';
+import {decodeText} from '../../text.js';
 import {emptyDesignScope, parseDesignScope, type DesignScope} from './assignment.js';
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -48,13 +47,4 @@ export async function upgradeMemberDirectory(root: string): Promise<void> {
   for (const entry of await readdir(join(root,'.rsi/members'),{withFileTypes:true})) {
     if (entry.isDirectory()) await upgradeMemberManifestFile(root, `.rsi/members/${entry.name}/member.json`);
   }
-}
-/** Old committed trees remain intact; normalize only their read projection. */
-export function currentMemberFormat(files: Record<string, string>, source?: MemberConfigSource): Record<string, string> {
-  const allowed = new Set<string>();
-  for (let current = source; current; current = current.previous) {
-    for (const hash of current.legacyManifestHashes ?? []) allowed.add(hash);
-    if ((current.formatVersion ?? 0) < 5 && current.files['member.json']) allowed.add(sha256(current.files['member.json']));
-  }
-  return Object.fromEntries(Object.entries(files).map(([path, text]) => [path, path.endsWith('/member.json') && allowed.has(sha256(text)) ? upgradeMemberManifest(text) : text]));
 }

@@ -12,8 +12,6 @@ export interface RosterMember { memberId: string; workspaceId: string; revision:
 export interface TeamRoster { workspaceId: string; members: RosterMember[] }
 export type MemberModelSettings = Pick<RunSettings, 'connectionId' | 'modelId' | 'modelOptions'>;
 export interface MemberModelConfig extends ConfigRecord<MemberModelSettings> { issues: string[] }
-export interface ConfigurationIssue { path: string; code: string; message: string }
-export interface MemberConfigurationReview { revision: string; digest: string; valid: boolean; issues: ConfigurationIssue[]; changes?: { type: 'create' | 'update' | 'delete'; path: string; name: string }[] }
 
 /** Workspace metadata, member metadata, activation, and model settings. */
 export class WorkspaceClient {
@@ -33,8 +31,7 @@ export class WorkspaceClient {
   roster(workspaceId: string): Promise<TeamRoster> { return this.members(workspaceId); }
   memberModelSettings(workspaceId: string, memberId: string): Promise<MemberModelConfig> { return this.get(`${this.base(workspaceId)}/members/${encodeURIComponent(memberId)}/model-settings`); }
   updateMemberModelSettings(workspaceId: string, memberId: string, revision: number, value: MemberModelSettings): Promise<MemberModelConfig> { return this.write(`${this.base(workspaceId)}/members/${encodeURIComponent(memberId)}/model-settings`, 'PUT', { revision, value }); }
-  committedMemberReview(workspaceId: string): Promise<MemberConfigurationReview> { return this.get(`${this.base(workspaceId)}/team/configuration?source=committed`); }
-  activateMemberConfiguration(workspaceId: string, input: { revision: string; digest: string }): Promise<{ revision: string; memberIds: string[] }> { return this.write(`${this.base(workspaceId)}/team/configuration/activate`, 'POST', input); }
+  activateMemberConfiguration(workspaceId: string): Promise<{ revision: string; memberIds: string[] }> { return this.write(`${this.base(workspaceId)}/team/configuration/activate`, 'POST', {}); }
   workspaceModels(workspaceId: string): Promise<WorkspaceModelsRecord> { return this.get(`${this.base(workspaceId)}/models`); }
   updateWorkspaceModels(workspaceId: string, revision: number, value: WorkspaceModels): Promise<WorkspaceModelsRecord> { return this.write(`${this.base(workspaceId)}/models`, 'PUT', { revision, value }); }
 }

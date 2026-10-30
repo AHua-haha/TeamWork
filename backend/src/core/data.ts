@@ -23,7 +23,6 @@ export class CoreData {
                     await team.initializeActivation(lead.workspaceId, bootstrap.activation);
             },
             modelsChanged: (db, id, value) => this.team.inTransaction(db).initializeLeadModels(id, value),
-            memberFiles: id => this.team.initialMemberFiles(id),
         });
         this.team = new TeamData(storage, this.agents, this.workspaces);
         this.config = new ConfigData(storage, this.agents, { contains: async (id, db) => !!await (db ? this.team.inTransaction(db) : this.team).getMember(id), ids: async () => (await this.team.contextMembers()).map(member => member.id) });
