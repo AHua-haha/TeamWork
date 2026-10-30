@@ -1,5 +1,0 @@
-{
-  "implementation": [
-    "backend/src/core/react-harness"
-  ]
-}

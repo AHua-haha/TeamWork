@@ -1,6 +1,0 @@
-{
-  "implementation": [
-    "backend/src/core/team",
-    "backend/prompts/team"
-  ]
-}

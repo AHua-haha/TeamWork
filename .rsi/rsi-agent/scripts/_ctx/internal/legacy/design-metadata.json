@@ -1,8 +1,0 @@
-{
-  "implementation": [
-    "scripts",
-    "backend/scripts",
-    "rsi.config.example.json",
-    "frontend/vite.config.ts"
-  ]
-}

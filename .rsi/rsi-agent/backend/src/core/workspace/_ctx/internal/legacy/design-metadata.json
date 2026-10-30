@@ -1,6 +1,0 @@
-{
-  "implementation": [
-    "backend/src/core/workspace",
-    "backend/prompts/workspace"
-  ]
-}
