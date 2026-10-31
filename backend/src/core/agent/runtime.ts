@@ -249,7 +249,10 @@ export class AgentRuntime {
         },
         compactionStarted: state => this.store.beginCompaction(state),
         compactionMessage: record => this.store.commitCompactionMessage(record),
-        compactionFinished: (state, revision, entries) => this.store.finishCompaction(state, revision, entries),
+        compactionFinished: async (state, revision, entries) => {
+          try { return await this.store.finishCompaction(state, revision, entries); }
+          catch (error) { this.harnesses.invalidate(run.agentId); throw error; }
+        },
         finished: state => this.store.finishRun(state.agentId, state.runId, state.status as Exclude<RunState['status'], 'running'>, state.error),
       }, this.progress, this.maxSteps, harnesses);
       const job = this.jobs.get(run.runId); if (job) job.execution = execution;

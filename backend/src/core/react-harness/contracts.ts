@@ -1,7 +1,7 @@
 import type {AgentInputData} from '../agent/data/index.js';
 import type {AssistantMessage, JsonObject, Tool, ToolCall, ToolResultMessage} from '@earendil-works/pi-ai';
 import type {StepScope, RuntimeTool} from '../agent/data/index.js';
-import type {ComponentState, ContextEntry} from '../agent/data/index.js';
+import type {ComponentState, ComponentStateReplacement, ContextEntry} from '../agent/data/index.js';
 import type {AgentContextState} from '../agent/data/index.js';
 import type {AgentTurnData} from '../agent/data/index.js';
 
@@ -22,9 +22,18 @@ export interface ReactHarnessContext {
 
 export interface ReactHarnessInputContext {agentId:string;input:ContextEntry;data:AgentInputData;signal:AbortSignal}
 
+/** Isolated purpose-owned state used only by one compaction preparation. */
+export interface ReactHarnessCompaction {
+  harness: ReactHarness;
+  replacement(context: AgentContextState): ComponentStateReplacement & {preparedRevision: number};
+  accept(replacement: ComponentStateReplacement): void;
+}
+
 /** Purpose-owned reaction to input and assistant responses; harnesses may own purpose-specific model tool definitions. */
 export interface ReactHarness {
   readonly harnessId?: string;
+  /** Fork related state; only accept its reconciled replacement after context cutover. */
+  prepareCompaction?(): ReactHarnessCompaction;
   onInput?(context:ReactHarnessInputContext):Promise<void>;
   /** Receive an acknowledged purpose-owned durable-state update. */
   applyUpdate?(revision: number, data: JsonObject): void;

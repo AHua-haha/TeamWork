@@ -1,8 +1,8 @@
-import {AgentInputData} from './data/input.js';
+import {AgentInputData, countedMessage} from './data/input.js';
 import {reactToUserInputs} from './input-reactions.js';
 import {AgentMessageData, AgentTurnData, type AgentMessagePersistence} from './data/messages.js';
 import { AgentState, AgentContextState } from './data/state.js';
-import { compactedContext, compactionInput, estimateRequestTokens, interruptedCompactionContext, compactionAcknowledgement, validateCompactionSettings, type CompactionState, type CompactionTrigger } from './data/compaction.js';
+import { compactedContext, compactionInput, estimateRequestTokens, compactionAcknowledgement, validateCompactionSettings, type CompactionState, type CompactionTrigger, type PreparedComponentState } from './data/compaction.js';
 import { finalAnswer, textPhase } from './final-answer.js';
 import { AgentMessageContext, type GroupContextReference } from './data/context.js';
 import { randomUUID } from 'node:crypto';
@@ -11,7 +11,7 @@ import { validateEntries } from './data/validation.js';
 import { ProgressStore } from './data/progress.js';
 import { AppError, type CompletedMessage, type ContextEntry, type ContextHistory, type RunState } from './data/model.js';
 import type { ModelStream, ModelRequest, AgentConfiguration, RuntimePolicy, RuntimeTool, StepScope } from './contracts.js';
-import type {ReactHarness, ReactHarnessContext} from '../react-harness/index.js';
+import type {ReactHarness, ReactHarnessCompaction, ReactHarnessContext} from '../react-harness/index.js';
 import { DefaultReactHarness } from '../react-harness/index.js';
 export { DefaultReactHarness } from '../react-harness/index.js';
 export type * from './contracts.js';
@@ -51,18 +51,18 @@ export class AgentExecution {
   restoreContext(context:ContextHistory):void{this.state.acceptContext(context);}
   attachContext(context:AgentContextState):void{this.state.attachContext(context);}
   receive(record:CompletedMessage):void{this.state.receive(record);}
-  private async buildModelRequest(scope: StepScope, history: ContextHistory, messages = this.messages): Promise<ModelRequest> {
-    for (const harness of this.reactHarnesses) harness.restoreContext?.(messages.context);
+  private async buildModelRequest(scope: StepScope, history: ContextHistory, messages = this.messages, harnesses = this.reactHarnesses): Promise<ModelRequest> {
+    for (const harness of harnesses) harness.restoreContext?.(messages.context);
     const projected = structuredClone(history);
     projected.entries=projected.entries.flatMap(entry=>{
       let value:ContextEntry|null=entry;
-      for(const harness of this.reactHarnesses)if(value){const next:ContextEntry|null|undefined=harness.projectContextEntry?.(value);if(next!==undefined)value=next;}
+      for(const harness of harnesses)if(value){const next:ContextEntry|null|undefined=harness.projectContextEntry?.(value);if(next!==undefined)value=next;}
       return value?[value]:[];
     });
     const request = await this.policy.buildRequest(scope, projected);
-    const owned = this.reactHarnesses.flatMap(harness => harness.tools?.(scope) ?? []);
-    const overridden = new Set(this.reactHarnesses.flatMap(harness => harness.overrideToolNames?.(scope) ?? []));
-    const prompts = (await Promise.all(this.reactHarnesses.map(harness => harness.systemPrompt?.(scope)))).map(prompt => prompt?.trim()).filter((prompt): prompt is string => !!prompt);
+    const owned = harnesses.flatMap(harness => harness.tools?.(scope) ?? []);
+    const overridden = new Set(harnesses.flatMap(harness => harness.overrideToolNames?.(scope) ?? []));
+    const prompts = (await Promise.all(harnesses.map(harness => harness.systemPrompt?.(scope)))).map(prompt => prompt?.trim()).filter((prompt): prompt is string => !!prompt);
     if (!owned.length && !overridden.size && !prompts.length) return request;
     const ownedNames = new Set(owned.map(tool => tool.definition.name));
     const tools = [...request.tools.filter(tool => !overridden.has(tool.definition.name) && !ownedNames.has(tool.definition.name)), ...owned];
@@ -186,12 +186,21 @@ export class AgentExecution {
     const draftModel = new AgentContextState(original), draft = draftModel.history;
     const messages = this.messages.prepare(state.id, trigger, draftModel);
     const trace = messages.trace, metadataChanges = messages.metadataChanges;
+    const preparations: Array<ReactHarnessCompaction | undefined> = this.reactHarnesses.map(harness => harness.prepareCompaction?.());
+    const compactionHarnesses = this.reactHarnesses.map((harness, index) => preparations[index]?.harness ?? harness);
+    if (preparations.some(Boolean) && !this.observer.compactionFinished
+      && (this.observer.message || this.observer.componentMessage || this.observer.contextChanged || this.observer.contextPatched)) {
+      throw new AppError('invalid_config', 'Prepared React Harness state requires atomic compaction completion persistence');
+    }
     await compactionAcknowledgement(() => this.observer.compactionStarted?.(structuredClone(state)));
     const finish = async (finished: CompactionState, revision: number, entries: ContextEntry[]) => {
       validateEntries(entries);
       if (this.observer.compactionFinished) {
-        this.context = await compactionAcknowledgement(() => this.observer.compactionFinished!(structuredClone(finished), revision, structuredClone(entries))) ?? {revision: revision + 1, entries: structuredClone(entries)};
-      } else await compactionAcknowledgement(() => this.replaceContext(revision, entries));
+        const result = await compactionAcknowledgement(() => this.observer.compactionFinished!(structuredClone(finished), revision, structuredClone(entries)));
+        if (finished.status === 'completed') this.context = result ?? {revision: revision + 1, entries: structuredClone(entries)};
+      } else if (finished.status === 'completed') {
+        await compactionAcknowledgement(() => this.replaceContext(revision, entries));
+      }
     };
     let committing = false;
     try {
@@ -204,8 +213,8 @@ export class AgentExecution {
           readContext: async () => structuredClone(draft),
           replaceContext: async () => { throw new AppError('context_conflict', 'Preparation context is replaced only at the compaction boundary'); },
           recordInput: async (text, metadata) => { ordinaryScope.signal.throwIfAborted(); await messages.append(compactionInput(text, metadata)); }};
-        const request = await abortable(track(this.buildModelRequest(scope, draft, messages)), scope.signal);
-        const {response} = await this.turn(scope, request, messages, track);
+        const request = await abortable(track(this.buildModelRequest(scope, draft, messages, compactionHarnesses)), scope.signal);
+        const {response} = await this.turn(scope, request, messages, track, compactionHarnesses);
         if (response.content.some(block => block.type === 'toolCall')) continue;
         if (response.stopReason === 'stop' && finalAnswer(response)) break;
         if (response.stopReason === 'stop' && response.content.some(block => block.type === 'text' && textPhase(block) === 'commentary')) continue;
@@ -213,21 +222,33 @@ export class AgentExecution {
       }
       ordinaryScope.signal.throwIfAborted();
       const entries = await compactedContext(state.agentId, original, trace.slice(1), group);
+      for (const entry of entries) {
+        const update = metadataChanges.get(entry.messageId);
+        if (update) {
+          entry.metadata = {...structuredClone(update.metadata), ...(entry.metadata.contextUsageInvalidated === true ? {contextUsageInvalidated: true} : {})};
+          metadataChanges.set(entry.messageId, {messageId: entry.messageId, metadata: structuredClone(entry.metadata)});
+        }
+      }
+      const previousIds = new Set(original.entries.map(entry => entry.messageId));
+      const messageCount = (original.messageCount ?? 0) + entries.filter(entry => !previousIds.has(entry.messageId)).reduce((count, entry) => count + countedMessage(entry), 0);
+      const replacementContext = new AgentContextState({revision: original.revision, entries, messageCount});
+      const prepared = preparations.flatMap(preparation => preparation ? [{preparation, replacement: preparation.replacement(replacementContext)}] : []);
+      const componentStates: PreparedComponentState[] = prepared.map(item => item.replacement);
+      const finished: CompactionState = {...state, status: 'completed', endedAt: Date.now(), contextMetadata: [...metadataChanges.values()], componentStates};
       committing = true;
-      await finish({...state, status: 'completed', endedAt: Date.now()}, original.revision, entries);
+      await finish(finished, original.revision, entries);
+      for (const {preparation, replacement} of prepared) preparation.accept(replacement);
     } catch (error) {
-      if (committing || (error instanceof AppError && error.code === 'compaction_persistence_failure')) throw error; // Uncertain durable acknowledgement is recovered by the caller, never a competing replacement.
+      if (committing || (error instanceof AppError && error.code === 'compaction_persistence_failure')) throw error;
       await settle();
       const failure = {code: ordinaryScope.signal.aborted ? 'cancelled' : error instanceof AppError ? error.code : 'compaction_error', message: error instanceof Error ? error.message : 'Compaction failed'};
-      const entries = interruptedCompactionContext(this.context, trace, failure);
-      for (const entry of entries) { const update = metadataChanges.get(entry.messageId); if (update) entry.metadata = structuredClone(update.metadata); }
-      await finish({...state, status: 'failed', endedAt: Date.now(), error: failure}, this.context.revision, entries);
+      await finish({...state, status: 'failed', endedAt: Date.now(), error: failure}, this.context.revision, this.context.entries);
       throw new AppError('compaction_failed', `Context preparation failed: ${failure.message}`);
     }
   }
 
   private async turn(scope: StepScope, request: ModelRequest, messages: AgentMessageData,
-    track: <T>(promise: Promise<T>) => Promise<T>): Promise<{response: AssistantMessage; results: ToolResultMessage[]; record: CompletedMessage}> {
+    track: <T>(promise: Promise<T>) => Promise<T>, harnesses = this.reactHarnesses): Promise<{response: AssistantMessage; results: ToolResultMessage[]; record: CompletedMessage}> {
     const run = this.runState, signal = scope.signal;
     const declared = request.tools.map(tool => tool.definition);
     const tools = new Map<string, ModelRequest['tools'][number]>();
@@ -324,10 +345,10 @@ export class AgentExecution {
       data: turn,
     };
     // Purpose-owned reactions claim their calls before the Default fallback, regardless of registration order.
-    for (const harness of this.reactHarnesses) {
+    for (const harness of harnesses) {
       if (!(harness instanceof DefaultReactHarness) && harness.canHandle(response)) await harness.handle(response, harnessContext);
     }
-    const fallback = this.reactHarnesses.find(harness => harness instanceof DefaultReactHarness) ?? new DefaultReactHarness();
+    const fallback = harnesses.find(harness => harness instanceof DefaultReactHarness) ?? new DefaultReactHarness();
     await fallback.handle(response, {...harnessContext, toolCalls: calls.filter(call => !turn.hasResult(call.id))});
     const results = turn.orderedResults();
     if (results.length !== calls.length) throw new AppError('invalid_tool_calls', 'React Harness did not produce a result for every tool call');

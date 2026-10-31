@@ -101,7 +101,7 @@ test('unchanged large group history gets one attempt per checkpoint, never recur
   assert.match(JSON.stringify(f.agent.snapshot().context.entries),/SHARED/);
 });
 
-test('failed pre-call preparation preserves old context and recorded tool effects without resuming work',async()=>{
+test('failed pre-call preparation discards candidates and preserves committed context without replay',async()=>{
   let calls=0;
   const tool:RuntimeTool={definition:{name:'inspect',description:'inspect',parameters:{type:'object',properties:{}}},execute:async()=>{calls++;return {content:[{type:'text',text:'observed external state'}],isError:false};}};
   let modelCalls=0;
@@ -112,7 +112,7 @@ test('failed pre-call preparation preserves old context and recorded tool effect
   const terminal=await f.agent.run(new AbortController().signal);
   assert.equal(terminal.status,'failed');assert.equal(terminal.error!.code,'compaction_failed');assert.equal(calls,1);
   const context=JSON.stringify(f.agent.snapshot().context.entries);
-  assert.match(context,/OLD RESULT|observed external state/);assert.match(context,/No old context was discarded/);
+  assert.match(context,/OLD RESULT/);assert.doesNotMatch(context,/observed external state|context-compaction/);
   assert.equal(f.requests.length,2);assert.equal(f.publications(),0);
 });
 
@@ -122,7 +122,7 @@ test('finishing preparation failure preserves the ordinary outcome and does not 
   assert.equal(terminal.status,'completed');assert.equal(terminal.error,null);
   assert.deepEqual(f.requests.map(item=>item.mode),['work','compaction']);
   assert.match(JSON.stringify(f.agent.snapshot().context.entries),/Accepted answer/);
-  assert.match(JSON.stringify(f.agent.snapshot().context.entries),/No old context was discarded/);
+  assert.doesNotMatch(JSON.stringify(f.agent.snapshot().context.entries),/context-compaction/);
 });
 
 test('cutover refusal leaves old context intact and does not claim completed preparation',async()=>{

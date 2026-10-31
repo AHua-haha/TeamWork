@@ -47,11 +47,14 @@ async function prepare(store:CoreData,url:string){
 }
 
 test('SQL refresh is incremental, excludes its own entry, survives restart and directly replaces the previous message',()=>fixture(async f=>{
- await f.invoke();assert.equal((await f.state()).data.messagesSinceRefresh,63);
+ await f.invoke();assert.equal((await f.state()).data.messagesSinceRefresh,0);
+ const initial=(await f.state()).data.replacementMessageId;
  await f.add([user()]);
  const original=f.store.agents.getContext.bind(f.store.agents);f.store.agents.getContext=async()=>{throw Error('Refresh must not reload full context');};
  try{await f.invoke();}finally{f.store.agents.getContext=original;}
  const state=await f.state(),id=state.data.replacementMessageId as string;
+ assert.equal(id,initial,'below-threshold user input and restored state retain the initial instruction');
+ assert.equal(state.data.messagesSinceRefresh,1);
  const context=await f.store.agents.getContext('agent');assert.equal(context.messageCount,64);assert.equal(context.entries.length,65);
  const hidden=context.entries.find(e=>e.messageId===f.viewId)!;assert.equal(hidden.metadata.modelContextHidden,true);assert.equal((hidden.message.content as {text:string}[])[0]!.text,'PRIVATE_DEPENDENCY');
  assert.match(context.entries.find(e=>e.messageId===id)!.message.content as string,/USAGE_ONLY/);
@@ -66,8 +69,9 @@ test('SQL refresh is incremental, excludes its own entry, survives restart and d
  assert.match(next.entries.find(e=>e.messageId===nextState.data.replacementMessageId)!.message.content as string,/UPDATED_USAGE/);
 }));
 
-test('failed SQL refresh rolls back visibility, insertion and harness state and can be retried after reload',()=>fixture(async f=>{
- await f.invoke();await f.add([user()]);const before=await f.store.agents.getContext('agent'),state=await f.state();
+for (const phase of ['initial', 'threshold']) test(`failed SQL ${phase} refresh rolls back visibility, insertion and harness state and can be retried after reload`,()=>fixture(async f=>{
+ if(phase==='threshold'){await f.invoke();await f.add([...Array.from({length:63},assistant),user()]);}
+ const before=await f.store.agents.getContext('agent'),state=await f.state();
  await f.store.pool.query("CREATE TRIGGER refuse_refresh BEFORE UPDATE ON agent_assistant_response_handler_state FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='refused refresh state'");
  await assert.rejects(f.invoke(),/refused refresh state/);
  const restored=new CoreData(new MySqlStorage(f.url));
@@ -80,8 +84,10 @@ test('context replacement keeps the append counter and missing old references do
  const context=await f.store.agents.residentContext('agent'),before=context.history.messageCount!;
  await f.store.agents.replaceContext('agent',context.history.revision,[assistant()]);
  assert.equal((await f.store.agents.getContext('agent')).messageCount,before+1);
- await f.add([...Array.from({length:62},assistant),user()]);await f.invoke();
- const current=await f.store.agents.getContext('agent');assert.equal(current.messageCount,128);assert.equal((await f.state()).data.messagesSinceRefresh,0);
+ await f.invoke();
+ const current=await f.store.agents.getContext('agent');assert.equal(current.messageCount,before+1);assert.equal((await f.state()).data.messagesSinceRefresh,0);
+ assert.deepEqual((await f.state()).data.discoveredDependencyDesigns,['backend'],'dependencies survive removal of their original views');
+ assert.equal(current.entries.filter(entry=>entry.metadata.fileContextReplacement===true).length,1);
 }));
 
 
@@ -92,4 +98,82 @@ test('concurrent first harness states for different members do not lock missing 
  assert.ok(states.every(state=>state.revision===1));
  await assert.rejects(f.store.agents.saveComponentState(ids[0]!,'file-content',0,{}),(error:any)=>error.code==='context_conflict');
  assert.deepEqual(await f.store.agents.getComponentState(ids[0]!,'file-content'),states[0]);
+}));
+
+for(const outcome of ['success','failure'] as const) test(`runtime compaction ${outcome} keeps File state consistent and refreshes only on later user input`,{timeout:30_000},()=>fixture(async f=>{
+ const {AgentRuntime,fixedPolicy}=await import('../../src/core/agent/runtime.js');
+ const {fileReactHarnessFactory}=await import('../../src/core/react-harness/file/harness.js');
+ const {fauxProvider}=await import('@earendil-works/pi-ai');
+ for(const [path,body]of Object.entries({'auth/auth.ts':'NEW_DEPENDENCY', '.rsi/project/auth/_ctx/DESIGN.md':'# Auth', '.rsi/project/auth/_ctx/README.md':'AUTH_USAGE'})){
+  await mkdir(dirname(join(f.root,path)),{recursive:true});await writeFile(join(f.root,path),body);
+ }
+ await f.invoke();
+ const initialId=(await f.state()).data.replacementMessageId;
+ await f.add([{messageId:randomUUID(),message:{role:'user',content:'OLD PRIVATE '.repeat(40000),timestamp:1},metadata:{runtimeGenerated:true}}]);
+ const model=fauxProvider().getModel(),base=fixedPolicy(model),modes=new WeakMap<object,string>();
+ const settings={thresholdTokens:10000,prompt:'Prepare continuation and preserve useful context.'};
+ let preparations=0,ordinary=0,beforeContext:Awaited<ReturnType<typeof f.store.agents.getContext>>|undefined,beforeState:Awaited<ReturnType<typeof f.state>>|undefined;
+ const runtime=new AgentRuntime(f.store.agents,{resolveForRun:async()=>({model,tools:[],systemPrompt:'',options:{},source:{appRevision:0,agentRevision:0,catalogRevisions:{}}})},{...base,
+  createReactHarnessFactories:()=>[fileReactHarnessFactory(f.root,f.source)],
+  buildRequest:async(scope,history)=>{const request=await base.buildRequest(scope,history);modes.set(request,scope.mode!);return request;},
+ },async function*(request){
+  let response;
+  if(modes.get(request)==='compaction'){
+   if(++preparations===1){
+    beforeContext=await f.store.agents.getContext('agent');beforeState=await f.state();
+    response=fauxAssistantMessage([
+     {type:'toolCall',id:'new-dependency',name:'read',arguments:{path:'auth/auth.ts'}},
+     {type:'toolCall',id:'working-source',name:'read',arguments:{path:'frontend/app.ts'}},
+    ],{stopReason:'toolUse'});
+   }else{
+    assert.deepEqual(await f.store.agents.getContext('agent'),beforeContext,'preparation messages and visibility stay isolated');
+    assert.deepEqual(await f.state(),beforeState,'preparation discoveries and file references do not advance live state');
+    if(outcome==='failure')throw Error('provider failed during preparation');
+    response=fauxAssistantMessage('Prepared continuation.');
+   }
+  }else{
+   ordinary++;
+   const context=await f.store.agents.getContext('agent'),state=await f.state();
+   if(ordinary===1&&outcome==='success'){
+    assert.equal(state.data.replacementMessageId,null);
+    assert.equal(context.entries.filter(entry=>entry.metadata.fileContextReplacement===true).length,0,'compaction never inserts a generated instruction');
+    assert.deepEqual(state.data.discoveredDependencyDesigns,['auth','backend'],'old discoveries accumulate even when their views are dropped');
+    const files=state.data.files as Record<string,{visibleMessageId:string}>;
+    assert.deepEqual(Object.keys(files).sort(),[join(f.root,'auth/auth.ts'),join(f.root,'frontend/app.ts')].sort());
+    assert.ok(Object.values(files).every(file=>context.entries.some(entry=>entry.messageId===file.visibleMessageId&&entry.metadata.modelContextHidden!==true)));
+   }else{
+    const generated=context.entries.filter(entry=>entry.metadata.fileContextReplacement===true&&entry.metadata.modelContextHidden!==true);
+    assert.equal(generated.length,1);
+    const text=generated[0]!.message.content as string;
+    if(outcome==='success'){
+     assert.notEqual(state.data.replacementMessageId,initialId);
+     assert.match(text,/AUTH_USAGE/);assert.match(text,/USAGE_ONLY/);
+    }else{
+     assert.equal(state.data.replacementMessageId,initialId);
+     assert.deepEqual(state.data.discoveredDependencyDesigns,['backend']);
+     assert.doesNotMatch(text,/AUTH_USAGE/);
+    }
+   }
+   response=fauxAssistantMessage('Done.');
+  }
+  yield {type:'start',partial:response};yield {type:'done',reason:response.stopReason as 'stop'|'toolUse',message:response};
+ },{compaction:settings});
+ try{
+  await runtime.open();
+  const first=await runtime.start('agent','Continue the task');
+  assert.equal((await runtime.finished('agent',first.runId)).status,outcome==='success'?'completed':'failed');
+  if(outcome==='failure'){
+   assert.deepEqual(await f.store.agents.getContext('agent'),beforeContext);
+   assert.deepEqual(await f.state(),beforeState);
+   assert.match(JSON.stringify(await f.store.agents.runMessages('agent',first.runId)),/NEW_DEPENDENCY/,'stable evidence is retained without replay');
+  }
+  const retained=await f.store.agents.getContext('agent'),state=await f.state();
+  await runtime.close();await runtime.open();
+  assert.deepEqual(await f.store.agents.getContext('agent'),retained,'restart alone never inserts an instruction');
+  assert.deepEqual(await f.state(),state);
+  settings.thresholdTokens=10_000_000;
+  const next=await runtime.start('agent','Next real user input');
+  assert.equal((await runtime.finished('agent',next.runId)).status,'completed');
+  assert.equal(preparations,2,'failed preparation tools are never replayed');
+ }finally{await runtime.close();}
 }));

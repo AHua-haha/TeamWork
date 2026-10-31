@@ -55,9 +55,10 @@ async function fixture(t:TestContext){
 
 test('64 messages trigger replacement only on user input; refresh uses message IDs and README only',async t=>{
  const f=await fixture(t);await f.user();await f.input();
+ const initial=f.state().data.replacementMessageId;
  await f.read('frontend/app.ts');await f.read('backend/impl.ts');await f.read('.rsi/project/backend/_ctx/DESIGN.md');
- await f.fill(63);assert.equal(f.state().data.replacementMessageId,null,'never refresh during ordinary work');
- await f.user();assert.equal(f.context.history.messageCount,64);
+ await f.fill(64);assert.equal(f.state().data.replacementMessageId,initial,'never refresh during ordinary work');
+ await f.user();assert.equal(f.context.history.messageCount,65);
  // The refresh must not enumerate or search the transcript. Entry lookup by ID remains available.
  const entries=f.context.history.entries,oldIterator=entries[Symbol.iterator];
  entries[Symbol.iterator]=()=>{throw Error('Full history scan forbidden');};
@@ -67,7 +68,7 @@ test('64 messages trigger replacement only on user input; refresh uses message I
  const body=text(entry);assert.match(body,/<system_instruction>/);assert.match(body,/not a user request/);assert.match(body,/frontend\/ \[working\] — User interface/);
  assert.match(body,/backend\/ — Durable storage/);assert.match(body,/BACKEND_USAGE_CONTRACT/);
  assert.doesNotMatch(body,/INCLUDED_SOURCE_MUST_NOT_LOAD|DEPENDENCY_PRIVATE_SOURCE|DEPENDENCY_PRIVATE_DESIGN|File React Harness/);
- assert.equal(f.context.history.messageCount,64,'replacement does not count');assert.equal(f.state().data.messagesSinceRefresh,0);
+ assert.equal(f.context.history.messageCount,65,'replacement does not count');assert.notEqual(id,initial);assert.equal(f.state().data.messagesSinceRefresh,0);
  const views=f.context.history.entries.filter(e=>typeof e.metadata.fileViewPath==='string');
  assert.equal(views.find(e=>String(e.metadata.fileViewPath).endsWith('frontend/app.ts'))!.metadata.modelContextHidden,undefined);
  assert.ok(views.filter(e=>String(e.metadata.fileViewPath).includes('/backend/')).every(e=>e.metadata.fileContextRefreshHidden===true));
@@ -76,19 +77,19 @@ test('64 messages trigger replacement only on user input; refresh uses message I
 });
 
 test('dependencies accumulate across restart and refresh; old replacement is hidden and missing README is explicit',async t=>{
- const f=await fixture(t);await f.user();await f.input();await f.read('backend/impl.ts');await f.fill(63);await f.user();await f.input();
+ const f=await fixture(t);await f.user();await f.input();await f.read('backend/impl.ts');await f.fill(64);await f.user();await f.input();
  const old=f.state().data.replacementMessageId as string;f.restart();await f.read('auth/auth.ts');
- await f.fill(127);await f.user();await f.input();
+ await f.fill(128);await f.user();await f.input();
  assert.deepEqual(f.state().data.discoveredDependencyDesigns,['auth','backend']);assert.equal(f.state().data.messagesSinceRefresh,0);
  const previous=f.context.entry(old)!;assert.equal(previous.metadata.modelContextHidden,true);assert.match(text(previous),/BACKEND_USAGE_CONTRACT/);
  assert.equal(projectFileContextEntry(structuredClone(previous)),null);
  const current=f.context.entry(f.state().data.replacementMessageId as string)!;
  assert.match(text(current),/BACKEND_USAGE_CONTRACT/);assert.match(text(current),/### auth\n\nNo README available\./);
- assert.equal(f.context.history.messageCount,128);assert.equal(f.context.pendingInputs().length,0);
+ assert.equal(f.context.history.messageCount,129);assert.equal(f.context.pendingInputs().length,0);
 });
 
 test('failed refresh keeps the previous reference and counter; restart can retry without losing source views',async t=>{
- const f=await fixture(t);await f.user();await f.input();await f.read('backend/impl.ts');await f.fill(63);await f.user();
+ const f=await fixture(t);await f.user();await f.input();await f.read('backend/impl.ts');await f.fill(64);await f.user();
  const before=structuredClone(f.context.history),state=structuredClone(f.state());f.fail(true);
  await assert.rejects(f.input(),/refused transaction/);assert.deepEqual(f.state(),state);
  f.context.replace(before);f.fail(false);f.restart();await f.input();
@@ -96,15 +97,15 @@ test('failed refresh keeps the previous reference and counter; restart can retry
 });
 
 test('assistant and tool messages count while runtime-generated and peer messages never trigger the user-input hook',async t=>{
- const f=await fixture(t);await f.user();await f.input();await f.fill(65);
+ const f=await fixture(t);await f.user();await f.input();const initial=f.state().data.replacementMessageId;await f.fill(65);
  await f.append({role:'user',content:'Private feedback',timestamp:1},{source:'publication-feedback'});
  await f.append({role:'user',content:'Peer message',timestamp:1},{source:'group-chat',author:{type:'member',name:'Peer'}});
- await f.input();assert.equal(f.state().data.replacementMessageId,null);
- await f.user();await f.input();assert.ok(f.state().data.replacementMessageId);
+ await f.input();assert.equal(f.state().data.replacementMessageId,initial);
+ await f.user();await f.input();assert.notEqual(f.state().data.replacementMessageId,initial);
 });
 
 test('Agent execution reacts before the model and never refreshes when work crosses the threshold mid-run',async t=>{
- const f=await fixture(t);await f.fill(62);await f.user();
+ const f=await fixture(t);await f.user();await f.input();const initial=f.state().data.replacementMessageId;await f.fill(63);await f.user();
  const model=fauxProvider().getModel(),requests:string[]=[];let calls=0;
  const stream:ModelStream=async function*(request){
   requests.push(JSON.stringify(request.context.messages));
@@ -115,7 +116,7 @@ test('Agent execution reacts before the model and never refreshes when work cros
  const observer={message:async(entry:CompletedMessage)=>{f.history.push(structuredClone(entry));return entry;},componentMessage:async(entry:CompletedMessage,effects:ComponentMessageEffects)=>{f.saveEffect(effects);f.history.push(structuredClone(entry));return entry;},contextPatched:async(_revision:number,_patch:unknown,effects?:ComponentMessageEffects)=>{if(effects)f.saveEffect(effects);}};
  const first=new AgentExecution(run('first'),f.context,0,{model,tools:[],systemPrompt:'Fixed',options:{}},fixedPolicy(model),stream,observer,undefined,64,[f.harness()]);
  assert.equal((await first.run(f.scope.signal)).status,'completed');
- assert.equal(f.context.history.messageCount,66);assert.equal(f.state().data.replacementMessageId,null);assert.ok(requests.every(request=>!request.includes('<system_instruction>')));
+ assert.equal(f.context.history.messageCount,67);assert.equal(f.state().data.replacementMessageId,initial);assert.ok(requests.every(request=>request.includes('<system_instruction>')&&!request.includes('BACKEND_USAGE_CONTRACT')));
  await f.user();
  const second=new AgentExecution(run('second'),f.context,f.history.length,{model,tools:[],systemPrompt:'Fixed',options:{}},fixedPolicy(model),stream,observer,undefined,64,[f.harness()]);
  assert.equal((await second.run(f.scope.signal)).status,'completed');

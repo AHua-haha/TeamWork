@@ -2,7 +2,7 @@ import {countedMessage} from './input.js';
 import { contextPageInput, checkContextPage, type ContextPageInput, type ContextPage } from '../../context-page.js';
 import type { AgentRecord, AgentExecutionState } from './model.js';
 import { validateEntries, validateRun, validateComponentState } from './validation.js';
-import { interruptedCompactionContext, validateCompactionState, type CompactionState } from './compaction.js';
+import { validateCompactionState, type CompactionState } from './compaction.js';
 import { adoptRecordedContext, sharedAttributionUpdates, type GroupContextMessage } from './context.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
@@ -347,9 +347,22 @@ export class AgentData {
                 const state = decode<CompactionState>(row!.state, validateCompactionState);
                 const updates = new Map((state.contextMetadata ?? []).map(update => [update.messageId, update]));
                 for (const update of effects.metadataUpdates) updates.set(update.messageId, update);
-                await db.execute('UPDATE context_compactions SET state = ? WHERE id = ?', [encode({...state, contextMetadata: [...updates.values()]}), String(record.metadata.compactionId)]);
-            } else saved = await session.commitMessage(record.agentId, record.runId, {messageId: record.messageId, message: record.message, metadata: record.metadata}, effects.metadataUpdates);
-            await session.saveComponentState(record.agentId, effects.componentId, effects.revision, effects.data);
+                identity(effects.componentId, 'componentId');
+                validateComponentState({revision: effects.revision, data: effects.data});
+                const components = new Map((state.componentStates ?? []).map(component => [component.componentId, component]));
+                const previous = components.get(effects.componentId);
+                const live = previous ? undefined : await session.getComponentState(record.agentId, effects.componentId);
+                if (effects.revision !== (previous?.preparedRevision ?? live!.revision))
+                    throw new AppError('context_conflict', 'Prepared React Harness state revision changed', 409);
+                components.set(effects.componentId, {componentId: effects.componentId, revision: previous?.revision ?? live!.revision,
+                    preparedRevision: effects.revision + 1, data: structuredClone(effects.data)});
+                const next = {...state, contextMetadata: [...updates.values()], componentStates: [...components.values()]};
+                validateCompactionState(next);
+                await db.execute('UPDATE context_compactions SET state = ? WHERE id = ?', [encode(next), String(record.metadata.compactionId)]);
+            } else {
+                saved = await session.commitMessage(record.agentId, record.runId, {messageId: record.messageId, message: record.message, metadata: record.metadata}, effects.metadataUpdates);
+                await session.saveComponentState(record.agentId, effects.componentId, effects.revision, effects.data);
+            }
             return saved;
         });
     }
@@ -402,42 +415,61 @@ export class AgentData {
         validateEntries(entries);
         if (state.status === 'preparing')
             throw new AppError('invalid_data', 'A terminal compaction state is required');
-        const current=await this.residentContext(state.agentId);
-        const messageCount=(current.history.messageCount??0)+entries.filter(entry=>!current.entry(entry.messageId)).reduce((n,e)=>n+countedMessage(e),0);
-        await this.transaction(async (db) => {
+        let result: ContextHistory;
+        await this.transaction(async db => {
             const agent = await this.agent(db, state.agentId, true);
             const [row] = await rows(db, 'SELECT state FROM context_compactions WHERE id = ? AND agent_id = ? AND run_id = ? AND active_agent_id = ?', [state.id, state.agentId, state.runId, state.agentId]);
-            if (!row || decode<CompactionState>(row.state, validateCompactionState).status !== 'preparing' || agent.contextRevision !== revision)
+            const preparing = row ? decode<CompactionState>(row.state, validateCompactionState) : undefined;
+            if (!preparing || preparing.status !== 'preparing' || agent.contextRevision !== revision)
                 throw new AppError('context_conflict', 'Context or compaction state changed', 409);
-            await this.writeContext(db, state.agentId, entries);
-            await db.execute('UPDATE agents SET context_length = ?, context_message_count=?, context_revision = context_revision + 1 WHERE id = ?', [entries.length,messageCount, state.agentId]);
-            this.acknowledge(db, state.agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries,messageCount});
-            await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode(state), state.id]);
+            if (state.status === 'failed') {
+                const {componentStates: _components, contextMetadata: _metadata, ...failed} = state;
+                await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode(failed), state.id]);
+                result = await this.contextRows(db, agent);
+                return;
+            }
+            const replacements = new Map((state.componentStates ?? []).map(component => [component.componentId, component]));
+            for (const prepared of preparing.componentStates ?? []) {
+                const replacement = replacements.get(prepared.componentId);
+                if (!replacement || replacement.revision !== prepared.revision || replacement.preparedRevision !== prepared.preparedRevision)
+                    throw new AppError('context_conflict', 'Prepared React Harness state changed', 409);
+            }
+            const session = this.inTransaction(db);
+            for (const replacement of replacements.values()) {
+                const prepared = preparing.componentStates?.find(component => component.componentId === replacement.componentId);
+                if (!prepared && replacement.preparedRevision !== replacement.revision)
+                    throw new AppError('context_conflict', 'Prepared React Harness state is unavailable', 409);
+                await session.saveComponentState(state.agentId, replacement.componentId, replacement.revision, replacement.data);
+            }
+            const saved = structuredClone(entries);
+            const metadata = new Map((preparing.contextMetadata ?? []).map(update => [update.messageId, update.metadata]));
+            for (const update of state.contextMetadata ?? []) metadata.set(update.messageId, update.metadata);
+            for (const entry of saved) {
+                const update = metadata.get(entry.messageId);
+                if (update) entry.metadata = structuredClone(update);
+            }
+            const current = await this.contextRows(db, agent), known = new Set(current.entries.map(entry => entry.messageId));
+            const messageCount = agent.contextMessageCount + saved.filter(entry => !known.has(entry.messageId)).reduce((count, entry) => count + countedMessage(entry), 0);
+            await this.writeContext(db, state.agentId, saved);
+            await db.execute('UPDATE agents SET context_length = ?, context_message_count=?, context_revision = context_revision + 1 WHERE id = ?', [saved.length, messageCount, state.agentId]);
+            this.acknowledge(db, state.agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: saved, messageCount});
+            await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode({...state, contextMetadata: [...metadata].map(([messageId, metadata]) => ({messageId, metadata}))}), state.id]);
+            result = {revision: revision + 1, entries: saved, messageCount};
         });
-        return { revision: revision + 1, entries: structuredClone(entries),messageCount };
+        return result!;
     }
     async recoverCompactions(): Promise<void> {
         this.assertRuntime();
         const pending = await rows(this.pool, 'SELECT id, agent_id FROM context_compactions WHERE active_agent_id IS NOT NULL');
         for (const item of pending)
-            await this.transaction(async (db) => {
-                const agent = await this.agent(db, item.agent_id, true);
-                const [row] = await rows(db, 'SELECT * FROM context_compactions WHERE id = ? AND active_agent_id IS NOT NULL', [item.id]);
-                if (!row)
-                    return;
+            await this.transaction(async db => {
+                await this.agent(db, item.agent_id, true);
+                const [row] = await rows(db, 'SELECT state FROM context_compactions WHERE id = ? AND active_agent_id IS NOT NULL', [item.id]);
+                if (!row) return;
                 const state = decode<CompactionState>(row.state, validateCompactionState);
-                const records = await rows(db, 'SELECT entry FROM messages WHERE agent_id = ? AND position > ? AND run_id = ? ORDER BY position', [state.agentId, row.history_after, state.runId]);
-                const trace = records.map(row => decode<ContextEntry>(row.entry, value => validateEntries([value]))).filter(entry => entry.metadata.compactionId === state.id);
-                const error = { code: 'runtime_restarted', message: 'Runtime stopped during context preparation; recorded effects were not replayed' };
-                const before=await this.contextRows(db,agent),known=new Set(before.entries.map(entry=>entry.messageId));
-                const entries=interruptedCompactionContext(before,trace,error);
-                const messageCount=agent.contextMessageCount+entries.filter(entry=>!known.has(entry.messageId)).reduce((n,e)=>n+countedMessage(e),0);
-                const metadata = new Map((state.contextMetadata ?? []).map(update => [update.messageId, update.metadata]));
-                for (const entry of entries) { const update = metadata.get(entry.messageId); if (update) entry.metadata = update; }
-                await this.writeContext(db, state.agentId, entries);
-                await db.execute('UPDATE agents SET context_length = ?, context_message_count=?, context_revision = context_revision + 1 WHERE id = ?', [entries.length,messageCount,state.agentId]);
-                this.acknowledge(db, state.agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries,messageCount});
-                await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode({ ...state, status: 'failed', endedAt: Date.now(), error }), state.id]);
+                const {componentStates: _components, contextMetadata: _metadata, ...discarded} = state;
+                const error = {code: 'runtime_restarted', message: 'Runtime stopped during context preparation; prepared replacements were discarded and external effects were not replayed'};
+                await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode({...discarded, status: 'failed', endedAt: Date.now(), error}), state.id]);
             });
     }
     async finishRun(agentId: string, runId: string, status: Exclude<RunStatus, 'running'>, error: RunState['error'] = null): Promise<RunState> {

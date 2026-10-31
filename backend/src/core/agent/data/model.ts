@@ -21,6 +21,9 @@ export interface ComponentState {
   data: JsonObject;
 }
 
+/** Expected live component revision and its proposed replacement data. */
+export interface ComponentStateReplacement { componentId: string; revision: number; data: JsonObject }
+
 export interface ContextMetadataUpdate { messageId: string; metadata: JsonObject }
 export interface ComponentMessageEffects {
   componentId: string;

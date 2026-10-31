@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto';
+import {validateComponentState} from './validation.js';
+import {object, jsonValue} from '../../validation.js';
 import { normalizeContext } from '@earendil-works/pi-ai';
 import { estimateContextTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { ModelRequest } from '../contracts.js';
-import { AgentMessageContext, repairInterruptedTools, type GroupContextMessage, type GroupContextReference } from './context.js';
-import { AppError, identity, type ContextEntry, type ContextHistory, type ContextMetadataUpdate } from './model.js';
+import { AgentMessageContext, type GroupContextReference } from './context.js';
+import { AppError, identity, position, type ContextEntry, type ContextHistory, type ContextMetadataUpdate, type ComponentStateReplacement } from './model.js';
 
 export interface CompactionSettings { thresholdTokens: number; prompt: string }
 export type CompactionTrigger = 'before-model' | 'after-run';
+/** revision is the committed baseline; preparedRevision orders journal-only operations. Cutover advances the live revision once. */
+export interface PreparedComponentState extends ComponentStateReplacement { preparedRevision: number }
 export interface CompactionState {
+  componentStates?: PreparedComponentState[];
   contextMetadata?: ContextMetadataUpdate[];
   id: string; agentId: string; runId: string; trigger: CompactionTrigger;
   status: 'preparing' | 'completed' | 'failed'; startedAt: number; endedAt: number | null;
@@ -22,6 +27,30 @@ export function validateCompactionState(value: unknown): asserts value is Compac
     || (state.status === 'preparing' ? state.endedAt !== null : !Number.isSafeInteger(state.endedAt))
     || (state.error !== null && (!state.error || typeof state.error !== 'object' || typeof state.error.code !== 'string' || typeof state.error.message !== 'string'))) {
     throw new AppError('invalid_data', 'Invalid compaction lifecycle');
+  }
+  if (state.contextMetadata !== undefined) {
+    if (!Array.isArray(state.contextMetadata)) throw new AppError('invalid_data', 'Invalid compaction metadata journal');
+    const ids = new Set<string>();
+    for (const update of state.contextMetadata) {
+      identity(update.messageId, 'messageId');
+      if (ids.has(update.messageId)) throw new AppError('invalid_data', 'Invalid compaction metadata journal');
+      object(update.metadata); jsonValue(update.metadata);
+      ids.add(update.messageId);
+    }
+  }
+  if (state.componentStates !== undefined) {
+    if (!Array.isArray(state.componentStates)) throw new AppError('invalid_data', 'Invalid compaction component state journal');
+    const ids = new Set<string>();
+    for (const replacement of state.componentStates) {
+      identity(replacement.componentId, 'componentId');
+      position(replacement.revision);
+      position(replacement.preparedRevision);
+      if (replacement.preparedRevision < replacement.revision || ids.has(replacement.componentId)) {
+        throw new AppError('invalid_data', 'Invalid compaction component state journal');
+      }
+      validateComponentState({revision: replacement.preparedRevision, data: replacement.data});
+      ids.add(replacement.componentId);
+    }
   }
 }
 export function validateCompactionSettings(settings: CompactionSettings): void {
@@ -59,14 +88,6 @@ export async function compactedContext(agentId: string, before: ContextHistory, 
     entry.metadata = {...entry.metadata, contextUsageInvalidated: true};
   }
   return [...shared, ...working];
-}
-
-/** Failure/restart keeps old knowledge and recorded effects, rather than applying a partial cutover. */
-export function interruptedCompactionContext(current: ContextHistory, recorded: ContextEntry[], error: CompactionState['error']): ContextEntry[] {
-  const ids = new Set(current.entries.map(entry => entry.messageId));
-  const entries = repairInterruptedTools([...structuredClone(current.entries), ...structuredClone(recorded.filter(entry => !ids.has(entry.messageId)))]);
-  entries.push(compactionInput(`Context compaction ended without replacement${error ? ` (${error.code}): ${error.message}` : '.'} No old context was discarded. Recorded preparation tools may have changed external state; inspect it before acting. Preparation is over; resume ordinary work only when the caller requests it.`, {source: 'context-compaction-recovery'}));
-  return entries;
 }
 
 export async function compactionAcknowledgement<T>(operation: () => Promise<T> | undefined): Promise<T | undefined> {

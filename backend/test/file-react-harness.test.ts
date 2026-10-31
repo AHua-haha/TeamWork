@@ -265,7 +265,8 @@ test('compaction executes handler-owned file tools and retains only the latest v
   const execution = new AgentExecution(initial, {revision: 0, entries: [{messageId: 'large', message: {role: 'user', content: 'old '.repeat(15000), timestamp: 1}, metadata: {}}]}, 0,
     {model, tools: [], systemPrompt: '', options: {}, compaction: {thresholdTokens: 4000, prompt: 'Preserve useful context; do not continue work.'}},
     {...base, createReactHarnesses: () => [handler], buildRequest: async(scope, history) => {mode = scope.mode!; return base.buildRequest(scope, history);}}, stream,
-    {message: async record => {stable.push(structuredClone(record)); return record;}, compactionMessage: async record => {stable.push(structuredClone(record)); return record;}, componentMessage: async record => {stable.push(structuredClone(record)); return record;}});
+    {message: async record => {stable.push(structuredClone(record)); return record;}, compactionMessage: async record => {stable.push(structuredClone(record)); return record;}, componentMessage: async record => {stable.push(structuredClone(record)); return record;},
+      compactionFinished: async (_state, revision, entries) => ({revision: revision + 1, entries})});
   assert.equal((await execution.run(new AbortController().signal)).status, 'completed');
   const results = execution.snapshot().context.entries.filter(entry => entry.message.role === 'toolResult');
   assert.equal(results.length, 2); assert.equal(results[0]!.metadata.modelContextHidden, true); assert.equal(results[1]!.metadata.modelContextHidden, undefined);

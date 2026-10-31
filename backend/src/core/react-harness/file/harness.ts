@@ -8,7 +8,7 @@ import { detectSupportedImageMimeTypeFromFile, resizeImage } from '@earendil-wor
 import { Type, type AssistantMessage, type JsonObject, type ToolCall, type ToolResultMessage } from '@earendil-works/pi-ai';
 import {projectFileContextEntry} from './context.js';
 import type {AgentContextState} from '../../agent/data/index.js';
-import type {ReactHarness, ReactHarnessContext, ReactHarnessFactory, ReactHarnessTool,ReactHarnessInputContext} from '../contracts.js';
+import type {ReactHarness, ReactHarnessContext, ReactHarnessFactory, ReactHarnessTool,ReactHarnessInputContext,ReactHarnessCompaction} from '../contracts.js';
 import {AppError} from '../../errors.js';
 import type {ComponentState} from '../../agent/data/index.js';
 
@@ -133,6 +133,35 @@ export class FileReactHarness implements ReactHarness {
     this.restoreLegacyReferences = !!source && typeof source === 'object' && Object.values(source).some(value => value && typeof value === 'object' && !('visibleMessageId' in value));
   }
 
+  applyUpdate(revision: number, data: JsonObject): void {
+    this.data=parseState(this.root,data);
+    this.revision=revision;
+    this.restoreLegacyReferences=false;
+  }
+
+  prepareCompaction(): ReactHarnessCompaction {
+    const revision=this.revision;
+    const draft=new FileReactHarness(this.root,{revision,data:structuredClone(this.data) as unknown as JsonObject},this.contextSource);
+    draft.designContext=this.designContext;
+    return {
+      harness:draft,
+      replacement:context=>{
+        const next=structuredClone(draft.data);
+        for(const [path,file] of Object.entries(next.files)){
+          const entry=file.visibleMessageId?context.entry(file.visibleMessageId):undefined;
+          if(!entry||entry.message.role!=='toolResult'||entry.metadata.modelContextHidden===true||entry.metadata.fileViewPath!==path)delete next.files[path];
+        }
+        const instruction=next.replacementMessageId?context.entry(next.replacementMessageId):undefined;
+        if(!instruction||instruction.message.role!=='user'||instruction.metadata.fileContextReplacement!==true||instruction.metadata.modelContextHidden===true)next.replacementMessageId=null;
+        const observed=context.history.messageCount??0;
+        next.messagesSinceRefresh+=Math.max(0,observed-next.lastObservedMessageCount);
+        next.lastObservedMessageCount=observed;
+        return {componentId:this.harnessId,revision,preparedRevision:draft.revision,data:next as unknown as JsonObject};
+      },
+      accept:replacement=>this.applyUpdate(replacement.revision+1,replacement.data),
+    };
+  }
+
   restoreContext(context: AgentContextState): void {
     if (!this.restoreLegacyReferences) return;
     // Upgrade pre-reference state once from an already-loaded context, never from SQL or per operation.
@@ -151,7 +180,9 @@ export class FileReactHarness implements ReactHarness {
     const observed=context.data.context.history.messageCount??0;
     const count=this.data.messagesSinceRefresh+Math.max(0,observed-this.data.lastObservedMessageCount);
     let next:State={...this.data,messagesSinceRefresh:count,lastObservedMessageCount:observed};
-    if(count<dependencyRefreshMessageThreshold){
+    const previous=this.data.replacementMessageId?context.data.entry(this.data.replacementMessageId):undefined;
+    const instructionExists=previous?.message.role==='user'&&previous.metadata.fileContextReplacement===true&&previous.metadata.modelContextHidden!==true;
+    if(instructionExists&&count<dependencyRefreshMessageThreshold){
       if(count!==this.data.messagesSinceRefresh||observed!==this.data.lastObservedMessageCount){
         await context.data.commit({append:[],update:[]},{componentId:this.harnessId,revision:this.revision,data:next as unknown as JsonObject,metadataUpdates:[]});
         this.data=next;this.revision++;
@@ -161,7 +192,6 @@ export class FileReactHarness implements ReactHarness {
     this.designContext=await this.contextSource(true);
     const files={...this.data.files},dependencies=new Set(this.data.discoveredDependencyDesigns);
     const updates=new Map<string,import('../../agent/data/model.js').ContextMetadataUpdate>();
-    const previous=this.data.replacementMessageId?context.data.entry(this.data.replacementMessageId):undefined;
     if(previous)updates.set(previous.messageId,{messageId:previous.messageId,metadata:{...previous.metadata,modelContextHidden:true}});
     for(const [path,file]of Object.entries(files)){
       const owner=fileDesignOwner(this.root,path,this.designContext);

@@ -1443,9 +1443,9 @@ test('group chat SQL/runtime: sequential execution, private feedback and continu
     const frontendRun = start.runs.find(run => run.agentId === f.frontend.memberId)!;
     assert.equal((await f.runtime.getState(f.backend.memberId)).run?.status, 'running');
     assert.equal((await f.runtime.getState(f.frontend.memberId)).run?.status, 'running');
-    assert.equal((await store.agents.getContext(f.lead.memberId)).entries.length, 1, 'idle Lead synchronized without a run');
+    assert.equal((await store.agents.getContext(f.lead.memberId)).entries.length, 2, 'idle Lead synchronized with one private generated instruction and without a run');
     const user = await f.team.runner.postUser(f.workspaceId, '@Lead discuss');
-    assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 1, 'only admitted shared input is incorporated during work');
+    assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 2, 'only admitted shared input and its generated instruction are incorporated during work');
     answer(backendStep.events, message('<mentions>["Lead"]</mentions>\n\nPRIVATE CANDIDATE: please review'));
     const revision = await f.requests.next();
     assert.doesNotMatch(revision.request.context.systemPrompt!, /You are Backend,/);
@@ -1538,7 +1538,7 @@ test('group SQL publication is atomic; restart preserves shared history without 
     // Simulate a crash after durable acceptance, before the model worker launches.
     const abandoned = await store.team.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: '@Backend abandoned', recipients: [f.backend.memberId] });
     await store.team.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'Shared while Backend is working', recipients: [] });
-    assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 1, 'recorded context survives cancellation');
+    assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 2, 'recorded context and generated instruction survive cancellation');
     let recoveredFinalization = false;
     const recoveryPolicy = f.team.policy(configuredPolicy());
     const recovery = new AgentRuntime(store.agents, f.team.runConfig, { ...recoveryPolicy, afterRun: async run => {
@@ -1551,9 +1551,9 @@ test('group SQL publication is atomic; restart preserves shared history without 
     try {
       assert.equal((await recovery.getState(f.backend.memberId)).run?.status, 'interrupted');
       assert.equal(recoveredFinalization, true);
-      assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 1, 'startup does not reconstruct context');
+      assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 2, 'startup preserves context without inserting another instruction');
       await recovery.syncGroupContext(f.backend.memberId);
-      assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 3, 'Agent-owned idle synchronization catches up without model execution');
+      assert.equal((await store.agents.getContext(f.backend.memberId)).entries.length, 4, 'Agent-owned idle synchronization catches up without model execution');
       assert.equal((await store.agents.runMessages(f.backend.memberId, abandoned.runs[0]!.runId)).length, 0);
       assert.equal((await store.team.chatSnapshot(f.workspaceId)).position, 3);
     } finally { await recovery.close(); }
@@ -1561,7 +1561,7 @@ test('group SQL publication is atomic; restart preserves shared history without 
     await f.team.service.retire(f.workspaceId, f.backend.memberId, f.backend.revision);
     await store.team.publishChat({ workspaceId: f.workspaceId, author: { type: 'user' }, text: 'After Backend retired', recipients: [] });
     assert.deepEqual(await store.agents.getContext(f.backend.memberId), retained, 'retirement excludes later messages even on explicit delivery');
-    assert.equal((await store.agents.getContext(f.frontend.memberId)).entries.length, 1, 'direct SQL publication does not run member synchronization');
+    assert.equal((await store.agents.getContext(f.frontend.memberId)).entries.length, 2, 'direct SQL publication does not run member synchronization');
   } finally { await f.close(); }
 });
 
@@ -1930,7 +1930,8 @@ test('workspace chat reset atomically clears member conversation storage and sta
     assert.ok(fresh.entries[0]!.revision > result.resetCursor);
     assert.equal(fresh.entries[1]!.kind === 'member' && fresh.entries[1]!.working.after, 0);
     const request = await f.requests.next();
-    assert.equal(request.request.context.messages.length, 1);
+    assert.equal(request.request.context.messages.length, 2);
+    assert.equal(request.request.context.messages.filter(entry => entry.role === 'user' && typeof entry.content === 'string' && entry.content.startsWith('<system_instruction>')).length, 1);
     assert.ok(JSON.stringify(request.request.context.messages).includes('Fresh conversation'));
     assert.ok(!JSON.stringify(request.request.context.messages).includes('original conversation'));
     answer(request.events, message('Fresh answer'));
@@ -2256,7 +2257,7 @@ test('idle synchronization failure is observable and recoverable without rejecti
     store.agents.patchContext=patch;
     await f.runtime.syncGroupContext(f.frontend.memberId);
     assert.equal((await f.runtime.getState(f.frontend.memberId)).run,null,'idle catch-up triggers no model');
-    assert.equal((await store.agents.getContext(f.frontend.memberId)).entries.length,1);
+    assert.equal((await store.agents.getContext(f.frontend.memberId)).entries.length,2);
     answer((await f.requests.next()).events,message('Recovered publication'));
     await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
   }finally{store.agents.patchContext=patch;await f.close();}
@@ -2489,16 +2490,19 @@ test('before-call compaction waits for acknowledged cutover then continues the s
   }finally{await f.close();}
 });
 
-test('workspace stop aborts finishing preparation while retaining the already accepted answer and uncertainty', {timeout:30000}, async()=>{
+test('workspace stop discards finishing preparation while retaining the already accepted answer', {timeout:30000}, async()=>{
   const f=await groupFixture(configuredPolicy(),{compaction:compactSettings});
   try {
     const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend answer then maintain context');
     answer((await f.requests.next()).events,largeUsage('Keep this public answer'));
     await f.requests.next();
+    const before = await store.agents.getContext(f.backend.memberId);
+    const component = await store.agents.getComponentState(f.backend.memberId, 'file-content');
     await f.team.runner.stop(f.workspaceId);
     const terminal=await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);
     assert.equal(terminal.status,'completed','accepted ordinary publication keeps its outcome');
-    assert.match(JSON.stringify((await store.agents.getContext(f.backend.memberId)).entries),/No old context was discarded/);
+    assert.deepEqual(await store.agents.getContext(f.backend.memberId), before);
+    assert.deepEqual(await store.agents.getComponentState(f.backend.memberId, 'file-content'), component);
     assert.equal((await store.team.chatSnapshot(f.workspaceId)).messages.at(-1)!.text,'Keep this public answer');
     const [journals]=await store.pool.query<any[]>('SELECT state FROM context_compactions WHERE run_id = ?',[terminal.runId]);
     assert.equal(decode<CompactionState>(journals[0].state,validateCompactionState).status,'failed');
@@ -2528,14 +2532,15 @@ test('restart recovers interrupted preparation even after ordinary completion wi
     recovery=new AgentRuntime(store.agents,f.team.runConfig,f.team.policy(configuredPolicy()),request=>{const events=new Queue<AssistantMessageEvent>();f.requests.push({request,events});return events;},{compaction:compactSettings});
     f.team.attach(recovery);await recovery.open();
     const context=JSON.stringify((await store.agents.getContext(state.agentId)).entries);
-    assert.match(context,/Stable accepted result/);assert.match(context,/uncertain-prep/);assert.match(context,/not replayed/);
+    assert.deepEqual(await store.agents.getContext(state.agentId), original);
+    assert.match(context,/Stable accepted result/);assert.doesNotMatch(context,/uncertain-prep|Recovery boundary/);
     assert.equal((await recovery.getState(state.agentId)).run!.status,'completed');
     assert.deepEqual(await store.agents.runMessages(state.agentId,state.runId),immutable,'recovery never rewrites stable history');
     const [journals]=await store.pool.query<any[]>('SELECT state,active_agent_id FROM context_compactions WHERE id = ?',[state.id]);
     assert.equal(journals[0].active_agent_id,null);assert.equal(decode<CompactionState>(journals[0].state,validateCompactionState).error!.code,'runtime_restarted');
     const next=await f.team.runner.postUser(f.workspaceId,'@Backend inspect after restart');
     const request=await f.requests.next();
-    assert.match(JSON.stringify(request.request.context.messages),/uncertain-prep/);
+    assert.doesNotMatch(JSON.stringify(request.request.context.messages),/uncertain-prep|Recovery boundary/);
     answer(request.events,message('Resumed from recorded evidence'));
     await recovery.finished(state.agentId,next.runs[0]!.runId);
   }finally{if(installed)await store.pool.query(`DROP TRIGGER ${trigger}`);await recovery?.close();await f.close();}
@@ -2560,7 +2565,7 @@ test('published answers do not hide preparation persistence failure and restart 
     recovery=new AgentRuntime(store.agents,f.team.runConfig,f.team.policy(configuredPolicy()),()=>{throw new Error('recovery must not call a model');});
     f.team.attach(recovery);await recovery.open();
     const restored=JSON.stringify((await store.agents.getContext(f.backend.memberId)).entries);
-    assert.match(restored,/Keep this accepted response/);assert.match(restored,/Prepared continuation/);assert.match(restored,/No old context was discarded/);
+    assert.match(restored,/Keep this accepted response/);assert.doesNotMatch(restored,/Prepared continuation|context-compaction/);
     assert.equal((await recovery.getState(f.backend.memberId)).run!.status,'completed');
   }finally{store.agents.finishCompaction=finish;await recovery?.close();await f.close();}
 });
@@ -3158,7 +3163,7 @@ test('file aggregates atomically append one result, patch only old metadata and 
   await store.agents.finishRun(agentId, run.runId, 'completed');
 });
 
-test('preparation journals file-view metadata with handler state and restores it after restart', {timeout: 30000}, async () => {
+test('interrupted preparation discards journaled file-view metadata and handler candidates after restart', {timeout: 30000}, async () => {
   const previous: ContextEntry = {messageId: randomUUID(), message: {role: 'toolResult', toolName: 'read', toolCallId: 'old', content: [{type: 'text', text: 'original view'}], isError: false, timestamp: 1}, metadata: {fileViewPath: '/workspace/file.ts'}};
   const {agentId} = await store.agents.createAgent(undefined, [previous]);
   const run = await store.agents.admitRun(agentId);
@@ -3172,12 +3177,75 @@ test('preparation journals file-view metadata with handler state and restores it
   await store.agents.acquireRuntime(() => undefined);
   try {await store.agents.recoverCompactions();} finally {await store.agents.releaseRuntime();}
   const context = await store.agents.getContext(agentId);
-  assert.equal(context.entries.find(entry => entry.messageId === previous.messageId)!.metadata.modelContextHidden, true);
-  assert.equal(context.entries.find(entry => entry.messageId === first.messageId)!.metadata.modelContextHidden, true);
-  assert.equal(context.entries.find(entry => entry.messageId === second.messageId)!.metadata.modelContextHidden, undefined);
-  assert.deepEqual((await store.agents.getComponentState(agentId, 'file-content')).data, {visibleMessageId: second.messageId});
+  assert.deepEqual(context.entries, [previous]);
+  assert.deepEqual(await store.agents.getComponentState(agentId, 'file-content'), {revision: 0, data: {}});
+  const [journals] = await store.pool.query<any[]>('SELECT state FROM context_compactions WHERE id = ?', [state.id]);
+  const discarded = decode<CompactionState>(journals[0].state, validateCompactionState);
+  assert.equal(discarded.status, 'failed');
+  assert.equal(discarded.contextMetadata, undefined);
+  assert.equal(discarded.componentStates, undefined);
   assert.ok((await store.agents.runMessages(agentId, run.runId)).every(entry => entry.metadata.modelContextHidden === undefined), 'recovery preserves original stable history metadata');
   await store.agents.finishRun(agentId, run.runId, 'interrupted');
+});
+
+for (const conflict of [false, true]) test(`prepared File state and context cutover ${conflict ? 'refuses stale state' : 'acknowledges atomically and rolls back together'}`, {timeout: 30000}, async () => {
+  const path = '/workspace/file.ts';
+  const original: ContextEntry = {messageId: randomUUID(), message: {role: 'user', content: 'Original committed context', timestamp: 1}, metadata: {original: true}};
+  const {agentId} = await store.agents.createAgent(undefined, [original]);
+  const live = await store.agents.saveComponentState(agentId, 'file-content', 0, {files: {}, discoveredDependencyDesigns: ['existing'], replacementMessageId: null});
+  const run = await store.agents.admitRun(agentId), resident = await store.agents.residentContext(agentId), before = structuredClone(resident.history);
+  const state: CompactionState = {id: randomUUID(), agentId, runId: run.runId, trigger: 'before-model', status: 'preparing', startedAt: 1, endedAt: null, error: null};
+  await store.agents.beginCompaction(state);
+  const retained: ContextEntry[] = [];
+  let candidate: Record<string, any> = {};
+  for (let index = 0; index < 2; index++) {
+    const id = randomUUID(), callId = randomUUID();
+    const assistant = {agentId, runId: run.runId, position: 0, messageId: randomUUID(), message: fauxAssistantMessage([{type: 'toolCall', id: callId, name: 'read', arguments: {path}}], {stopReason: 'toolUse'}), metadata: {source: 'context-compaction', compactionId: state.id}};
+    await store.agents.commitCompactionMessage(assistant); retained.push(assistant);
+    const record = {agentId, runId: run.runId, position: 0, messageId: id, message: {role: 'toolResult' as const, toolName: 'read', toolCallId: callId, content: [{type: 'text' as const, text: 'prepared aggregate'}], isError: false, timestamp: 1}, metadata: {source: 'context-compaction', compactionId: state.id, fileViewPath: path}};
+    candidate = {files: {[path]: {ranges: [{start: 1, end: index + 1}], visibleMessageId: id}}, discoveredDependencyDesigns: ['existing', 'new'], replacementMessageId: null};
+    const prior = index ? retained[index * 2 - 1]! : original;
+    await store.agents.commitComponentMessage(record, {componentId: 'file-content', revision: live.revision + index, data: candidate, metadataUpdates: [{messageId: prior.messageId, metadata: {...prior.metadata, modelContextHidden: true}}]});
+    retained.push(record);
+  }
+  assert.deepEqual(await store.agents.getComponentState(agentId, 'file-content'), live);
+  assert.deepEqual(await store.agents.getContext(agentId), before);
+  const stable = await store.agents.runMessages(agentId, run.runId);
+  const [rows] = await store.pool.query<any[]>('SELECT state FROM context_compactions WHERE id = ?', [state.id]);
+  const journal = decode<CompactionState>(rows[0].state, validateCompactionState);
+  assert.deepEqual(journal.componentStates, [{componentId: 'file-content', revision: 1, preparedRevision: 3, data: candidate}]);
+  const finished = {...journal, status: 'completed' as const, endedAt: Date.now()};
+  if (conflict) {
+    const changed = await store.agents.saveComponentState(agentId, 'file-content', live.revision, {...live.data, concurrent: true});
+    await assert.rejects(store.agents.finishCompaction(finished, before.revision, retained), code('context_conflict'));
+    assert.deepEqual(await store.agents.getContext(agentId), before); assert.deepEqual(resident.history, before);
+    assert.deepEqual(await store.agents.getComponentState(agentId, 'file-content'), changed);
+    await store.agents.finishCompaction({...state, status: 'failed', endedAt: Date.now(), error: {code: 'context_conflict', message: 'Discard stale preparation'}}, before.revision, before.entries);
+  } else {
+    const trigger = 'refuse_cutover_' + randomUUID().replaceAll('-', '');
+    await store.pool.query(`CREATE TRIGGER ${trigger} BEFORE UPDATE ON context_compactions FOR EACH ROW BEGIN IF OLD.id = '${state.id}' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'refused coordinated cutover'; END IF; END`);
+    try {
+      await assert.rejects(store.agents.finishCompaction(finished, before.revision, retained), /refused coordinated cutover/);
+      assert.deepEqual(await store.agents.getContext(agentId), before); assert.deepEqual(resident.history, before);
+      assert.deepEqual(await store.agents.getComponentState(agentId, 'file-content'), live, 'component write rolls back when later journal write fails');
+    } finally {await store.pool.query(`DROP TRIGGER ${trigger}`);}
+    await store.storage.transaction(async db => {
+      await store.agents.inTransaction(db).finishCompaction(finished, before.revision, retained);
+      assert.deepEqual(resident.history, before, 'resident context waits for outer transaction acknowledgement');
+    });
+    const current = await store.agents.getContext(agentId);
+    assert.deepEqual(resident.history, current);
+    assert.equal(current.revision, before.revision + 1);
+    assert.equal(current.messageCount, before.messageCount! + 4);
+    assert.equal(current.entries[1]!.metadata.modelContextHidden, true);
+    assert.equal(current.entries[3]!.metadata.modelContextHidden, undefined);
+    assert.deepEqual(await store.agents.getComponentState(agentId, 'file-content'), {revision: live.revision + 1, data: candidate});
+    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    try {assert.deepEqual(await reopened.agents.getContext(agentId), current); assert.deepEqual(await reopened.agents.getComponentState(agentId, 'file-content'), {revision: 2, data: candidate});}
+    finally {await reopened.close();}
+  }
+  assert.deepEqual(await store.agents.runMessages(agentId, run.runId), stable, 'cutover never changes stable history');
+  await store.agents.finishRun(agentId, run.runId, 'completed');
 });
 
 test('runtime restores file references across runs and restart, and context reset clears handler state', {timeout: 30000}, async () => {
@@ -3285,7 +3353,7 @@ test('member design-scope migration persists canonical rows and snapshots withou
  }finally{await f.close();}
 });
 
-test('direct preparation metadata updates journal independently and recover without rewriting stable messages', {timeout:15000},async()=>{
+test('interrupted preparation discards metadata candidates without rewriting context or stable messages', {timeout:15000},async()=>{
  const original:ContextEntry={messageId:randomUUID(),message:{role:'user',content:'retained original context',timestamp:1},metadata:{original:true}};
  const {agentId}=await store.agents.createAgent(undefined,[original]);
  const run=await store.agents.startRun(agentId,user),before=await store.agents.getContext(agentId),history=await store.agents.runMessages(agentId,run.runId);
@@ -3299,7 +3367,7 @@ test('direct preparation metadata updates journal independently and recover with
   await reopened.agents.acquireRuntime(()=>undefined);
   await reopened.agents.recoverCompactions();
   const restored=await reopened.agents.getContext(agentId);
-  assert.deepEqual(restored.entries.find(e=>e.messageId===original.messageId)!.metadata,updates[0]!.metadata);
+  assert.deepEqual(restored, before);
   assert.equal(restored.entries.find(e=>e.messageId===original.messageId)!.message.content,'retained original context');
   assert.deepEqual(await reopened.agents.runMessages(agentId,run.runId),history);
   await assert.rejects(reopened.agents.patchCompactionMetadata(agentId,state.id,updates),code('context_conflict'));
