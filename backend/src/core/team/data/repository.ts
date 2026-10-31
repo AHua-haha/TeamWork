@@ -11,7 +11,7 @@ import type { MemberRecord, NewMember, StoredMember, TeamStore, MemberActivation
 import { defaultRunSettings, type WorkspaceModels } from '../../workspace/data/models.js';
 import { generatedSource } from './member-config.js';
 import { AppError, identity, position, type RunState } from '../../agent/data/model.js';
-import { chatHistoryInput, defaultMentionLimit, groupEntry, groupContextMessage, migrateGroupEnvelope, validateGroupContextEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatHistoryInput, type ChatHistoryPage, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset, type GroupContextEntry } from './group-chat.js';
+import { chatHistoryInput, defaultMentionLimit, groupEntry, groupContextMessage, groupContextFormat, migrateGroupEnvelope, migrateGroupRole, validateGroupContextEntry, mentionLimit, validateChatMessage, validateTimelineEntry, type ChatHistoryInput, type ChatHistoryPage, type ChatPublication, type ChatMessage, type ChatSnapshot, type ChatStore, type StoredChatMessage, type FinalReference, type TimelineEntry, type TimelineSnapshot, type ChatAcceptance, type ChatReset, type GroupContextEntry } from './group-chat.js';
 import { clearTables, dataTransaction, rows, insertRows, limitClause, duplicate, type DataConnection as Db } from '../../data-transaction.js';
 import { schema } from './schema.js';
 import { GroupContexts, GroupContextState, type GroupContextHistory } from './group-context.js';
@@ -44,7 +44,7 @@ export class TeamData implements TeamStore, ChatStore {
         // Activation identity is application-owned; retire old Git/hash markers without touching the repository.
         await this.pool.query("UPDATE member_activation SET revision = UUID() WHERE revision NOT REGEXP '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'");
         const columns = await rows(this.pool, 'SHOW COLUMNS FROM chat_settings');
-        if (String(columns.find(row => row.Field === 'context_format')?.Default) !== '2') await this.pool.query('ALTER TABLE chat_settings ALTER COLUMN context_format SET DEFAULT 2');
+        if (String(columns.find(row => row.Field === 'context_format')?.Default) !== String(groupContextFormat)) await this.pool.query('ALTER TABLE chat_settings ALTER COLUMN context_format SET DEFAULT 3');
         for (const column of ['reset_cursor', 'reset_position'])
             if (!columns.some(row => row.Field === column))
                 await this.pool.query(`ALTER TABLE chat_settings ADD COLUMN ${column} BIGINT UNSIGNED NOT NULL DEFAULT 0`);
@@ -66,7 +66,7 @@ export class TeamData implements TeamStore, ChatStore {
         return this.transaction(async db => {
             await this.workspaces.inTransaction(db).requireWorkspace(workspaceId);
             const [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length,context_revision FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
-            if (settings && settings.context_format !== 2) throw new AppError('runtime_unavailable', 'Group context migration is incomplete', 503);
+            if (settings && settings.context_format !== groupContextFormat) throw new AppError('runtime_unavailable', 'Group context migration is incomplete', 503);
             const summary = await this.inTransaction(db).readGroupSummary(workspaceId);
             const resetPosition = Number(settings?.reset_position ?? 0), upper = Number(settings?.position ?? 0);
             if (summary && (summary.from !== resetPosition + 1 || summary.analyzedThrough > upper)) throw new AppError('corrupt_data', 'Group summary coverage differs from current context', 500);
@@ -129,7 +129,7 @@ export class TeamData implements TeamStore, ChatStore {
     private async loadGroupContext(workspaceId: string): Promise<GroupContextHistory> {
         return this.transaction(async db => {
             const [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
-            if (settings && settings.context_format !== 2) throw new AppError('runtime_unavailable', 'Group context migration is incomplete', 503);
+            if (settings && settings.context_format !== groupContextFormat) throw new AppError('runtime_unavailable', 'Group context migration is incomplete', 503);
             const upper = settings?.position ?? 0, resetPosition = settings?.reset_position ?? 0;
             const records = await rows(db, 'SELECT position,id,entry FROM chat_context_entries FORCE INDEX (PRIMARY) WHERE workspace_id = ? AND position > ? AND position <= ? ORDER BY position', [workspaceId, resetPosition, upper]);
             if (records.length !== (settings?.context_length ?? 0)) throw new AppError('corrupt_data', 'Group context row length differs from its bookkeeping', 500);
@@ -145,32 +145,37 @@ export class TeamData implements TeamStore, ChatStore {
     }
     /** Startup-only conversion. Existing frontend history and origin references are unchanged. */
     async migrateGroupContext(): Promise<void> {
-        const workspaces = await rows(this.pool, 'SELECT workspace_id FROM chat_settings WHERE context_format < 2 UNION SELECT workspace_id FROM chat_messages WHERE workspace_id NOT IN (SELECT workspace_id FROM chat_settings) ORDER BY workspace_id');
+        const workspaces = await rows(this.pool, 'SELECT workspace_id FROM chat_settings WHERE context_format < 3 UNION SELECT workspace_id FROM chat_messages WHERE workspace_id NOT IN (SELECT workspace_id FROM chat_settings) ORDER BY workspace_id');
         for (const {workspace_id: workspaceId} of workspaces) await this.transaction(async db => {
             await this.workspaces.inTransaction(db).requireWorkspace(workspaceId, true);
-            const records = await rows(db, 'SELECT position,entry FROM chat_messages WHERE workspace_id = ? ORDER BY position', [workspaceId]);
-            await db.execute('INSERT IGNORE INTO chat_settings (workspace_id,position,context_format) VALUES (?, ?, 0)', [workspaceId, records.at(-1)?.position ?? 0]);
-            const [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
-            if (settings!.context_format === 2) return;
+            let [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+            if (!settings) {
+                const [latest] = await rows(db, 'SELECT MAX(position) AS position FROM chat_messages WHERE workspace_id = ?', [workspaceId]);
+                await db.execute('INSERT INTO chat_settings (workspace_id,position,context_format) VALUES (?, ?, 0)', [workspaceId, latest!.position ?? 0]);
+                [settings] = await rows(db, 'SELECT position,reset_position,context_format,context_length FROM chat_settings WHERE workspace_id = ?', [workspaceId]);
+            }
+            if (settings!.context_format === groupContextFormat) return;
             const names = new Map((await this.inTransaction(db).listMembers(workspaceId)).map(member => [member.id, member.value.name]));
-            if (settings!.context_format === 1) {
+            if (settings!.context_format === 1 || settings!.context_format === 2) {
                 const old = await rows(db, 'SELECT position,entry FROM chat_context_entries WHERE workspace_id = ? ORDER BY position', [workspaceId]);
                 const migrated: GroupContextEntry[] = [];
                 for (const row of old) {
-                    const entry = migrateGroupEnvelope(decode<GroupContextEntry>(row.entry, () => undefined), names);
+                    const previous = decode<GroupContextEntry>(row.entry, () => undefined);
+                    const entry = settings!.context_format === 1 ? migrateGroupEnvelope(previous, names) : migrateGroupRole(previous);
                     if (entry.metadata.workspaceId !== workspaceId || entry.metadata.groupPosition !== row.position) throw new AppError('corrupt_data', 'Legacy group row differs from its metadata', 500);
-                    await db.execute('UPDATE chat_context_entries SET entry = ? WHERE workspace_id = ? AND position = ?', [encode(entry), workspaceId, row.position]);
+                    if (JSON.stringify(entry) !== JSON.stringify(previous)) await db.execute('UPDATE chat_context_entries SET entry = ? WHERE workspace_id = ? AND position = ?', [encode(entry), workspaceId, row.position]);
                     migrated.push(entry);
                 }
                 const summary = await this.inTransaction(db).readGroupSummary(workspaceId);
                 if (summary) migrated.unshift(groupSummaryEntry(workspaceId, summary));
                 const groups = migrated.map(groupContextMessage);
                 for (const id of names.keys()) await this.agents.inTransaction(db).refreshSharedAttribution(id, workspaceId, groups);
-                await db.execute('UPDATE chat_settings SET context_format = 2, context_revision = context_revision + 1 WHERE workspace_id = ?', [workspaceId]);
+                await db.execute('UPDATE chat_settings SET context_format = 3, context_revision = context_revision + 1 WHERE workspace_id = ?', [workspaceId]);
                 this.storage.afterCommit(db, () => this.contexts.invalidate(workspaceId), () => this.contexts.invalidate(workspaceId));
                 return;
             }
             const entries: GroupContextEntry[] = [];
+            const records = await rows(db, 'SELECT position,entry FROM chat_messages WHERE workspace_id = ? ORDER BY position', [workspaceId]);
             for (const row of records) {
                 if (row.position <= settings!.reset_position) continue;
                 const stored = decode<StoredChatMessage>(row.entry, () => undefined);
@@ -183,7 +188,11 @@ export class TeamData implements TeamStore, ChatStore {
             }
             await db.execute('DELETE FROM chat_context_entries WHERE workspace_id = ?', [workspaceId]);
             await insertRows(db, 'INSERT INTO chat_context_entries (workspace_id,position,id,entry) VALUES ?', entries.map(entry => [workspaceId, Number(entry.metadata.groupPosition), entry.messageId, encode(entry)]));
-            await db.execute('UPDATE chat_settings SET context_format = 2, context_length = ?, context_revision = GREATEST(context_revision, position) WHERE workspace_id = ?', [entries.length, workspaceId]);
+            await db.execute('UPDATE chat_settings SET context_format = 3, context_length = ?, context_revision = GREATEST(context_revision, position) WHERE workspace_id = ?', [entries.length, workspaceId]);
+            const groups = entries.map(groupContextMessage);
+            const summary = await this.inTransaction(db).readGroupSummary(workspaceId);
+            if (summary) groups.unshift(groupContextMessage(groupSummaryEntry(workspaceId, summary)));
+            for (const id of names.keys()) await this.agents.inTransaction(db).refreshSharedAttribution(id, workspaceId, groups);
             this.storage.afterCommit(db, () => this.contexts.invalidate(workspaceId), () => this.contexts.invalidate(workspaceId));
         });
     }
@@ -501,7 +510,7 @@ export class TeamData implements TeamStore, ChatStore {
             await db.execute('DELETE FROM chat_exchanges WHERE workspace_id = ?', [workspaceId]);
             await this.agents.inTransaction(db).resetConversations(members.map(member => member.id));
             await db.execute('UPDATE chat_clock SET seq = ? WHERE workspace_id = ?', [resetCursor, workspaceId]);
-            await db.execute('UPDATE chat_settings SET position = ?, reset_cursor = ?, reset_position = ?, context_length = 0, context_format = 2, context_revision = context_revision + 1 WHERE workspace_id = ?', [resetPosition, resetCursor, resetPosition, workspaceId]);
+            await db.execute('UPDATE chat_settings SET position = ?, reset_cursor = ?, reset_position = ?, context_length = 0, context_format = 3, context_revision = context_revision + 1 WHERE workspace_id = ?', [resetPosition, resetCursor, resetPosition, workspaceId]);
             this.storage.afterCommit(db, () => this.contexts.changed(workspaceId, {reset: resetPosition}), () => this.contexts.invalidate(workspaceId));
             return { workspaceId, resetCursor, resetPosition };
         });

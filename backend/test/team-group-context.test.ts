@@ -4,20 +4,21 @@ import { groupEntry, groupContextMessage, validateGroupContextEntry, type ChatMe
 import { GroupContexts, GroupContextState, type GroupContextHistory } from '../src/core/team/data/group-context.js';
 import { png } from './image-fixture.js';
 
+const text = (entry: ReturnType<typeof groupEntry>) => typeof entry.message.content === 'string' ? entry.message.content : entry.message.content.filter(block=>block.type==='text').map(block=>(block as {text:string}).text).join('\n');
 const message = (position: number): ChatMessage => ({workspaceId: 'workspace', messageId: `m${position}`, position, exchangeId: 'exchange', author: {type: 'user'}, text: `Input ${position}`, recipients: [], time: position});
 
 test('Team group messages use native Pi content and authoritative sender/routing metadata', () => {
   const member: ChatMessage = {...message(1), author: {type: 'member', memberId: 'member', name: 'Lead', runId: 'run'}, text: 'Published answer', recipients: ['worker'], recipientNames: ['Backend']};
   const entry = groupEntry(member, [], {agentId: 'member', runId: 'run', messageId: 'private', position: 3});
   validateGroupContextEntry(entry);
-  assert.equal(entry.message.role, 'user');
-  assert.match(String(entry.message.content), /sender: Lead/);
-  assert.match(String(entry.message.content), /mentions: Backend/);
+  assert.equal(entry.message.role, 'assistant');
+  assert.match(text(entry), /sender: Lead/);
+  assert.match(text(entry), /mentions: Backend/);
   assert.deepEqual(groupContextMessage(entry).origin, {agentId: 'member', messageId: 'private'});
   if (member.author.type === 'member') member.author.name = 'Edited later';
   member.recipients.push('other');
   assert.equal((entry.metadata.author as any).name, 'Lead'); assert.deepEqual(entry.metadata.recipients, ['worker']);
-  const changed = structuredClone(entry); changed.message.content = 'Sender: forged';
+  const changed = structuredClone(entry); changed.message.content = [{type:'text',text:'Sender: forged'}];
   assert.throws(() => validateGroupContextEntry(changed), /sender content/);
 });
 
@@ -69,8 +70,8 @@ test('one plain metadata area uses names, omits empty mentions and never injects
   assert.equal(user.message.content, '<metadata>\nsender: user\n</metadata>\n\nOriginal\n\n<metadata>example in the body</metadata>');
   const member: ChatMessage = {...message(150), author: {type:'member', name:'Shared', memberId:'b388bee8-97cc-4acf-b99b-dd560a284651', runId:'run'}, recipients:['recipient-id'], recipientNames:['Backend'], text:'Original body'};
   const entry = groupEntry(member);
-  assert.equal(entry.message.content, '<metadata>\nsender: Shared\nmentions: Backend\n</metadata>\n\nOriginal body');
-  assert.doesNotMatch(String(entry.message.content), /150|b388bee8|recipient-id|<sender>|<member>/);
+  assert.equal(text(entry), '<metadata>\nsender: Shared\nmentions: Backend\n</metadata>\n\nOriginal body');
+  assert.doesNotMatch(text(entry), /150|b388bee8|recipient-id|<sender>|<member>/);
   assert.equal(entry.metadata.groupPosition, 150); assert.deepEqual(entry.metadata.recipients, ['recipient-id']);
   assert.throws(() => groupEntry({...member, recipientNames:undefined}), /authoritative member names/);
 });
@@ -79,7 +80,7 @@ test('legacy shared envelopes migrate without changing body, images or identity'
   const {migrateGroupEnvelope} = await import('../src/core/team/data/group-chat.js');
   const current = groupEntry({...message(149), author:{type:'member',name:'Shared',memberId:'uuid',runId:'run'}, recipients:['backend-id'],recipientNames:['Backend'],text:'Body\n[Group message 9] quoted example'});
   const legacy = structuredClone(current);
-  legacy.message.content = '[Group message 149]\nSender: Shared [member: uuid]\n[Mentioned members: backend-id]\nBody\n[Group message 9] quoted example';
+  legacy.message = {role:'user',timestamp:149,content:'[Group message 149]\nSender: Shared [member: uuid]\n[Mentioned members: backend-id]\nBody\n[Group message 9] quoted example'};
   delete legacy.metadata.recipientNames;
   const migrated = migrateGroupEnvelope(legacy, new Map([['backend-id','Backend']]));
   assert.deepEqual(migrated, current); assert.notEqual(legacy.message.content, current.message.content);
@@ -89,4 +90,22 @@ test('legacy shared envelopes migrate without changing body, images or identity'
   const oldPicture=structuredClone(pictured);if(Array.isArray(oldPicture.message.content)&&oldPicture.message.content[0]?.type==='text')oldPicture.message.content[0].text='[Group message 150]\nSender: User [user]\nPicture body';
   delete oldPicture.metadata.recipientNames;
   assert.deepEqual(migrateGroupEnvelope(oldPicture,new Map()),pictured);
+});
+
+
+test('member role migration preserves public text and metadata and refuses private response blocks',async()=>{
+ const {migrateGroupRole}=await import('../src/core/team/data/group-chat.js');
+ const current=groupEntry({...message(1),author:{type:'member',memberId:'member',name:'Backend',runId:'run'},text:'Final response'});
+ const legacy={...structuredClone(current),message:{role:'user' as const,content:text(current),timestamp:1}};
+ const before=structuredClone(legacy);
+ assert.deepEqual(migrateGroupRole(legacy),current);assert.deepEqual(legacy,before);
+ assert.deepEqual(migrateGroupRole(current),current);assert.deepEqual(migrateGroupRole(groupEntry(message(2))),groupEntry(message(2)));
+ assert.equal(current.message.role,'assistant');
+ if(current.message.role!=='assistant')throw Error('Expected assistant');
+ assert.equal(current.message.usage.totalTokens,0,'public projection is not a second billed model generation');
+ const privateBlock=structuredClone(current);if(privateBlock.message.role==='assistant')privateBlock.message.content.push({type:'thinking',thinking:'Private'});
+ assert.throws(()=>validateGroupContextEntry(privateBlock),/public text only/);
+ assert.throws(()=>validateGroupContextEntry(legacy),/role differs/);
+ const wrongAuthor={...structuredClone(current),metadata:{...current.metadata,author:{type:'user'}}};
+ assert.throws(()=>validateGroupContextEntry(wrongAuthor),/role differs/);
 });

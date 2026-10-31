@@ -1342,7 +1342,7 @@ test('agent headers route atomically and persist only the referenced body while 
     const history = await store.agents.runMessages(f.lead.memberId, accepted.runs[0]!.runId);
     assert.ok(history.some(record => record.message.role === 'assistant' && record.message.content.some(part => part.type === 'text' && part.text === raw)));
     assert.equal(history.filter(record => record.metadata.source === 'publication-feedback').length, 2);
-    for (const step of [left]) assert.ok(step.request.context.messages.some(m => m.role === 'user' && typeof m.content === 'string' && m.content.endsWith(body) && !m.content.includes('["Backend"')));
+    for (const step of [left]) assert.ok(step.request.context.messages.some(m => m.role === 'assistant' && m.content.some(block => block.type === 'text' && block.text.endsWith(body) && !block.text.includes('["Backend"'))));
     const context = await store.agents.getContext(f.lead.memberId);
     await store.agents.replaceContext(f.lead.memberId, context.revision, [{ messageId: 'header-summary', message: { role: 'user', content: 'Compacted context.', timestamp: 1 }, metadata: {} }]);
     assert.deepEqual(await store.agents.runMessages(f.lead.memberId, accepted.runs[0]!.runId), history);
@@ -2763,7 +2763,7 @@ test('Team reuses one Pi group-context load across publications, members and run
     }
     const shared = await store.team.readGroupContext(f.workspaceId, 0);
     assert.equal(loads, 1); assert.equal(shared.length, 4);
-    assert.deepEqual(shared.map(item => item.entry.message.role), ['user', 'user', 'user', 'user']);
+    assert.deepEqual(shared.map(item => item.entry.message.role), ['user', 'assistant', 'user', 'assistant']);
     assert.match(JSON.stringify(shared), /sender: Lead/); assert.match(JSON.stringify(shared), /sender: user/);
     assert.doesNotMatch(JSON.stringify(shared), /private-encrypted-thinking/);
     assert.ok(shared[1]!.origin); assert.equal(shared[1]!.entry.metadata.finalRef !== undefined, true);
@@ -3074,7 +3074,7 @@ test('group envelope migration preserves stable records and identities, refreshe
     const body=(content:any)=>prefix(content).slice(prefix(content).indexOf('</metadata>\n\n')+'</metadata>\n\n'.length);
     const oldById=new Map<string,any>();
     for(const entry of original){
-      const old=structuredClone(entry);old.message.content=oldHeader(entry)+body(entry.message.content);delete old.metadata.recipientNames;oldById.set(entry.messageId,old);
+      const old=structuredClone(entry);old.message={role:'user',timestamp:entry.message.timestamp,content:oldHeader(entry)+body(entry.message.content)};delete old.metadata.recipientNames;oldById.set(entry.messageId,old);
       await store.pool.execute('UPDATE chat_context_entries SET entry = ? WHERE workspace_id = ? AND id = ?',[encode(old),f.workspaceId,old.messageId]);
     }
     const updates=context.entries.flatMap(entry=>{
@@ -3360,4 +3360,38 @@ test('member instruction migration durably separates active and draft agent.md a
   assert.equal((await store.team.getMember(member.id))!.value.settings.prompt,'Original shared rule\n\nDraft first\n\nDraft second');
   assert.deepEqual(await store.agents.getContext(member.id),history);assert.deepEqual(await store.team.chatSnapshot(f.workspaceId),chat);
  }finally{await f.close();}
+});
+
+
+test('startup converts public member messages to assistant roles atomically without changing stable history or signed private responses', {timeout:30000}, async()=>{
+ const f=await groupFixture(),trigger='group_role_'+randomUUID().replaceAll('-','');let installed=false;
+ try{
+  const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend review');
+  answer((await f.requests.next()).events,fauxAssistantMessage([{type:'thinking',thinking:'private',thinkingSignature:'signed-private-reasoning'},{type:'text',text:'Public answer',textSignature:'signed-answer'}]));
+  await f.runtime.finished(f.backend.memberId,accepted.runs[0]!.runId);await f.runtime.close();
+  const current=await store.team.readGroupContext(f.workspaceId,0),group=current[1]!.entry;
+  assert.deepEqual(current.map(item=>item.entry.message.role),['user','assistant']);assert.doesNotMatch(JSON.stringify(group),/signed-private|signed-answer|thinking/);
+  const stable=await store.team.chatSnapshot(f.workspaceId),history=await store.agents.runMessages(f.backend.memberId,accepted.runs[0]!.runId);
+  const own=await store.agents.getContext(f.backend.memberId),peer=await store.agents.getContext(f.lead.memberId);
+  const copied=peer.entries.find(entry=>entry.messageId===group.messageId)!;assert.equal(copied.message.role,'assistant');
+  if(group.message.role!=='assistant')throw Error('Expected assistant group response');
+  const legacy={...structuredClone(group),message:{role:'user' as const,content:(group.message.content[0] as {text:string}).text,timestamp:group.message.timestamp}};
+  await store.pool.execute('UPDATE chat_context_entries SET entry = ? WHERE workspace_id = ? AND id = ?',[encode(legacy),f.workspaceId,group.messageId]);
+  await store.agents.patchContext(f.lead.memberId,peer.revision,{append:[],update:[{...copied,message:legacy.message}]});
+  await store.pool.execute('UPDATE chat_settings SET context_format = 2 WHERE workspace_id = ?',[f.workspaceId]);store.team.close();
+  await store.pool.query(`CREATE TRIGGER ${trigger} BEFORE UPDATE ON agent_context_entries FOR EACH ROW BEGIN IF OLD.agent_id = '${f.lead.memberId}' AND OLD.id = '${group.messageId}' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='refused role migration'; END IF; END`);installed=true;
+  await assert.rejects(store.team.migrateGroupContext(),/refused role migration/);
+  const [failed]=await store.pool.query<any[]>('SELECT context_format FROM chat_settings WHERE workspace_id = ?',[f.workspaceId]);assert.equal(failed[0].context_format,2);
+  const [raw]=await store.pool.query<any[]>('SELECT entry FROM chat_context_entries WHERE workspace_id = ? AND id = ?',[f.workspaceId,group.messageId]);assert.deepEqual(decode(raw[0].entry,()=>{}),legacy);
+  assert.equal((await store.agents.getContext(f.lead.memberId)).entries.find(entry=>entry.messageId===group.messageId)!.message.role,'user');
+  await store.pool.query(`DROP TRIGGER ${trigger}`);installed=false;await store.team.migrateGroupContext();
+  assert.deepEqual(await store.team.readGroupContext(f.workspaceId,0),current);
+  assert.deepEqual((await store.agents.getContext(f.lead.memberId)).entries,peer.entries);
+  assert.deepEqual(await store.agents.getContext(f.backend.memberId),own,'the original signed assistant response is not replaced with the public projection');
+  assert.deepEqual(await store.team.chatSnapshot(f.workspaceId),stable);assert.deepEqual(await store.agents.runMessages(f.backend.memberId,accepted.runs[0]!.runId),history);
+  const ready=await store.team.inspectGroupContext(f.workspaceId),peerReady=await store.agents.getContext(f.lead.memberId);
+  await store.team.migrateGroupContext();assert.deepEqual(await store.team.inspectGroupContext(f.workspaceId),ready);assert.deepEqual(await store.agents.getContext(f.lead.memberId),peerReady);
+  const reopened=new CoreData(new MySqlStorage(databaseUrl!));
+  try{await reopened.migrate();assert.deepEqual(await reopened.team.inspectGroupContext(f.workspaceId),ready);assert.deepEqual(await reopened.agents.getContext(f.lead.memberId),peerReady);}finally{await reopened.close();}
+ }finally{if(installed)await store.pool.query(`DROP TRIGGER ${trigger}`);await f.close();}
 });

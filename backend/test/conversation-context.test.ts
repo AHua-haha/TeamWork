@@ -57,7 +57,9 @@ test('own accepted final retains signed original blocks and adds attribution/pro
   assert.equal(entries![0]!.metadata.groupMessageId,'g1');
   assert.equal(await new AgentMessageContext('lead',{revision:1,entries:entries!}).incoming(reference),undefined);
   const other = await new AgentMessageContext('other',{revision:0,entries:[]}).incoming(reference);
-  assert.equal(other![0]!.message.role,'user');
+  assert.equal(other![0]!.message.role,'assistant');
+  assert.deepEqual(other![0]!.message,shared.entry.message);
+  assert.doesNotMatch(JSON.stringify(other![0]!.message),/signed-reasoning|private reasoning|opaque/);
 });
 
 test('invalid group ordering refuses incorporation and does not mutate existing state', async () => {

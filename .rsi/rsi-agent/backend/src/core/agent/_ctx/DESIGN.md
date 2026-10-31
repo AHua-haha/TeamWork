@@ -4,7 +4,7 @@
 
 Run one agent with supplied model settings, assembled React Harnesses and a continuous in-memory message context. Own the model/tool loop, message-context state, group-message consumption tracking, run status and produced execution values. A member's context outlives an individual activation.
 
-Team owns group content and provides a read reference. Agent determines what shared messages it needs using its own tracking state. Agent does not own group publication, sender attribution, shared-message ordering or team scheduling. Agent owns and aggregates its core in-memory schema, durable context/execution/history/compaction model and related data operations. Its execution mechanism remains usable in memory; Agent’s durable runtime implements acknowledged persistence without a concrete Team dependency.
+Team owns group content and provides a read reference. Incoming shared context preserves native roles: user input is `user`, and accepted member reports are `assistant`, with sender attribution in their content. A peer’s shared report contains public text only; the sender retains its original signed private response without duplicating it. Agent determines what shared messages it needs using its own tracking state. Agent does not own group publication, sender attribution, shared-message ordering or team scheduling. Agent owns and aggregates its core in-memory schema, durable context/execution/history/compaction model and related data operations. Its execution mechanism remains usable in memory; Agent’s durable runtime implements acknowledged persistence without a concrete Team dependency.
 
 ### Terms and public state meaning
 

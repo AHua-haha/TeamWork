@@ -87,12 +87,13 @@ export function sharedAttributionUpdates(entries: readonly ContextEntry[], group
     const item = shared.get(entry.metadata.groupMessageId);
     if (!item) continue;
     const copy = structuredClone(entry);
-    if (copy.message.role === 'user') { copy.message = structuredClone(item.entry.message); copy.metadata = {...copy.metadata, ...structuredClone(item.entry.metadata)}; }
-    else if (copy.message.role === 'assistant' && item.origin?.messageId === copy.messageId) {
+    if (copy.message.role === 'assistant' && item.origin?.messageId === copy.messageId) {
       const first = copy.message.content.find(part => part.type !== 'thinking');
       // Previous incorporation added an attribution-only text block, never changed signed blocks.
       if (first?.type !== 'text' || !first.text.startsWith(`[Group message ${item.position}]\nSender: `)) continue;
       first.text = item.sender;
+    } else if (copy.message.role === 'user' || copy.metadata.source === 'group-chat') {
+      copy.message = structuredClone(item.entry.message); copy.metadata = {...copy.metadata, ...structuredClone(item.entry.metadata)};
     } else continue;
     if (JSON.stringify(copy.message) !== JSON.stringify(entry.message)) updates.push(copy);
   }

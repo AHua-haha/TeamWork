@@ -366,3 +366,9 @@ At the boundary, a successful refresh inserts a private user-role `<system_instr
 The previous generated entry and active outside-working source/RSI file views become hidden in effective model context. Working content stays visible; original stable messages, signatures and tool pairing remain intact. A refreshed dependency read creates a new active view rather than reviving the hidden aggregate. Small harness state, context insertion and targeted visibility metadata acknowledge atomically; failure leaves the prior state intact. Restart restores the state, compaction tolerates absent referenced IDs, and chat/context reset clears it. There are no new file permissions.
 
 Current member manifests use `designScope: {working: [...]}` only. Startup upgrades old active snapshots and draft files independently to the working-only format, preserving assignments, instruction text, identity and history without implicitly activating pending edits. Current inputs reject configured dependency fields.
+
+### Roles in shared group context
+
+Accepted user input is stored as a native Pi `user` message. Accepted member final responses are stored as `assistant` messages with text blocks and the existing sender/mention metadata prefix. The public projection has Team-owned provenance and zero usage; the final origin reference continues to identify the real private response. Thinking, signed provider data and tool traces stay private. The sender keeps its signed original assistant entry; other members incorporate the public assistant entry. Shared summaries remain system-generated user-role context.
+
+Startup upgrades older shared response entries and copied private-context entries atomically to these roles. Original message IDs, order, metadata, summaries, origin references and stable chat/private history are preserved. Normal publication remains incremental, and inspection APIs return the stored roles without a response-time conversion.

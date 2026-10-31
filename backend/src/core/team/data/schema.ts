@@ -36,7 +36,7 @@ export const schema = [
     workspace_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     position BIGINT UNSIGNED NOT NULL DEFAULT 0, mention_limit INT UNSIGNED NOT NULL DEFAULT 32,
     reset_cursor BIGINT UNSIGNED NOT NULL DEFAULT 0, reset_position BIGINT UNSIGNED NOT NULL DEFAULT 0,
-    context_format TINYINT UNSIGNED NOT NULL DEFAULT 2, context_length BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    context_format TINYINT UNSIGNED NOT NULL DEFAULT 3, context_length BIGINT UNSIGNED NOT NULL DEFAULT 0,
     context_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   ) ENGINE=InnoDB`,

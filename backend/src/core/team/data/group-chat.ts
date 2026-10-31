@@ -2,13 +2,14 @@ import type { ContextPage, ContextPageInput } from '../../context-page.js';
 import { validateMessage, validateRun } from '../../agent/data/validation.js';
 import type { GroupContextMessage } from '../../agent/data/context.js';
 import type { GroupSummary, GroupSummaryInput, GroupSummarySubmission } from './group-summary.js';
-import type { ImageContent, Message, JsonObject } from '@earendil-works/pi-ai';
+import type { AssistantMessage, ImageContent, Message, JsonObject } from '@earendil-works/pi-ai';
 import { validateChatImages, type ChatImage, type PreparedChatImage, type ChatImageStore } from './chat-images.js';
 import type { RunState } from '../../agent/data/model.js';
 import { AppError, identity, position } from '../../agent/data/model.js';
 
 export const maxChatCharacters = 20_000;
 export const defaultMentionLimit = 32;
+export const groupContextFormat = 3;
 export type ChatAuthor = { type: 'user' } | { type: 'member'; memberId: string; name: string; runId: string };
 export interface ChatMessage {
   workspaceId: string; messageId: string; position: number; exchangeId: string;
@@ -147,10 +148,30 @@ export function groupEntry(message: ChatMessage, images: ImageContent[] = [], fi
   const text = groupSender(message) + message.text;
   return {
     messageId: message.messageId,
-    message: { role: 'user', content: images.length ? [{ type: 'text', text }, ...images.map(image => ({...image}))] : text, timestamp: message.time },
+    message: message.author.type === 'member' ? publicAssistant(text, message.time) : { role: 'user', content: images.length ? [{ type: 'text', text }, ...images.map(image => ({...image}))] : text, timestamp: message.time },
     metadata: { source: 'group-chat', workspaceId: message.workspaceId, groupPosition: message.position, exchangeId: message.exchangeId, author: {...message.author}, recipients: [...message.recipients], recipientNames: [...(message.recipientNames ?? [])],
       ...(message.attachments ? {attachments: message.attachments.map(image => ({...image}))} : {}), ...(finalRef ? {finalRef: {...structuredClone(finalRef)}} : {}) },
   };
+}
+
+/** Public transcript projection, not another model generation or its private signed response. */
+function publicAssistant(text: string, timestamp: number): AssistantMessage {
+  return {role: 'assistant', content: [{type: 'text', text}], api: 'group-chat', provider: 'team', model: 'public-response',
+    stopReason: 'stop', timestamp, usage: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}}};
+}
+
+/** Startup-only role conversion preserves public bytes, identities and origin references. */
+export function migrateGroupRole(entry: GroupContextEntry): GroupContextEntry {
+  const copy = structuredClone(entry);
+  if ((copy.metadata.author as unknown as ChatAuthor)?.type === 'member' && copy.message.role === 'user') {
+    const content = copy.message.content;
+    if (typeof content !== 'string' && (content.length !== 1 || content[0]?.type !== 'text'))
+      throw new AppError('corrupt_data', 'Member publication must contain public text only', 500);
+    copy.message = publicAssistant(typeof content === 'string' ? content : (content[0] as {text: string}).text, copy.message.timestamp);
+  }
+  validateGroupContextEntry(copy);
+  return copy;
 }
 
 export function mentionLimit(value: unknown): number {
@@ -163,7 +184,7 @@ export function validateGroupContextEntry(value: unknown): asserts value is Grou
   if (!value || typeof value !== 'object') throw new AppError('corrupt_data', 'Invalid group context entry', 500);
   const entry = value as GroupContextEntry;
   identity(entry.messageId, 'messageId'); validateMessage(entry.message);
-  if (entry.message.role !== 'user' || !entry.metadata || entry.metadata.source !== 'group-chat') throw new AppError('corrupt_data', 'Group context requires public user-role content', 500);
+  if (!entry.metadata || entry.metadata.source !== 'group-chat') throw new AppError('corrupt_data', 'Group context requires public chat content', 500);
   const metadata = entry.metadata;
   const text = typeof entry.message.content === 'string' ? entry.message.content : entry.message.content[0]?.type === 'text' ? entry.message.content[0].text : '';
   const record = {workspaceId: metadata.workspaceId, messageId: entry.messageId, position: metadata.groupPosition,
@@ -172,6 +193,10 @@ export function validateGroupContextEntry(value: unknown): asserts value is Grou
   identity(record.workspaceId); identity(record.exchangeId); position(record.position);
   if (!record.position || !Number.isSafeInteger(record.time) || record.time < 0) throw new AppError('corrupt_data', 'Invalid group position or time', 500);
   validateRouting(record.author, record.recipients);
+  if (record.author.type === 'user' ? entry.message.role !== 'user' : entry.message.role !== 'assistant')
+    throw new AppError('corrupt_data', 'Group message role differs from its author', 500);
+  if (entry.message.role === 'assistant' && (entry.message.stopReason !== 'stop' || entry.message.content.length !== 1 || entry.message.content[0]?.type !== 'text'))
+    throw new AppError('corrupt_data', 'Member publication must contain public text only', 500);
   const prefix = groupSender(record);
   if (!text.startsWith(prefix)) throw new AppError('corrupt_data', 'Group sender content differs from authoritative metadata', 500);
   chatText(text.slice(prefix.length), record.attachments);
@@ -204,8 +229,7 @@ export function migrateGroupEnvelope(entry: GroupContextEntry, names: ReadonlyMa
   const content = groupSender({author, recipients, recipientNames}) + text.slice(oldPrefix.length);
   if (typeof copy.message.content === 'string') copy.message.content = content;
   else if (copy.message.content[0]?.type === 'text') copy.message.content[0].text = content;
-  validateGroupContextEntry(copy);
-  return copy;
+  return migrateGroupRole(copy);
 }
 
 /** The Agent port is a detached projection of Team-owned Pi messages, not reconstructed text. */
