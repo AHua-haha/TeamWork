@@ -1,53 +1,119 @@
+---
+summary: Owns project configuration, development and deployment lifecycle, Desktop test launching, and isolated MySQL service management.
+include:
+  - scripts/dev.sh
+  - scripts/develop.mjs
+  - scripts/desktop.sh
+  - scripts/desktop.mjs
+  - scripts/database.sh
+  - scripts/database.mjs
+  - scripts/deploy.sh
+  - scripts/deployment.mjs
+  - scripts/host-config.mjs
+  - scripts/host-common.mjs
+  - scripts/backend-command.mjs
+  - scripts/serve-frontend.mjs
+  - scripts/copy-deployment.mjs
+  - scripts/test/host-config.test.mjs
+  - scripts/test/deployment.test.mjs
+  - rsi.config.example.json
+  - .rsi/rsi-agent/desktop/_ctx/README.md
+  - desktop/package.json
+---
+
 # Operations usage contract
 
-### Environment and development
+Operations manages the project-owned environment configuration, development and deployment processes, the optional Desktop test launcher, and the supporting MySQL service. Backend Core owns application records and schema behavior; Operations only creates/checks the configured database and account and supplies connection settings to child processes.
 
-**Input:** `scripts/dev.sh init|start|stop|restart|status|logs [backend|frontend]`, project private config; locked `backend/package-lock.json` and `frontend/package-lock.json`.
+## Configuration and isolation
 
-**Output:** Validated config, dependency readiness errors, process status/logs, and local backend/frontend on configured loopback ports.
+`rsi.config.json` is the only private project configuration source. Commands initialize it from `rsi.config.example.json` when it is absent, replace template placeholders, generate fresh root/application passwords and per-environment encryption keys, validate the result, and write it with private permissions. Existing configuration is preserved; legacy `.env` files, ambient application variables, another checkout's settings and hidden fallback values are not imported.
 
-**Effect:** Child processes receive only managed per-environment settings. `dev.sh start` starts/ensures the dedicated DB, provisions the configured development schema/user (no application schema interpretation), and starts backend/frontend; stop stops only those application processes and preserves the database service/data. Dependency setup is `npm ci --prefix backend && npm ci --prefix frontend`.
+The configuration contains absolute state paths, one loopback MySQL service identity, separate development and deployment ports, schemas, application accounts, encryption keys, environment variables and context-compaction thresholds. Development and deployment database names, accounts, keys and backend ports must remain distinct. The harness permission switch is retired and ignored if present; the configured positive safe-integer `contextCompactionThresholdTokens` is passed to the selected backend as `RSI_CONTEXT_COMPACTION_THRESHOLD_TOKENS`.
 
-**Usage:** `nvm install && nvm use`; `npm ci --prefix backend && npm ci --prefix frontend`; `./scripts/dev.sh init`; `./scripts/dev.sh start`; `./scripts/dev.sh status`; `./scripts/dev.sh stop`. Desktop packaging also requires `nvm use` in `desktop/`, then `npm ci` and `npm run make:mac`.
+Child processes receive a filtered host environment plus explicit project settings. Application variables such as `DATABASE_URL`, `CONFIG_ENCRYPTION_KEY`, `HOST`, `PORT`, `NODE_ENV`, `AGENT_BACKEND_ORIGIN`, Compose variables and `NODE_OPTIONS` do not leak from the caller. Lifecycle commands use a project state directory, per-process records, logs and a lock so concurrent mutations refuse cleanly.
 
-### Desktop backend launcher
+## Development lifecycle
 
-**Input:** `scripts/desktop.sh start|stop|status [development|deployment]`.
+**Commands**
 
-**Output:** A foreground Electron session connected to the selected backend origin; status/stop records for the selected desktop backend.
+```sh
+./scripts/dev.sh init
+./scripts/dev.sh start
+./scripts/dev.sh stop
+./scripts/dev.sh restart
+./scripts/dev.sh status
+./scripts/dev.sh logs [backend|frontend]
+```
 
-**Effect:** Development mode starts the source backend with the development schema/account. Deployment mode starts the selected committed release with deployment settings and schema/account; it refuses when no release is selected. The launcher writes the selected origin to the Electron per-user `desktop.json` only while the session runs, restores the previous file afterward, and does not start the Vite server. It stops a backend it started when Electron exits, while preserving the supporting MySQL service. The command requires Node 22.19.x before starting Electron.
+`start` verifies development dependencies, starts the configured project-owned MySQL service without recreating an existing container, provisions/checks the development schema and account, then starts the TypeScript backend and Vite frontend on the configured loopback ports. The frontend receives only the selected backend origin. `stop` and `restart` stop application processes recorded for this project and preserve the MySQL service, volume and data. `status` reports MySQL and application process state without requiring source releases. `logs` prints the saved backend/frontend log paths and the last 60 lines, either for both services or for the selected service.
 
-**Usage:** `./scripts/desktop.sh start development`; `./scripts/desktop.sh start deployment`; `./scripts/desktop.sh status development`; `./scripts/desktop.sh stop development`.
+A busy backend or frontend port refuses before that service starts. A running process with changed settings requires `restart`; stale or mismatched PID records are ignored or removed without signaling unrelated processes. Startup failures stop a backend started by the same command and leave the database service untouched.
 
-### Dedicated supporting database
+## Supporting MySQL service
 
-**Input:** `scripts/database.sh start|stop|status`; `mysql` configuration and separate development/deployment database credentials from `rsi.config.json`.
+**Commands**
 
-**Output:** Explicit service lifecycle/status; Compose health waits on start.
+```sh
+./scripts/database.sh start
+./scripts/database.sh stop
+./scripts/database.sh status
+```
 
-**Effect:** Docker Compose arguments select the configured context/project and a generated Compose artifact under the configured state directory; unique project identity and explicit named volume/network/container isolate service resources. Start uses no-recreate; stop only targets this Compose project's MySQL. Configured host port is checked by Compose bind, so another listener causes start refusal without stopping it. Database start provisions and verifies both configured schemas/accounts; app start provisions/verifies its selected environment. Container, network, volume and address ownership mismatches are refused before Compose mutations. Existing containers are not recreated.
+The service is generated at runtime from `rsi.config.json` into `<stateDirectory>/database/compose.json`; there is no checked-in `backend/compose.yaml` used by these commands. Docker Compose runs with the configured Docker context, project identity, named container, network, volume and loopback host port. The generated service uses the configured MySQL image and health check.
 
-**Usage:** `./scripts/database.sh start`, `./scripts/database.sh status`, `./scripts/database.sh stop`.
+`start` validates ownership of an existing container, network and volume before Compose can mutate anything, then starts MySQL with `--no-recreate` and waits for health. It provisions and verifies both configured application schemas/accounts. `stop` only stops this project's MySQL container. `status` reports whether the configured Compose service is running. Foreign resources, mismatched credentials/image/address/volume, occupied ports and invalid configuration refuse without stopping or resetting another service. These commands do not interpret, migrate or copy application records.
 
-### Deployment
+## Desktop test launcher
 
-**Input:** `scripts/deploy.sh` lifecycle/update commands and optional local Git ref.
+**Commands**
 
-**Output/effect:** Exported committed local source is built before switching; failures preserve active release or attempt recovery after launch failure. Deployment application database settings stay separately configured and database is never stopped by app stop.
+```sh
+./scripts/desktop.sh start development
+./scripts/desktop.sh start deployment
+./scripts/desktop.sh stop development
+./scripts/desktop.sh status development
+```
 
-**Usage:** `./scripts/deploy.sh update [git-ref]`; `./scripts/deploy.sh status`.
+The environment argument defaults to `development` and must be `development` or `deployment`. `start` requires Node.js 22.19.x, initializes configuration, starts/checks the project MySQL service and selected schema/account, and starts the selected backend. Development uses the checkout's TypeScript entry; deployment uses the selected compiled release from deployment state. Deployment refuses when no release is selected or when the manifest belongs to another checkout.
 
-### Configuration contract
+The launcher writes `{ "backendOrigin": "http://127.0.0.1:<backend-port>" }` to the Electron per-user `desktop.json`, runs `npm start` in `desktop/` in the foreground, and restores the previous file when Electron exits. `npm start` builds the shared frontend, stages its output, compiles the Electron host and invokes Electron Forge; this launcher does not run Vite. If the launcher started the backend, it stops that backend after Electron exits. It leaves the supporting MySQL service and data running. `stop` stops only the selected launcher backend; `status` reports its PID. Deployment `stop`/`status` require a valid selected release because backend resolution reads the deployment manifest.
 
-`rsi.config.json` is the sole private project config. Toolchain selection is repository-level: `.nvmrc` and `.node-version` pin Node 22.19.0, while backend/frontend/desktop package manifests declare `>=22.19.0 <23` and package-local `.npmrc` files enable `engine-strict=true`. `mysql.host` must be loopback, project identity is validated, and host port is explicit (initialized to 13306). Initialization generates fresh root/application credentials and separate encryption keys without importing other settings. Existing config migration preserves keys and resource identity explicitly. `backendSettings(config, environment)` creates child-only backend settings. Context compaction threshold and harness switch are explicit per-environment inputs, with positive-safe-integer/Boolean validation and no launcher fallback values. Example template: [rsi.config.example.json](../../../../rsi.config.example.json).
+The Electron package remains responsible for its own window, preload, proxy and packaging behavior. Operations only supplies the temporary origin and process lifecycle. See the [Desktop usage contract](../../desktop/_ctx/README.md) for the renderer and proxy boundary.
 
-### Explicit deployment snapshot copy
+## Deployment lifecycle
 
-**Input:** `node scripts/copy-deployment.mjs <source-config> <source-mysql-container>`. Target configuration must already preserve the source deployment encryption key.
+**Commands**
 
-**Output:** Successful table/row counts and a private completed-copy record; refusals for same service, nonempty target, mismatched encryption key or source container identity.
+```sh
+./scripts/deploy.sh init
+./scripts/deploy.sh deploy <git-ref>
+./scripts/deploy.sh update [git-ref]
+./scripts/deploy.sh start
+./scripts/deploy.sh stop
+./scripts/deploy.sh restart
+./scripts/deploy.sh status
+./scripts/deploy.sh logs [backend|frontend]
+```
 
-**Effect:** Reads a consistent SQL snapshot from the explicitly selected source, imports it into the isolated target schema, and verifies every table count. Source is never modified. Private backup `database/deployment-source.sql` and `database/deployment-copy.json` live under target state. Repeating a completed copy does nothing. No lifecycle command calls this migration implicitly. Workspace filesystem paths remain as stored.
+`deploy <git-ref>` resolves a committed local Git ref, refuses revisions containing private `rsi.config.json`, exports the commit into the configured temporary deployment source root, installs locked backend/frontend dependencies, builds both packages, starts the deployment backend and static frontend, and records an owned `active.json` manifest. The active release is selected only after build and launch succeed.
 
-**Usage:** `node scripts/copy-deployment.mjs /Users/ahua/workspace/rsi-agent/rsi.config.json backend-mysql-1` (this machine's one-time copy is complete).
+`update` defaults to committed `HEAD`; it preserves uncommitted checkout files and accepts an explicit local ref. If a build fails, the current manifest and running release remain active. If launch fails after a switch, Operations stops the failed attempt and tries to relaunch the previous release when one was running. A selected release keeps its original compiled backend entry so older releases can restart after source layout changes. Missing release directories are rebuilt from the manifest's commit. `start`, `stop`, `restart`, `status` and `logs` operate on the selected deployment and its saved process records/logs. Deployment application settings and database remain separate from development, and stopping the application never stops MySQL.
+
+## Explicit database snapshot copy
+
+The one-time migration command is separate from normal lifecycle commands:
+
+```sh
+node scripts/copy-deployment.mjs <source-project-config> <source-mysql-container>
+```
+
+The target must already have its deployment encryption key set to the source key and must use a distinct MySQL service. The source container must belong to the configured source project and address. The command starts/provisions the target service, refuses a nonempty target or empty source, dumps a consistent source snapshot, imports it into the target deployment schema, verifies every table row count and records a private completion marker plus checksum. It never modifies the source, does not copy workspace filesystem paths, and does nothing on a repeat with the same completed identity. Normal `dev`, `desktop` and `deploy` commands never invoke this copy.
+
+## Failure and recovery guarantees
+
+Configuration, ownership, port, release and dependency failures are explicit nonzero exits with credential-safe messages. Operations does not stop unrelated processes or services, does not delete a selected release before a replacement is built, and preserves database service/data across application stop. Earlier filesystem or database effects can remain after a later failure, so recovery uses the saved state, manifest and explicit lifecycle commands. The current test fixtures cover configuration isolation, resource ownership, release build/launch recovery, stale process records, lock recovery, old release entries and snapshot safety.
+
+## Open design discrepancies
+
+The current DESIGN explicitly requires generated Compose configuration; implementation agrees by generating `<stateDirectory>/database/compose.json` from `scripts/host-config.mjs`. An older member instruction still lists `backend/compose.yaml` as owned implementation, but that is not a current DESIGN requirement. The DESIGN also still requires a harness-permission switch, whereas Runtime DESIGN and current launch settings retire/ignore it; this conflicting requirement needs confirmation before changing DESIGN. The one-time deployment copy command exists, but historical completion cannot be verified from checked-in files. Desktop's host and the optional Operations launcher have distinct lifecycle ownership: Electron connects to an external backend, while the launcher may start/stop that backend around a session. This boundary is consistent across current contracts; no behavior changed here.
