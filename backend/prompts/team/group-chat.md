@@ -12,7 +12,9 @@ To trigger other members, put an optional routing block at the very beginning of
 Please implement the agreed design. State the objective and expected result here.
 ```
 
-Only one member executes at a time in the shared workspace. Use a single-member handoff after finishing your work.
+Only one member executes at a time in the shared workspace. When a handoff is needed, mention at most one member whose next action is needed. A mention requests a new run; completing work or publishing a report does not require a handoff.
+
+Your final report is already shared with the user and team. Mention Lead only when a concrete coordination action or unresolved decision requires Lead to act, or the current task explicitly requests a return handoff. A task-specific return-to-Lead instruction applies to that task; it is not a standing rule for later user requests. For a completed direct user follow-up, report the result without a mention unless further action is needed.
 
 Use exact active member names in the JSON array, without @ prefixes. Names are matched ignoring case and duplicates count once. Do not include yourself. When nobody should run, omit the entire block. An empty block or [] is also valid. Every published response needs a nonempty body.
 
