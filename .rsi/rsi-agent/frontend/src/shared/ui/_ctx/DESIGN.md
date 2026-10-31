@@ -28,6 +28,27 @@ Shared UI provides direct UI component implementations and visual examples, not 
 - Keep feature-specific screens and one-off business interactions in their feature.
 - Preserve accessibility, keyboard interaction and local visual mechanics as part of component contracts.
 
+## Reference application layout
+
+The user requested reusable Shared layout foundations based on the supplied reference screenshot, before adjusting the existing frontend. This is a presentation-only design. Existing App composition, routes, screens and application styles must not be migrated as part of this step.
+
+- A window toolbar spans the complete frame, above the navigation rail, sidebar and main pane.
+- A narrow navigation rail and a separate fixed-width sidebar sit below the toolbar; the main pane fills the remaining width and height.
+- Navigation-rail icon controls use the sidebar-header height as their full hit-area height. The icon artwork is inset inside that area and does not define the rail width or row height.
+- The sidebar header spans the full sidebar width, uses the same initial 48 px height as the rail controls, and may place title content and optional actions in separate slots.
+- A centered thread column has its own content-width budget. Adjacent message avatars and their gap are outside that budget and must not reduce the content width.
+- Use reference-based CSS defaults of 48 px toolbar height, 56 px rail width and 264 px sidebar width. Use a 724 px maximum thread content width for the current text-sample layout; at 14 px, the requested line through `Restart the backend` measures about 716 px before its avatar gutter. These are approximate CSS dimensions based on the reference image and supplied sample, not exact source-pixel measurements.
+- Keep these dimensions available as scoped CSS custom properties for later visual tuning, including `--shared-sidebar-header-height`. At constrained widths the thread content may shrink; the rail and sidebar do not automatically collapse. Their visibility and navigation policy remain with the consumer.
+- Supply the toolbar, navigation, sidebar and thread contents through React nodes. These primitives do not provide routing, backend calls, feature state or native operating-system window controls.
+- Provide a standalone Storybook example for reviewing the full frame and a thread row with an avatar positioned outside its content column.
+- Thread body content uses 14 px text with a unitless line height of 1.65. Sidebar items use 14 px text with a unitless line height of 1.5. These user-selected text defaults are scoped to those regions; sidebar-header and toolbar typography are separate.
+- Sidebar item rows use an exact 32 px height. Section-title rows use the same 32 px height. Sidebar text remains 14 px with a 1.5 line height (21 px), leaving 11 px of vertical room inside each row.
+- Use the same 4 px gap between items, between a section title and its first item, and between adjacent sections; do not add section-specific vertical margins.
+- Place the section fold/expand chevron immediately to the right of the title text with a 4 px gap.
+- Sidebar items highlight immediately on hover and keyboard focus; disabled items do not gain a hover highlight, and selected items retain their distinct background.
+- Sidebar sections fold independently through an accessible disclosure button and start expanded by default. Collapsing hides the content without unmounting it; a consumer may control open state through props and a callback.
+- The reference layout and these body-text defaults are established. Demo colors remain illustrative; the final palette, remaining type hierarchy, control styling and feature integration remain separate design decisions.
+
 ## Agent context viewer
 
 The Shared UI design includes a reusable two-pane presentation for inspecting an Agent's current persisted context. This is a visual component design; it does not make Agent context a universal Shared data model or require other features to use Pi messages.

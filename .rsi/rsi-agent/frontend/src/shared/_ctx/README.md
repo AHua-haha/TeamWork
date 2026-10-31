@@ -10,6 +10,13 @@ include:
   - frontend/src/shared/backend-client/context-client.ts
   - frontend/src/shared/backend-client/group-client.ts
   - frontend/src/shared/ui/SequenceInspector.tsx
+  - frontend/src/shared/ui/AppShell.tsx
+  - frontend/src/shared/ui/NavigationRailButton.tsx
+  - frontend/src/shared/ui/SidebarHeader.tsx
+  - frontend/src/shared/ui/SidebarSection.tsx
+  - frontend/src/shared/ui/layout.css
+  - frontend/src/shared/ui/AppShell.stories.tsx
+  - frontend/test/shared-layout.test.ts
   - frontend/src/shared/ui/index.ts
   - frontend/src/app/main.tsx
   - frontend/src/features/workspace/ContextTab.tsx
@@ -32,7 +39,11 @@ Resource clients return backend-shaped records, attachment URLs for browser bina
 
 ## Shared UI
 
-`SequenceInspector<T>` is the current reusable UI component. It receives an ordered `items` array, optional `getKey`, row/detail render callbacks, an optional controlled `selectedKey`, an `onSelect` callback and an empty-state node. It renders a two-pane list/detail presentation. The last item is selected initially when no controlled selection is supplied; selecting a row updates local selection and invokes the callback. If the active key disappears, it proposes the last remaining item through local selection and the callback; a controlled owner must apply that callback for the displayed selection to change.
+Shared UI includes optional `AppShell`, `NavigationRailButton`, `SidebarHeader`, `SidebarSection`, `ThreadColumn` and `ThreadRow` primitives for the reference layout, plus `SequenceInspector<T>` for ordered list/detail presentation. The new layout stylesheet is explicitly opt-in and is not loaded by the UI index. Existing App and feature screens remain composed as before.
+
+`AppShell` places a 48 px toolbar above a 56 px navigation rail, 264 px sidebar and flexible main pane. Slots supply content and may omit the side regions. `NavigationRailButton` and `SidebarHeader` share a 48 px height through `--shared-sidebar-header-height`; the sidebar header fills the 264 px sidebar and the rail button keeps 20 px artwork inset within its hit area. `ThreadColumn` centers up to 724 px of content, excluding the separate avatar gutter used by `ThreadRow`; the Storybook reference sample demonstrates the requested line break at this width. These initial dimensions approximate the supplied screenshot in CSS pixels and can be tuned with scoped custom properties. Storybook `Shared/AppShell` demonstrates full, constrained and omitted-slot layouts. Sidebar items highlight on hover/focus, and `SidebarSection` provides independently collapsible groups with optional controlled open state while keeping hidden children mounted. Full usage, required parent sizing, failure behavior and boundaries are documented in the UI contract.
+
+`SequenceInspector<T>` receives an ordered `items` array, optional `getKey`, row/detail render callbacks, an optional controlled `selectedKey`, an `onSelect` callback and an empty-state node. It renders a two-pane list/detail presentation. The last item is selected initially when no controlled selection is supplied; selecting a row updates local selection and invokes the callback. If the active key disappears, it proposes the last remaining item through local selection and the callback; a controlled owner must apply that callback for the displayed selection to change.
 
 The component renders native buttons with listbox/option semantics, selected styling, visible keyboard focus and an `aria-live` detail region. CSS supplies the two-pane layout, scrolling and a narrow-screen stacked layout. It owns only selection state and immediate presentation; it does not fetch data, paginate, map records or assign meaning to actions.
 
@@ -40,7 +51,7 @@ Features may provide any row and detail content. Workspace uses the component fo
 
 ## Boundaries and guarantees
 
-Shared preserves the backend's JSON, binary and SSE representations, revisions, cursors, cancellation signals and stream lifecycle semantics. It does not own feature caches, optimistic policy, navigation, persistence, authorization or durable mutation decisions. Shared UI begins with the genuinely reusable inspector; feature-specific screens stay in their feature.
+Shared preserves the backend's JSON, binary and SSE representations, revisions, cursors, cancellation signals and stream lifecycle semantics. It does not own feature caches, optimistic policy, navigation, persistence, authorization or durable mutation decisions. Shared UI provides the reusable inspector and explicitly requested layout foundations; feature-specific screens and live application-shell composition stay in their owners.
 
 Example composition:
 

@@ -1,2 +1,10 @@
 export { SequenceInspector } from './SequenceInspector.js';
 export type { SequenceInspectorProps } from './SequenceInspector.js';
+export { AppShell, ThreadColumn, ThreadRow } from './AppShell.js';
+export type { AppShellProps, ThreadColumnProps, ThreadRowProps } from './AppShell.js';
+export { NavigationRailButton } from './NavigationRailButton.js';
+export type { NavigationRailButtonProps } from './NavigationRailButton.js';
+export { SidebarHeader } from './SidebarHeader.js';
+export type { SidebarHeaderProps } from './SidebarHeader.js';
+export { SidebarSection } from './SidebarSection.js';
+export type { SidebarSectionProps } from './SidebarSection.js';

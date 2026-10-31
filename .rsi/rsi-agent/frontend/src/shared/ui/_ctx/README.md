@@ -1,6 +1,15 @@
 ---
-summary: Provides the generic SequenceInspector list/detail component, callback-based selection, native keyboard activation and responsive layout.
+summary: Provides reference-sized application and thread layout primitives, separate avatar gutters, and the generic SequenceInspector list/detail component.
 include:
+  - frontend/src/shared/ui/AppShell.tsx
+  - frontend/src/shared/ui/NavigationRailButton.tsx
+  - frontend/src/shared/ui/SidebarHeader.tsx
+  - frontend/src/shared/ui/SidebarSection.tsx
+  - frontend/test/sidebar-section.test.ts
+  - frontend/src/shared/ui/layout.css
+  - frontend/src/shared/ui/AppShell.stories.tsx
+  - frontend/src/shared/ui/app-shell.stories.css
+  - frontend/test/shared-layout.test.ts
   - frontend/src/shared/ui/SequenceInspector.tsx
   - frontend/src/shared/ui/SequenceInspector.stories.tsx
   - frontend/src/shared/ui/index.ts
@@ -14,9 +23,68 @@ include:
 
 # UI usage contract
 
-Shared UI currently provides `SequenceInspector<T>`, a generic presentation component for an ordered list with a selected detail panel. It renders supplied data and invokes callbacks; it does not fetch backend data, own feature state, interpret records or apply business policy.
+Shared UI provides optional application/thread layout primitives and `SequenceInspector<T>`, a generic ordered-list/detail component. They render supplied content; they do not fetch backend data, own feature state, interpret records or apply business policy.
 
-## Inputs and interactions
+## Reference layout primitives
+
+Import `AppShell`, `NavigationRailButton`, `SidebarHeader`, `SidebarSection`, `ThreadColumn` and `ThreadRow` from `frontend/src/shared/ui/index.ts`, and explicitly load `frontend/src/shared/ui/layout.css`. The index deliberately does not import this stylesheet. Existing App and feature screens do not use these primitives yet, and their global stylesheet is unchanged.
+
+`AppShell` receives a required `toolbar` node, optional `navigationRail` and `sidebar` nodes, and `children` for its main pane. It also accepts `navigationLabel`, `sidebarLabel`, `className` and `style`. It renders a full-width header above a horizontal rail/sidebar/main body. Missing side slots produce no empty landmarks or reserved columns. The parent must supply a definite height; use a full-height parent or an explicit `style={{height: '100dvh'}}`. Main and sidebar content can scroll without moving the toolbar. The header is browser content, not a native operating-system title bar.
+
+Initial desktop dimensions approximate the reference screenshot in CSS pixels:
+
+| Region | Default | CSS custom property |
+| --- | --- | --- |
+| Window toolbar | 48 px high | `--shared-toolbar-height` |
+| Navigation rail | 56 px wide | `--shared-rail-width` |
+| Sidebar | 264 px wide | `--shared-sidebar-width` |
+| Sidebar header / rail control | 48 px high | `--shared-sidebar-header-height` |
+| Rail icon artwork | 20 px square | `--shared-navigation-icon-size` |
+| Thread content | 724 px maximum width | `--shared-thread-width` |
+| Thread text | 14 px; line height 1.65 | `--shared-thread-font-size`, `--shared-thread-line-height` |
+| Sidebar item text | 14 px; line height 1.5 | `--shared-sidebar-item-font-size`, `--shared-sidebar-item-line-height` |
+| Sidebar item row | 32 px exact height | `--shared-sidebar-item-height` |
+| Sidebar item gap | 4 px, including section title-to-content | `--shared-sidebar-item-gap` |
+| Avatar slot | 32 px square | `--shared-thread-avatar-size` |
+| Avatar-to-content gap | 12 px | `--shared-thread-avatar-gap` |
+| Minimum thread outer inset beyond the avatar gutter | 16 px per side | `--shared-thread-edge-padding` |
+
+`NavigationRailButton` is a reusable icon-only native button. It defaults to `type="button"`, takes `icon`, `label` and optional `active`, forwards native button attributes, and exposes `aria-current="page"` when active. Its full hit area is the same `--shared-sidebar-header-height` as the sidebar header; the icon artwork is inset to `--shared-navigation-icon-size` and does not determine row height. It does not navigate or own selected state. `SidebarHeader` spans the entire sidebar width, accepts title `children`, optional `actions` and `className`, and keeps actions separate from clipped title content. Set shell-size properties on the `AppShell` root; thread properties may be set on that root or a `ThreadColumn`. Size properties take CSS lengths. `ThreadColumn` centers its inner content in the available pane and shrinks it when necessary, reserving a separate avatar gutter on both edges. The 724 px limit applies only to the inner content; it excludes avatars and their gap. The reference story's first line ends at `Restart the backend`, with `to load them.` wrapping onto the next line at 14 px. At narrower available widths, the text wraps naturally. No breakpoint automatically hides or resizes the rail/sidebar. The consumer decides when to omit slots or change dimensions; this is a desktop geometry foundation rather than a complete mobile navigation workflow.
+
+Thread content defaults to 14 px text and unitless line height 1.65 (23.1 px at the default size). Wrap sidebar item content in `.shared-sidebar-items` to apply 14 px text and a 1.5 line height separately from the thread and sidebar header. The wrapper stacks items with a configurable 4 px gap; interactive direct children use an exact 32 px row height by default. Section headings use the same height and gap; their chevron sits immediately to the right of the title text with a 4 px gap. Sidebar text remains 14 px with a 1.5 line height. Storybook uses these same defaults.
+
+Enabled sidebar action rows and rail buttons highlight immediately on pointer hover or keyboard focus, using `--shared-sidebar-hover` (default `#eef1f4`). Current-page items retain their selected background; disabled rows do not receive hover highlighting. Section headers use the same highlight.
+
+`SidebarSection` accepts `title`, `children`, `defaultOpen` (default `true`), optional controlled `open`, `onOpenChange(nextOpen)` and `className`. Its native disclosure button exposes `aria-expanded` and `aria-controls`, supports click/Enter/Space, and rotates its chevron when folded. Uncontrolled sections keep their own independent open state. With `open`, the consumer must apply the callback to change the visible state. Collapsing uses a hidden panel while leaving children mounted, preserving their local state; no data loading, navigation or persistence is triggered by the component. Projects and Recent demonstrate this in the layout story. Omitted or failed render content follows normal React behavior; the section adds no error boundary or loading policy.
+
+```tsx
+<SidebarSection title="Projects" defaultOpen>
+  <div className="shared-sidebar-items">{projectButtons}</div>
+</SidebarSection>
+```
+
+`ThreadColumn` takes `children`, `className` and `style`. `ThreadRow` takes `children`, optional `avatar` and `className`. Its avatar is a sibling of message content, positioned in the leading gutter without narrowing the message. Avatar rows reserve at least the configured avatar height. Consumers supply accessible avatar content and decide message roles, alignment, rendering and composer behavior. These components expose no state, routing, submission or scrolling-to-latest policy.
+
+```tsx
+import { AppShell, ThreadColumn, ThreadRow } from './shared/ui/index.js';
+import './shared/ui/layout.css';
+
+<AppShell toolbar={toolbar} navigationRail={navigation} sidebar={sidebar}
+  style={{height: '100dvh'}}>
+  <ThreadColumn>
+    <ThreadRow avatar={<img src={avatarUrl} alt="Assistant" />}>
+      {messageContent}
+    </ThreadRow>
+    {composer}
+  </ThreadColumn>
+</AppShell>
+```
+
+Storybook `Shared/AppShell` provides `ReferenceLayout`, `ConstrainedWidth`, `NavigationAlignment`, `TallerSidebarHeader` and `ContentWithoutAvatars`. `NavigationAlignment` shows rail icon hit areas aligned to the sidebar header; `TallerSidebarHeader` shows both responding to the shared height token. Section folding and hover/focus highlighting work in the example; navigation and composer actions remain placeholders rather than feature workflows. Its separate scoped demo stylesheet illustrates neutral surfaces; the final palette, remaining type hierarchy and control design are not established by the demo.
+
+Without `layout.css`, the components retain their semantic structure but not these dimensions. Invalid CSS overrides follow browser CSS behavior. Content/render errors propagate through React; the primitives provide no error boundary or network failure state. Geometry and optional-slot/landmark behavior are covered by focused tests and browser review; existing feature interfaces remain unchanged.
+
+## SequenceInspector inputs and interactions
 
 `SequenceInspector` accepts:
 
@@ -40,7 +108,7 @@ Features decide what the items mean and how to render them. Workspace uses the c
 
 The `Shared/SequenceInspector` Storybook stories demonstrate representative generic entries with text, thinking, tools and empty-state content. They use a local `DemoEntry` shape rather than Pi messages and do not demonstrate image/unknown-content rendering or a Shared raw-data toggle. It is visual example data rather than a canonical backend model. The intended richer context presentation is composed in Workspace; Shared itself imports neither Pi nor assistant-ui.
 
-Consumers must load `frontend/src/app/styles.css` (App startup and Storybook preview already do). Without these global rules the markup has no component-local layout styles. The generic inspector stacks below 700px; Workspace overrides preserve its message/detail panes side by side and move its own source picker above them at narrow widths.
+Consumers of `SequenceInspector` must load `frontend/src/app/styles.css` (App startup and Storybook preview already do). Without these global rules the markup has no component-local layout styles. The generic inspector stacks below 700px; Workspace overrides preserve its message/detail panes side by side and move its own source picker above them at narrow widths.
 
 Example:
 
@@ -60,8 +128,8 @@ import { SequenceInspector } from './shared/ui/index.js';
 
 ## Boundaries and guarantees
 
-Shared UI owns immediate presentation mechanics: selection, focus behavior exposed by native controls, accessible state attributes, detail announcement and responsive layout styling. It has no network, persistence, backend protocol, feature workflow or business-validation behavior. Visual classes and responsive rules live in the application stylesheet and are intentionally presentation-only. Callers supply unique stable keys and suitable readable row labels; index keys are only the default and follow positions when data changes. Render/key/callback errors propagate through React or the event caller: the inspector adds no error boundary or fallback for thrown exceptions. Loading/error/raw-detail controls belong to consumer-supplied content.
+Shared UI owns immediate presentation mechanics: selection, focus behavior exposed by native controls, accessible state attributes, detail announcement and responsive layout styling. It has no network, persistence, backend protocol, feature workflow or business-validation behavior. Inspector visual classes and responsive rules live in the application stylesheet. The optional shell/thread geometry lives in the separate, class-scoped `layout.css`; both remain presentation-only. Callers supply unique stable keys and suitable readable row labels; index keys are only the default and follow positions when data changes. Render/key/callback errors propagate through React or the event caller: the inspector adds no error boundary or fallback for thrown exceptions. Loading/error/raw-detail controls belong to consumer-supplied content.
 
-The source and Storybook examples establish these behaviors; there is currently no dedicated automated Shared inspector interaction test or measured accessibility audit. In particular, native keyboard operation is implemented, while a complete ARIA listbox keyboard pattern is not. This gap against the UI design's accessibility verification expectations requires follow-up outside this context-only review.
+The source and Storybook examples establish these behaviors; there is currently no dedicated automated Shared inspector interaction test or measured accessibility audit. In particular, native keyboard operation is implemented, while a complete ARIA listbox keyboard pattern is not. This gap against the UI design's accessibility verification expectations remains separate from the shell and navigation layout work.
 
 Verification expectations for changes are visual and interaction focused: preserve ordered rendering, controlled/uncontrolled selection, fallback selection when data changes, empty state, accessible roles/labels, visible focus and narrow-screen layout. Backend and persistence behavior belong to the consuming feature or the Backend Client.
