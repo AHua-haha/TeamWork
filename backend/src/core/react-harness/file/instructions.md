@@ -7,7 +7,45 @@ Prefer read, edit and write for ordinary file operations:
 - Use edit for targeted changes to existing files.
 - Use write to create files or intentionally replace their complete content.
 
-Prefer batching multiple ready tool calls in one assistant response. Calls execute sequentially in response order. Wait for results before constructing calls that depend on newly obtained information.
+Prefer batching known edits at two levels:
+- Within one file, combine multiple known non-overlapping replacement blocks in one edit call's edits array. All blocks match the same original file snapshot.
+- Across different files, emit multiple independent edit calls in one assistant response, usually one call per file. You do not need another model response between edits whose arguments are already known.
+
+For example, after inspecting the implementation and tests and deciding to update a timeout and retry limit, emit the following TWO edit tool calls in ONE assistant response. Each JSON block below is the arguments object for a separate call to the existing edit tool.
+
+First call: two separate replacement blocks within src/config.ts:
+
+```json
+{
+  "path": "src/config.ts",
+  "edits": [
+    {
+      "oldText": "export function getTimeoutMs() {\n  return 5000;\n}",
+      "newText": "export function getTimeoutMs() {\n  return 10000;\n}"
+    },
+    {
+      "oldText": "export function getRetryLimit() {\n  return 2;\n}",
+      "newText": "export function getRetryLimit() {\n  return 3;\n}"
+    }
+  ]
+}
+```
+
+Second call: update another file in that same assistant response:
+
+```json
+{
+  "path": "test/config.test.ts",
+  "edits": [
+    {
+      "oldText": "assert.equal(getTimeoutMs(), 5000);\nassert.equal(getRetryLimit(), 2);",
+      "newText": "assert.equal(getTimeoutMs(), 10000);\nassert.equal(getRetryLimit(), 3);"
+    }
+  ]
+}
+```
+
+The first call batches multiple blocks within one file; both calls together batch edits across files. Batching is a preference, not a requirement. Calls execute sequentially in response order, with separate results. Wait when later arguments depend on earlier results, further inspection is needed, or a failed edit requires correction. Apply the same cross-file principle to independent write calls, and batch ready read calls in one response too.
 
 Use Bash for directory listing, file discovery, text/code search and structural matching, including commands such as ls, find and rg. Bash is also appropriate for Git, builds, tests, process management and scripted edits when useful.
 
