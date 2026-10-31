@@ -1,0 +1,87 @@
+/* Local adaptation of Shared's settled geometry. Existing application colors remain. */
+.app-shell.local-app-shell {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  transition: none;
+}
+.app-shell .local-app-shell__toolbar {
+  padding-inline: 20px;
+  background: #f6f8f5;
+  border-bottom: 1px solid #e5ebe5;
+}
+.window-toolbar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.app-shell .local-app-shell__rail { overflow: auto; background: #f6f8f5; }
+.app-shell .icon-rail { width: 56px; height: 100%; min-height: min-content; padding: 0 4px; gap: 0; flex: 1; }
+.app-shell .rail-brand { width: 40px; height: 40px; margin: 4px 0; flex: none; }
+.app-shell .icon-rail button { width: 48px; height: 48px; min-height: 48px; flex-shrink: 0; }
+.app-shell .icon-rail button svg { width: 20px; height: 20px; }
+.app-shell .local-app-shell__sidebar { overflow: hidden; }
+.app-shell.panel-closed .local-app-shell__sidebar { flex-basis: 0; width: 0; visibility: hidden; }
+.app-shell .context-panel { width: 264px; height: 100%; padding: 0 0 16px; overflow-y: auto; gap: 4px; }
+.app-shell .local-sidebar-header { flex-shrink: 0; }
+.app-shell .local-sidebar-header h2 { margin: 0; font-size: 14px; line-height: 1.5; }
+.app-shell .sidebar-search { margin: 4px 12px; }
+.app-shell .context-list { overflow: visible; flex-shrink: 0; gap: 4px; }
+.app-shell .local-sidebar-section { margin-inline: 12px; flex-shrink: 0; font-size: 14px; line-height: 1.5; }
+.app-shell .local-sidebar-section__toggle { height: 32px; color: #94a499; }
+.app-shell .local-sidebar-section__toggle:hover, .app-shell .local-sidebar-section__toggle:focus-visible { background: #eff4ed; }
+.sidebar-section-with-action { position: relative; flex-shrink: 0; }
+.sidebar-section-with-action > .section-add { position: absolute; z-index: 1; inset-block-start: 2px; inset-inline-end: 16px; width: 28px; height: 28px; padding: 0; }
+.sidebar-section-with-action .local-sidebar-section__toggle { padding-right: 36px; }
+.app-shell .conversation-nav-row, .app-shell .conversation-nav-link, .app-shell .provider-shortcut, .app-shell .context-overview { height: 32px; min-height: 32px; font-size: 14px; line-height: 1.5; }
+.app-shell .conversation-nav-link, .app-shell .provider-shortcut, .app-shell .context-overview { padding-block: 0; }
+.app-shell .context-overview { width: calc(100% - 24px); margin-inline: 12px; }
+.app-shell .rename-trigger { padding-block: 0; height: 32px; }
+.app-shell .rename-form { height: 32px; padding-block: 2px; }
+.app-shell .rename-form input { padding-block: 0; font-size: 14px; }
+.app-shell .provider-shortcut:not(.selected):hover, .app-shell .provider-shortcut:not(.selected):focus-visible { background: #eff4ed; }
+.app-shell .conversation-nav-row:not(.selected):focus-within { background: #eff4ed; }
+.app-shell .local-app-shell__main { overflow: hidden; display: flex; flex-direction: column; }
+.app-shell .main-area { height: 100%; flex: 1; }
+
+/* Copied thread geometry keeps the content budget separate from adjacent avatars. */
+.thread-viewport { padding: 28px 0 0; }
+.solo-thread-column { flex: 1; min-height: 100%; }
+.solo-thread-column > .local-thread-column__content { display: flex; flex-direction: column; }
+.message { display: block; }
+.message .local-thread-row__avatar { padding-top: 2px; }
+.message-avatar { width: 32px; height: 32px; }
+.message-content { font-size: 14px; line-height: 1.65; }
+.group-conversation {
+  --group-reading-width: 724px;
+  --group-avatar-size: 32px;
+  --group-avatar-scale: 1;
+  --group-avatar-gap: 12px;
+  --group-edge-space: 16px;
+  --group-run-padding: 0px;
+}
+.group-final .markdown, .group-work .markdown, .group-user p { font-size: 14px; line-height: 1.65; }
+
+@media (max-width: 1100px) {
+  .app-shell .workspace-panel { top: 48px; height: calc(100dvh - 48px); }
+  .app-shell .workspace-panel.open.expanded { width: calc(100vw - 56px); }
+  .app-shell .workspace-scrim { top: 48px; left: 56px; }
+}
+@media (max-width: 760px) {
+  .app-shell.local-app-shell { display: flex; }
+  .app-shell .local-app-shell__sidebar, .app-shell.panel-closed .local-app-shell__sidebar {
+    position: fixed; z-index: 31; top: 48px; bottom: 0; left: 56px;
+    width: min(264px, calc(100vw - 56px)); visibility: visible;
+    transition: transform .22s ease;
+  }
+  .app-shell.panel-closed .local-app-shell__sidebar { transform: translateX(calc(-100% - 56px)); pointer-events: none; }
+  .app-shell .context-panel, .app-shell.panel-closed .context-panel {
+    position: static; width: 100%; padding: 0 0 16px; transform: none; transition: none;
+    visibility: visible; box-shadow: none;
+  }
+  .app-shell.panel-open .local-app-shell__sidebar { box-shadow: 8px 0 30px #1d2e1d15; }
+  .mobile-scrim { inset: 48px 0 0 56px; }
+  .app-shell .icon-rail { padding: 0 4px; }
+  .app-shell .rail-brand { margin: 4px 0; width: 40px; height: 40px; }
+  .app-shell .thread-viewport { padding: 23px 0 0; }
+  .app-shell .group-conversation { --group-avatar-size: 32px; --group-avatar-gap: 12px; --group-edge-space: 16px; --group-run-padding: 0px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .local-app-shell__sidebar { transition: none; }
+}

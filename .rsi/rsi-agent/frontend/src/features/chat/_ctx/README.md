@@ -8,7 +8,7 @@ include:
 
 # Chat usage contract
 
-`ChatPage` creates and follows an agent client for a solo conversation, gates sending on configuration readiness, and supplies `Conversation` with settings, files and optional discussion reference controls. `GroupChat` provides the workspace/team variant and consumes the lightweight roster supplied by Workspace.
+`ChatPage` creates and follows an agent client for a solo conversation, gates sending on configuration readiness, and supplies `Conversation` with settings, files and optional discussion reference controls. `GroupChat` provides the workspace/team variant and consumes the lightweight roster supplied by Workspace. Solo conversation layout uses a local copy of the Shared thread geometry: 724 px content width where available, 14 px text with 1.65 line height, and avatar space outside the message content width. The local copy preserves the application's existing color palette.
 
 Chat projects synchronized backend snapshots into rendered messages. The composer sends text and optional discussion references through the shared client; cancellation is an explicit user action. Running state, stream progress, stable history, errors, retries, images and model/configuration controls are rendered by the chat components. Transient progress is not promoted to stable history until backend state confirms it, and navigation/disconnect does not cancel backend work.
 

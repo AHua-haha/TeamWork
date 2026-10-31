@@ -1,3 +1,7 @@
+import { AppShell } from './layout/AppShell.js';
+import { NavigationRailButton } from './layout/NavigationRailButton.js';
+import { SidebarHeader } from './layout/SidebarHeader.js';
+import { SidebarSection } from './layout/SidebarSection.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { backendClient, emptySettings, type AgentSummary, type ConfigRecord, type ConnectionView, type WorkspaceRecord } from '../shared/backend-client/index.js';
 import { HomePage } from '../features/home/HomePage.js';
@@ -149,21 +153,21 @@ export function App() {
   const filteredAgents = agents.filter(agent => `${agent.name} ${agent.agentId}`.toLowerCase().includes(needle));
   const filteredWorkspaces = workspaces.filter(workspace => `${workspace.name} ${workspace.directory}`.toLowerCase().includes(needle));
 
-  return <div className={`app-shell ${panelOpen ? 'panel-open' : 'panel-closed'}`}>
-    <nav className="icon-rail" aria-label="Primary navigation">
+  return <>
+    <AppShell className={`app-shell ${panelOpen ? 'panel-open' : 'panel-closed'}`}
+      toolbar={<strong className="window-toolbar-title">{title}</strong>}
+      navigationRail={<div className="icon-rail">
       <div className="rail-brand" title={title} aria-label={title}>✳</div>
-      <button type="button" className={section === 'conversations' ? 'active' : ''} aria-label="Conversations" title="Conversations" aria-current={section === 'conversations' ? 'page' : undefined} onClick={() => chooseSection('conversations')}><ChatIcon /></button>
-      <button type="button" className={section === 'config' ? 'active' : ''} aria-label="Config" title="Config" aria-current={section === 'config' ? 'page' : undefined} onClick={() => chooseSection('config')}><ConfigIcon /></button>
+      <NavigationRailButton icon={<ChatIcon />} label="Conversations" active={section === 'conversations'} className={section === 'conversations' ? 'active' : ''} onClick={() => chooseSection('conversations')} />
+      <NavigationRailButton icon={<ConfigIcon />} label="Config" active={section === 'config'} className={section === 'config' ? 'active' : ''} onClick={() => chooseSection('config')} />
       <div className="rail-spacer" />
       <button type="button" className="rail-toggle" aria-label={panelOpen ? 'Collapse sidebar' : 'Expand sidebar'} title={panelOpen ? 'Collapse sidebar' : 'Expand sidebar'} onClick={() => setPanelOpen(!panelOpen)}>{panelOpen ? '‹' : '›'}</button>
-    </nav>
-    {panelOpen && <button type="button" className="mobile-scrim" aria-label="Close sidebar" onClick={() => setPanelOpen(false)} />}
-    <aside className="context-panel" aria-label={section === 'conversations' ? 'Conversations sidebar' : 'Config sidebar'} aria-hidden={!panelOpen} inert={!panelOpen}>
+    </div>}
+      sidebar={<div className="context-panel" aria-label={section === 'conversations' ? 'Conversations sidebar' : 'Config sidebar'} aria-hidden={!panelOpen} inert={!panelOpen}>
       {section === 'conversations' ? <>
-        <div className="context-head"><span className="eyebrow">PROJECTS</span><h2>Conversations</h2></div>
+        <SidebarHeader><h2>Conversations</h2></SidebarHeader>
         <label className="sidebar-search"><span className="sr-only">Search workspaces and conversations</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search" /></label>
-        <div className="context-section-label with-action"><span>WORKSPACES</span>
-          <button type="button" className="section-add" title="Add workspace" aria-label="Add workspace" onClick={() => setAddingWorkspace(true)}>＋</button></div>
+        <div className="sidebar-section-with-action"><button type="button" className="section-add" title="Add workspace" aria-label="Add workspace" onClick={() => setAddingWorkspace(true)}>＋</button><SidebarSection title="Workspaces">
         {workspacesError && <div className="sidebar-error" role="alert">{workspacesError}<button type="button" onClick={() => void loadWorkspaces()}>Retry</button></div>}
         <div className="context-list" aria-label="Workspace list">
           {workspacesLoading && !workspaces.length && <p className="sidebar-muted">Loading workspaces…</p>}
@@ -172,8 +176,8 @@ export function App() {
             <button type="button" className="conversation-nav-link" title={workspace.directory} onClick={() => navigate({ page: 'workspace', id: workspace.workspaceId })}><span className="conversation-nav-mark">▣</span><span>{workspace.name}</span></button>
           </div>)}
         </div>
-        <div className="context-section-label with-action"><span>CONVERSATIONS</span>
-          <button type="button" className="section-add" disabled={creating || !allowCreation} title={allowCreation ? 'New conversation' : 'Conversation creation is disabled by app settings'} aria-label="New conversation" onClick={() => void newConversation()}>{creating ? '…' : '＋'}</button></div>
+        </SidebarSection></div>
+        <div className="sidebar-section-with-action"><button type="button" className="section-add" disabled={creating || !allowCreation} title={allowCreation ? 'New conversation' : 'Conversation creation is disabled by app settings'} aria-label="New conversation" onClick={() => void newConversation()}>{creating ? '…' : '＋'}</button><SidebarSection title="Conversations">
         {agentsError && <div className="sidebar-error" role="alert">{agentsError}<button type="button" onClick={() => void loadAgents()}>Retry</button></div>}
         <div className="context-list" aria-label="Conversation list">
           {agentsLoading && !agents.length && <p className="sidebar-muted">Loading conversations…</p>}
@@ -188,30 +192,35 @@ export function App() {
             </>}
           </div>)}
         </div>
+        </SidebarSection></div>
         {renameError && <div className="sidebar-error" role="alert">{renameError}<button type="button" onClick={() => setRenameError(null)}>Dismiss</button></div>}
       </> : <>
-        <div className="context-head"><span className="eyebrow">CONFIG</span><h2>Providers</h2></div>
+        <SidebarHeader><h2>Providers</h2></SidebarHeader>
         <button type="button" className="context-overview" onClick={() => { setFocusProviderId(null); navigate({ page: 'providers' }); }}>All providers <span>{connections.length}</span></button>
-        <div className="context-section-label">CONNECTIONS</div>
+        <SidebarSection title="Connections">
         {connectionsLoading && !connections.length && <p className="sidebar-muted">Loading providers…</p>}
         {connectionsError && <div className="sidebar-error" role="alert">{connectionsError}<button type="button" onClick={() => void loadConnections()}>Retry</button></div>}
         <div className="context-list" aria-label="Provider shortcuts">{connections.map(connection => <button type="button" className={`provider-shortcut ${focusProviderId === connection.id ? 'selected' : ''}`} key={connection.id} onClick={() => { setFocusProviderId(connection.id); navigate({ page: 'providers' }); }}>
           <span className="provider-shortcut-dot" /><span>{connection.value.label}</span>
         </button>)}</div>
+        </SidebarSection>
       </>}
-    </aside>
-    <main className="main-area">
+    </div>}
+      sidebarLabel={section === 'conversations' ? 'Conversations sidebar' : 'Config sidebar'}>
+    <div className="main-area">
       {error && <div className="setup-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
       {route.page === 'workspace' && <WorkspacePage key={route.id} workspaceId={route.id} name={workspaces.find(item => item.workspaceId === route.id)?.name ?? null}
         files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded }} />}
       {route.page === 'conversation' && <SoloPage key={route.id} agentId={route.id} api={api} configRefresh={configRefresh} />}
       {route.page === 'home' && <HomePage onAddWorkspace={() => setAddingWorkspace(true)} onNewConversation={() => void newConversation()} creating={creating} allowCreation={allowCreation} />}
       {route.page === 'providers' && <ProvidersPage api={api} records={connections} loading={connectionsLoading} loadError={connectionsError} refresh={loadConnections} focusId={focusProviderId} clearFocus={() => setFocusProviderId(null)} />}
-    </main>
+    </div>
+    </AppShell>
+    {panelOpen && <button type="button" className="mobile-scrim" aria-label="Close sidebar" onClick={() => setPanelOpen(false)} />}
     {addingWorkspace && <CreateWorkspaceDialog client={workspaceClient} onClose={() => setAddingWorkspace(false)} onCreated={created => {
       setAddingWorkspace(false);
       setWorkspaces(list => [...list.filter(item => item.workspaceId !== created.workspaceId), created].sort((a, b) => a.name.localeCompare(b.name)));
       navigate({ page: 'workspace', id: created.workspaceId });
     }} />}
-  </div>;
+  </>;
 }

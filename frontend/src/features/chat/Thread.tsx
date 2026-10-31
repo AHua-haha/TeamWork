@@ -6,6 +6,7 @@ import { ConfigClient } from '../../shared/backend-client/index.js';
 import { ComposerSettings, type AgentConfigControl } from './ComposerSettings.js';
 import { Glyph } from '../workspace/Glyph.js';
 import { referenceLabel, type Discussion } from '../../shared/backend-client/index.js';
+import { ThreadColumn, ThreadRow } from './layout/ThreadLayout.js';
 import { toolHeading, toolLabels } from './tool-label.js';
 
 function TextPart({ text }: TextMessagePartProps) { return <p className="message-text">{text}</p>; }
@@ -54,12 +55,13 @@ export function Conversation({ client, config, api, eyebrow, title, onConfigGate
     {snapshot.run?.status === 'failed' && snapshot.run.error && <div className="error-banner" role="alert">Run failed: {snapshot.run.error.message}</div>}
     <ThreadPrimitive.Root className="thread">
       <ThreadPrimitive.Viewport className="thread-viewport">
+        <ThreadColumn className="solo-thread-column">
         {snapshot.completed.length === 0 && snapshot.live.length === 0 && <div className="empty-state"><div className="empty-mark">✳</div><h3>Start a conversation</h3><p>Your message starts a backend owned agent run. The response appears here as it streams.</p></div>}
         <ThreadPrimitive.Messages>{({ message }) => <MessagePrimitive.Root className={`message message-${message.role}`}>
-          <div className="message-rail"><span className="message-avatar">{message.role === 'assistant' ? '✳' : message.role === 'user' ? 'Y' : 'S'}</span></div>
-          <div className="message-main"><div className="message-label">{message.role === 'assistant' ? 'Agent' : message.role === 'user' ? 'You' : 'System'}</div>
+          <ThreadRow avatar={<span className="message-avatar" aria-hidden="true">{message.role === 'assistant' ? '✳' : message.role === 'user' ? 'Y' : 'S'}</span>}>
+            <div className="message-label">{message.role === 'assistant' ? 'Agent' : message.role === 'user' ? 'You' : 'System'}</div>
             <div className="message-content"><MessagePrimitive.Parts components={parts} /></div>
-          </div>
+          </ThreadRow>
         </MessagePrimitive.Root>}</ThreadPrimitive.Messages>
         <ThreadPrimitive.ViewportFooter className="composer-footer">
           <ComposerPrimitive.Root className="composer">
@@ -70,6 +72,7 @@ export function Conversation({ client, config, api, eyebrow, title, onConfigGate
             </div>
           </ComposerPrimitive.Root>
         </ThreadPrimitive.ViewportFooter>
+        </ThreadColumn>
       </ThreadPrimitive.Viewport>
     </ThreadPrimitive.Root>
   </div>;

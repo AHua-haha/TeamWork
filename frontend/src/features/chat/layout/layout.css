@@ -1,0 +1,47 @@
+/* Local copy of Shared thread geometry; no Shared UI runtime imports. */
+.local-thread-column {
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  min-height: 100%;
+  padding-inline: calc(var(--local-thread-avatar-size, 32px) + var(--local-thread-avatar-gap, 12px) + var(--local-thread-edge-padding, 16px));
+}
+
+.local-thread-column__content {
+  box-sizing: border-box;
+  font-size: var(--local-thread-font-size, 14px);
+  line-height: var(--local-thread-line-height, 1.65);
+  width: var(--local-thread-width, 724px);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.local-thread-row {
+  position: relative;
+  min-width: 0;
+}
+
+.local-thread-row--with-avatar {
+  min-height: var(--local-thread-avatar-size, 32px);
+}
+
+.local-thread-row__avatar {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: calc(100% + var(--local-thread-avatar-gap, 12px));
+  display: grid;
+  place-items: center;
+  width: var(--local-thread-avatar-size, 32px);
+  height: var(--local-thread-avatar-size, 32px);
+}
+
+.local-thread-row__avatar > * {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.local-thread-row__content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
