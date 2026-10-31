@@ -17,7 +17,7 @@ const signal = () => new AbortController().signal;
 const git = (scope: string, command: string) => ({ command });
 
 test('assignment accepts design references only and never agent-owned implementation paths or authority metadata', () => {
-  const value={working:['api/_ctx/DESIGN.md'],dependencies:['contracts/metadata.json']};
+  const value={working:['api/_ctx/DESIGN.md']};
   assert.equal(parseDesignScope(value).working[0],'api/_ctx/DESIGN.md');
   assert.throws(()=>parseDesignScope({...value,allowedCommands:[]}));
   assert.throws(()=>parseDesignScope({working:['user/a'],dependencies:['user/A']}));

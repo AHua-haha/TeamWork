@@ -8,13 +8,12 @@ import {OperationQueue} from '../operation-queue.js';
 import {currentFiles} from './member-files.js';
 
 export interface ResolvedAssignment {
-  working: ResolvedDesign[]; dependencies: ResolvedDesign[];
+  working: ResolvedDesign[];
 }
 /** Resolve design guidance and implementation mappings, never tool authority. */
 export async function resolveAssignment(designs: DesignService, workspaceId: string, config: DesignScope): Promise<ResolvedAssignment> {
   const working = await designs.working(workspaceId, config.working);
-  const dependencies = await Promise.all(config.dependencies.map(path => designs.read(workspaceId, path)));
-  return {working, dependencies};
+  return {working};
 }
 
 /** Team-owned project/configuration reads; no tool execution or permission policy. */

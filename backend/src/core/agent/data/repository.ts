@@ -1,3 +1,4 @@
+import {countedMessage} from './input.js';
 import { contextPageInput, checkContextPage, type ContextPageInput, type ContextPage } from '../../context-page.js';
 import type { AgentRecord, AgentExecutionState } from './model.js';
 import { validateEntries, validateRun, validateComponentState } from './validation.js';
@@ -9,7 +10,7 @@ import type { MySqlStorage } from '../../../storage/mysql.js';
 import type { UserMessage } from '@earendil-works/pi-ai';
 import { decode, encode } from '../../codec.js';
 import { AppError, identity, position, type ComponentState, type CompletedMessage, type ContextEntry, type ContextHistory, type CurrentState, type FollowSnapshot, type RunState, type RunStatus } from './model.js';
-import { clearTables, dataTransaction, insertRows, rows, type DataConnection as Db } from '../../data-transaction.js';
+import { clearTables, dataTransaction, insertRows, rows, duplicate, type DataConnection as Db } from '../../data-transaction.js';
 import { schema } from './schema.js';
 import { ResidentContexts, type ContextChange } from './resident-context.js';
 import type { ContextPatch, ContextMetadataUpdate, ComponentMessageEffects } from './model.js';
@@ -52,6 +53,11 @@ export class AgentData {
         }
         await this.pool.query('DROP TABLE IF EXISTS chunks');
         await this.pool.query('DROP TABLE IF EXISTS live_messages');
+        if(!columns.some(row=>row.Field==='context_message_count')){
+            await this.pool.query('ALTER TABLE agents ADD COLUMN context_message_count BIGINT UNSIGNED NOT NULL DEFAULT 0');
+            await this.pool.query('UPDATE agents SET context_message_count=context_length');
+        }
+
     }
     async acquireRuntime(onLost: (error: Error) => void): Promise<void> {
         if (this.lease)
@@ -104,10 +110,10 @@ export class AgentData {
     }
     private async agent(db: Db, agentId: string, lock = false): Promise<AgentRecord> {
         identity(agentId, 'agentId');
-        const [row] = await rows(db, `SELECT id,context_length,context_revision,history_position,active_run_id,latest_run_id,context_format FROM agents WHERE id = ?${lock ? ' FOR UPDATE' : ''}`, [agentId]);
+        const [row] = await rows(db, `SELECT id,context_message_count,context_length,context_revision,history_position,active_run_id,latest_run_id,context_format FROM agents WHERE id = ?${lock ? ' FOR UPDATE' : ''}`, [agentId]);
         if (!row)
             throw new AppError('not_found', 'Agent not found', 404);
-        return { id: row.id, contextLength: row.context_length, contextRevision: row.context_revision, historyPosition: row.history_position, activeRunId: row.active_run_id, latestRunId: row.latest_run_id, contextFormat: row.context_format };
+        return { id: row.id, contextMessageCount:Number(row.context_message_count), contextLength: row.context_length, contextRevision: row.context_revision, historyPosition: row.history_position, activeRunId: row.active_run_id, latestRunId: row.latest_run_id, contextFormat: row.context_format };
     }
     private async run(db: Db, agentId: string, runId: string): Promise<RunState> {
         identity(runId, 'runId');
@@ -129,7 +135,7 @@ export class AgentData {
         identity(agentId, 'agentId');
         validateEntries(entries);
         await this.transaction(async (db) => {
-            await db.execute('INSERT INTO agents (id, context_length) VALUES (?, ?)', [agentId, entries.length]);
+            await db.execute('INSERT INTO agents (id, context_length,context_message_count) VALUES (?, ?, ?)', [agentId, entries.length,entries.reduce((n,e)=>n+countedMessage(e),0)]);
             await this.writeContext(db, agentId, entries);
             await this.hooks.created?.(db, agentId);
         });
@@ -148,7 +154,7 @@ export class AgentData {
         if (entries.some((entry, index) => entry.messageId !== records[index]!.id))
             throw new AppError('corrupt_data', 'Context row identity is invalid', 500);
         validateEntries(entries);
-        return {revision: agent.contextRevision, entries};
+        return {revision: agent.contextRevision, entries,messageCount:agent.contextMessageCount};
     }
     async getComponentState(agentId: string, componentId: string): Promise<ComponentState> {
         identity(agentId, 'agentId'); identity(componentId, 'componentId');
@@ -167,12 +173,16 @@ export class AgentData {
         validateComponentState(next);
         return this.transaction(async db => {
             await this.agent(db, agentId, true);
-            const [row] = await rows(db, 'SELECT revision FROM agent_assistant_response_handler_state WHERE agent_id = ? AND handler_id = ? FOR UPDATE', [agentId, componentId]);
-            if (!row) {
-                if (revision !== 0) throw new AppError('context_conflict', 'React Harness state revision changed', 409);
-                await db.execute('INSERT INTO agent_assistant_response_handler_state (agent_id,handler_id,revision,data) VALUES (?,?,?,?)', [agentId, componentId, next.revision, encode(next.data)]);
+            // The locked parent serializes this agent. A missing-row locking read would
+            // gap-lock other agents' first inserts under repeatable read.
+            if (revision === 0) {
+                try {
+                    await db.execute('INSERT INTO agent_assistant_response_handler_state (agent_id,handler_id,revision,data) VALUES (?,?,?,?)', [agentId, componentId, next.revision, encode(next.data)]);
+                } catch (error) {
+                    if (duplicate(error)) throw new AppError('context_conflict', 'React Harness state revision changed', 409);
+                    throw error;
+                }
             } else {
-                if (row.revision !== revision) throw new AppError('context_conflict', 'React Harness state revision changed', 409);
                 const [result] = await db.execute<ResultSetHeader>('UPDATE agent_assistant_response_handler_state SET revision = ?, data = ? WHERE agent_id = ? AND handler_id = ? AND revision = ?', [next.revision, encode(next.data), agentId, componentId, revision]);
                 if (result.affectedRows !== 1) throw new AppError('context_conflict', 'React Harness state revision changed', 409);
             }
@@ -228,15 +238,16 @@ export class AgentData {
     async replaceContext(agentId: string, revision: number, entries: ContextEntry[]): Promise<ContextHistory> {
         position(revision);
         validateEntries(entries);
-        const saved = structuredClone(entries);
+        const saved = structuredClone(entries),current=await this.residentContext(agentId);
+        const messageCount=(current.history.messageCount??0)+saved.filter(entry=>!current.entry(entry.messageId)).reduce((n,e)=>n+countedMessage(e),0);
         await this.transaction(async db => {
             const agent = await this.agent(db, agentId, true);
             if (agent.contextRevision !== revision) throw new AppError('context_conflict', 'Context revision changed', 409);
             await this.writeContext(db, agentId, saved);
-            await db.execute('UPDATE agents SET context_length = ?, context_revision = context_revision + 1 WHERE id = ?', [saved.length, agentId]);
-            this.acknowledge(db, agentId, {baseRevision: revision, revision: revision + 1, replace: saved});
+            await db.execute('UPDATE agents SET context_length = ?, context_message_count=?, context_revision = context_revision + 1 WHERE id = ?', [saved.length,messageCount, agentId]);
+            this.acknowledge(db, agentId, {baseRevision: revision, revision: revision + 1, replace: saved,messageCount});
         });
-        return {revision: revision + 1, entries: saved};
+        return {revision: revision + 1, entries: saved,messageCount};
     }
     async patchContext(agentId: string, revision: number, patch: ContextPatch): Promise<void> {
         position(revision);
@@ -253,9 +264,16 @@ export class AgentData {
             }
             await insertRows(db, 'INSERT INTO agent_context_entries (agent_id,position,id,entry) VALUES ?',
                 saved.append.map((entry, index) => [agentId, agent.contextLength + index + 1, entry.messageId, encode(entry)]));
-            await db.execute('UPDATE agents SET context_length = ?, context_revision = context_revision + 1 WHERE id = ?', [agent.contextLength + saved.append.length, agentId]);
+            await db.execute('UPDATE agents SET context_length = ?, context_message_count=context_message_count+?, context_revision = context_revision + 1 WHERE id = ?', [agent.contextLength + saved.append.length,saved.append.reduce((n,e)=>n+countedMessage(e),0), agentId]);
             this.acknowledge(db, agentId, {baseRevision: revision, revision: revision + 1, patch: saved});
         });
+    }
+    async commitComponentContext(agentId:string,revision:number,patch:ContextPatch,effects?:ComponentMessageEffects):Promise<void>{
+        try{await this.transaction(async db=>{
+            const session=this.inTransaction(db);
+            await session.patchContext(agentId,revision,patch);
+            if(effects)await session.saveComponentState(agentId,effects.componentId,effects.revision,effects.data);
+        });}catch(error){this.contexts.invalidate(agentId);throw error;}
     }
     private async writeContextMetadata(db: Db, agentId: string, updates: ContextMetadataUpdate[]): Promise<void> {
         for (const update of updates) {
@@ -272,7 +290,7 @@ export class AgentData {
         await this.writeContextMetadata(db, agent.id, metadataUpdates);
         await db.execute('INSERT INTO messages (agent_id, position, id, run_id, entry) VALUES (?, ?, ?, ?, ?)', [agent.id, next, entry.messageId, runId, serialized]);
         await db.execute('INSERT INTO agent_context_entries (agent_id,position,id,entry) VALUES (?, ?, ?, ?)', [agent.id, agent.contextLength + 1, entry.messageId, serialized]);
-        await db.execute('UPDATE agents SET history_position = ?, context_length = context_length + 1, context_revision = context_revision + 1 WHERE id = ?', [next, agent.id]);
+        await db.execute('UPDATE agents SET history_position = ?, context_length = context_length + 1, context_message_count=context_message_count+?, context_revision = context_revision + 1 WHERE id = ?', [next,countedMessage(entry), agent.id]);
         this.acknowledge(db, agent.id, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, patch: {append: [entry], update: [], ...(metadataUpdates.length ? {metadata: metadataUpdates} : {})}});
         return { ...entry, agentId: agent.id, runId, position: next };
     }
@@ -384,17 +402,19 @@ export class AgentData {
         validateEntries(entries);
         if (state.status === 'preparing')
             throw new AppError('invalid_data', 'A terminal compaction state is required');
+        const current=await this.residentContext(state.agentId);
+        const messageCount=(current.history.messageCount??0)+entries.filter(entry=>!current.entry(entry.messageId)).reduce((n,e)=>n+countedMessage(e),0);
         await this.transaction(async (db) => {
             const agent = await this.agent(db, state.agentId, true);
             const [row] = await rows(db, 'SELECT state FROM context_compactions WHERE id = ? AND agent_id = ? AND run_id = ? AND active_agent_id = ?', [state.id, state.agentId, state.runId, state.agentId]);
             if (!row || decode<CompactionState>(row.state, validateCompactionState).status !== 'preparing' || agent.contextRevision !== revision)
                 throw new AppError('context_conflict', 'Context or compaction state changed', 409);
             await this.writeContext(db, state.agentId, entries);
-            await db.execute('UPDATE agents SET context_length = ?, context_revision = context_revision + 1 WHERE id = ?', [entries.length, state.agentId]);
-            this.acknowledge(db, state.agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries});
+            await db.execute('UPDATE agents SET context_length = ?, context_message_count=?, context_revision = context_revision + 1 WHERE id = ?', [entries.length,messageCount, state.agentId]);
+            this.acknowledge(db, state.agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries,messageCount});
             await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode(state), state.id]);
         });
-        return { revision: revision + 1, entries: structuredClone(entries) };
+        return { revision: revision + 1, entries: structuredClone(entries),messageCount };
     }
     async recoverCompactions(): Promise<void> {
         this.assertRuntime();
@@ -409,12 +429,14 @@ export class AgentData {
                 const records = await rows(db, 'SELECT entry FROM messages WHERE agent_id = ? AND position > ? AND run_id = ? ORDER BY position', [state.agentId, row.history_after, state.runId]);
                 const trace = records.map(row => decode<ContextEntry>(row.entry, value => validateEntries([value]))).filter(entry => entry.metadata.compactionId === state.id);
                 const error = { code: 'runtime_restarted', message: 'Runtime stopped during context preparation; recorded effects were not replayed' };
-                const entries = interruptedCompactionContext({ revision: agent.contextRevision, entries: (await this.contextRows(db, agent)).entries }, trace, error);
+                const before=await this.contextRows(db,agent),known=new Set(before.entries.map(entry=>entry.messageId));
+                const entries=interruptedCompactionContext(before,trace,error);
+                const messageCount=agent.contextMessageCount+entries.filter(entry=>!known.has(entry.messageId)).reduce((n,e)=>n+countedMessage(e),0);
                 const metadata = new Map((state.contextMetadata ?? []).map(update => [update.messageId, update.metadata]));
                 for (const entry of entries) { const update = metadata.get(entry.messageId); if (update) entry.metadata = update; }
                 await this.writeContext(db, state.agentId, entries);
-                await db.execute('UPDATE agents SET context_length = ?, context_revision = context_revision + 1 WHERE id = ?', [entries.length, state.agentId]);
-                this.acknowledge(db, state.agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries});
+                await db.execute('UPDATE agents SET context_length = ?, context_message_count=?, context_revision = context_revision + 1 WHERE id = ?', [entries.length,messageCount,state.agentId]);
+                this.acknowledge(db, state.agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries,messageCount});
                 await db.execute('UPDATE context_compactions SET state = ?, active_agent_id = NULL WHERE id = ?', [encode({ ...state, status: 'failed', endedAt: Date.now(), error }), state.id]);
             });
     }
@@ -478,7 +500,7 @@ export class AgentData {
         identity(agentId, 'agentId');
         validateEntries(entries);
         await this.transaction(async db => {
-            await db.execute('INSERT INTO agents (id,context_length) VALUES (?, ?)', [agentId, entries.length]);
+            await db.execute('INSERT INTO agents (id,context_length,context_message_count) VALUES (?, ?, ?)', [agentId, entries.length,entries.reduce((n,e)=>n+countedMessage(e),0)]);
             await this.writeContext(db, agentId, entries);
         });
     }
@@ -557,8 +579,8 @@ export class AgentData {
             const recorded = await rows(db, 'SELECT entry FROM messages WHERE agent_id = ? ORDER BY position', [agentId]);
             const entries = adoptRecordedContext(agentId, group.id, (await this.contextRows(db, agent)).entries, recorded.map(row => decode<ContextEntry>(row.entry, value => validateEntries([value]))), await group.read(0));
             await this.writeContext(db, agentId, entries);
-            await db.execute('UPDATE agents SET context_length = ?, context_revision = context_revision + 1, context_format = 1 WHERE id = ?', [entries.length, agentId]);
-            this.acknowledge(db, agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries});
+            await db.execute('UPDATE agents SET context_length = ?, context_message_count=?, context_revision = context_revision + 1, context_format = 1 WHERE id = ?', [entries.length,Math.max(agent.contextMessageCount,entries.reduce((n,e)=>n+countedMessage(e),0)),agentId]);
+            this.acknowledge(db, agentId, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: entries,messageCount:Math.max(agent.contextMessageCount,entries.reduce((n,e)=>n+countedMessage(e),0))});
         });
     }
     async finishLegacyMigration(): Promise<void> {
@@ -575,8 +597,8 @@ export class AgentData {
                 for (const table of ['context_compactions', 'messages', 'runs', 'agent_assistant_response_handler_state'])
                     await db.execute(`DELETE FROM ${table} WHERE agent_id = ?`, [id]);
                 await this.writeContext(db, id, []);
-                await db.execute('UPDATE agents SET context_length = 0, context_revision = context_revision + 1, history_position = 0, active_run_id = NULL, latest_run_id = NULL WHERE id = ?', [id]);
-                this.acknowledge(db, id, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: []});
+                await db.execute('UPDATE agents SET context_length = 0, context_message_count=0, context_revision = context_revision + 1, history_position = 0, active_run_id = NULL, latest_run_id = NULL WHERE id = ?', [id]);
+                this.acknowledge(db, id, {baseRevision: agent.contextRevision, revision: agent.contextRevision + 1, replace: [],messageCount:0});
             }
         });
     }

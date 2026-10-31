@@ -1,3 +1,5 @@
+import {AgentInputData} from './data/input.js';
+import {reactToUserInputs} from './input-reactions.js';
 import type { ContextPageInput } from '../context-page.js';
 import { validateMessage } from './data/validation.js';
 import type { ResolvedRunConfig, RunConfigSource } from './contracts.js';
@@ -114,7 +116,7 @@ export class AgentRuntime {
 
   /** Refused final publications are private input to the same model/tool loop. */
   async feedback(agentId: string, runId: string, text: string): Promise<void> {
-    const record = await this.store.commitMessage(agentId, runId, { messageId: randomUUID(), message: { role: 'user', content: text, timestamp: Date.now() }, metadata: { source: 'publication-feedback' } });
+    const record = await this.store.commitMessage(agentId, runId, { messageId: randomUUID(), message: { role: 'user', content: text, timestamp: Date.now() }, metadata: { source: 'publication-feedback',runtimeGenerated:true } });
     this.jobs.get(runId)?.execution?.receive(record);
     this.progress.changed(agentId);
   }
@@ -201,6 +203,8 @@ export class AgentRuntime {
         if ('replace' in change) await this.store.replaceContext(agentId, history.revision, change.replace);
         else await this.store.patchContext(agentId, history.revision, change.patch);
       }
+      try{await reactToUserInputs(agentId,new AgentInputData(resident,(revision,patch,effects)=>this.store.commitComponentContext(agentId,revision,patch,effects)),await this.harnesses.get(agentId),new AbortController().signal);}
+      catch(error){this.harnesses.invalidate(agentId);throw error;}
       this.contextFailures.delete(agentId);
     }).catch(error => { this.contextFailures.set(agentId, error); });
     this.contextUpdates.set(agentId, update);
@@ -239,7 +243,10 @@ export class AgentRuntime {
         },
         contextChanged: (revision, entries) => this.replaceContext(run.agentId, revision, entries),
         compactionMetadata: (id, updates) => this.store.patchCompactionMetadata(run.agentId, id, updates),
-        contextPatched: (revision, patch) => this.store.patchContext(run.agentId, revision, patch),
+        contextPatched: async(revision,patch,effects)=>{
+          try{await this.store.commitComponentContext(run.agentId,revision,patch,effects);}
+          catch(error){this.harnesses.invalidate(run.agentId);throw error;}
+        },
         compactionStarted: state => this.store.beginCompaction(state),
         compactionMessage: record => this.store.commitCompactionMessage(record),
         compactionFinished: (state, revision, entries) => this.store.finishCompaction(state, revision, entries),

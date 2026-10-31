@@ -2,13 +2,13 @@
 
 ## Purpose, responsibilities and boundaries
 
-Provide capabilities, instructions and rules for a purpose, react to assistant responses, and maintain the related private context and durable state. React is the verb describing reaction. This system is a sibling of Agent, Team and Workspace under Core.
+Provide capabilities, instructions and rules for a purpose, react to user-input messages and assistant-response messages, and maintain the related private context and durable state. React is the verb describing reaction. This system is a sibling of Agent, Team and Workspace under Core.
 
 Agent owns how an agent runs, native messages/context/history, durable data operations and compaction lifecycle. React Harness owns what capabilities are provided and how its context/state is maintained. Team owns member assignments, configuration and cooperation; Workspace owns project registration/context documents. Initial implementations are File React Harness and Default React Harness. Tools currently execute without design/path, command, sandbox or Git approval gates; ordinary schemas, errors, timeouts, cancellation and host OS behavior remain.
 
 ## Interface contract
 
-React Harness supplies tool declarations, assistant-response reactions, instructions and optional model-context projections. A host assembles purpose-specific instances for an Agent. The public entry is `core/react-harness/index.ts`. Related implementations, contracts, residency, tools and Markdown instructions live beneath that directory, organized by purpose.
+React Harness supplies tool declarations, user-input and assistant-response reactions, fixed system instructions, dynamic private context/instructions and optional model-context projections. A host assembles purpose-specific instances for an Agent. The public entry is `core/react-harness/index.ts`. Related implementations, contracts, residency, tools and Markdown instructions live beneath that directory, organized by purpose.
 
 The host supplies the actual Agent data model for the assistant turn, plus tool-validation/execution/sequencing capabilities and execution metadata. React Harness uses public data-model operations directly for context/history lookup, targeted metadata changes, paired results, deferred private instructions and acknowledged related-state commits. It does not require a runtime-owned context-operation proxy or import Agent execution implementation. Agent data is the shared contract. React Harness owns its state schema/meaning while generic component-state persistence and atomic message transactions belong to Agent's data layer.
 
@@ -35,7 +35,7 @@ During compaction use the preparation context's own message-ID index. Journal pr
 
 ### Default React Harness
 
-Provide native Pi ls/grep/find, persistent Bash, web search/fetch and caller-supplied business tools. Preserve their existing execution, output/truncation, recoverable error, background-job and timeout behavior. Default supplies fallback execution for unclaimed configured tools. Team supplies model discovery/member validation and accepted design guidance; this is not member-owned Harness configuration. Bash runs directly as the host account with filtered child environment and no sandbox/Git interception. Context reset, retirement/activation and shutdown stop shell resources without requiring Workspace enumeration.
+Provide native Pi ls/grep/find, persistent Bash, web search/fetch and caller-supplied business tools. Preserve their existing execution, output/truncation, recoverable error, background-job and timeout behavior. Default supplies fallback execution for unclaimed configured tools. Team supplies model discovery/member validation tools and working assignments; this is not member-owned Harness configuration. Bash runs directly as the host account with filtered child environment and no sandbox/Git interception. Context reset, retirement/activation and shutdown stop shell resources without requiring Workspace enumeration.
 
 ### Related state and residency
 
@@ -45,10 +45,86 @@ Reuse instances across runs, restore their small state once from Agent's compone
 
 Keep this dependency direction: React Harness depends on public Agent data-model types/operations; Agent data does not import concrete React Harness implementations. Agent runtime imports React Harness's public integration interface. Business tools may be supplied by other owners without giving React Harness foreign schema knowledge. Context maintenance must use acknowledged data operations rather than mutating raw collections before persistence. Purpose-owned model projections operate on detached copies.
 
-Member designScope remains Team-owned assignment guidance, with recursive working roots and explicit dependencies. There is no member Harness configuration or legacy resource inspection. Future permission and member-specific Harness configuration require separate design.
+Member designScope remains Team-owned assignment guidance, with recursive working roots only; dependencies are discovered dynamically. There is no member Harness configuration or legacy resource inspection. Future permission and member-specific Harness configuration require separate design.
 
 ### Fixed instructions and dynamic context
 
-React Harnesses have two conceptual prompt contributions: stable system instructions, and changing context or runtime-generated private instructions produced while reacting to execution. Agent assembles fixed system contributions. Purpose-owned reactions can append private instructions through Agent turn data after paired tool results; no new dynamic injection lifecycle is prescribed here.
+React Harnesses have two conceptual prompt contributions: stable system instructions, and changing context or runtime-generated private instructions produced while reacting to execution. Agent assembles fixed system contributions. Purpose-owned reactions can append private instructions through Agent turn data after paired tool results; input reactions use Agent input data at the safe boundary below.
 
-File React Harness owns file-tool instructions, project-context organization/maintenance rules, and the working-design/dependency consumer-context responsibility. Fixed context-maintenance rules belong in its system contribution. Working DESIGN documents and dependency README/included source are changing information: remove their current system-prompt embedding. The dynamic injection role, position, timing, refresh and persistence will be designed later; do not invent a replacement now. Default React Harness owns only instructions about its capabilities, tool behavior and execution lifecycle, without Team configuration rules or Workspace guidance assembly.
+File React Harness owns file-tool instructions, project-context organization/maintenance rules, and the working-design/dependency usage README context responsibility. Fixed context-maintenance rules belong in its system contribution. Working DESIGN documents and dependency README/included source are changing information: remove their current system-prompt embedding. The user-input refresh design below defines the changing design/dependency context and its checkpoint. It uses a private user-role message; the exact hook API and concrete durable schema remain implementation choices. Default React Harness owns only instructions about its capabilities, tool behavior and execution lifecycle, without Team configuration rules or Workspace guidance assembly.
+
+### User-input reaction and dependency-context refresh
+
+This extends assistant-response reaction with user-input reaction before ordinary model work.
+
+#### Ownership and member assignments
+
+React Harness reacts to user-input messages as well as assistant responses. Once incoming user input is incorporated into the member's private context, its input reaction can inspect/manipulate effective context, insert private instructions and maintain acknowledged related durable state before ordinary model work starts. Preserve existing safe input boundaries: do not interrupt an active model/tool sequence or insert a reaction between a tool call and its paired result. Team continues to own original shared input and immutable group history; the reaction changes only the receiving Agent's private model context.
+
+Member configuration assigns working designs only, including descendant design parts recursively. Remove configured dependency design scopes. Members can freely inspect other design systems as their work requires. File React Harness owns discovery and refresh of their context. This is context maintenance, not a read-access or implementation-permission boundary.
+
+#### Discovery and durable state
+
+Track design systems outside the member's recursive working scope whose source or RSI context the member has viewed. Attribute files/context documents to their owning design parts and deduplicate discovered dependencies by design system. The discovered dependency set accumulates across multiple refreshes. Do not prune or evict it in this prototype; dependency cleanup policy is deferred.
+
+Retain discovery state, the successful-refresh marker/counter and the previous generated-context reference in File React Harness's related durable state. Backend restart must preserve these facts. Reuse existing file-view/message references and Agent data-model operations; preserve the established small-state and targeted context-update pattern rather than creating another file-history subsystem.
+
+File state stores `replacementMessageId`, `discoveredDependencyDesigns` and `messagesSinceRefresh`, alongside the existing per-file `visibleMessageId` registry. `lastObservedMessageCount` is an internal cursor on Agent's cumulative append clock; it avoids counting by scanning the transcript. Agent indexes pending user inputs and context entries by ID. Refresh looks up only tracked active file messages and the previous replacement. Visibility metadata, the new context-only message and the small state snapshot acknowledge in one transaction. Reset clears them together. Compaction may remove referenced entries; missing IDs are skipped, without history reconstruction.
+
+#### Checkpoint and message-count trigger
+
+The only check-and-replace checkpoint is reaction to incoming user input after the previous run has ended, before the next ordinary model call. No dependency-context replacement occurs during a run, on assistant/tool responses or automatically when a run finishes. The agent may reveal dependency implementation and context throughout its run; reaching the threshold does not replace that information immediately.
+
+The threshold is **64 completed messages** added to the member's context since its last successful refresh. Count incoming messages, assistant messages and tool-result messages once each; include the triggering incoming user message once when checking the boundary. Streaming chunks are not separate messages. Do not count system prompts or the refresh's own automatically inserted context message. Do not weight messages by length/tokens or count each model request's repeated context. This threshold is separate from model-call limits and token-based compaction.
+
+Below 64, leave dependency-context visibility unchanged. At or above 64, perform one refresh at that checkpoint and reset the count only after success. A failed refresh must not advance the successful-refresh marker or claim its counter reset. The generated instruction must not recursively trigger another user-input refresh.
+
+#### New replacement context
+
+Construct one private replacement message containing the current full design-system tree and the usage README context of every accumulated discovered dependency.
+
+The tree is for overall project orientation and follows the project hierarchy. Structural nodes connect that hierarchy. For a node explicitly bound to a design part, append only its optional existing summary text; leave absent summaries absent. Do not inherit a parent's design binding onto other nodes or generate descriptions with another model. Mark the member's assigned working designs, including their covered descendants, with `[working]`. Do not add extra node metadata such as IDs, hashes, revisions, document-path fields or discovery status.
+
+Use the agent-facing term **usage README context**. For every discovered dependency, insert its current README content once. Do not expand README include references or expose their files' contents automatically; those references can remain ordinary README text and the agent can inspect files independently. If a README is missing, state `No README available.` for that dependency. Do not fabricate a contract, substitute DESIGN/internal notes or retain hidden raw context as an implicit missing-README exception.
+
+#### Hide and preserve
+
+At successful refresh, hide the following from effective model context:
+
+1. The previous replacement-context message.
+2. Revealed source-file context belonging to design systems outside the working designs.
+3. Revealed RSI context belonging to dependency design systems, including DESIGN, README and internal notes. Their refreshed usage README is represented through the new generated message.
+
+Preserve working-design source/context content, ordinary conversation and useful private execution messages. The newly generated message remains visible. Stable history is immutable; hiding is model-facing projection/visibility, not deletion of original stored messages. Preserve every tool call's paired result and provider protocol/signature data. Existing per-file aggregate supersession remains a separate File tool behavior; the dependency-refresh replacement described here happens only at the user-input checkpoint.
+
+#### Generated message role and marker
+
+Deliver the replacement as a native **user-role message**, wrapped with `<system_instruction>` and `</system_instruction>`. The marker identifies its application purpose; it does not turn it into a provider system-role message or insert it into the fixed system prompt. Tell the agent that the system generated it to provide useful information and that it is not a user request. Do not expose the File React Harness name or other implementation ownership details in that message. Keep it private to the receiving Agent; do not publish it as a user/group-chat message.
+
+The intended presentation is:
+
+```text
+<system_instruction>
+This message is automatically generated by the system to provide
+useful context. It is not a user request.
+
+## Design tree
+
+Project
+├── frontend/ [working] — User-facing application
+│   └── chat/ [working] — Group chat and streamed responses
+└── backend/
+    ├── storage/ — Database connections and transactions
+    └── authentication/ — Identity and authentication
+
+## Usage README context
+
+### backend/storage/
+[README content]
+
+### backend/authentication/
+No README available.
+</system_instruction>
+```
+
+Use the actual current tree, summaries, assignments and discovered READMEs. The example is a presentation shape, not new design parts or invented project metadata. Dynamic injection of member identity, responsibility and roster remains a separate future design.

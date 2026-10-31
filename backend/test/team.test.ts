@@ -52,8 +52,8 @@ test('member names stay unique, and fields are checked', () => withTeam(async fi
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'backend', role: 'x' }), code('member_exists'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: ' Bad', role: 'x' }), code('invalid_input'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: '' }), code('invalid_input'));
-  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', designScope: { working: ['../escape'], dependencies: [] } }), code('invalid_path'));
-  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', designScope: { working: ['a/metadata.json', 'A/metadata.json'], dependencies: [] } }), code('invalid_config'));
+  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', designScope: { working: ['../escape'] } }), code('invalid_path'));
+  await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', designScope: { working: ['a/metadata.json', 'A/metadata.json'] } }), code('invalid_config'));
   await assert.rejects(fixture.team.service.create(fixture.workspaceId, { name: 'Ok', role: 'x', extra: 1 }), code('invalid_config'));
   await assert.rejects(fixture.team.service.team('missing'), code('not_found'));
 }));

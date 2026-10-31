@@ -72,7 +72,7 @@ export const leadResponsibility = 'Works with the user on this project: helps ma
 /** A workspace lead initialized with supplied default settings; empty settings support legacy imports. */
 export function newLead(workspaceId: string, settings: RunSettings = emptyRunSettings, working: string[] = []): NewMember {
   const id = randomUUID();
-  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, designScope: {working, dependencies: []}, settings };
+  const fields = { name: 'Lead', role: 'Lead', responsibility: leadResponsibility, designScope: {working}, settings };
   return {
     id, workspaceId, lead: true, nameKey: 'lead',
     value: { workspaceId, ...fields, configuration: generatedSource(fields), lead: true, createdAt: Date.now(), retiredAt: null },
@@ -258,8 +258,8 @@ export class TeamService {
     for (const [index, member] of members.entries()) {
       if (member.value.settings.toolOptionIds.length) issues[index]!.push('Workspace member tools are supplied by React Harnesses; clear catalog tool selections');
       const scope = member.value.designScope;
-      if (!member.value.lead && !scope.working.length && !scope.dependencies.length) issues[index]!.push('Configure a design scope for this member');
-      try { await this.designs.checkAssignment(member.workspaceId,scope.working,scope.dependencies); }
+      if (!member.value.lead && !scope.working.length) issues[index]!.push('Configure a design scope for this member');
+      try { await this.designs.checkAssignment(member.workspaceId,scope.working); }
       catch (error) {
         if (!(error instanceof AppError) || error.status >= 500) throw error;
         issues[index]!.push(`Assigned design is unavailable: ${error.message}`);

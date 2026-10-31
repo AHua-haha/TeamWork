@@ -18,7 +18,6 @@
       "backend/core/team/metadata.json",
       "backend/core/agent/metadata.json",
       "backend/core/harness/metadata.json"
-    ],
-    "dependencies": []
+    ]
   }
 }

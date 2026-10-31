@@ -8,7 +8,8 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 /** Read only at the historical storage boundary; current member inputs never accept Harness fields. */
 export function restoredDesignScope(data: Record<string, unknown>): DesignScope {
   const harness = object(data.harness) ? data.harness : undefined;
-  return parseDesignScope(data.designScope ?? harness?.designScope ?? emptyDesignScope());
+  const scope=data.designScope??harness?.designScope??emptyDesignScope();
+  return parseDesignScope(object(scope)?{working:scope.working}:scope);
 }
 /** Preserve every meaningful pending field; remove only retired configuration keys. */
 export function upgradeMemberManifest(text: string): string {
@@ -36,10 +37,11 @@ export function currentMemberManifest(text:string):string {
   const upgraded=upgradeMemberManifest(text),data=JSON.parse(upgraded) as Record<string,unknown>;
   if(!object(data))throw new AppError('invalid_config','Member manifest must be an object');
   const settings=object(data.settings)?data.settings:{};
-  if(!Object.hasOwn(data,'promptFiles')&&!Object.hasOwn(settings,'prompt')&&!Object.hasOwn(settings,'promptOptionIds'))return upgraded;
+  const scope=object(data.designScope)?data.designScope:undefined;
+  if(!Object.hasOwn(data,'promptFiles')&&!Object.hasOwn(settings,'prompt')&&!Object.hasOwn(settings,'promptOptionIds')&&!Object.hasOwn(scope??{},'dependencies'))return upgraded;
   const {promptFiles,...current}=data;
   const {prompt,promptOptionIds,...modelSettings}=settings;
-  return JSON.stringify({...current,settings:modelSettings},null,2)+'\n';
+  return JSON.stringify({...current,settings:modelSettings,...(scope?{designScope:{working:scope.working}}:{})},null,2)+'\n';
 }
 export type CatalogInstructions=(ids:readonly string[])=>Promise<string>;
 const noCatalog:CatalogInstructions=async ids=>{if(ids.length)throw new AppError('invalid_config','Catalog instructions are required to migrate this member');return '';};
@@ -61,7 +63,7 @@ export async function upgradeMemberManifestFile(root:string,path:string,catalog:
   if(!object(data))return;
   const settings=object(data.settings)?data.settings:{};
   const legacy=Object.hasOwn(data,'promptFiles')||Object.hasOwn(settings,'prompt')||Object.hasOwn(settings,'promptOptionIds');
-  if(!legacy){const next=upgradeMemberManifest(previous);if(next!==previous)await writeFile(join(root,path),next,'utf8');return;}
+  if(!legacy){const next=currentMemberManifest(previous);if(next!==previous)await writeFile(join(root,path),next,'utf8');return;}
   const refs=legacyPromptFiles(data.promptFiles),prefix=dirname(path),agentPath=prefix+'/agent.md';
   const existing=await migrationText(root,agentPath),old=new Map<string,string>();
   for(const ref of refs){const text=await migrationText(root,prefix+'/'+ref);if(text===undefined&&existing===undefined)return;if(text!==undefined)old.set(ref,text);}

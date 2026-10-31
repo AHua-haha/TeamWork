@@ -1,3 +1,4 @@
+import {dependencyRefreshMessageThreshold,fileDesignOwner,workingDesign,replacementContext,type FileDesignContext,type FileDesignContextSource} from './design-context.js';
 import { dirname, isAbsolute, relative as relativePath, resolve, basename, join } from 'node:path';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
@@ -7,13 +8,19 @@ import { detectSupportedImageMimeTypeFromFile, resizeImage } from '@earendil-wor
 import { Type, type AssistantMessage, type JsonObject, type ToolCall, type ToolResultMessage } from '@earendil-works/pi-ai';
 import {projectFileContextEntry} from './context.js';
 import type {AgentContextState} from '../../agent/data/index.js';
-import type {ReactHarness, ReactHarnessContext, ReactHarnessFactory, ReactHarnessTool} from '../contracts.js';
+import type {ReactHarness, ReactHarnessContext, ReactHarnessFactory, ReactHarnessTool,ReactHarnessInputContext} from '../contracts.js';
 import {AppError} from '../../errors.js';
 import type {ComponentState} from '../../agent/data/index.js';
 
 type Range = { start: number; end: number };
 type FileState = { ranges: Range[]; visibleMessageId: string | null };
-type State = { files: Record<string, FileState> };
+type State = {
+  files:Record<string,FileState>;
+  replacementMessageId:string|null;
+  discoveredDependencyDesigns:string[];
+  messagesSinceRefresh:number;
+  lastObservedMessageCount:number;
+};
 type EditChange = { start: number; oldEnd: number; newEnd: number; delta: number };
 
 const fileToolNames = new Set(['read', 'write', 'edit']);
@@ -115,8 +122,11 @@ export class FileReactHarness implements ReactHarness {
   private data: State;
   private revision: number;
   private restoreLegacyReferences: boolean;
+  private designContext?:FileDesignContext;
+  readonly onInput?: (context:ReactHarnessInputContext)=>Promise<void>;
 
-  constructor(private readonly root: string, initial: ComponentState) {
+  constructor(private readonly root: string, initial: ComponentState,private readonly contextSource?:FileDesignContextSource) {
+    if(contextSource)this.onInput=context=>this.reactToInput(context);
     this.revision = initial.revision;
     this.data = parseState(root, initial.data);
     const source = initial.data.files;
@@ -133,6 +143,41 @@ export class FileReactHarness implements ReactHarness {
       if (file) file.visibleMessageId = entry.messageId;
     }
     this.restoreLegacyReferences = false;
+  }
+
+  private async reactToInput(context:ReactHarnessInputContext):Promise<void>{
+    if(!this.contextSource)return;
+    this.designContext=await this.contextSource(false);
+    const observed=context.data.context.history.messageCount??0;
+    const count=this.data.messagesSinceRefresh+Math.max(0,observed-this.data.lastObservedMessageCount);
+    let next:State={...this.data,messagesSinceRefresh:count,lastObservedMessageCount:observed};
+    if(count<dependencyRefreshMessageThreshold){
+      if(count!==this.data.messagesSinceRefresh||observed!==this.data.lastObservedMessageCount){
+        await context.data.commit({append:[],update:[]},{componentId:this.harnessId,revision:this.revision,data:next as unknown as JsonObject,metadataUpdates:[]});
+        this.data=next;this.revision++;
+      }
+      return;
+    }
+    this.designContext=await this.contextSource(true);
+    const files={...this.data.files},dependencies=new Set(this.data.discoveredDependencyDesigns);
+    const updates=new Map<string,import('../../agent/data/model.js').ContextMetadataUpdate>();
+    const previous=this.data.replacementMessageId?context.data.entry(this.data.replacementMessageId):undefined;
+    if(previous)updates.set(previous.messageId,{messageId:previous.messageId,metadata:{...previous.metadata,modelContextHidden:true}});
+    for(const [path,file]of Object.entries(files)){
+      const owner=fileDesignOwner(this.root,path,this.designContext);
+      if(owner===undefined||workingDesign(owner,this.designContext.workingDesigns))continue;
+      dependencies.add(owner);
+      const entry=file.visibleMessageId?context.data.entry(file.visibleMessageId):undefined;
+      if(entry)updates.set(entry.messageId,{messageId:entry.messageId,metadata:{...entry.metadata,modelContextHidden:true,fileContextRefreshHidden:true}});
+      delete files[path];
+    }
+    const discovered=[...dependencies].sort();
+    const text=await replacementContext(this.designContext,discovered);
+    context.signal.throwIfAborted();
+    const entry=context.data.instruction(text,{source:'file-context-refresh',fileContextReplacement:true,runtimeGenerated:true,contextMessageCounted:false});
+    next={...next,files,discoveredDependencyDesigns:discovered,replacementMessageId:entry.messageId,messagesSinceRefresh:0};
+    await context.data.commit({append:[entry],update:[]},{componentId:this.harnessId,revision:this.revision,data:next as unknown as JsonObject,metadataUpdates:[...updates.values()]});
+    this.data=next;this.revision++;
   }
 
   tools(): ReactHarnessTool[] {
@@ -169,7 +214,11 @@ export class FileReactHarness implements ReactHarness {
       context.scope.signal.throwIfAborted();
       const messageId = randomUUID();
       const previous = this.data.files[result.path]?.visibleMessageId;
-      const next: State = { files: {...this.data.files, [result.path]: {...result.file, visibleMessageId: messageId}} };
+      if(!this.designContext&&this.contextSource)this.designContext=await this.contextSource(false);
+      const owner=this.designContext?fileDesignOwner(this.root,result.path,this.designContext):undefined;
+      const discovered=new Set(this.data.discoveredDependencyDesigns);
+      if(owner!==undefined&&this.designContext&&!workingDesign(owner,this.designContext.workingDesigns))discovered.add(owner);
+      const next:State={...this.data,discoveredDependencyDesigns:[...discovered].sort(),files:{...this.data.files,[result.path]:{...result.file,visibleMessageId:messageId}}};
       try {
         await context.data.recordToolResult(call, {content: result.content, isError: false}, {fileViewPath: result.path}, {
           messageId, effects: {componentId: this.harnessId, revision: this.revision, data: next as unknown as JsonObject,
@@ -266,8 +315,8 @@ export class FileReactHarness implements ReactHarness {
   }
 }
 
-export function fileReactHarnessFactory(root: string): ReactHarnessFactory {
-  return {harnessId: 'file-content', create: initial => new FileReactHarness(root, initial)};
+export function fileReactHarnessFactory(root: string,contextSource?:FileDesignContextSource): ReactHarnessFactory {
+  return {harnessId: 'file-content', create: initial => new FileReactHarness(root, initial,contextSource)};
 }
 
 function textContent(bytes: Buffer): string {
@@ -304,5 +353,8 @@ function parseState(root: string, data: JsonObject): State {
       files[resolve(root, path)] = {ranges: normalizeRanges(ranges), visibleMessageId: typeof (value as FileState).visibleMessageId === 'string' ? (value as FileState).visibleMessageId : null};
     }
   }
-  return {files};
+  const integer=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>=0?Number(value):0;
+  return {files,replacementMessageId:typeof data.replacementMessageId==='string'?data.replacementMessageId:null,
+    discoveredDependencyDesigns:Array.isArray(data.discoveredDependencyDesigns)?[...new Set(data.discoveredDependencyDesigns.filter((value):value is string=>typeof value==='string'))]:[],
+    messagesSinceRefresh:integer(data.messagesSinceRefresh),lastObservedMessageCount:integer(data.lastObservedMessageCount)};
 }

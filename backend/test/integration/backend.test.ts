@@ -1127,7 +1127,7 @@ test('React Harnesses execute shared project tools and native commits while memb
       name: first.name, role: first.role, responsibility: first.responsibility, designScope: first.designScope,
       settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' },
     });
-    await team.create(workspaceId, { name: 'Backend', role: 'developer', responsibility: 'Implement result', settings: { prompt: 'Keep the result concise.' }, designScope: { working: ['metadata.json'], dependencies: [] } });
+    await team.create(workspaceId, { name: 'Backend', role: 'developer', responsibility: 'Implement result', settings: { prompt: 'Keep the result concise.' }, designScope: { working: ['metadata.json'] } });
     await runtime.open();
     const accepted = await team.runner.postUser(workspaceId, 'Propose a design refinement and ask Backend to implement the accepted design.');
     const run = accepted.runs[0]!;
@@ -1143,7 +1143,7 @@ test('React Harnesses execute shared project tools and native commits while memb
     answer(secondStep.events, call('bash', { command: 'git add -f .rsi/project && git commit -m "Design refinement"' }));
     const thirdStep = await requests.next();
     assert.match(JSON.stringify(thirdStep.request.context.messages), /Design refinement/);
-    const manifest = { name: 'Pending new member', role: 'developer', responsibility: 'Future member', settings: {}, designScope: { working: ['metadata.json'], dependencies: [] } };
+    const manifest = { name: 'Pending new member', role: 'developer', responsibility: 'Future member', settings: {}, designScope: { working: ['metadata.json'] } };
     answer(thirdStep.events, call('write', { path: '.rsi/members/pending/agent.md', content: 'Pending prompt.' }));
     const manifestStep = await requests.next();
     answer(manifestStep.events, call('write', { path: '.rsi/members/pending/member.json', content: JSON.stringify(manifest) }));
@@ -1158,7 +1158,7 @@ test('React Harnesses execute shared project tools and native commits while memb
     await assert.rejects(store.team.updateMember(activeWorker.id, activeWorker.revision, 'backend', activeWorker.value, true), code('member_busy'));
     const storedBundle = (await store.team.getMember(activeWorker.id))!.value.configuration!;
     assert.equal(storedBundle.files['agent.md'], 'Keep the result concise.');
-    assert.deepEqual(JSON.parse(storedBundle.files['member.json']!).designScope, { working: ['metadata.json'], dependencies: [] });
+    assert.deepEqual(JSON.parse(storedBundle.files['member.json']!).designScope, { working: ['metadata.json'] });
     const leadFiles = await team.memberWorkspace.files(lead.memberId);
     await writeFile(join(leadFiles.root, '.rsi/members/pending/agent.md'), 'UNSUBMITTED prompt');
     assert.equal((await team.configuration.activeSource(workspaceId, activeWorker.id)).digest, storedBundle.digest);
@@ -1276,7 +1276,7 @@ async function groupFixture(basePolicy: RuntimePolicy = configuredPolicy(), opti
   const first = (await team.team(workspaceId)).members[0]!;
   const lead = await team.update(workspaceId, first.memberId, first.revision, { name: first.name, role: first.role, responsibility: first.responsibility, designScope: first.designScope, settings: { ...first.settings, connectionId, modelId: 'gpt-4.1-mini' } });
   await seedDesign(workspaceService, workspaceId, 'metadata.json', { content: 'Shared test design', implementation: ['.'] });
-  const designScope = {working:['metadata.json'],dependencies:[]};
+  const designScope = {working:['metadata.json']};
   const backend = await team.create(workspaceId, { name: 'Backend', role: 'developer', designScope });
   const frontend = await team.create(workspaceId, { name: 'Frontend', role: 'developer', designScope });
   await runtime.open();
@@ -1732,7 +1732,7 @@ test('member file activation atomically replaces/updates the team using current 
     await rm(pathJoin(files.root, backendSource.path));
     await files.write.writeFile(pathJoin(files.root, frontendSource.path), JSON.stringify({ ...JSON.parse(frontendSource.files['member.json']!), responsibility: 'Updated atomically' }));
     await files.write.mkdir(pathJoin(files.root, '.rsi/members/Replacement/prompts'));
-    const manifest = { name:'Replacement',role:'developer',responsibility:'Replacement',settings:{},designScope:{working:['metadata.json'],dependencies:[]} };
+    const manifest = { name:'Replacement',role:'developer',responsibility:'Replacement',settings:{},designScope:{working:['metadata.json']} };
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/member.json'), JSON.stringify(manifest));
     await files.write.writeFile(pathJoin(files.root, '.rsi/members/Replacement/agent.md'), 'Accepted prompt');
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, true, JSON.stringify(pending.issues));
@@ -2641,13 +2641,13 @@ test('resident context acknowledges outer commit, ignores rollback, and resets t
     assert.deepEqual(resident.history.entries, [], 'no speculative memory publication');
     throw new Error('rollback context rows');
   }), /rollback context rows/);
-  assert.deepEqual(resident.history, {revision: 0, entries: []});
+  assert.deepEqual(resident.history, {revision: 0, entries: [],messageCount:0});
   assert.deepEqual(await store.agents.getContext(agentId), resident.history);
   await store.storage.transaction(async db => {
     await store.agents.inTransaction(db).patchContext(agentId, 0, {append: [entry], update: []});
     assert.equal(resident.history.revision, 0);
   });
-  assert.deepEqual(resident.history, {revision: 1, entries: [entry]});
+  assert.deepEqual(resident.history, {revision: 1, entries: [entry],messageCount:1});
   await assert.rejects(store.storage.transaction(async db => {
     await store.agents.inTransaction(db).resetConversations([agentId]);
     assert.equal(resident.history.entries.length, 1);
@@ -2656,7 +2656,7 @@ test('resident context acknowledges outer commit, ignores rollback, and resets t
   assert.equal(resident.history.entries.length, 1);
   await store.storage.transaction(async db => {await store.agents.inTransaction(db).resetConversations([agentId]);});
   assert.equal(await store.agents.residentContext(agentId), resident);
-  assert.deepEqual(resident.history, {revision: 2, entries: []});
+  assert.deepEqual(resident.history, {revision: 2, entries: [],messageCount:0});
   await assert.rejects(store.agents.patchContext(agentId, 1, {append: [entry], update: []}), code('context_conflict'));
 });
 
@@ -2685,7 +2685,7 @@ test('whole-JSON context migration preserves order, opaque fields, revisions and
     assert.equal(columns.length, 1, 'old data remains until every agent is migrated');
     await storage.pool.execute('UPDATE agents SET context = ? WHERE id = ?', [encode([]), 'b']);
     await data.migrate();
-    const expected = {revision: 9, entries};
+    const expected = {revision: 9, entries,messageCount:2};
     assert.deepEqual(await data.getContext('a'), expected);
     await data.migrate(); assert.deepEqual(await data.getContext('a'), expected);
     const [retired] = await storage.pool.query<any[]>("SHOW COLUMNS FROM agents LIKE 'context'");
@@ -2743,7 +2743,7 @@ test('uncertain SQL commit invalidates resident context before another run can r
   assert.throws(() => stale.history, /out of sequence/);
   const restored = await store.agents.residentContext(agentId);
   assert.notEqual(restored, stale);
-  assert.deepEqual(restored.history, {revision: 1, entries: [entry]}, 'restore actual durable outcome without replaying the write');
+  assert.deepEqual(restored.history, {revision: 1, entries: [entry],messageCount:1}, 'restore actual durable outcome without replaying the write');
 });
 
 test('Team reuses one Pi group-context load across publications, members and runs', {timeout: 30000}, async () => {
@@ -2892,7 +2892,7 @@ test('adoption preserves filesystem context and fresh lead atomically after revi
     const members=await store.team.listMembers(created.workspaceId);
     assert.equal(members.length,1);
     assert.equal(members[0]!.value.name,'Lead');
-    assert.deepEqual(members[0]!.value.designScope,{working:['_ctx/DESIGN.md'],dependencies:[]});
+    assert.deepEqual(members[0]!.value.designScope,{working:['_ctx/DESIGN.md']});
     assert.equal((await store.agents.getState(members[0]!.id)).historyPosition,0);
     assert.deepEqual(await readdir(join(root,'members')),[members[0]!.value.name]);
     const activation=await store.team.getMemberActivation(created.workspaceId);
@@ -2913,7 +2913,7 @@ test('Agent context inspection pages exact Pi entries, rejects changed revisions
   assert.deepEqual(first, {revision: 0, offset: 0, total: 2, nextOffset: 1, entries: [entries[0]]});
   assert.deepEqual(await store.agents.inspectContext(agentId, {offset: 1, limit: 1, revision: first.revision}), {revision: 0, offset: 1, total: 2, nextOffset: null, entries: [entries[1]]});
   assert.deepEqual((await store.agents.inspectContext(agentId, {offset: 2, revision: 0})).entries, []);
-  assert.deepEqual(await store.agents.getContext(agentId), {revision: 0, entries}, 'inspection neither mutates nor synchronizes context');
+  assert.deepEqual(await store.agents.getContext(agentId), {revision: 0, entries,messageCount:2}, 'inspection neither mutates nor synchronizes context');
   const reopened = new CoreData(new MySqlStorage(databaseUrl!));
   try { assert.deepEqual(await reopened.agents.inspectContext(agentId), {...first, nextOffset: null, entries}); }
   finally { await reopened.close(); }
@@ -3274,7 +3274,7 @@ test('member design-scope migration persists canonical rows and snapshots withou
   await f.team.service.initialize();
   const migrated=(await store.team.getMember(current.id))!;
   assert.equal('harness' in migrated.value,false);assert.deepEqual(migrated.value.designScope,designScope);assert.deepEqual(migrated.value.settings,current.value.settings);
-  assert.equal(migrated.value.configuration!.formatVersion,6);assert.equal('previous' in migrated.value.configuration!,false);
+  assert.equal(migrated.value.configuration!.formatVersion,7);assert.equal('previous' in migrated.value.configuration!,false);
   assert.equal('execute' in JSON.parse(await readFile(join(root,source.path),'utf8')),false);
   assert.deepEqual(await store.agents.getContext(current.id),context);assert.deepEqual(await store.agents.runMessages(current.id,accepted.runs[0]!.runId),history);assert.deepEqual(await store.team.chatSnapshot(f.workspaceId),chat);
   assert.equal(await gitText(root,['rev-parse','HEAD']),head);

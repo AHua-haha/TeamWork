@@ -1,3 +1,5 @@
+import {AgentInputData} from './data/input.js';
+import {reactToUserInputs} from './input-reactions.js';
 import {AgentMessageData, AgentTurnData, type AgentMessagePersistence} from './data/messages.js';
 import { AgentState, AgentContextState } from './data/state.js';
 import { compactedContext, compactionInput, estimateRequestTokens, interruptedCompactionContext, compactionAcknowledgement, validateCompactionSettings, type CompactionState, type CompactionTrigger } from './data/compaction.js';
@@ -52,7 +54,11 @@ export class AgentExecution {
   private async buildModelRequest(scope: StepScope, history: ContextHistory, messages = this.messages): Promise<ModelRequest> {
     for (const harness of this.reactHarnesses) harness.restoreContext?.(messages.context);
     const projected = structuredClone(history);
-    projected.entries = projected.entries.map(entry => this.reactHarnesses.reduce((value, harness) => harness.projectContextEntry?.(value) ?? value, entry));
+    projected.entries=projected.entries.flatMap(entry=>{
+      let value:ContextEntry|null=entry;
+      for(const harness of this.reactHarnesses)if(value){const next:ContextEntry|null|undefined=harness.projectContextEntry?.(value);if(next!==undefined)value=next;}
+      return value?[value]:[];
+    });
     const request = await this.policy.buildRequest(scope, projected);
     const owned = this.reactHarnesses.flatMap(harness => harness.tools?.(scope) ?? []);
     const overridden = new Set(this.reactHarnesses.flatMap(harness => harness.overrideToolNames?.(scope) ?? []));
@@ -96,6 +102,7 @@ export class AgentExecution {
       signal.throwIfAborted();
       group = await this.policy.groupContext?.(run.agentId);
       await synchronize();
+      await reactToUserInputs(run.agentId,new AgentInputData(this.state.contextModel,this.observer.contextPatched?.bind(this.observer),!!(this.observer.message||this.observer.componentMessage||this.observer.contextChanged)),this.reactHarnesses,signal);
       for (let step = 1; ; step++) {
         signal.throwIfAborted();
         this.observer.assertActive?.();
@@ -110,7 +117,7 @@ export class AgentExecution {
           recordInput: async (text, metadata) => {
             signal.throwIfAborted();
             this.observer.assertActive?.();
-            await this.messages.append({ messageId: randomUUID(), message: { role: 'user', content: text, timestamp: Date.now() }, metadata });
+            await this.messages.append({ messageId: randomUUID(), message: { role: 'user', content: text, timestamp: Date.now() }, metadata:{...metadata,runtimeGenerated:true} });
             this.progress.changed(run.agentId);
           },
         };

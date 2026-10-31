@@ -10,6 +10,8 @@ export interface ContextEntry {
 }
 
 export interface ContextHistory {
+  /** Cumulative completed context appends, unaffected by hiding/compaction. */
+  messageCount?: number;
   revision: number;
   entries: ContextEntry[];
 }
@@ -76,7 +78,7 @@ export type FollowEvent = { version: 2; agentId: string; runId: string | null } 
 );
 
 export interface AgentRecord {
-  id:string; contextLength:number; contextRevision:number; historyPosition:number;
+  id:string; contextMessageCount:number; contextLength:number; contextRevision:number; historyPosition:number;
   activeRunId:string|null; latestRunId:string|null; contextFormat:number;
 }
 

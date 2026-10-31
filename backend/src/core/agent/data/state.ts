@@ -1,3 +1,4 @@
+import {countedMessage,userInput} from './input.js';
 import { validateEntries, validateRun } from './validation.js';
 import { AppError, position, type CompletedMessage, type ContextEntry, type ContextHistory, type ContextPatch, type ContextMetadataUpdate, type RunState } from './model.js';
 
@@ -6,6 +7,7 @@ export class AgentContextState {
     private value: ContextHistory;
     private invalid = false;
     private readonly indices = new Map<string, number>();
+    private readonly inputs=new Set<string>();
     constructor(context: ContextHistory) { this.value = {revision: 0, entries: []}; this.replace(context); }
     get history(): ContextHistory {
         if (this.invalid) throw new AppError('context_conflict', 'Resident context acknowledgement is out of sequence; restore context before running', 409);
@@ -15,10 +17,14 @@ export class AgentContextState {
     replace(context: ContextHistory): void {
         validateEntries(context.entries);
         position(context.revision);
-        this.value = structuredClone(context);
+        const previous=this.value;
+        const count=context.messageCount ?? ((previous?.messageCount??0)+context.entries.filter(entry=>!this.indices.has(entry.messageId)).reduce((sum,entry)=>sum+countedMessage(entry),0));
+        position(count);
+        this.value = {...structuredClone(context),messageCount:count};
         this.invalid = false;
         this.indices.clear();
-        this.value.entries.forEach((entry, index) => this.indices.set(entry.messageId, index));
+        this.inputs.clear();
+        this.value.entries.forEach((entry,index)=>{this.indices.set(entry.messageId,index);if(userInput(entry)&&entry.metadata.reactInputHandled!==true)this.inputs.add(entry.messageId);});
     }
     append(entry: ContextEntry): void {
         void this.history;
@@ -26,6 +32,8 @@ export class AgentContextState {
         validateEntries([entry]);
         this.indices.set(entry.messageId, this.value.entries.length);
         this.value.entries.push(structuredClone(entry));
+        this.value.messageCount=(this.value.messageCount??0)+countedMessage(entry);
+        if(userInput(entry)&&entry.metadata.reactInputHandled!==true)this.inputs.add(entry.messageId);
         this.value.revision++;
     }
     entry(messageId: string): ContextEntry | undefined {
@@ -33,11 +41,13 @@ export class AgentContextState {
         const index = this.indices.get(messageId);
         return index === undefined ? undefined : this.value.entries[index];
     }
+    pendingInputs():ContextEntry[]{return [...this.inputs].flatMap(id=>this.entry(id)??[]);}
     updateMetadata(updates: ContextMetadataUpdate[]): void {
         for (const update of updates) {
             const entry = this.entry(update.messageId);
             if (!entry) throw new AppError('context_conflict', 'Context entry no longer exists', 409);
             entry.metadata = structuredClone(update.metadata);
+            if(userInput(entry)&&entry.metadata.reactInputHandled!==true)this.inputs.add(entry.messageId);else this.inputs.delete(entry.messageId);
         }
     }
     patch(revision: number, patch: ContextPatch): void {
@@ -47,6 +57,7 @@ export class AgentContextState {
             const index = this.indices.get(entry.messageId);
             if (index === undefined) throw new AppError('context_conflict', 'Context entry no longer exists', 409);
             this.value.entries[index] = structuredClone(entry);
+            if(userInput(entry)&&entry.metadata.reactInputHandled!==true)this.inputs.add(entry.messageId);else this.inputs.delete(entry.messageId);
         }
         for (const entry of patch.append) this.append(entry);
         this.value.revision = revision;

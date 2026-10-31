@@ -16,14 +16,6 @@
   "designScope": {
     "working": [
       "desktop/metadata.json"
-    ],
-    "dependencies": [
-      "metadata.json",
-      "frontend/metadata.json",
-      "frontend/app/metadata.json",
-      "frontend/shared/metadata.json",
-      "frontend/shared/backend-client/metadata.json",
-      "operations/metadata.json"
     ]
   }
 }

@@ -23,7 +23,7 @@ async function legacy(f:Fixture,member:MemberView,retired=false){
 
 test('members expose design assignment directly and reject legacy Harness configuration on current inputs',()=>withTeam(async f=>{
  const member=await worker(f,'Backend',['src']);
- assert.deepEqual(member.designScope,{working:['systems/backend/metadata.json'],dependencies:[]});
+ assert.deepEqual(member.designScope,{working:['systems/backend/metadata.json']});
  for(const key of ['harness','harnesses','execute','allowedCommands','implementationScope'])assert.equal(key in member,false);
  const fields={name:member.name,role:member.role,responsibility:member.responsibility,settings:member.settings,designScope:member.designScope};
  assert.deepEqual(JSON.parse(generatedSource(fields).files['member.json']!).designScope,member.designScope);
@@ -44,7 +44,7 @@ test('startup migrates records and manifests without activating pending edits, r
  await f.team.initialize();
  const active=(await f.team.service.find(member.memberId))!,source=active.value.configuration!;
  assert.equal(active.id,member.memberId);assert.deepEqual(active.value.designScope,member.designScope);assert.equal('harness' in active.value,false);assert.equal('execute' in JSON.parse(source.files['member.json']!),false);
- assert.equal(source.formatVersion,6);assert.equal('previous' in source,false);assert.equal(source.files['agent.md'],old.source.files['agent.md']);
+ assert.equal(source.formatVersion,7);assert.equal('previous' in source,false);assert.equal(source.files['agent.md'],old.source.files['agent.md']);
  assert.equal(active.value.responsibility,member.responsibility);assert.deepEqual(f.store.agentContexts.get(member.memberId),retained);
  const pending=JSON.parse(await readFile(join(f.directory,source.path),'utf8'));assert.equal(pending.responsibility,'Pending responsibility');assert.equal('execute' in pending,false);
  assert.equal(await readFile(join(f.directory,dirname(source.path),'agent.md'),'utf8'),'Pending prompt');
@@ -89,4 +89,30 @@ test('migration refuses linked member manifests rather than rewriting their targ
  const member=await worker(f,'Backend'),old=await legacy(f,member),target=join(f.folder,'outside.json');
  await writeFile(target,old.raw);await rm(join(f.directory,old.source.path));await symlink(target,join(f.directory,old.source.path));
  await assert.rejects(f.team.initialize(),code('config_conflict'));assert.equal(await readFile(target,'utf8'),old.raw);
+}));
+
+
+test('working-only migration preserves active and draft instructions independently and does not recreate deleted agent.md',()=>withTeam(async f=>{
+ const member=await worker(f,'Backend',['src']),missing=await worker(f,'Missing',['lib']);
+ for(const view of [member,missing]){
+  const active=(await f.team.service.find(view.memberId))!,source=active.value.configuration!;
+  const manifest={...JSON.parse(source.files['member.json']!),designScope:{...view.designScope,dependencies:['external/_ctx/DESIGN.md']}};
+  const text=JSON.stringify(manifest,null,2)+'\n';
+  const old={...source,...sourceBundle(source.path,{...source.files,'member.json':text},'user'),formatVersion:6};
+  await f.store.updateMember(active.id,active.revision,view.name.toLowerCase(),{...active.value,designScope:manifest.designScope,configuration:old});
+  await writeFile(join(f.directory,source.path),JSON.stringify({...manifest,responsibility:'Draft only'}));
+  if(view===missing)await rm(join(f.directory,dirname(source.path),'agent.md'));
+  else await writeFile(join(f.directory,dirname(source.path),'agent.md'),'Draft instruction bytes\n');
+ }
+ await f.team.initialize();
+ const active=(await f.team.service.find(member.memberId))!,source=active.value.configuration!;
+ assert.deepEqual(active.value.designScope,member.designScope);assert.equal(active.value.responsibility,member.responsibility);
+ assert.equal(active.value.settings.prompt,member.settings.prompt);assert.equal(source.files['agent.md'],member.settings.prompt);assert.equal(source.formatVersion,7);
+ assert.deepEqual(JSON.parse(source.files['member.json']!).designScope,member.designScope);
+ const draft=JSON.parse(await readFile(join(f.directory,source.path),'utf8'));
+ assert.deepEqual(draft.designScope,member.designScope);assert.equal(draft.responsibility,'Draft only');
+ assert.equal(await readFile(join(f.directory,dirname(source.path),'agent.md'),'utf8'),'Draft instruction bytes\n');
+ const absent=(await f.team.service.find(missing.memberId))!;
+ await assert.rejects(readFile(join(f.directory,dirname(absent.value.configuration!.path),'agent.md')),code('ENOENT'));
+ const before=await f.team.service.all(f.workspaceId);await f.team.initialize();assert.deepEqual(await f.team.service.all(f.workspaceId),before);
 }));

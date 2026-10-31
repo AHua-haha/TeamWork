@@ -8,7 +8,7 @@ import {stubConfig,withTeam} from './team-fixture.js';
 
 test('fresh workspace has exact active lead files and application activation identity without context history',()=>withTeam(async f=>{
  const lead=await f.team.member(f.workspaceId,f.lead.memberId);
- assert.equal(lead.ready,true);assert.deepEqual(lead.designScope,{working:['_ctx/DESIGN.md'],dependencies:[]});
+ assert.equal(lead.ready,true);assert.deepEqual(lead.designScope,{working:['_ctx/DESIGN.md']});
  assert.deepEqual((await f.team.designs.list(f.workspaceId)).designs.map(d=>d.path),['_ctx/DESIGN.md']);
  const source=await f.team.configuration.activeSource(f.workspaceId,lead.memberId);
  for(const [path,text]of Object.entries(source.files))assert.equal(await readFile(join(f.directory,'.rsi/members/Lead',path),'utf8'),text);

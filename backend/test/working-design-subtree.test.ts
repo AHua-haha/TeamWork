@@ -11,7 +11,7 @@ test('working source subtrees contain descendant design systems exactly once and
  const child=await seedDesign(f.workspaces,f.workspaceId,'systems/backend/auth/_ctx/DESIGN.md',{content:'# Auth',implementation:[]});
  const grandchild=await seedDesign(f.workspaces,f.workspaceId,'systems/backend/auth/cache/_ctx/DESIGN.md',{content:'# Cache',implementation:[]});
  await seedDesign(f.workspaces,f.workspaceId,'systems/backend-extra/_ctx/DESIGN.md',{content:'# Sibling',implementation:[]});
- await configureAssignment(f,'Backend',{designScope:{working:[parent,child],dependencies:[]}});
+ await configureAssignment(f,'Backend',{designScope:{working:[parent,child]}});
  const resolved=await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.find(member.memberId))!.value.designScope);
  assert.deepEqual(resolved.working.map(d=>d.path),['systems/backend/_ctx/DESIGN.md',child,grandchild]);
 }));
@@ -27,11 +27,11 @@ test('an explicit refresh sees new filesystem designs without Git acceptance or 
  assert.equal((await f.team.member(f.workspaceId,member.memberId)).revision,before.revision);
 }));
 
-test('dependency selection stays explicit while working scope expands recursively',()=>withTeam(async f=>{
+test('dependency assignment is removed while outside systems remain discoverable',()=>withTeam(async f=>{
  const member=await worker(f,'Backend',[]);
- const dependency=await seedDesign(f.workspaces,f.workspaceId,'contracts/_ctx/DESIGN.md',{content:'# Contracts',implementation:[]});
- await seedDesign(f.workspaces,f.workspaceId,'contracts/child/_ctx/DESIGN.md',{content:'# Child',implementation:[]});
- await configureAssignment(f,'Backend',{designScope:{working:member.designScope.working,dependencies:[dependency]}});
- const resolved=await resolveAssignment(f.team.designs,f.workspaceId,(await f.team.service.find(member.memberId))!.value.designScope);
- assert.deepEqual(resolved.dependencies.map(d=>d.path),[dependency]);
+ await seedDesign(f.workspaces,f.workspaceId,'contracts/_ctx/DESIGN.md',{content:'# Contracts',implementation:[]});
+ const {parseDesignScope}=await import('../src/core/team/data/assignment.js');
+ assert.throws(()=>parseDesignScope({working:member.designScope.working,dependencies:[]}));
+ const resolved=await resolveAssignment(f.team.designs,f.workspaceId,member.designScope);
+ assert.equal('dependencies' in resolved,false);assert.ok((await f.team.designs.list(f.workspaceId)).designs.some(d=>d.path==='contracts/_ctx/DESIGN.md'));
 }));

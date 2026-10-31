@@ -15,7 +15,7 @@ test('accepted bundle contains meaningful JSON and Markdown; identity, revisions
   const manifest = JSON.parse(source.files['member.json']!);
   assert.deepEqual(Object.keys(manifest).sort(), ['designScope', 'name', 'responsibility', 'role', 'settings']);
   assert.deepEqual(manifest.designScope, member.designScope);
-  assert.equal(source.formatVersion, 6);
+  assert.equal(source.formatVersion, 7);
   assert.equal(manifest.settings.prompt, undefined);
   assert.equal(manifest.implementationScope, undefined);
   const files = await f.team.memberWorkspace.files(f.lead.memberId);

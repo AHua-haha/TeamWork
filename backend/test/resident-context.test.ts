@@ -34,7 +34,7 @@ test('commit during first durable read is incorporated exactly once after snapsh
   residents.changed('agent', {baseRevision: 0, revision: 1, patch: {append: [input('new')], update: []}});
   resolve({revision: 0, entries: []});
   const model = await loaded;
-  assert.deepEqual(model.history, {revision: 1, entries: [input('new')]});
+  assert.deepEqual(model.history, {revision: 1, entries: [input('new')],messageCount:1});
   residents.changed('agent', {baseRevision: 0, revision: 1, patch: {append: [input('new')], update: []}});
   assert.equal(model.history.entries.length, 1);
 });

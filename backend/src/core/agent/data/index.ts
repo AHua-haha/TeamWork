@@ -3,4 +3,5 @@ export * from './model.js';
 export * from './execution.js';
 export * from './state.js';
 export * from './messages.js';
+export * from './input.js';
 export {AgentData} from './repository.js';

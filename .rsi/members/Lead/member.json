@@ -16,7 +16,6 @@
   "designScope": {
     "working": [
       "metadata.json"
-    ],
-    "dependencies": []
+    ]
   }
 }

@@ -1,3 +1,4 @@
+import type {AgentInputData} from '../agent/data/index.js';
 import type {AssistantMessage, JsonObject, Tool, ToolCall, ToolResultMessage} from '@earendil-works/pi-ai';
 import type {StepScope, RuntimeTool} from '../agent/data/index.js';
 import type {ComponentState, ContextEntry} from '../agent/data/index.js';
@@ -19,9 +20,12 @@ export interface ReactHarnessContext {
   data: AgentTurnData;
 }
 
-/** Purpose-owned reaction to an assistant response; harnesses may own purpose-specific model tool definitions. */
+export interface ReactHarnessInputContext {agentId:string;input:ContextEntry;data:AgentInputData;signal:AbortSignal}
+
+/** Purpose-owned reaction to input and assistant responses; harnesses may own purpose-specific model tool definitions. */
 export interface ReactHarness {
   readonly harnessId?: string;
+  onInput?(context:ReactHarnessInputContext):Promise<void>;
   /** Receive an acknowledged purpose-owned durable-state update. */
   applyUpdate?(revision: number, data: JsonObject): void;
   canHandle(response: AssistantMessage): boolean;
@@ -33,7 +37,7 @@ export interface ReactHarness {
   /** Fixed purpose-owned rules appended to each model request, including compaction. Changing context is separate. */
   systemPrompt?(scope: StepScope): string | Promise<string>;
   /** Purpose-owned model projection; stable history and stored message bytes remain intact. */
-  projectContextEntry?(entry: ContextEntry): ContextEntry;
+  projectContextEntry?(entry: ContextEntry): ContextEntry | null;
   /** Names whose configured implementations are replaced by this harness. */
   overrideToolNames?(scope: StepScope): string[];
 }

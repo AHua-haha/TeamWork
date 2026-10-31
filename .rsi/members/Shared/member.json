@@ -18,11 +18,6 @@
       "frontend/shared/metadata.json",
       "frontend/shared/backend-client/metadata.json",
       "frontend/shared/ui/metadata.json"
-    ],
-    "dependencies": [
-      "frontend/metadata.json",
-      "frontend/app/metadata.json",
-      "frontend/features/metadata.json"
     ]
   }
 }

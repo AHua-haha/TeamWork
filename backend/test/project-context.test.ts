@@ -121,7 +121,7 @@ test('project context APIs use one resident filesystem index without SQL history
   const snapshot=await manager.refresh();
   manager.loadDesign=async()=>{throw new Error('Unexpected document body load for readiness');};
   assert.equal((await f.designs.list(f.workspaceId)).designs.length,1);
-  await f.designs.checkAssignment(f.workspaceId,['_ctx/DESIGN.md'],[]);
+  await f.designs.checkAssignment(f.workspaceId,['_ctx/DESIGN.md']);
   assert.equal(manager.snapshot(),snapshot);
 }));
 

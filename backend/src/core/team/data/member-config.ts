@@ -8,7 +8,7 @@ import {currentMemberManifest,legacyPromptFiles} from './member-config-migration
 import { AppError } from '../../agent/data/model.js';
 
 /** Schema control belongs to the backend envelope, not the editable JSON. */
-export const memberManifestVersion = 6;
+export const memberManifestVersion = 7;
 export interface MemberConfigSource {
   formatVersion?: number;
   path: string; files: Record<string, string>; digest: string; submittedBy: string; submittedAt: number;

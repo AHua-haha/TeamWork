@@ -21,7 +21,7 @@ export interface MemberValidation {
 }
 interface Plan { review: MemberValidation; active: StoredMember[]; modelsRevision: number; activation: MemberActivationState | null }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const assignment = (scope: MemberFields['designScope']) => ({ working: scope.working.map(p => p.toLowerCase()).sort(), dependencies: scope.dependencies.map(p => p.toLowerCase()).sort() });
+const assignment = (scope: MemberFields['designScope']) => ({ working: scope.working.map(p => p.toLowerCase()).sort() });
 const withoutPrompt = (settings: MemberFields['settings']) => { const { prompt: _prompt, ...rest } = settings; return rest; };
 
 /** Current member files are inputs; activation stores the durable active snapshot independently of Git. */
@@ -106,7 +106,7 @@ export class MemberConfigService {
         if (current) {
           if (fields.name !== current.value.name || fields.role !== current.value.role || !same(withoutPrompt(fields.settings), withoutPrompt(current.value.settings)) || !same(assignment(fields.designScope), assignment(current.value.designScope))) throw new AppError('forbidden_update', 'Update may change only responsibility and agent.md');
           fields.designScope = current.value.designScope;
-        } else if (!designScope.working.length && !designScope.dependencies.length) throw new AppError('invalid_config', 'A new worker needs a design assignment');
+        } else if (!designScope.working.length) throw new AppError('invalid_config', 'A new worker needs a design assignment');
         if (match[1] !== fields.name) throw new AppError('invalid_config', 'Member directory must exactly match its name');
         await resolveAssignment(this.workspace.designs, workspaceId, fields.designScope);
         const source = sourceBundle(path, files, 'user');

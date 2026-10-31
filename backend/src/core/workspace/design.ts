@@ -31,9 +31,9 @@ export class DesignService{
     if(!document.content.trim())throw new AppError('invalid_design',`${document.path} is empty`);
     return{path:system.designReference,revision:sha256(document.content),implementation:[system.projectPath],documents:[{path:system.designReference,content:document.content}],content:document.content};
   }
-  async checkAssignment(workspaceId:string,working:readonly string[],dependencies:readonly string[]):Promise<void>{
+  async checkAssignment(workspaceId:string,working:readonly string[]):Promise<void>{
     const project=await this.project(workspaceId);
-    for(const input of [...working,...dependencies])project.manager.design(projectNode(await this.reference(input,project)),project.snapshot);
+    for(const input of working)project.manager.design(projectNode(await this.reference(input,project)),project.snapshot);
   }
   async list(workspaceId:string):Promise<{designs:Omit<ResolvedDesign,'content'|'documents'>[];truncated:boolean}>{
     const project=await this.project(workspaceId);
@@ -44,6 +44,12 @@ export class DesignService{
     return{...resolved,size:Buffer.byteLength(resolved.content),updatedAt:project.snapshot.refreshedAt,design:resolved,designIssue:null};
   }
   async read(workspaceId:string,input:unknown):Promise<ResolvedDesign>{return this.readProject(input,await this.project(workspaceId));}
+  async workingPaths(workspaceId:string,references:readonly string[]):Promise<string[]>{
+    const project=await this.project(workspaceId);
+    return Promise.all(references.map(async input=>{
+      const path=projectNode(await this.reference(input,project));project.manager.design(path,project.snapshot);return path;
+    }));
+  }
   async working(workspaceId:string,references:readonly string[]):Promise<ResolvedDesign[]>{
     if(!references.length)return[];
     const project=await this.project(workspaceId);

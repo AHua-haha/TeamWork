@@ -114,6 +114,14 @@ export class ContextBaseManager {
     catch(error) {if (missing(error)) throw new AppError('context_changed','Design document disappeared; explicitly refresh the context index',409);throw error;}
   }
 
+  /** README only: never traverses include paths or reads included source. */
+  async loadUsageReadme(projectPath:string,snapshot=this.requireSnapshot()):Promise<string|undefined>{
+    if(this.closed)throw new AppError('workspace_unavailable','Context manager is closed',503);
+    const path=this.design(projectPath,snapshot).documents.readme;if(!path)return;
+    try{return await this.files.text(path,this.limits.maxFileBytes);}
+    catch(error){if(missing(error))return;throw error;}
+  }
+
   async loadConsumerContext(projectPath: string, snapshot = this.requireSnapshot()): Promise<ConsumerContext> {
     if (this.closed) throw new AppError('workspace_unavailable','Context manager is closed',503);
     const system = this.design(projectPath,snapshot), readmePath = system.documents.readme;

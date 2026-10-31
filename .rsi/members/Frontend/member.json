@@ -20,13 +20,6 @@
       "frontend/features/providers/metadata.json",
       "frontend/features/chat/metadata.json",
       "frontend/features/workspace/metadata.json"
-    ],
-    "dependencies": [
-      "frontend/metadata.json",
-      "frontend/app/metadata.json",
-      "frontend/shared/metadata.json",
-      "frontend/shared/backend-client/metadata.json",
-      "frontend/shared/ui/metadata.json"
     ]
   }
 }

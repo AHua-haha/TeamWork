@@ -2,6 +2,7 @@ export const schema = [
   `CREATE TABLE IF NOT EXISTS agents (
     id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
     context_format TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    context_message_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
     context_length BIGINT UNSIGNED NOT NULL DEFAULT 0, context_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
     history_position BIGINT UNSIGNED NOT NULL DEFAULT 0,
     active_run_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,

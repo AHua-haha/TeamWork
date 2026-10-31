@@ -2,7 +2,7 @@ import type { ContextEntry, ContextHistory, ContextPatch } from './model.js';
 import { AgentContextState } from './state.js';
 import { AppError } from './model.js';
 
-export type ContextChange = {baseRevision: number; revision: number} & (
+export type ContextChange = {baseRevision: number; revision: number; messageCount?:number} & (
     | {replace: ContextEntry[]}
     | {patch: ContextPatch}
 );
@@ -49,7 +49,7 @@ export class ResidentContexts {
     private apply(model: AgentContextState, change: ContextChange): void {
         if (change.revision <= model.history.revision) return;
         if (change.baseRevision !== model.history.revision) throw new Error('Resident context revision gap');
-        if ('replace' in change) model.replace({revision: change.revision, entries: change.replace});
+        if ('replace' in change) model.replace({revision: change.revision, entries: change.replace,messageCount:change.messageCount});
         else model.patch(change.revision, change.patch);
     }
     clear(): void { this.entries.clear(); }

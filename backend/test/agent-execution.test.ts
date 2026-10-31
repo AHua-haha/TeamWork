@@ -153,5 +153,5 @@ test('refused context persistence cannot advance Agent-owned incorporation state
     contextChanged:async()=>{throw new Error('context persistence refused');},
   });
   assert.equal((await agent.run(new AbortController().signal)).status,'failed');
-  assert.deepEqual(agent.snapshot().context,{revision:0,entries:[]});
+  assert.deepEqual(agent.snapshot().context,{revision:0,entries:[],messageCount:0});
 });

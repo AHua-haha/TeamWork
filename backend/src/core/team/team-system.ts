@@ -229,7 +229,14 @@ export class TeamSystem {
         const member = await this.service.find(agentId);
         if (!member) return factories;
         const workspace = await this.workspaces.record(member.workspaceId);
-        return [...factories, fileReactHarnessFactory(workspace.directory), defaultReactHarnessFactory(workspace.directory, [...this.web, ...management])];
+        return [...factories, fileReactHarnessFactory(workspace.directory,async refresh=>{
+          const manager=await this.workspaces.contextManager(member.workspaceId);
+          const snapshot=refresh||!manager.snapshot()?await manager.refresh():manager.snapshot()!;
+          const current=await this.service.find(agentId);
+          if(!current)throw new AppError('not_found','Member is unavailable',404);
+          const workingDesigns=await this.designs.workingPaths(member.workspaceId,current.value.designScope.working);
+          return {snapshot,workingDesigns,readme:path=>manager.loadUsageReadme(path,snapshot)};
+        }), defaultReactHarnessFactory(workspace.directory, [...this.web, ...management])];
       },
       groupContext: async agentId => {
         const member = await this.service.find(agentId);

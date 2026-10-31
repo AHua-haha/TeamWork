@@ -33,7 +33,7 @@ export function estimateRequestTokens(request: ModelRequest): number {
   return estimateContextTokens(normalizeContext(request.context)).tokens;
 }
 export function compactionInput(text: string, metadata: ContextEntry['metadata'] = {}): ContextEntry {
-  return {messageId: randomUUID(), message: {role: 'user', content: text, timestamp: Date.now()}, metadata};
+  return {messageId: randomUUID(), message: {role: 'user', content: text, timestamp: Date.now()}, metadata:{...metadata,runtimeGenerated:true}};
 }
 
 /** Shared coverage is selected by Agent from its own state, never supplied by Team. */
@@ -47,7 +47,8 @@ export async function compactedContext(agentId: string, before: ContextHistory, 
   const original = group ? await new AgentMessageContext(agentId, {revision: 0, entries: []}).incoming({
     id: group.id, read: async after => (await group.read(after, through)).filter(message => message.position <= through),
   }) ?? [] : [];
-  const shared = original;
+  const handled=new Set(before.entries.filter(entry=>entry.metadata.reactInputHandled===true).map(entry=>entry.messageId));
+  const shared=original.map(entry=>handled.has(entry.messageId)?{...entry,metadata:{...entry.metadata,reactInputHandled:true}}:entry);
   const working = structuredClone(retained);
   for (const entry of working) if (entry.message.role === 'assistant') {
     // These reports measured the discarded prefix. Never alter the immutable history record.

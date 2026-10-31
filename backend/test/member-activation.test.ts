@@ -8,7 +8,7 @@ import { TeamSystem } from '../src/core/team/team-system.js';
 import { code, settle, stubConfig, withTeam, worker, type Fixture } from './team-fixture.js';
 
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
-const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, designScope: { working: ['work/metadata.json'], dependencies: [] } });
+const manifest = (name: string) => ({ name, role: 'developer', responsibility: `Own ${name}`, settings: {}, designScope: { working: ['work/metadata.json'] } });
 async function setup(f: Fixture) {
   await seedDesign(f.workspaces, f.workspaceId, 'work/metadata.json', { content: 'Work', implementation: ['src'] });
   }
@@ -55,7 +55,7 @@ test('updates allow responsibility and prompts while preserving identity, models
   assert.equal(after.value.responsibility, 'New responsibility'); assert.equal(after.value.settings.prompt, 'New prompt');
   assert.deepEqual(after.value.designScope, before.value.designScope);
   const current = JSON.parse(after.value.configuration!.files['member.json']!);
-  for (const changed of [{ name: 'Renamed' }, { role: 'other' }, { settings: { modelOptions: [{ connectionId: 'conn', modelId: 'model', temperature: 0.2 }] } }, { settings: { modelId: 'other' } }, { designScope: { working: [], dependencies: ['work/metadata.json'] } }]) {
+  for (const changed of [{ name: 'Renamed' }, { role: 'other' }, { settings: { modelOptions: [{ connectionId: 'conn', modelId: 'model', temperature: 0.2 }] } }, { settings: { modelId: 'other' } }, { designScope: { working: [] } }]) {
     await draft(f, path, { ...current, ...changed }, 'New prompt');
     const review = await f.team.configuration.validate(f.lead.memberId, '.rsi/members');
     assert.equal(review.valid, false); assert.ok(review.issues.some(i => i.code === 'forbidden_update'), JSON.stringify(review.issues));
@@ -79,7 +79,7 @@ test('filesystem deletion persists through materialization/restart and activatio
 
 test('malformed references, lead deletion, duplicate names and base-policy overrides refuse activation without changing active state', () => withTeam(async f => {
   await setup(f); const path = '.rsi/members/Backend/member.json', original = await f.team.service.team(f.workspaceId);
-  for (const change of [{ promptFiles: [] }, { settings: {promptOptionIds: []} }, { designScope: { working: ['missing/metadata.json'], dependencies: [] } }, { name: 'Lead' }, { extra: true }, { execute: {allowedCommands: []} }]) {
+  for (const change of [{ promptFiles: [] }, { settings: {promptOptionIds: []} }, { designScope: { working: ['missing/metadata.json'] } }, { name: 'Lead' }, { extra: true }, { execute: {allowedCommands: []} }]) {
     await draft(f, path, { ...manifest('Backend'), ...change });
     const pending = await f.team.configuration.validate(f.lead.memberId, '.rsi/members'); assert.equal(pending.valid, false);
     const review = await validate(f); await assert.rejects(f.team.activateConfiguration(f.workspaceId), code('invalid_config'));

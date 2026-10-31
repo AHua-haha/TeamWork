@@ -10,7 +10,7 @@ export interface AgentMessagePersistence {
   message?(record: CompletedMessage): Promise<CompletedMessage | void>;
   componentMessage?(record: CompletedMessage, effects: ComponentMessageEffects): Promise<CompletedMessage>;
   contextChanged?(revision: number, entries: ContextEntry[]): Promise<ContextHistory | void>;
-  contextPatched?(revision: number, patch: ContextPatch): Promise<void>;
+  contextPatched?(revision: number, patch: ContextPatch,effects?:ComponentMessageEffects): Promise<void>;
   compactionMessage?(record: CompletedMessage): Promise<CompletedMessage | void>;
   compactionMetadata?(id: string, updates: ContextMetadataUpdate[]): Promise<void>;
 }
@@ -109,7 +109,7 @@ export class AgentTurnData {
     this.results.set(call.id, result);
     return structuredClone(result);
   }
-  appendInstruction(message: Message, metadata: JsonObject = {}): void {this.instructions.push({message: structuredClone(message), metadata: structuredClone(metadata)});}
+  appendInstruction(message: Message, metadata: JsonObject = {}): void {this.instructions.push({message: structuredClone(message), metadata: {...structuredClone(metadata),runtimeGenerated:true}});}
   updateMetadata(updates: ContextMetadataUpdate[]): Promise<void> {return this.messages.updateMetadata(updates);}
   orderedResults(): ToolResultMessage[] {return this.calls.flatMap(call => this.result(call.id) ?? []);}
   async flushInstructions(): Promise<void> {
