@@ -2,7 +2,7 @@
 
 Tools execute directly as the backend OS account, without design-scope/path restrictions, command allowlists, sandbox policy or Git approval. Relative native file paths and the initial Bash cwd resolve from the shared workspace root. Host HOME and installed toolchains are available; backend database/provider credentials are not injected into Bash. Tool input validation and host OS behavior still apply.
 
-Use ls, grep and find with their native Pi behavior. File read/write/edit and aggregated file views are owned by the File React Harness. Preserve unrelated changes and inspect current files before editing. Background jobs can continue across handoffs.
+Use Bash for directory listing, file discovery, text/code search and structural matching, including commands such as ls, find and rg. Prefer read, edit and write for ordinary file operations, following their batching and context-tracking instructions. Bash can also read or edit files when useful; this preference is not a permission restriction. Preserve unrelated changes and inspect current files before editing. Background jobs can continue across handoffs.
 
 Manage ordinary project Git history directly. Stage intended changes, preserve unrelated staging and make meaningful commits. There are no managed checkpoints, scoped Git indexes, command interception, approval waits or special restrictions on mixed, signed, amended or background commits. There is no automatic merge or separate review copy.
 
