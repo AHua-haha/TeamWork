@@ -3249,6 +3249,56 @@ for (const conflict of [false, true]) test(`prepared File state and context cuto
   await store.agents.finishRun(agentId, run.runId, 'completed');
 });
 
+test('partial batch edits persist one updated aggregate and all-failed retries preserve it after restart', {timeout: 30000}, async () => {
+  const {fileReactHarnessFactory} = await import('../../src/core/react-harness/file/harness.js');
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'partial-edit-')));
+  await writeFile(join(directory, 'file.txt'), 'one\ntwo\nrepeat repeat\nfour\n');
+  const f = await fixture({policy: {...fixedPolicy(model), createReactHarnessFactories: () => [fileReactHarnessFactory(directory)]}});
+  try {
+    const run = await f.runtime.start(f.agentId, 'Apply independent edits');
+    answer((await f.requests.next()).events, fauxAssistantMessage([
+      {type: 'toolCall', id: 'read-original', name: 'read', arguments: {path: 'file.txt'}},
+      {type: 'toolCall', id: 'partial', name: 'edit', arguments: {path: 'file.txt', edits: [
+        {oldText: 'two', newText: 'TWO'}, {oldText: 'missing', newText: 'bad'},
+        {oldText: 'repeat', newText: 'bad'}, {oldText: 'one\ntwo', newText: 'bad'},
+        {oldText: 'four', newText: 'FOUR'},
+      ]}},
+    ], {stopReason: 'toolUse'}));
+    const next = await f.requests.next();
+    const partial = next.request.context.messages.find(entry => entry.role === 'toolResult' && entry.toolCallId === 'partial');
+    assert.equal(partial?.role, 'toolResult');
+    if (partial?.role !== 'toolResult') throw new Error('Missing paired edit result');
+    assert.equal(partial.isError, false);
+    assert.match(JSON.stringify(partial.content), /Applied 2 of 5 edit blocks: 1, 5/);
+    answer(next.events, message('Applied valid blocks'));
+    assert.equal((await f.runtime.finished(f.agentId, run.runId)).status, 'completed');
+    assert.equal(await readFile(join(directory, 'file.txt'), 'utf8'), 'one\nTWO\nrepeat repeat\nFOUR\n');
+    const context = await store.agents.getContext(f.agentId), component = await store.agents.getComponentState(f.agentId, 'file-content');
+    const views = context.entries.filter(entry => entry.metadata.fileViewPath === join(directory, 'file.txt'));
+    assert.equal(views.length, 2); assert.equal(views[0]!.metadata.modelContextHidden, true);
+    assert.equal(views[1]!.metadata.modelContextHidden, undefined); assert.equal(component.revision, 2);
+    assert.equal((component.data.files as Record<string, {visibleMessageId: string}>)[join(directory, 'file.txt')]!.visibleMessageId, views[1]!.messageId);
+    await f.runtime.close(); await f.runtime.open();
+    assert.deepEqual(await store.agents.getComponentState(f.agentId, 'file-content'), component);
+    const retry = await f.runtime.start(f.agentId, 'Try rejected blocks again');
+    answer((await f.requests.next()).events, fauxAssistantMessage([{type: 'toolCall', id: 'all-failed', name: 'edit', arguments: {path: 'file.txt', edits: [
+      {oldText: 'missing', newText: 'bad'}, {oldText: 'repeat', newText: 'bad'},
+    ]}}], {stopReason: 'toolUse'}));
+    const resumed = await f.requests.next();
+    const failure = resumed.request.context.messages.find(entry => entry.role === 'toolResult' && entry.toolCallId === 'all-failed');
+    assert.equal(failure?.role === 'toolResult' && failure.isError, true);
+    assert.doesNotMatch(JSON.stringify(failure), /<<<FILE_START/);
+    answer(resumed.events, message('No further changes'));
+    assert.equal((await f.runtime.finished(f.agentId, retry.runId)).status, 'completed');
+    assert.deepEqual(await store.agents.getComponentState(f.agentId, 'file-content'), component);
+    const current = await store.agents.getContext(f.agentId);
+    assert.equal(current.entries.find(entry => entry.messageId === views[1]!.messageId)!.metadata.modelContextHidden, undefined);
+    const reopened = new CoreData(new MySqlStorage(databaseUrl!));
+    try {assert.deepEqual(await reopened.agents.getComponentState(f.agentId, 'file-content'), component); assert.deepEqual(await reopened.agents.getContext(f.agentId), current);}
+    finally {await reopened.close();}
+  } finally {await f.runtime.close(); await rm(directory, {recursive: true, force: true});}
+});
+
 test('runtime restores file references across runs and restart, and context reset clears handler state', {timeout: 30000}, async () => {
   const {fileReactHarnessFactory} = await import('../../src/core/react-harness/file/harness.js');
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'runtime-file-handler-')));

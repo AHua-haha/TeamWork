@@ -22,6 +22,46 @@ type State = {
   lastObservedMessageCount:number;
 };
 type EditChange = { start: number; oldEnd: number; newEnd: number; delta: number };
+type EditMatch = {block: number; oldText: string; newText: string; originalIndex: number};
+type EditFailure = {block: number; reason: string; message: string; hint: string};
+type FileResult = {path: string; file: FileState; content: ToolResultMessage['content']; isError?: boolean};
+
+/** Select against one snapshot in request order; rejected blocks never reserve a range. */
+function selectEdits(content: string, edits: Array<{oldText: string; newText: string}>) {
+  const accepted: EditMatch[] = [], rejected: EditFailure[] = [];
+  for (const [index, edit] of edits.entries()) {
+    const block = index + 1, oldText = edit.oldText.replace(/\r\n/g, '\n'), newText = edit.newText.replace(/\r\n/g, '\n');
+    const originalIndex = content.indexOf(oldText);
+    if (originalIndex < 0) {
+      rejected.push({block, reason: 'not found', message: 'oldText was not found in the original file snapshot.', hint: 'Read the affected range and retry with the current source text.'});
+      continue;
+    }
+    if (content.indexOf(oldText, originalIndex + 1) >= 0) {
+      rejected.push({block, reason: 'ambiguous', message: 'oldText matched multiple locations in the original file snapshot.', hint: 'Include enough surrounding source text to make the match unique.'});
+      continue;
+    }
+    const conflict = accepted.find(previous => originalIndex < previous.originalIndex + previous.oldText.length && previous.originalIndex < originalIndex + oldText.length);
+    if (conflict) {
+      rejected.push({block, reason: 'overlap', message: `This block overlaps earlier accepted block ${conflict.block}.`, hint: 'Combine the changes or target a non-overlapping range.'});
+      continue;
+    }
+    accepted.push({block, oldText, newText, originalIndex});
+  }
+  return {accepted, rejected};
+}
+
+function editSummary(total: number, accepted: EditMatch[], rejected: EditFailure[]): string {
+  return `applied ${accepted.length} of ${total} replacements${rejected.length ? `; rejected blocks ${rejected.map(edit => edit.block).join(', ')}` : ''}`;
+}
+
+function formatEditResult(total: number, accepted: EditMatch[], rejected: EditFailure[]): string {
+  const lines = [`Applied ${accepted.length} of ${total} edit blocks${accepted.length ? `: ${accepted.map(edit => edit.block).join(', ')}` : ''}.`];
+  if (rejected.length) lines.push(`Rejected blocks: ${rejected.map(edit => edit.block).join(', ')}.`, accepted.length
+    ? 'Successful edits are already applied. Retry only the failed blocks.'
+    : 'The file was not modified; the previous aggregate remains current.');
+  for (const failure of rejected) lines.push('', `Block ${failure.block} — ${failure.reason}:`, failure.message, `Hint: ${failure.hint}`);
+  return `<edit_result>\n${lines.join('\n')}\n</edit_result>`;
+}
 
 const fileToolNames = new Set(['read', 'write', 'edit']);
 const fileToolInstructions = readFileSync(new URL('./instructions.md', import.meta.url), 'utf8').trim();
@@ -58,8 +98,8 @@ function fileKey(root: string, absolute: string): string {
 }
 function safePath(path: string): string { return path.replace(/[\r\n\t]/g, ' '); }
 function lineAt(content: string, offset: number): number { return newlineCount(content.slice(0, offset)) + 1; }
-function metadata(path: string, totalLines: number, operation: 'read' | 'write' | 'edit', editResult?: string, markerId?: string): string {
-  return `<metadata>\npath: ${safePath(path)}\ntotal_lines: ${totalLines}\noperation: ${operation}\nstatus: success${editResult ? `\nedit_result: ${editResult}` : ''}${markerId ? `\nfile_marker_id: ${markerId}` : ''}\n</metadata>`;
+function metadata(path: string, totalLines: number, operation: 'read' | 'write' | 'edit', editResult?: string, markerId?: string, status: 'success' | 'error' = 'success'): string {
+  return `<metadata>\npath: ${safePath(path)}\ntotal_lines: ${totalLines}\noperation: ${operation}\nstatus: ${status}${editResult ? `\nedit_result: ${editResult}` : ''}${markerId ? `\nfile_marker_id: ${markerId}` : ''}\n</metadata>`;
 }
 function formatAggregate(path: string, content: string, ranges: Range[], operation: 'read' | 'write' | 'edit', editResult?: string): string {
   // Keep source whitespace and line endings; only marker boundaries may add a newline.
@@ -215,7 +255,7 @@ export class FileReactHarness implements ReactHarness {
     return [
       { definition: { name: 'read', description: 'Read text or an image directly from the filesystem. Text results aggregate all revealed ranges as plain source text without line numbers, with FILE_START/FILE_END boundaries and UNREVEALED_GAP markers for every omitted range. offset is 1-indexed; omit limit to reveal the remaining lines. The aggregate is not truncated. Images are returned as image blocks. Previous aggregates are hidden from future model context.', parameters: Type.Object({path, offset: Type.Optional(Type.Integer({minimum: 1})), limit: Type.Optional(Type.Integer({minimum: 1}))}, {additionalProperties: false}) } },
       { definition: { name: 'write', description: 'Create or replace a UTF-8 text file, creating parent directories as needed. Returns the full post-write file as plain source text within FILE_START/FILE_END boundaries, followed by metadata. The successful content argument is omitted from future model context.', parameters: Type.Object({path, content: Type.String()}, {additionalProperties: false}) } },
-      { definition: { name: 'edit', description: 'Edit a UTF-8 text file using one or more unique exact string replacements. All oldText matches must exist once in the original file and must not overlap. Returns the current aggregate including changed lines. Use actual source text, excluding presentation markers and metadata.', parameters: Type.Object({path, edits: Type.Array(Type.Object({oldText: Type.String({minLength: 1}), newText: Type.String()}, {additionalProperties: false}), {minItems: 1})}, {additionalProperties: false}) } },
+      { definition: { name: 'edit', description: 'Edit a UTF-8 text file with exact replacements matched against the original snapshot. Try blocks in input order: apply unique non-overlapping matches, reject missing or ambiguous matches and later overlaps, and continue with the remaining blocks. Returns plain-text feedback in a leading <edit_result> block followed by the updated aggregate when any edit succeeds. Retry only rejected blocks. Use actual source text, excluding presentation markers, edit feedback and metadata.', parameters: Type.Object({path, edits: Type.Array(Type.Object({oldText: Type.String({minLength: 1}), newText: Type.String()}, {additionalProperties: false}), {minItems: 1})}, {additionalProperties: false}) } },
     ];
   }
 
@@ -231,17 +271,23 @@ export class FileReactHarness implements ReactHarness {
     const fileCallIds = calls.map(call => call.id);
     for (const call of calls) {
       await context.beforeToolCall(call, fileCallIds);
-      let result: {path: string; file: FileState; content: ToolResultMessage['content']};
+      let result: FileResult;
       try {
         context.validateToolCall(call);
         result = await this.perform(call, context);
       } catch (error) {
         context.scope.signal.throwIfAborted();
         const path = typeof call.arguments.path === 'string' ? call.arguments.path : '(unknown)';
-        await context.data.recordToolResult(call, {content: [{type: 'text', text: `${call.name} failed: ${errorMessage(error)}\n\n<metadata>\npath: ${safePath(path)}\noperation: ${call.name}\nstatus: error\n</metadata>`}], isError: true});
+        const failure = `${call.name} failed: ${errorMessage(error)}`;
+        const report = call.name === 'edit' ? `<edit_result>\n${failure}\n</edit_result>` : failure;
+        await context.data.recordToolResult(call, {content: [{type: 'text', text: `${report}\n\n<metadata>\npath: ${safePath(path)}\noperation: ${call.name}\nstatus: error\n</metadata>`}], isError: true});
         continue;
       }
       context.scope.signal.throwIfAborted();
+      if (result.isError) {
+        await context.data.recordToolResult(call, {content: result.content, isError: true});
+        continue;
+      }
       const messageId = randomUUID();
       const previous = this.data.files[result.path]?.visibleMessageId;
       if(!this.designContext&&this.contextSource)this.designContext=await this.contextSource(false);
@@ -276,7 +322,7 @@ export class FileReactHarness implements ReactHarness {
     return updates;
   }
 
-  private async perform(call: ToolCall, context: ReactHarnessContext): Promise<{path: string; file: FileState; content: ToolResultMessage['content']}> {
+  private async perform(call: ToolCall, context: ReactHarnessContext): Promise<FileResult> {
     context.scope.signal.throwIfAborted();
     if (typeof call.arguments.path !== 'string' || !call.arguments.path) throw new AppError('invalid_input', 'A non-empty file path is required');
     const path = await canonicalPath(this.root, call.arguments.path);
@@ -319,18 +365,10 @@ export class FileReactHarness implements ReactHarness {
       const original = textContent(await readFile(path));
       const crlf = original.includes('\r\n');
       content = original.replace(/\r\n/g, '\n');
-      const matches = edits.map(edit => {
-        const oldText = edit.oldText.replace(/\r\n/g, '\n'), newText = edit.newText.replace(/\r\n/g, '\n');
-        const index = content.indexOf(oldText);
-        if (index < 0) throw new AppError('edit_failed', 'Requested oldText was not found; file was not changed');
-        if (content.indexOf(oldText, index + 1) >= 0) throw new AppError('edit_failed', 'Requested oldText is ambiguous; use a unique exact match');
-        return {oldText, newText, originalIndex: index};
-      }).sort((left, right) => left.originalIndex - right.originalIndex);
-      for (let index = 1; index < matches.length; index++) {
-        const previous = matches[index - 1]!;
-        if (previous.originalIndex + previous.oldText.length > matches[index]!.originalIndex) throw new AppError('invalid_input', 'Edit oldText matches must not overlap');
-      }
-      for (const edit of [...matches].reverse()) {
+      const {accepted, rejected} = selectEdits(content, edits);
+      const report = formatEditResult(edits.length, accepted, rejected), summary = editSummary(edits.length, accepted, rejected);
+      if (!accepted.length) return {path, file, isError: true, content: [{type: 'text', text: `${report}\n\n${metadata(label, lineCount(original), 'edit', summary, undefined, 'error')}`}]};
+      for (const edit of [...accepted].sort((left, right) => right.originalIndex - left.originalIndex)) {
         const start = lineAt(content, edit.originalIndex), previousCount = lineCount(content);
         content = content.slice(0, edit.originalIndex) + edit.newText + content.slice(edit.originalIndex + edit.oldText.length);
         file.ranges = adjustRanges(file.ranges, {start, oldEnd: start + newlineCount(edit.oldText), newEnd: Math.min(lineCount(content), start + newlineCount(edit.newText)), delta: lineCount(content) - previousCount});
@@ -339,7 +377,7 @@ export class FileReactHarness implements ReactHarness {
       await writeFile(path, crlf ? content.replace(/\n/g, '\r\n') : content, 'utf8');
       content = textContent(await readFile(path));
       file.ranges = file.ranges.map(range => ({start: range.start, end: Math.min(range.end, lineCount(content))})).filter(range => range.start <= range.end);
-      view = formatAggregate(label, content, file.ranges, 'edit', `applied ${edits.length} exact string replacement${edits.length === 1 ? '' : 's'}`);
+      view = `${report}\n\n${formatAggregate(label, content, file.ranges, 'edit', summary)}`;
     }
     return {path, file, content: [{type: 'text', text: view}]};
   }

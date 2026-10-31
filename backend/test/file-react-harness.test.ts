@@ -135,7 +135,7 @@ test('empty and shortened files never produce line zero or clamp stale ranges to
   assert.match(text(result), /total_lines: 0/); assert.doesNotMatch(text(result), /undefined|\n *0\t/);
 });
 
-test('exact edits shift ranges, preserve CRLF, and reject overlapping or ambiguous matches before writing', async t => {
+test('exact edits shift ranges and preserve CRLF while rejecting only later overlaps', async t => {
   const f = await fixture(t, {'file.txt': 'a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng\r\nh\r\ni\r\n'});
   await f.run([[call('a', 'read', {path: 'file.txt', offset: 7, limit: 2})], [call('b', 'edit', {path: 'file.txt', edits: [{oldText: 'b\r\nc', newText: 'B\r\nC\r\nC2'}, {oldText: 'e\nf', newText: 'E\nF'}]})]]);
   const result = f.history.filter(entry => entry.message.role === 'toolResult').at(-1)!;
@@ -143,7 +143,98 @@ test('exact edits shift ranges, preserve CRLF, and reject overlapping or ambiguo
   assert.doesNotMatch(await readFile(join(f.root, 'file.txt'), 'utf8'), /(?<!\r)\n/);
   const before = await readFile(join(f.root, 'file.txt'), 'utf8');
   await f.run([[call('c', 'edit', {path: 'file.txt', edits: [{oldText: 'B\nC', newText: 'x'}, {oldText: 'C\nC2', newText: 'y'}]})]]);
-  assert.equal(await readFile(join(f.root, 'file.txt'), 'utf8'), before);
+  assert.equal(await readFile(join(f.root, 'file.txt'), 'utf8'), before.replace('B\r\nC', 'x'));
+  const partial = f.history.filter(entry => entry.message.role === 'toolResult').at(-1)!;
+  assert.match(text(partial), /^<edit_result>\nApplied 1 of 2 edit blocks: 1\./);
+  assert.match(text(partial), /Block 2 — overlap:/);
+});
+
+test('batch edits apply independent blocks against the original snapshot and report plain-text failures first', async t => {
+  const f = await fixture(t, {'file.txt': 'zero\nalpha\nbeta\ngamma\nrepeat repeat\nomega\nlast\n'});
+  await f.run([[call('read', 'read', {path: 'file.txt', offset: 7, limit: 1})]]);
+  const previous = f.context().entries.find(entry => entry.message.role === 'toolResult')!;
+  await f.run([[call('edit', 'edit', {path: 'file.txt', edits: [
+    {oldText: 'gamma', newText: 'GAMMA\nnew'},
+    {oldText: 'missing', newText: 'bad'},
+    {oldText: 'repeat', newText: 'bad'},
+    {oldText: 'beta\ngamma', newText: 'bad'},
+    {oldText: 'beta', newText: 'BETA'},
+    {oldText: 'alpha', newText: 'ALPHA\nEXTRA'},
+    {oldText: 'ALPHA', newText: 'bad chained edit'},
+  ]})]]);
+  assert.equal(await readFile(join(f.root, 'file.txt'), 'utf8'), 'zero\nALPHA\nEXTRA\nBETA\nGAMMA\nnew\nrepeat repeat\nomega\nlast\n');
+  const results = f.context().entries.filter(entry => entry.message.role === 'toolResult'), result = results.at(-1)!, output = text(result);
+  assert.equal(result.message.role === 'toolResult' && result.message.isError, false);
+  assert.match(output, /^<edit_result>\nApplied 3 of 7 edit blocks: 1, 5, 6\./);
+  assert.match(output, /Rejected blocks: 2, 3, 4, 7\./);
+  assert.match(output, /Block 2 — not found:/); assert.match(output, /Block 3 — ambiguous:/);
+  assert.match(output, /Block 4 — overlap:\nThis block overlaps earlier accepted block 1\./);
+  assert.match(output, /Block 7 — not found:/);
+  assert.match(output, /<\/edit_result>\n\n<<<FILE_START path="file.txt" total_lines=9>>>/);
+  assert.doesNotMatch(output.slice('<edit_result>'.length, output.indexOf('</edit_result>')), /<[^>]+>/);
+  assert.match(output, /<<<UNREVEALED_GAP lines=1-1>>>\nALPHA\nEXTRA\nBETA\nGAMMA\nnew\n<<<UNREVEALED_GAP lines=7-8>>>\nlast/);
+  assert.match(output, /edit_result: applied 3 of 7 replacements; rejected blocks 2, 3, 4, 7/);
+  assert.equal(results[0]!.metadata.modelContextHidden, true);
+  assert.equal(f.history.find(entry => entry.messageId === previous.messageId)!.metadata.modelContextHidden, undefined);
+  const file = (f.state().data.files as Record<string, {ranges: unknown; visibleMessageId: string}>)[join(f.root, 'file.txt')]!;
+  assert.deepEqual(file.ranges, [{start: 2, end: 6}, {start: 9, end: 9}]);
+  assert.equal(file.visibleMessageId, result.messageId);
+  assert.equal(f.state().revision, 2, 'one aggregate/state commit per successful call');
+});
+
+test('earlier accepted blocks win by request order, duplicate overlaps fail, and adjacent ranges remain valid', async t => {
+  const f = await fixture(t, {'file.txt': 'abcdef'});
+  await f.run([[call('edit', 'edit', {path: 'file.txt', edits: [
+    {oldText: 'cd', newText: 'X'}, {oldText: 'bc', newText: 'bad'},
+    {oldText: 'ab', newText: 'A'}, {oldText: 'ef', newText: 'Z'}, {oldText: 'cd', newText: 'bad'},
+  ]})]]);
+  assert.equal(await readFile(join(f.root, 'file.txt'), 'utf8'), 'AXZ');
+  const output = text(f.history.find(entry => entry.message.role === 'toolResult')!);
+  assert.match(output, /Applied 3 of 5 edit blocks: 1, 3, 4\./);
+  assert.match(output, /Block 2 — overlap:\nThis block overlaps earlier accepted block 1\./);
+  assert.match(output, /Block 5 — overlap:\nThis block overlaps earlier accepted block 1\./);
+});
+
+test('all rejected blocks return edit_result without publishing another aggregate or changing file bytes', async t => {
+  const original = 'a\r\nrepeat\nrepeat\r\n';
+  const f = await fixture(t, {'file.txt': original});
+  await f.run([[call('read', 'read', {path: 'file.txt'})]]);
+  const state = structuredClone(f.state()), previous = f.context().entries.find(entry => entry.message.role === 'toolResult')!;
+  await f.run([[call('edit', 'edit', {path: 'file.txt', edits: [{oldText: 'missing', newText: 'bad'}, {oldText: 'repeat', newText: 'bad'}]})]]);
+  const result = f.history.filter(entry => entry.message.role === 'toolResult').at(-1)!, output = text(result);
+  assert.match(output, /^<edit_result>\nApplied 0 of 2 edit blocks\./);
+  assert.match(output, /Block 1 — not found:/); assert.match(output, /Block 2 — ambiguous:/);
+  assert.match(output, /previous aggregate remains current/); assert.match(output, /status: error/);
+  assert.doesNotMatch(output, /<<<FILE_START|<<<FILE_END|— overlap/);
+  assert.equal(result.message.role === 'toolResult' && result.message.isError, true);
+  assert.deepEqual(f.state(), state);
+  assert.equal(f.context().entries.find(entry => entry.messageId === previous.messageId)!.metadata.modelContextHidden, undefined);
+  assert.equal(await readFile(join(f.root, 'file.txt'), 'utf8'), original);
+});
+
+test('partial edit acknowledgement failure preserves committed state and never replays accepted replacements', async t => {
+  const f = await fixture(t, {'file.txt': 'one\ntwo\n'});
+  await f.run([[call('read', 'read', {path: 'file.txt'})]]);
+  const state = structuredClone(f.state()), requests = f.requests.length;
+  f.setFailCommit();
+  const terminal = await f.run([[call('edit', 'edit', {path: 'file.txt', edits: [{oldText: 'one', newText: 'ONE'}, {oldText: 'missing', newText: 'bad'}]})]]);
+  assert.equal(terminal.error?.code, 'handler_state_persistence_failure');
+  assert.equal(await readFile(join(f.root, 'file.txt'), 'utf8'), 'ONE\ntwo\n');
+  assert.deepEqual(f.state(), state);
+  assert.equal(f.requests.length, requests + 1, 'no retry or model continuation after uncertain acknowledgement');
+});
+
+test('invalid edit input and file errors return a leading edit_result without writing', async t => {
+  const f = await fixture(t, {'file.txt': 'one\ntwo'});
+  await f.run([[call('invalid', 'edit', {path: 'file.txt', edits: [{oldText: '', newText: 'bad'}]}), call('missing', 'edit', {path: 'missing.txt', edits: [{oldText: 'one', newText: 'bad'}]})]]);
+  const results = f.history.filter(entry => entry.message.role === 'toolResult');
+  assert.equal(results.length, 2);
+  for (const result of results) {
+    assert.match(text(result), /^<edit_result>\nedit failed:/);
+    assert.equal(result.message.role === 'toolResult' && result.message.isError, true);
+  }
+  assert.equal(f.state().revision, 0);
+  assert.equal(await readFile(join(f.root, 'file.txt'), 'utf8'), 'one\ntwo');
 });
 
 test('successful write suppresses only its content argument and preserves original stable history', async t => {
