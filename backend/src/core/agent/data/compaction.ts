@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {validateComponentState} from './validation.js';
 import {object, jsonValue} from '../../validation.js';
 import { normalizeContext } from '@earendil-works/pi-ai';
-import { estimateContextTokens } from '@earendil-works/pi-ai/utils/estimate';
+import { estimateMessageTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { ModelRequest } from '../contracts.js';
 import { AgentMessageContext, type GroupContextReference } from './context.js';
 import { AppError, identity, position, type ContextEntry, type ContextHistory, type ContextMetadataUpdate, type ComponentStateReplacement } from './model.js';
@@ -59,7 +59,9 @@ export function validateCompactionSettings(settings: CompactionSettings): void {
   }
 }
 export function estimateRequestTokens(request: ModelRequest): number {
-  return estimateContextTokens(normalizeContext(request.context)).tokens;
+  // Measure the effective request after Harness projection. Historical usage can
+  // describe a larger prefix whose file views have since been hidden or replaced.
+  return normalizeContext(request.context).messages.reduce((tokens, message) => tokens + estimateMessageTokens(message), 0);
 }
 export function compactionInput(text: string, metadata: ContextEntry['metadata'] = {}): ContextEntry {
   return {messageId: randomUUID(), message: {role: 'user', content: text, timestamp: Date.now()}, metadata:{...metadata,runtimeGenerated:true}};
@@ -78,16 +80,7 @@ export async function compactedContext(agentId: string, before: ContextHistory, 
   }) ?? [] : [];
   const handled=new Set(before.entries.filter(entry=>entry.metadata.reactInputHandled===true).map(entry=>entry.messageId));
   const shared=original.map(entry=>handled.has(entry.messageId)?{...entry,metadata:{...entry.metadata,reactInputHandled:true}}:entry);
-  const working = structuredClone(retained);
-  for (const entry of working) if (entry.message.role === 'assistant') {
-    // These reports measured the discarded prefix. Never alter the immutable history record.
-    entry.message.usage = {...entry.message.usage, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-      ...(entry.message.usage.reasoning === undefined ? {} : {reasoning: 0}),
-      ...(entry.message.usage.cacheWrite1h === undefined ? {} : {cacheWrite1h: 0}),
-      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}};
-    entry.metadata = {...entry.metadata, contextUsageInvalidated: true};
-  }
-  return [...shared, ...working];
+  return [...shared, ...structuredClone(retained)];
 }
 
 export async function compactionAcknowledgement<T>(operation: () => Promise<T> | undefined): Promise<T | undefined> {

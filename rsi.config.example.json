@@ -29,7 +29,7 @@
     "environment": {
       "DEEPSEEK_WEB_API_KEY": ""
     },
-    "contextCompactionThresholdTokens": 256000
+    "contextCompactionThresholdTokens": 384000
   },
   "deployment": {
     "backendPort": 3101,
@@ -43,6 +43,6 @@
     "environment": {
       "DEEPSEEK_WEB_API_KEY": ""
     },
-    "contextCompactionThresholdTokens": 256000
+    "contextCompactionThresholdTokens": 384000
   }
 }

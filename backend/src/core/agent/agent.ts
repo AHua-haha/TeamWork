@@ -225,7 +225,7 @@ export class AgentExecution {
       for (const entry of entries) {
         const update = metadataChanges.get(entry.messageId);
         if (update) {
-          entry.metadata = {...structuredClone(update.metadata), ...(entry.metadata.contextUsageInvalidated === true ? {contextUsageInvalidated: true} : {})};
+          entry.metadata = structuredClone(update.metadata);
           metadataChanges.set(entry.messageId, {messageId: entry.messageId, metadata: structuredClone(entry.metadata)});
         }
       }

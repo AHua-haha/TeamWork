@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fauxAssistantMessage, fauxProvider, normalizeContext, type AssistantMessage } from '@earendil-works/pi-ai';
-import { estimateContextTokens } from '@earendil-works/pi-ai/utils/estimate';
+import { fauxAssistantMessage, fauxProvider, type AssistantMessage } from '@earendil-works/pi-ai';
+import { projectFileContextEntry } from '../src/core/react-harness/file/context.js';
+import type {ReactHarness} from '../src/core/react-harness/contracts.js';
 import { AgentExecution, fixedPolicy, type AgentObserver } from '../src/core/agent/agent.js';
 import { compactedContext, estimateRequestTokens, validateCompactionSettings, type CompactionState } from '../src/core/agent/data/compaction.js';
 import type { AgentConfiguration, ModelRequest, ModelStream, RuntimePolicy, RuntimeTool } from '../src/core/agent/contracts.js';
@@ -24,7 +25,7 @@ function shared(text = 'User objective') {
 function fixture(options: {
   entries?: ContextEntry[]; threshold?: number; tools?: RuntimeTool[]; observer?: AgentObserver;
   produce: (mode: string, request: ModelRequest, call: number) => AssistantMessage | Promise<AssistantMessage>;
-  groupText?: string;
+  groupText?: string; harnesses?: ReactHarness[];
 }) {
   const requests: {mode: string;request: ModelRequest}[] = [], modes = new WeakMap<ModelRequest,string>();
   const base = fixedPolicy(model,options.tools), group = shared(options.groupText);
@@ -41,19 +42,53 @@ function fixture(options: {
     yield {type:'done',reason:message.stopReason as 'stop'|'toolUse'|'length',message};
   };
   const config:AgentConfiguration={model,tools:options.tools??[],systemPrompt:'',options:{},compaction:{thresholdTokens:options.threshold??200,prompt}};
-  const agent=new AgentExecution(initial,{revision:0,entries:options.entries??[]},0,config,policy,stream,options.observer);
+  const agent=new AgentExecution(initial,{revision:0,entries:options.entries??[]},0,config,policy,stream,options.observer,undefined,64,options.harnesses);
   return {agent,requests,publications:()=>publications};
 }
 
-test('token measurement delegates full normalized prompt/tools/images and reported usage to Pi',()=>{
-  const request:ModelRequest={model,tools:[],context:{systemPrompt:'system '.repeat(100),tools:[{name:'inspect',description:'description',parameters:{type:'object',properties:{}}}],messages:[{role:'user',content:[{type:'text',text:'question'},{type:'image',mimeType:'image/png',data:'x'.repeat(10000)}],timestamp:1},response('short',20000)]}};
-  assert.equal(estimateRequestTokens(request),estimateContextTokens(normalizeContext(request.context)).tokens);
-  assert.equal(estimateRequestTokens(request),20000,'uses reported usage, not text size alone');
-  request.context.messages=request.context.messages.slice(0,1);
-  assert.ok(estimateRequestTokens(request)>1200,'includes system prompt and tool declarations with image estimate');
+test('token estimation counts effective content, system rules, schemas and images independently of provider usage',()=>{
+  const answer=response('text',900000);
+  const request:ModelRequest={model,tools:[],context:{systemPrompt:'rule',messages:[{role:'user',content:'question',timestamp:1},answer]}};
+  const before=structuredClone(request.context);
+  assert.equal(estimateRequestTokens(request),4,'four characters per token, rounding per message');
+  assert.deepEqual(request.context,before,'estimation never rewrites message usage or content');
+  answer.usage={...answer.usage,input:0,totalTokens:0};
+  assert.equal(estimateRequestTokens(request),4);
+  request.context.tools=[{name:'inspect',description:'Inspect a file',parameters:{type:'object',properties:{}}}];
+  const withTools=estimateRequestTokens(request);assert.ok(withTools>4,'tool schemas are included');
+  request.context.messages[0]={role:'user',content:[{type:'text',text:'question'},{type:'image',mimeType:'image/png',data:'a'.repeat(10000)}],timestamp:1};
+  assert.equal(estimateRequestTokens(request),withTools+1200,'image allowance is independent of encoded byte count');
+  request.context.messages[0]={role:'user',content:[{type:'text',text:'question'},{type:'image',mimeType:'image/png',data:'small'}],timestamp:1};
+  assert.equal(estimateRequestTokens(request),withTools+1200);
+  const call=fauxAssistantMessage([{type:'toolCall',id:'call',name:'inspect',arguments:{path:'x'.repeat(4000)}}]);
+  request.context.messages.push(call);assert.ok(estimateRequestTokens(request)>withTools+2200,'tool arguments contribute content tokens');
 });
 
-test('pre-call compaction retains the complete new trace, resumes the same loop and invalidates old usage',async()=>{
+test('compaction counts projected placeholders, omits hidden instructions and ignores stale usage',async()=>{
+  const body='UNEXPOSED_CONTENT_'.repeat(4000);
+  const call=fauxAssistantMessage([{type:'toolCall',id:'old-write',name:'write',arguments:{path:'file.txt',content:body}}]);
+  const entries:ContextEntry[]=[
+    {messageId:'old-instruction',message:{role:'user',content:body,timestamp:1},metadata:{fileContextReplacement:true,modelContextHidden:true,runtimeGenerated:true}},
+    {messageId:'write',message:call,metadata:{suppressedToolCallArguments:['old-write']}},
+    {messageId:'old-file',message:{role:'toolResult',toolCallId:'old-write',toolName:'write',content:[{type:'text',text:body}],isError:false,timestamp:3},metadata:{modelContextHidden:true}},
+    {messageId:'old-usage',message:response('Continue',900000),metadata:{}},
+  ];
+  const harness:ReactHarness={canHandle:()=>false,handle:async()=>{},projectContextEntry:projectFileContextEntry};
+  const f=fixture({entries,harnesses:[harness],produce:()=>response('Done',900000)});
+  assert.equal((await f.agent.run(new AbortController().signal)).status,'completed');
+  assert.deepEqual(f.requests.map(item=>item.mode),['work'],'neither checkpoint is triggered by hidden content or old usage');
+  const request=f.requests[0]!.request;
+  assert.doesNotMatch(JSON.stringify(request.context.messages),/UNEXPOSED_CONTENT_/);
+  assert.match(JSON.stringify(request.context.messages),/File view omitted/);
+  assert.match(JSON.stringify(request.context.messages),/Written successfully/);
+  assert.ok(estimateRequestTokens(request)<200);
+  const stored=f.agent.snapshot().context.entries;
+  assert.equal(stored.find(entry=>entry.messageId==='old-instruction')!.message.content,body);
+  const saved=stored.find(entry=>entry.messageId==='old-usage')!.message;
+  assert.equal(saved.role==='assistant'&&saved.usage.totalTokens,900000);
+});
+
+test('pre-call compaction retains the complete new trace, resumes the same loop and preserves provider usage',async()=>{
   const stable:ContextEntry[]=[], starts:CompactionState[]=[];
   const tool:RuntimeTool={definition:{name:'inspect',description:'read facts',parameters:{type:'object',properties:{}}},execute:async(_args,scope)=>{
     assert.equal(scope.mode,'compaction');return {content:[{type:'text',text:'retrieved precise state'}],isError:false};
@@ -73,8 +108,9 @@ test('pre-call compaction retains the complete new trace, resumes the same loop 
   assert.doesNotMatch(JSON.stringify(context),/OLD PRIVATE|This message marks a replacement boundary/);
   assert.match(JSON.stringify(context),/User objective|retrieved precise state|Next steps/);
   assert.deepEqual(context.map(entry=>entry.message.role),['user','assistant','toolResult','assistant','assistant']);
-  const retained=context.find(entry=>entry.metadata.contextUsageInvalidated&&entry.message.role==='assistant'&&entry.message.stopReason==='stop')!;
-  assert.equal(retained.message.role==='assistant'&&retained.message.usage.totalTokens,0);
+  const retained=context.find(entry=>entry.message.role==='assistant'&&entry.message.stopReason==='stop'&&entry.metadata.source==='context-compaction')!;
+  assert.equal(retained.message.role==='assistant'&&retained.message.usage.totalTokens,100000);
+  assert.equal(retained.metadata.contextUsageInvalidated,undefined);
   const stableFinal=stable.at(-1)!.message;
   assert.equal(stableFinal.role==='assistant'&&stableFinal.usage.totalTokens,100000,'stable usage is unchanged');
   assert.ok(estimateRequestTokens(f.requests.at(-1)!.request)<200,'discarded prefix usage does not retrigger finishing compaction');
@@ -83,7 +119,7 @@ test('pre-call compaction retains the complete new trace, resumes the same loop 
 test('finishing compaction uses the same threshold and awaits cutover without another ordinary call',async()=>{
   let release!:()=>void, entered!:()=>void;
   const gate=new Promise<void>(resolve=>release=resolve), saving=new Promise<void>(resolve=>entered=resolve);
-  const f=fixture({threshold:200,observer:{compactionFinished:async(state,revision,entries)=>{assert.equal(state.trigger,'after-run');entered();await gate;return {revision:revision+1,entries};}},produce:mode=>mode==='work'?response('Original public answer',1000):response('Finished state; no remaining work.',1000)});
+  const f=fixture({threshold:200,observer:{compactionFinished:async(state,revision,entries)=>{assert.equal(state.trigger,'after-run');entered();await gate;return {revision:revision+1,entries};}},produce:mode=>mode==='work'?response('Original public answer'+' saved'.repeat(200),1000):response('Finished state; no remaining work.',1000)});
   const running=f.agent.run(new AbortController().signal);await saving;
   assert.match(JSON.stringify(f.agent.snapshot().context.entries),/Original public answer/,'old context remains until acknowledgement');
   release();assert.equal((await running).status,'completed');
@@ -117,7 +153,7 @@ test('failed pre-call preparation discards candidates and preserves committed co
 });
 
 test('finishing preparation failure preserves the ordinary outcome and does not retry',async()=>{
-  const f=fixture({produce:mode=>{if(mode==='work')return response('Accepted answer',1000);throw new Error('compaction unavailable');}});
+  const f=fixture({produce:mode=>{if(mode==='work')return response('Accepted answer'+' saved'.repeat(200),1000);throw new Error('compaction unavailable');}});
   const terminal=await f.agent.run(new AbortController().signal);
   assert.equal(terminal.status,'completed');assert.equal(terminal.error,null);
   assert.deepEqual(f.requests.map(item=>item.mode),['work','compaction']);
@@ -150,7 +186,7 @@ test('compaction requires a positive token threshold and a maintained instructio
 });
 
 test('the before-call checkpoint runs again after tools settle within the same ordinary run',async()=>{
-  const tool:RuntimeTool={definition:{name:'inspect',description:'inspect',parameters:{type:'object',properties:{}}},execute:async()=>({content:[{type:'text',text:'exact tool facts'}],isError:false})};
+  const tool:RuntimeTool={definition:{name:'inspect',description:'inspect',parameters:{type:'object',properties:{}}},execute:async()=>({content:[{type:'text',text:'exact tool facts '.repeat(100)}],isError:false})};
   let work=0;
   const f=fixture({tools:[tool],produce:mode=>{
     if(mode==='compaction')return response('Preserved exact tool facts.\n## Next steps\nFinish answer.',10000);
@@ -163,7 +199,7 @@ test('the before-call checkpoint runs again after tools settle within the same o
 });
 
 test('a completed publication cannot hide a finishing cutover acknowledgement failure',async()=>{
-  const f=fixture({observer:{compactionFinished:async()=>{throw new Error('uncertain SQL acknowledgement');},finished:async state=>({...state,status:'completed',error:null})},produce:mode=>response(mode==='work'?'Accepted public answer':'Continuation',1000)});
+  const f=fixture({observer:{compactionFinished:async()=>{throw new Error('uncertain SQL acknowledgement');},finished:async state=>({...state,status:'completed',error:null})},produce:mode=>response(mode==='work'?'Accepted public answer'+' saved'.repeat(200):'Continuation',1000)});
   await assert.rejects(f.agent.run(new AbortController().signal),/uncertain SQL acknowledgement/);
   assert.match(JSON.stringify(f.agent.snapshot().context.entries),/Accepted public answer/);
 });

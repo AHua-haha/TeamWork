@@ -2420,8 +2420,9 @@ test('constructed image context fails explicitly when a later model request cann
 });
 
 const compactSettings:CompactionSettings={thresholdTokens:100000,prompt:agentPrompt('context-compaction')};
-function largeUsage(text:string) {
+function recordedUsage(text:string, largeContent=false) {
   const result=message(text);
+  if(largeContent)result.content.unshift({type:'thinking',thinking:'Existing private reasoning. '.repeat(20000)});
   result.usage={...result.usage,input:200000,output:0,cacheRead:0,cacheWrite:0,totalTokens:200000};
   return result;
 }
@@ -2431,7 +2432,7 @@ test('finishing compaction persists a private trace and atomically replaces cont
   try {
     const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend preserve the shared objective');
     const run=accepted.runs[0]!;
-    answer((await f.requests.next()).events,largeUsage('Original accepted answer'));
+    answer((await f.requests.next()).events,recordedUsage('Original accepted answer',true));
     const preparation=await f.requests.next();
     assert.match(JSON.stringify(preparation.request.context.messages),/replacement boundary|Checkpoint: after-run/);
     const old=await store.agents.getContext(f.backend.memberId);
@@ -2441,7 +2442,7 @@ test('finishing compaction persists a private trace and atomically replaces cont
     const entry=published.changes.at(-1)!.entry;
     assert.ok(entry.kind==='member'&&entry.finalRef);
     assert.equal(entry.kind==='member'&&entry.text,'Original accepted answer');
-    answer(preparation.events,largeUsage('Preserved private continuation. No work remains.'));
+    answer(preparation.events,recordedUsage('Preserved private continuation. No work remains.'));
     const terminal=await f.runtime.finished(f.backend.memberId,run.runId);
     assert.equal(terminal.status,'completed');assert.equal(terminal.step,1);
     assert.deepEqual(await store.team.chatTimeline(f.workspaceId),published,'no new publication or revision');
@@ -2453,14 +2454,14 @@ test('finishing compaction persists a private trace and atomically replaces cont
     assert.match(JSON.stringify(current.entries),/Preserved private continuation/);
     assert.match(JSON.stringify(current.entries),/sender: Backend|shared objective/,'original group messages remain');
     assert.doesNotMatch(JSON.stringify(current.entries),/Checkpoint: after-run/);
-    const continuation=current.entries.find(record=>record.metadata.contextUsageInvalidated)!.message;
-    assert.equal(continuation.role==='assistant'&&continuation.usage.totalTokens,0);
+    const continuation=current.entries.find(record=>record.metadata.source==='context-compaction'&&record.message.role==='assistant')!.message;
+    assert.equal(continuation.role==='assistant'&&continuation.usage.totalTokens,200000);
     const [journals]=await store.pool.query<any[]>('SELECT state, active_agent_id FROM context_compactions WHERE run_id = ?',[run.runId]);
     assert.equal(journals.length,1);assert.equal(journals[0].active_agent_id,null);
     assert.equal(decode<CompactionState>(journals[0].state,validateCompactionState).status,'completed');
     const next=await f.team.runner.postUser(f.workspaceId,'@Backend next ordinary request');
     const step=await f.requests.next();
-    assert.doesNotMatch(JSON.stringify(step.request.context.messages),/Checkpoint: before-model/,'invalidated usage does not immediately compact again');
+    assert.doesNotMatch(JSON.stringify(step.request.context.messages),/Checkpoint: before-model/,'historical usage does not trigger compaction for the short effective context');
     answer(step.events,message('Second ordinary answer'));
     await f.runtime.finished(f.backend.memberId,next.runs[0]!.runId);
     await f.team.runner.reset(f.workspaceId);
@@ -2478,7 +2479,7 @@ test('before-call compaction waits for acknowledged cutover then continues the s
     const preparation=await f.requests.next();
     assert.match(JSON.stringify(preparation.request.context.messages),/Checkpoint: before-model/);
     assert.match(JSON.stringify((await store.agents.getContext(f.backend.memberId)).entries),/OLD PRIVATE/);
-    answer(preparation.events,largeUsage('Useful continuation.\n## Next steps\nFinish the existing objective.'));
+    answer(preparation.events,recordedUsage('Useful continuation.\n## Next steps\nFinish the existing objective.'));
     const ordinary=await f.requests.next();
     assert.doesNotMatch(JSON.stringify(ordinary.request.context.messages),/OLD PRIVATE|Checkpoint: before-model/);
     assert.match(JSON.stringify(ordinary.request.context.messages),/Useful continuation|continue existing work/);
@@ -2494,7 +2495,7 @@ test('workspace stop discards finishing preparation while retaining the already 
   const f=await groupFixture(configuredPolicy(),{compaction:compactSettings});
   try {
     const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend answer then maintain context');
-    answer((await f.requests.next()).events,largeUsage('Keep this public answer'));
+    answer((await f.requests.next()).events,recordedUsage('Keep this public answer',true));
     await f.requests.next();
     const before = await store.agents.getContext(f.backend.memberId);
     const component = await store.agents.getComponentState(f.backend.memberId, 'file-content');
@@ -2551,7 +2552,7 @@ test('published answers do not hide preparation persistence failure and restart 
   const finish=store.agents.finishCompaction.bind(store.agents);
   try{
     const accepted=await f.team.runner.postUser(f.workspaceId,'@Backend preserve acknowledgement errors');
-    answer((await f.requests.next()).events,largeUsage('Keep this accepted response'));
+    answer((await f.requests.next()).events,recordedUsage('Keep this accepted response',true));
     const prep=await f.requests.next();
     store.agents.finishCompaction=async()=>{throw new Error('injected missing acknowledgement');};
     answer(prep.events,message('Prepared continuation'));
