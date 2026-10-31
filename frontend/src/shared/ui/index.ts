@@ -8,3 +8,5 @@ export { SidebarHeader } from './SidebarHeader.js';
 export type { SidebarHeaderProps } from './SidebarHeader.js';
 export { SidebarSection } from './SidebarSection.js';
 export type { SidebarSectionProps } from './SidebarSection.js';
+export { WindowToolbar } from './WindowToolbar.js';
+export type { WindowToolbarProps } from './WindowToolbar.js';

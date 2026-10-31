@@ -5,17 +5,60 @@
 }
 
 .shared-app-shell-demo .shared-app-shell__toolbar {
-  justify-content: space-between;
-  gap: 16px;
-  padding-inline: 20px;
   background: #f1f1f1;
   border-bottom: 1px solid #e6e6e6;
 }
 
-.shared-app-shell-demo .shared-app-shell__toolbar span,
+.shared-app-shell-demo__brand-information,
 .shared-app-shell-demo__thread-heading span {
   color: #777;
   font-size: 12px;
+}
+
+.shared-app-shell-demo__logo {
+  display: grid;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 6px;
+  background: #e1eee8;
+  color: #376750;
+  font-weight: 700;
+}
+
+.shared-app-shell-demo__brand-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.shared-app-shell-demo__brand-copy > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-app-shell-demo .shared-window-toolbar__actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.shared-app-shell-demo .shared-window-toolbar__actions button:hover {
+  background: #e5e5e5;
+}
+
+.shared-app-shell-demo .shared-window-toolbar__actions svg {
+  width: 18px;
+  height: 18px;
+}
+
+.shared-app-shell-demo .shared-app-shell__toolbar > strong {
+  padding-inline: 12px;
 }
 
 .shared-app-shell-demo .shared-app-shell__rail {

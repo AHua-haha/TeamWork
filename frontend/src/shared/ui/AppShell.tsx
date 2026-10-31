@@ -5,6 +5,9 @@ export interface AppShellProps {
   toolbar: ReactNode;
   navigationRail?: ReactNode;
   sidebar?: ReactNode;
+  /** Controlled visibility; the sidebar stays mounted while closed. */
+  sidebarOpen?: boolean;
+  sidebarId?: string;
   children: ReactNode;
   navigationLabel?: string;
   sidebarLabel?: string;
@@ -14,14 +17,18 @@ export interface AppShellProps {
 
 /** Optional application frame. Import layout.css when composing this primitive. */
 export function AppShell({
-  toolbar, navigationRail, sidebar, children,
+  toolbar, navigationRail, sidebar, sidebarOpen = true, sidebarId, children,
   navigationLabel = 'Primary navigation', sidebarLabel = 'Sidebar', className = '', style,
 }: AppShellProps) {
-  return <div className={`shared-app-shell${className ? ` ${className}` : ''}`} style={style}>
+  return <div className={`shared-app-shell${className ? ` ${className}` : ''}`} style={style}
+    data-rail-present={navigationRail != null} data-sidebar-open={sidebar != null && sidebarOpen}>
     <header className="shared-app-shell__toolbar">{toolbar}</header>
     <div className="shared-app-shell__body">
       {navigationRail != null && <nav className="shared-app-shell__rail" aria-label={navigationLabel}>{navigationRail}</nav>}
-      {sidebar != null && <aside className="shared-app-shell__sidebar" aria-label={sidebarLabel}>{sidebar}</aside>}
+      {sidebar != null && <aside className="shared-app-shell__sidebar" id={sidebarId} aria-label={sidebarLabel}
+        aria-hidden={!sidebarOpen} inert={!sidebarOpen}>
+        <div className="shared-app-shell__sidebar-content">{sidebar}</div>
+      </aside>}
       <main className="shared-app-shell__main">{children}</main>
     </div>
   </div>;
