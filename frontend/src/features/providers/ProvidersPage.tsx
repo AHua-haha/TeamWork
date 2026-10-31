@@ -1,3 +1,4 @@
+import { WindowToolbar } from '../WindowToolbar.js';
 import { useEffect, useRef, useState } from 'react';
 import type { Capabilities, ConfigClient, ConfigRecord, ConnectionInput, ConnectionView, ModelChoice } from '../../shared/backend-client/index.js';
 
@@ -146,8 +147,9 @@ export function ProvidersPage({ api, records, loading, loadError, refresh, focus
 
   return <div className="providers-page">
     <div className="providers-content">
-      <header className="providers-header"><div><div className="eyebrow">CONFIG / PROVIDERS</div><h1>Providers</h1><p>Connections make models available to your conversations.</p></div>
-        <button type="button" className="primary-button" onClick={() => openEditor(null)}>＋ Add provider</button></header>
+      <WindowToolbar title="Providers">
+        <button type="button" className="primary-button" onClick={() => openEditor(null)}>＋ Add provider</button>
+      </WindowToolbar>
       {notice && <div className="form-notice" role="status">{notice}</div>}
       {actionError && <div className="form-error" role="alert">{actionError}<button type="button" onClick={() => setActionError(null)}>Dismiss</button></div>}
       {loadError && <div className="form-error" role="alert">{loadError}<button type="button" onClick={() => void refresh()}>Retry</button></div>}

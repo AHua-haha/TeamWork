@@ -10,6 +10,7 @@ import { readRoute as parseRoute, routeUrl, validId, type Route } from './routes
 import { SoloPage } from '../features/chat/SoloPage.js';
 import { CreateWorkspaceDialog } from '../features/workspace/WorkspaceDialogs.js';
 import { WorkspacePage } from '../features/workspace/WorkspacePage.js';
+import { WindowToolbarTarget } from '../features/WindowToolbar.js';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed';
 const readRoute = () => parseRoute(window.location.search);
@@ -55,13 +56,17 @@ export function App() {
   const [focusProviderId, setFocusProviderId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [renameError, setRenameError] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
   const [configRefresh, setConfigRefresh] = useState(0);
   const section = route.page === 'providers' ? 'config' : 'conversations';
+  const [toolbarTarget, setToolbarTarget] = useState<HTMLElement | null>(null);
+  const pageTitle = route.page === 'providers' ? 'Providers'
+    : route.page === 'workspace' ? workspaces.find(item => item.workspaceId === route.id)?.name ?? 'Workspace'
+    : route.page === 'conversation' ? agents.find(item => item.agentId === route.id)?.name || `Conversation · ${route.id.slice(0, 8)}`
+    : title;
 
   const loadAgents = useCallback(async () => {
     try { setAgents(await api.listAgents()); setAgentsError(null); }
@@ -149,13 +154,10 @@ export function App() {
     finally { setRenameBusy(false); }
   }
 
-  const needle = search.toLowerCase().trim();
-  const filteredAgents = agents.filter(agent => `${agent.name} ${agent.agentId}`.toLowerCase().includes(needle));
-  const filteredWorkspaces = workspaces.filter(workspace => `${workspace.name} ${workspace.directory}`.toLowerCase().includes(needle));
-
-  return <>
+  return <WindowToolbarTarget.Provider value={toolbarTarget}>
+  <>
     <AppShell className={`app-shell ${panelOpen ? 'panel-open' : 'panel-closed'}`}
-      toolbar={<strong className="window-toolbar-title">{title}</strong>}
+      toolbar={<><strong className="window-toolbar-fallback">{pageTitle}</strong><div id="window-toolbar-actions" ref={setToolbarTarget} /></>}
       navigationRail={<div className="icon-rail">
       <div className="rail-brand" title={title} aria-label={title}>✳</div>
       <NavigationRailButton icon={<ChatIcon />} label="Conversations" active={section === 'conversations'} className={section === 'conversations' ? 'active' : ''} onClick={() => chooseSection('conversations')} />
@@ -166,13 +168,12 @@ export function App() {
       sidebar={<div className="context-panel" aria-label={section === 'conversations' ? 'Conversations sidebar' : 'Config sidebar'} aria-hidden={!panelOpen} inert={!panelOpen}>
       {section === 'conversations' ? <>
         <SidebarHeader><h2>Conversations</h2></SidebarHeader>
-        <label className="sidebar-search"><span className="sr-only">Search workspaces and conversations</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search" /></label>
         <div className="sidebar-section-with-action"><button type="button" className="section-add" title="Add workspace" aria-label="Add workspace" onClick={() => setAddingWorkspace(true)}>＋</button><SidebarSection title="Workspaces">
         {workspacesError && <div className="sidebar-error" role="alert">{workspacesError}<button type="button" onClick={() => void loadWorkspaces()}>Retry</button></div>}
         <div className="context-list" aria-label="Workspace list">
           {workspacesLoading && !workspaces.length && <p className="sidebar-muted">Loading workspaces…</p>}
           {!workspacesLoading && !workspaces.length && !workspacesError && <p className="sidebar-muted">No workspaces yet. A workspace is a project folder with its own team.</p>}
-          {filteredWorkspaces.map(workspace => <div className={`conversation-nav-row ${route.page === 'workspace' && route.id === workspace.workspaceId ? 'selected' : ''}`} key={workspace.workspaceId}>
+          {workspaces.map(workspace => <div className={`conversation-nav-row ${route.page === 'workspace' && route.id === workspace.workspaceId ? 'selected' : ''}`} key={workspace.workspaceId}>
             <button type="button" className="conversation-nav-link" title={workspace.directory} onClick={() => navigate({ page: 'workspace', id: workspace.workspaceId })}><span className="conversation-nav-mark">▣</span><span>{workspace.name}</span></button>
           </div>)}
         </div>
@@ -182,7 +183,7 @@ export function App() {
         <div className="context-list" aria-label="Conversation list">
           {agentsLoading && !agents.length && <p className="sidebar-muted">Loading conversations…</p>}
           {!agentsLoading && !agents.length && !agentsError && <p className="sidebar-muted">No conversations yet.</p>}
-          {filteredAgents.map(agent => <div className={`conversation-nav-row ${route.page === 'conversation' && route.id === agent.agentId ? 'selected' : ''}`} key={agent.agentId}>
+          {agents.map(agent => <div className={`conversation-nav-row ${route.page === 'conversation' && route.id === agent.agentId ? 'selected' : ''}`} key={agent.agentId}>
             {renamingId === agent.agentId ? <form className="rename-form" onSubmit={event => { event.preventDefault(); void saveName(); }}>
               <input aria-label="Conversation name" autoFocus value={renameDraft} disabled={renameBusy} onChange={event => setRenameDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setRenamingId(null); }} />
               <button type="submit" disabled={renameBusy} aria-label="Save conversation name">✓</button><button type="button" aria-label="Cancel rename" onClick={() => setRenamingId(null)}>×</button>
@@ -209,8 +210,7 @@ export function App() {
       sidebarLabel={section === 'conversations' ? 'Conversations sidebar' : 'Config sidebar'}>
     <div className="main-area">
       {error && <div className="setup-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
-      {route.page === 'workspace' && <WorkspacePage key={route.id} workspaceId={route.id} name={workspaces.find(item => item.workspaceId === route.id)?.name ?? null}
-        files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded }} />}
+      {route.page === 'workspace' && <WorkspacePage key={route.id} workspaceId={route.id} name={pageTitle} files={{ open: filesOpen, expanded: filesExpanded, show: showFiles, expand: setFilesExpanded }} />}
       {route.page === 'conversation' && <SoloPage key={route.id} agentId={route.id} api={api} configRefresh={configRefresh} />}
       {route.page === 'home' && <HomePage onAddWorkspace={() => setAddingWorkspace(true)} onNewConversation={() => void newConversation()} creating={creating} allowCreation={allowCreation} />}
       {route.page === 'providers' && <ProvidersPage api={api} records={connections} loading={connectionsLoading} loadError={connectionsError} refresh={loadConnections} focusId={focusProviderId} clearFocus={() => setFocusProviderId(null)} />}
@@ -222,5 +222,6 @@ export function App() {
       setWorkspaces(list => [...list.filter(item => item.workspaceId !== created.workspaceId), created].sort((a, b) => a.name.localeCompare(b.name)));
       navigate({ page: 'workspace', id: created.workspaceId });
     }} />}
-  </>;
+  </>
+  </WindowToolbarTarget.Provider>;
 }

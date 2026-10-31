@@ -21,7 +21,6 @@
 .app-shell .context-panel { width: 264px; height: 100%; padding: 0 0 16px; overflow-y: auto; gap: 4px; }
 .app-shell .local-sidebar-header { flex-shrink: 0; }
 .app-shell .local-sidebar-header h2 { margin: 0; font-size: 14px; line-height: 1.5; }
-.app-shell .sidebar-search { margin: 4px 12px; }
 .app-shell .context-list { overflow: visible; flex-shrink: 0; gap: 4px; }
 .app-shell .local-sidebar-section { margin-inline: 12px; flex-shrink: 0; font-size: 14px; line-height: 1.5; }
 .app-shell .local-sidebar-section__toggle { height: 32px; color: #94a499; }
@@ -45,16 +44,13 @@
 .solo-thread-column { flex: 1; min-height: 100%; }
 .solo-thread-column > .local-thread-column__content { display: flex; flex-direction: column; }
 .message { display: block; }
+.solo-thread-column { --local-thread-avatar-size: 28px; --local-thread-avatar-gap: 15px; }
 .message .local-thread-row__avatar { padding-top: 2px; }
-.message-avatar { width: 32px; height: 32px; }
 .message-content { font-size: 14px; line-height: 1.65; }
 .group-conversation {
   --group-reading-width: 724px;
-  --group-avatar-size: 32px;
-  --group-avatar-scale: 1;
-  --group-avatar-gap: 12px;
   --group-edge-space: 16px;
-  --group-run-padding: 0px;
+  --group-run-padding: 20px;
 }
 .group-final .markdown, .group-work .markdown, .group-user p { font-size: 14px; line-height: 1.65; }
 
@@ -80,8 +76,21 @@
   .app-shell .icon-rail { padding: 0 4px; }
   .app-shell .rail-brand { margin: 4px 0; width: 40px; height: 40px; }
   .app-shell .thread-viewport { padding: 23px 0 0; }
-  .app-shell .group-conversation { --group-avatar-size: 32px; --group-avatar-gap: 12px; --group-edge-space: 16px; --group-run-padding: 0px; }
+  .app-shell .group-conversation { --group-avatar-gap: 8px; --group-edge-space: 16px; --group-run-padding: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-shell .local-app-shell__sidebar { transition: none; }
+}
+
+/* Feature-owned title/actions are rendered in the shell's window bar. */
+.app-shell .local-app-shell__toolbar { gap: 12px; overflow: hidden; }
+.window-toolbar-fallback { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.local-app-shell__toolbar:has(.window-toolbar-title) > .window-toolbar-fallback { display: none; }
+#window-toolbar-actions { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.window-toolbar-title { margin: 0; flex: 1; }
+.window-toolbar-actions { display: flex; align-items: center; gap: 11px; flex: none; margin-left: auto; }
+@media (max-width: 760px) {
+  .app-shell .local-app-shell__toolbar { padding-inline: 12px; gap: 8px; }
+  #window-toolbar-actions, .window-toolbar-actions { gap: 6px; }
+  .window-toolbar-actions .status-pill { overflow: hidden; text-overflow: ellipsis; max-width: 100px; padding: 5px 6px; }
 }

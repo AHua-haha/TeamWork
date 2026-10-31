@@ -1,3 +1,4 @@
+import { WindowToolbar } from '../WindowToolbar.js';
 import { backendClient } from '../../shared/backend-client/index.js';
 import { useImageDraft } from './useImageDraft.js';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
@@ -92,14 +93,12 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
     } catch { /* Draft/reference and the inline backend reason remain. */ }
   }
   return <div className="conversation group-conversation">
-    <div className="conversation-head"><div><div className="eyebrow">WORKSPACE GROUP</div><h2>{title}</h2></div>
-      <div className="conversation-actions"><span className={`status-pill ${active ? 'status-active' : ''}`}>{status}</span>
+    <WindowToolbar title={title}><span className={`status-pill ${active ? 'status-active' : ''}`}>{status}</span>
         <button type="button" className="icon-button" aria-label="Reset group chat and member context" title={active ? 'Stop team work before resetting' : 'Reset chat and member context'}
           disabled={active || snapshot.sending || snapshot.stopping || snapshot.resetting || !snapshot.synchronized} onClick={() => { closeModel(); setResetOpen(true); }}><Glyph name="trash" /></button>
         <button type="button" className="icon-button" aria-label="Refresh group chat" onClick={client.refresh}>↻</button>
         {!filesOpen && <button type="button" className="icon-button" aria-label={`Show ${panelLabel.toLowerCase()}`} onClick={() => onFiles(true)}><Glyph name="panel" /></button>}
-      </div>
-    </div>
+    </WindowToolbar>
     {resetOpen && <ConfirmDialog eyebrow="WORKSPACE GROUP" title="Reset chat and member context?" action="Reset chat"
       message="Permanently clear this group chat and every member’s private conversation context and message history. Project files, designs, member settings will be kept. Stop team work before resetting."
       onClose={() => setResetOpen(false)} onConfirm={async () => { await client.reset(); setResetOpen(false); pinned.current = true; }} />}

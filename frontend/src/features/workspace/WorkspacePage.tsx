@@ -1,3 +1,4 @@
+import { WindowToolbar } from '../WindowToolbar.js';
 import { WorkspaceResizeHandle } from './WorkspaceResizeHandle.js';
 import { useChatRoster } from './useChatRoster.js';
 import { MemberActivationPanel } from './MemberActivationPanel.js';
@@ -17,7 +18,7 @@ export function WorkspacePage({workspaceId, name, files}: {workspaceId: string; 
   const [modelsOpen, setModelsOpen] = useState(false);
   const title = name ?? 'Workspace';
   useEffect(() => { setRunning(false); setSelected('context'); setModelsOpen(false); }, [workspaceId]);
-  if (!lead) return <div className="conversation-page"><div className="conversation"><div className="conversation-head"><h2>{title}</h2></div>{state.error ? <div className="error-banner" role="alert">{state.error}<button type="button" onClick={() => void state.refresh()}>Retry</button></div> : <p className="sidebar-muted">Opening workspace chat…</p>}</div></div>;
+  if (!lead) return <div className="conversation-page"><div className="conversation"><WindowToolbar title={title} />{state.error ? <div className="error-banner" role="alert">{state.error}<button type="button" onClick={() => void state.refresh()}>Retry</button></div> : <p className="sidebar-muted">Opening workspace chat…</p>}</div></div>;
   const showPanel = files.show;
   return <div className={`conversation-page ${files.open && files.expanded ? 'expanded' : ''}`}>
     <GroupChat key={workspaceId} workspaceId={workspaceId} team={state} title={title} filesOpen={files.open} onFiles={showPanel} onRunning={setRunning}

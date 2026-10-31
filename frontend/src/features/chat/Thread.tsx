@@ -1,3 +1,4 @@
+import { WindowToolbar } from '../WindowToolbar.js';
 import { ComposerPrimitive, MessagePrimitive, ThreadPrimitive } from '@assistant-ui/react';
 import type { ImageMessagePartProps, ReasoningMessagePartProps, TextMessagePartProps, ToolCallMessagePartProps } from '@assistant-ui/react';
 import { useSyncExternalStore } from 'react';
@@ -41,14 +42,11 @@ export function Conversation({ client, config, api, eyebrow, title, onConfigGate
     : snapshot.run ? snapshot.run.status[0]?.toUpperCase() + snapshot.run.status.slice(1) : 'Ready';
 
   return <div className="conversation">
-    <div className="conversation-head">
-      <div><div className="eyebrow">{eyebrow}</div><h2>{title}</h2></div>
-      <div className="conversation-actions">
-        <span className={`status-pill ${active ? 'status-active' : ''} ${snapshot.connection === 'error' ? 'status-error' : ''}`}><span className="status-dot" />{status}</span>
-        <button type="button" className="icon-button" onClick={() => client.refresh()} title="Synchronize conversation" aria-label="Refresh conversation">↻</button>
-        {onFiles && !filesOpen && <button type="button" className="icon-button" onClick={() => onFiles(true)} title="Show design, team and files" aria-label="Show design, team and files"><Glyph name="panel" /></button>}
-      </div>
-    </div>
+    <WindowToolbar title={title}>
+      <span className={`status-pill ${active ? 'status-active' : ''} ${snapshot.connection === 'error' ? 'status-error' : ''}`}><span className="status-dot" />{status}</span>
+      <button type="button" className="icon-button" onClick={() => client.refresh()} title="Synchronize conversation" aria-label="Refresh conversation">↻</button>
+      {onFiles && !filesOpen && <button type="button" className="icon-button" onClick={() => onFiles(true)} title="Show design, team and files" aria-label="Show design, team and files"><Glyph name="panel" /></button>}
+    </WindowToolbar>
     {snapshot.error && <div className="error-banner" role="alert">{snapshot.error}<button type="button" onClick={() => client.refresh()}>Retry</button></div>}
     {config.record?.issues.length ? <div className="error-banner" role="alert">Configure this agent before sending: {config.record.issues.join(' · ')}</div> : null}
     {config.error && <div className="error-banner" role="alert">{config.error}</div>}
