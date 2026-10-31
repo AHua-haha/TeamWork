@@ -14,6 +14,7 @@ test('window toolbar exposes application identity, panel title and supplied acti
     sidebarId: 'project-sidebar',
     onSidebarToggle: () => {},
   }));
+  assert.ok(markup.indexOf('shared-window-toolbar__brand-group') < markup.indexOf('shared-window-toolbar__toggle'));
   assert.ok(markup.indexOf('Application') < markup.indexOf('Current panel'));
   assert.ok(markup.indexOf('Current panel') < markup.indexOf('Refresh panel'));
   assert.match(markup, /type="button"[^>]*aria-label="Hide sidebar"/);
@@ -31,8 +32,9 @@ test('closing preserves logo, app name and reopening control while only the side
     sidebarOpen: false, sidebarId: 'project-sidebar', children: 'Panel content',
   }));
   assert.match(markup, /data-sidebar-open="false"/);
-  assert.match(markup, /class="shared-window-toolbar__logo"><span data-testid="app-logo">R<\/span><\/div><div class="shared-window-toolbar__brand">Application<\/div>/);
-  assert.doesNotMatch(markup, /class="shared-window-toolbar__brand"[^>]*(?:aria-hidden|inert|hidden)/);
+  assert.ok(markup.indexOf('shared-window-toolbar__logo') < markup.indexOf('shared-window-toolbar__toggle'));
+  assert.match(markup, /class="shared-window-toolbar__logo[^"\n]*"><span data-testid="app-logo">R<\/span><\/div><div class="shared-window-toolbar__brand[^"\n]*">Application<\/div>/);
+  assert.doesNotMatch(markup, /class="shared-window-toolbar__brand[^"\n]*"[^>]*(?:aria-hidden|inert|hidden)/);
   assert.match(markup, /aria-label="Show sidebar"[^>]*aria-expanded="false"/);
   assert.match(markup, /<aside[^>]*id="project-sidebar"[^>]*aria-hidden="true" inert=""/);
   assert.doesNotMatch(markup, /\shidden=/);

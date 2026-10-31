@@ -1,0 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+/* Storybook canvas defaults, independent of the application stylesheet. */
+@layer base {
+  body { margin: 0; font-family: 'DM Sans', system-ui, sans-serif; color: #242424; }
+  button, input, textarea, select { font: inherit; }
+}

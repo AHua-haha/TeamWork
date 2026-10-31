@@ -1,0 +1,6 @@
+import type { HTMLAttributes } from 'react';
+
+/** Compact rows; callers supply native actions and own selection/navigation. */
+export function SidebarItems({ className = '', ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div {...props} className={`shared-sidebar-items tw:flex tw:flex-col tw:gap-[var(--shared-sidebar-item-gap,4px)] tw:text-[length:var(--shared-sidebar-item-font-size,14px)] tw:leading-[var(--shared-sidebar-item-line-height,1.5)] tw:[&>:is(button,a,[role=link],[role=button])]:box-border tw:[&>:is(button,a,[role=link],[role=button])]:h-[var(--shared-sidebar-item-height,32px)] tw:[&>:is(button,a,[role=link],[role=button])]:min-h-0 tw:[&>:is(button,a,[role=link],[role=button])]:flex-[0_0_var(--shared-sidebar-item-height,32px)] tw:[&>:is(button,a,[role=link],[role=button])]:my-0 tw:[&>:is(button,a,[role=link],[role=button])]:border-0 tw:[&>:is(button,a,[role=link],[role=button])]:py-0 tw:[&>:is(button,a,[role=link],[role=button])]:[font:inherit] tw:[&>:is(button,a,[role=link],[role=button])]:truncate tw:[&>:is(button,a,[role=link],[role=button]):not(:disabled):not([aria-disabled=true]):not([aria-current=page]):is(:hover,:focus-visible)]:bg-[var(--shared-sidebar-hover,#eef1f4)] ${className}`} />;
+}

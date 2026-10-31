@@ -22,7 +22,7 @@ test('initially folded sections hide their panel while retaining child markup', 
     children: createElement('input', { 'aria-label': 'Draft', defaultValue: 'Keep this value' }),
   }));
   assert.match(markup, /aria-expanded="false"/);
-  assert.match(markup, /class="shared-sidebar-section__body" hidden=""/);
+  assert.match(markup, /class="shared-sidebar-section__body[^"\n]*" hidden=""/);
   assert.match(markup, /value="Keep this value"/);
 });
 

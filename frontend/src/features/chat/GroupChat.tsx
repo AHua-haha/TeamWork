@@ -11,6 +11,8 @@ import { ConfirmDialog } from '../workspace/WorkspaceDialogs.js';
 import { MemberModelPopover } from './MemberModelPopover.js';
 import { Glyph } from '../workspace/Glyph.js';
 import { Markdown } from './Markdown.js';
+import { ComposerActionButton } from '../../shared/ui/ComposerActionButton.js';
+import { useComposerScrollCollapse } from '../../shared/ui/useComposerScrollCollapse.js';
 import { memberColor, mentionAt, mentionToken, workDuration, runActivity, isRunThinking, workToolSummary, toolSetSummary, type ActivityItem, type ToolActivity } from './group-work.js';
 
 export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunning, discussion, panelLabel = 'Workspace tools' }: {
@@ -47,6 +49,9 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
   const [dismissed, setDismissed] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
+  const composerDock = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLFormElement>(null);
+  const composerCompact = useComposerScrollCollapse(viewport, composer);
   const pinned = useRef(true);
   const timeline = useRef<HTMLDivElement>(null);
   const olderAnchor = useRef<{entryId: string; top: number} | null>(null);
@@ -76,6 +81,8 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
     if (!content || !view) return;
     const observer = new ResizeObserver(() => { if (pinned.current) view.scrollTop = view.scrollHeight; });
     observer.observe(content);
+    // Attachments and inline feedback can grow the floating composer.
+    if (composerDock.current) observer.observe(composerDock.current);
     return () => observer.disconnect();
   }, []);
   const mention = dismissed ? null : mentionAt(draft, caret);
@@ -113,10 +120,7 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
         ? <article key={entry.entryId} data-entry-id={entry.entryId} className="group-user"><div className="group-user-body">{entry.text && <p>{entry.text}</p>}{entry.attachments?.length ? <div className="group-message-images">{entry.attachments.map(image => <MessageImage key={image.id} workspaceId={workspaceId} image={image} />)}</div> : null}</div><div className="group-identity group-user-identity"><span className="group-avatar" aria-hidden="true">Y</span><strong className="group-identity-name">You</strong></div></article>
         : <MemberResponse key={entry.entryId} entry={entry} canConfigure={!!team.team?.members.some(member => member.memberId === entry.memberId)} modelOpen={modelTarget?.memberId === entry.memberId}
           onModel={openModel} onModelLeave={leaveModel} />)}</div>
-    </div>
-    {modelTarget && modelMember && <MemberModelPopover key={modelTarget.memberId} workspaceId={workspaceId} member={modelMember} anchor={modelTarget.anchor}
-      onClose={closeModel} onEnter={keepModelOpen} onLeave={leaveModel} onSaved={refreshTeam} />}
-    <div className="group-composer-footer"><form className={`composer ${dragging ? 'composer-dragging' : ''}`}
+    <div className="group-composer-footer" ref={composerDock}><form ref={composer} data-compact={composerCompact} className={`composer ${dragging ? 'composer-dragging' : ''}`}
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (!snapshot.sending) setDragging(true); } }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
       onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); setDragging(false); if (!snapshot.sending && !snapshot.resetting) pictures.add([...event.dataTransfer.files]); }}
@@ -156,10 +160,16 @@ export function GroupChat({ workspaceId, title, team, filesOpen, onFiles, onRunn
         {!suggestions.length && <p>No matching members</p>}
       </div>}
       <div className="composer-actions"><button type="button" className="icon-button" aria-label="Attach pictures" title="Attach PNG, JPEG or WebP pictures" disabled={snapshot.sending || snapshot.resetting || pictures.images.length >= 4} onClick={() => picker.current?.click()}><Glyph name="plus" /></button><span className="group-composer-hint">No mention → Lead · Shift+Enter for a new line</span>
-        {active && <button type="button" className="cancel-button" disabled={snapshot.stopping} onClick={() => void client.stop()}>{snapshot.stopping ? 'Stopping…' : 'Stop team'}</button>}
-        <button type="submit" className="send-button" disabled={(!draft.trim() && !pictures.images.length) || snapshot.sending || snapshot.resetting || !snapshot.synchronized}>{snapshot.sending ? 'Sending…' : 'Send ↗'}</button>
+        <ComposerActionButton running={active} type={active ? 'button' : 'submit'}
+          aria-label={active ? snapshot.stopping ? 'Stopping team' : 'Stop team' : snapshot.sending ? 'Sending message' : 'Send message'}
+          aria-busy={snapshot.sending || snapshot.stopping}
+          disabled={active ? snapshot.stopping || snapshot.resetting : (!draft.trim() && !pictures.images.length) || snapshot.sending || snapshot.resetting || !snapshot.synchronized}
+          onClick={active ? () => void client.stop() : undefined} />
       </div>
     </form></div>
+    </div>
+    {modelTarget && modelMember && <MemberModelPopover key={modelTarget.memberId} workspaceId={workspaceId} member={modelMember} anchor={modelTarget.anchor}
+      onClose={closeModel} onEnter={keepModelOpen} onLeave={leaveModel} onSaved={refreshTeam} />}
   </div>;
 }
 

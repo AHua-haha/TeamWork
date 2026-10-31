@@ -1,5 +1,7 @@
 node_modules/
 dist/
+frontend/storybook-static/
+frontend/debug-storybook.log
 .DS_Store
 .claude/
 .playwright-cli/

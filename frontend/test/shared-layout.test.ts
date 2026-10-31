@@ -14,7 +14,7 @@ test('navigation controls have accessible labels and sidebar header actions rema
   assert.match(markup, /shared-navigation-rail-button/);
   assert.match(markup, /aria-label="Home"/);
   assert.match(markup, /shared-navigation-rail-button__icon/);
-  assert.match(markup, /shared-sidebar-header"><div class="shared-sidebar-header__content">Workspace<\/div><div class="shared-sidebar-header__actions">/);
+  assert.match(markup, /shared-sidebar-header[^"\n]*"><div class="shared-sidebar-header__content[^"\n]*">Workspace<\/div><div class="shared-sidebar-header__actions[^"\n]*">/);
 });
 
 test('rail buttons expose caller-owned active and disabled states without submitting forms', () => {
@@ -26,12 +26,12 @@ test('rail buttons expose caller-owned active and disabled states without submit
   assert.match(active, /disabled=""/);
   assert.match(active, /aria-hidden="true">P/);
   const inactive = renderToStaticMarkup(createElement(NavigationRailButton, { label: 'Home', icon: 'H' }));
-  assert.doesNotMatch(inactive, /aria-current|disabled/);
+  assert.doesNotMatch(inactive, / aria-current="| disabled=""/);
 });
 
 test('sidebar headers without actions render no empty action container', () => {
   const markup = renderToStaticMarkup(createElement(SidebarHeader, { children: 'Workspace', className: 'consumer-header' }));
-  assert.match(markup, /class="shared-sidebar-header consumer-header"/);
+  assert.match(markup, /class="shared-sidebar-header[^"\n]*consumer-header[^"\n]*"/);
   assert.doesNotMatch(markup, /shared-sidebar-header__actions/);
 });
 
@@ -44,7 +44,7 @@ test('shared shell places its full-width toolbar before the navigation, sidebar 
     navigationLabel: 'Application sections',
     sidebarLabel: 'Project conversations',
   }));
-  assert.match(markup, /<header[^>]*><span>Window toolbar<\/span><\/header><div class="shared-app-shell__body">/);
+  assert.match(markup, /<header[^>]*><span>Window toolbar<\/span><\/header><div class="shared-app-shell__body[^"\n]*">/);
   assert.match(markup, /<nav[^>]*aria-label="Application sections"[^>]*>[\s\S]*Navigation action[\s\S]*<\/nav><aside[^>]*aria-label="Project conversations"/);
   assert.match(markup, /<\/aside><main[^>]*><p>Thread content<\/p><\/main>/);
 });
@@ -54,8 +54,8 @@ test('omitting shell side slots renders main content directly without empty navi
     toolbar: 'Toolbar', children: 'Main content', className: 'consumer-frame', style: { height: 700 },
   }));
   assert.doesNotMatch(markup, /<nav|<aside/);
-  assert.match(markup, /class="shared-app-shell consumer-frame" style="height:700px"/);
-  assert.match(markup, /<div class="shared-app-shell__body"><main[^>]*>Main content<\/main>/);
+  assert.match(markup, /class="shared-app-shell[^"\n]*consumer-frame[^"\n]*" style="height:700px"/);
+  assert.match(markup, /<div class="shared-app-shell__body[^"\n]*"><main[^>]*>Main content<\/main>/);
 });
 
 test('thread rows keep accessible avatars in a sibling gutter outside message content', () => {
@@ -65,8 +65,8 @@ test('thread rows keep accessible avatars in a sibling gutter outside message co
       children: createElement('article', null, 'Message content'),
     }),
   }));
-  assert.match(markup, /<div class="shared-thread-column__content"><div class="shared-thread-row shared-thread-row--with-avatar">/);
-  assert.match(markup, /<div class="shared-thread-row__avatar"><span role="img" aria-label="Assistant avatar">A<\/span><\/div><div class="shared-thread-row__content"><article>Message content<\/article><\/div>/);
+  assert.match(markup, /<div[^>]*class="shared-thread-column__content[^"\n]*"><div class="shared-thread-row[^"\n]*shared-thread-row--with-avatar[^"\n]*">/);
+  assert.match(markup, /<div class="shared-thread-row__avatar[^"\n]*"><span role="img" aria-label="Assistant avatar">A<\/span><\/div><div class="shared-thread-row__content[^"\n]*"><article>Message content<\/article><\/div>/);
 });
 
 test('thread content without an avatar renders no avatar element and preserves supplied order', () => {
@@ -77,7 +77,7 @@ test('thread content without an avatar renders no avatar element and preserves s
       createElement(ThreadRow, { key: 'second', children: 'Second message' }),
     ],
   }));
-  assert.match(markup, /class="shared-thread-column consumer-thread"/);
+  assert.match(markup, /class="shared-thread-column[^"\n]*consumer-thread[^"\n]*"/);
   assert.doesNotMatch(markup, /shared-thread-row__avatar|shared-thread-row--with-avatar/);
   assert.ok(markup.indexOf('First message') < markup.indexOf('Second message'));
 });

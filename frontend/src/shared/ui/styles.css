@@ -1,0 +1,33 @@
+/* Opt-in utilities: do not reset existing application elements. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme) prefix(tw);
+@import "tailwindcss/utilities.css" layer(utilities) prefix(tw);
+@source "./";
+
+@theme {
+  --color-ui-canvas: #fff;
+  --color-ui-chrome: #f1f1f1;
+  --color-ui-sidebar: #fafafa;
+  --color-ui-border: #e6e6e6;
+  --color-ui-text: #242424;
+  --color-ui-muted: #777;
+  --color-ui-selected: #eaeaea;
+  --color-ui-focus: #3270b6;
+}
+
+/* Geometry is scoped and remains overridable per shell via style/custom CSS. */
+.shared-app-shell {
+  --shared-toolbar-height: 48px;
+  --shared-rail-width: 56px;
+  --shared-sidebar-width: 264px;
+  --shared-sidebar-header-height: 48px;
+  --shared-toolbar-brand-toggle-gap: 8px;
+  --shared-sidebar-transition-duration: 200ms;
+  --shared-sidebar-transition-easing: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shared-app-shell {
+    --shared-sidebar-transition-duration: 0ms;
+  }
+}

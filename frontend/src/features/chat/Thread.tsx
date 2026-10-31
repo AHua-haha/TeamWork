@@ -1,7 +1,7 @@
 import { WindowToolbar } from '../WindowToolbar.js';
 import { ComposerPrimitive, MessagePrimitive, ThreadPrimitive } from '@assistant-ui/react';
 import type { ImageMessagePartProps, ReasoningMessagePartProps, TextMessagePartProps, ToolCallMessagePartProps } from '@assistant-ui/react';
-import { useSyncExternalStore } from 'react';
+import { useRef, useSyncExternalStore } from 'react';
 import type { AgentClient } from '../../shared/backend-client/index.js';
 import { ConfigClient } from '../../shared/backend-client/index.js';
 import { ComposerSettings, type AgentConfigControl } from './ComposerSettings.js';
@@ -9,6 +9,8 @@ import { Glyph } from '../workspace/Glyph.js';
 import { referenceLabel, type Discussion } from '../../shared/backend-client/index.js';
 import { ThreadColumn, ThreadRow } from './layout/ThreadLayout.js';
 import { toolHeading, toolLabels } from './tool-label.js';
+import { ComposerActionButton } from '../../shared/ui/ComposerActionButton.js';
+import { useComposerScrollCollapse } from '../../shared/ui/useComposerScrollCollapse.js';
 
 function TextPart({ text }: TextMessagePartProps) { return <p className="message-text">{text}</p>; }
 function ImagePart({ image }: ImageMessagePartProps) { return <img className="message-image" src={image} alt="Message attachment" />; }
@@ -33,6 +35,9 @@ export function Conversation({ client, config, api, eyebrow, title, onConfigGate
   filesOpen: boolean; onFiles?: (open: boolean) => void; discussion?: Discussion;
 }) {
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
+  const viewport = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLFormElement>(null);
+  const composerCompact = useComposerScrollCollapse(viewport, composer);
   const active = snapshot.run?.status === 'running';
   const status = snapshot.sending ? 'Submitting'
     : snapshot.connection === 'syncing' ? 'Syncing'
@@ -52,7 +57,7 @@ export function Conversation({ client, config, api, eyebrow, title, onConfigGate
     {config.error && <div className="error-banner" role="alert">{config.error}</div>}
     {snapshot.run?.status === 'failed' && snapshot.run.error && <div className="error-banner" role="alert">Run failed: {snapshot.run.error.message}</div>}
     <ThreadPrimitive.Root className="thread">
-      <ThreadPrimitive.Viewport className="thread-viewport">
+      <ThreadPrimitive.Viewport ref={viewport} className="thread-viewport">
         <ThreadColumn className="solo-thread-column">
         {snapshot.completed.length === 0 && snapshot.live.length === 0 && <div className="empty-state"><div className="empty-mark">✳</div><h3>Start a conversation</h3><p>Your message starts a backend owned agent run. The response appears here as it streams.</p></div>}
         <ThreadPrimitive.Messages>{({ message }) => <MessagePrimitive.Root className={`message message-${message.role}`}>
@@ -62,11 +67,11 @@ export function Conversation({ client, config, api, eyebrow, title, onConfigGate
           </ThreadRow>
         </MessagePrimitive.Root>}</ThreadPrimitive.Messages>
         <ThreadPrimitive.ViewportFooter className="composer-footer">
-          <ComposerPrimitive.Root className="composer">
+          <ComposerPrimitive.Root ref={composer} data-compact={composerCompact} className="composer">
             {discussion?.reference && <div className="composer-reference" role="status"><span>{referenceLabel(discussion.reference)}</span><button type="button" aria-label="Remove discussion reference" onClick={discussion.clear}>×</button></div>}
             <ComposerPrimitive.Input className="composer-input" placeholder="Send a message to the agent…" aria-label="Message the agent" />
             <div className="composer-actions"><ComposerSettings control={config} api={api} active={active} onGateChange={onConfigGate} /><span>Enter to send · Shift+Enter for a new line</span>
-              {active ? <button type="button" className="cancel-button" onClick={() => void client.cancel()}>Stop run</button> : <ComposerPrimitive.Send className="send-button">Send <span aria-hidden="true">↗</span></ComposerPrimitive.Send>}
+              {active ? <ComposerActionButton running onClick={() => void client.cancel()} /> : <ComposerPrimitive.Send asChild><ComposerActionButton /></ComposerPrimitive.Send>}
             </div>
           </ComposerPrimitive.Root>
         </ThreadPrimitive.ViewportFooter>

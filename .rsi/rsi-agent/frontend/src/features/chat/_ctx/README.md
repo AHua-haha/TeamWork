@@ -22,3 +22,13 @@ Example:
 ```
 
 Group history uses bounded latest-page loading, cursor-based updates and explicit older-page requests as specified by the Chat design. The feature does not own scheduling, execution policy or durable conversation authority.
+
+## Floating composer placement
+
+Both chat surfaces use `useComposerScrollCollapse` with their viewport and composer refs and expose its state through `data-compact` on the form. Styles reduce only vertical padding and draft height on upward message scrolling; downward gestures or composer focus restore the normal height. Actions and attachments remain available, drafts stay mounted, and the message width is unchanged. Streaming and history-anchor scroll changes do not trigger collapse. Reduced-motion users receive the same state changes without animation.
+
+GroupChat keeps the timeline and transparent sticky composer dock in the same scrolling viewport. The timeline does not shrink; the dock reserves its natural height in the scroll flow. Its horizontal padding aligns the input with the reading column and becomes zero inside narrow viewports, where the viewport already supplies edge padding. A ResizeObserver watches both the timeline and dock, following the bottom only when the existing pinned flag allows it. Solo keeps its existing viewport footer and removes its gradient surface. Both docks ignore pointer events outside their composer boxes, preserving interactions with content underneath.
+
+The composer exposes one round primary icon action. Idle state sends through the existing submission path; a running response shows a pause glyph wired to the existing stop-team/cancel-run action. The group composer no longer renders simultaneous Send and Stop buttons. Empty-input, synchronization and pending-operation restrictions remain enforced, and accessible labels describe the actual send/stop action.
+
+The composer action strip reserves one fixed sidebar-item-height row (32 px by default, using the Shared or application-local sidebar item token). Controls are vertically centered on one line; supporting hints truncate rather than wrapping into a second row. Input text and attachments remain above this reserved row.
